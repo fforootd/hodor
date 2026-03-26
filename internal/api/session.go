@@ -153,7 +153,7 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT id, identity_id, org_id, user_agent, ip_address, created_at, expires_at
 	          FROM sessions WHERE revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
-	var args []any = []any{limit}
+	args := []any{limit}
 	if identityID > 0 {
 		query = `SELECT id, identity_id, org_id, user_agent, ip_address, created_at, expires_at
 		         FROM sessions WHERE identity_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
@@ -172,6 +172,10 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		var s SessionResponse
 		rows.Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt)
 		sessions = append(sessions, s)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, ListResponse{Items: sessions})

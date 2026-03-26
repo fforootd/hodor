@@ -24,7 +24,7 @@ func emitGCEvent(ctx context.Context, db *database.DB, bus *eventbus.Bus, eventT
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
-	db.SQL().ExecContext(ctx,
+	_, _ = db.SQL().ExecContext(ctx,
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
 		 VALUES (?, ?, 0, 0, 'system', 0, 'gc', ?, '{}', '', 0, datetime('now'))`,
 		eventID, eventType, payloadJSON)
@@ -158,6 +158,9 @@ func loadRetentionPolicies(ctx context.Context, db *database.DB) ([]retentionPol
 			continue
 		}
 		policies = append(policies, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("retention policy rows: %w", err)
 	}
 	return policies, nil
 }

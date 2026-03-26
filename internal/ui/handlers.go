@@ -230,6 +230,10 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 		}
 		identities = append(identities, row)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "rows error", http.StatusInternalServerError)
+		return
+	}
 
 	renderAdminIdentities(w, ident, identities)
 }
@@ -265,6 +269,10 @@ func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
 		row.UserAgent = userAgent.String
 		row.IPAddress = ipAddress.String
 		sessions = append(sessions, row)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "rows error", http.StatusInternalServerError)
+		return
 	}
 
 	renderAdminSessions(w, ident, sessions)
@@ -312,6 +320,10 @@ func (u *UI) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		events = append(events, row)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "rows error", http.StatusInternalServerError)
+		return
+	}
 
 	renderAdminEvents(w, ident, events, typeFilter)
 }
@@ -349,6 +361,9 @@ func (u *UI) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 			j.Enabled = enabled == 1
 			jobRows = append(jobRows, j)
 		}
+		if err := rows.Err(); err == nil {
+			rows.Close()
+		}
 	}
 
 	type PolicyRow struct {
@@ -368,6 +383,9 @@ func (u *UI) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			policies = append(policies, p)
+		}
+		if err := pRows.Err(); err == nil {
+			pRows.Close()
 		}
 	}
 
@@ -443,6 +461,9 @@ func (u *UI) loadSchemaOptions(ctx context.Context) []SchemaOption {
 			FieldsJSON: string(fieldsJSON),
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
 	return opts
 }
 
@@ -474,10 +495,7 @@ func (u *UI) handleAdminIdentityCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build capabilities from auth method checkboxes.
-	var caps []string
-	for _, method := range r.Form["auth_methods"] {
-		caps = append(caps, method)
-	}
+	caps := append([]string{}, r.Form["auth_methods"]...)
 
 	resp, err := u.api.CreateIdentityInternal(r, api.IdentityRequest{
 		Identifier:   identifier,
@@ -634,7 +652,9 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 			caps = append(caps, cap)
 		}
 	}
-
+	if err := capRows.Err(); err != nil {
+		return nil, false
+	}
 	return &IdentityContext{
 		IdentityID:   identityID,
 		Identifier:   identifier,
@@ -704,6 +724,10 @@ func (u *UI) handleAdminSchemas(w http.ResponseWriter, r *http.Request) {
 		}
 
 		schemas = append(schemas, s)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "rows error", http.StatusInternalServerError)
+		return
 	}
 
 	renderAdminSchemas(w, ident, schemas)

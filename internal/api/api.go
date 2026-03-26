@@ -295,7 +295,7 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, identityID)
 
-	query := "UPDATE identities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query := "UPDATE identities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update failed")
@@ -337,7 +337,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Clean up promoted indexes.
-	tx.ExecContext(r.Context(), `DELETE FROM entity_indexes WHERE entity_type = 'identity' AND entity_id = ?`, identityID)
+	_, _ = tx.ExecContext(r.Context(), `DELETE FROM entity_indexes WHERE entity_type = 'identity' AND entity_id = ?`, identityID)
 
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM identities WHERE id = ?`, identityID)
 	if err != nil {
@@ -446,6 +446,10 @@ func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal([]byte(schemaStr), &s.Schema)
 		schemas = append(schemas, s)
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, ListResponse{Items: schemas})
 }
@@ -505,6 +509,9 @@ func (a *API) loadCapabilities(r *http.Request, identityID int64) []string {
 		var c string
 		rows.Scan(&c)
 		caps = append(caps, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 	return caps
 }
@@ -596,7 +603,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 				Link:         fmt.Sprintf("/console/identities/%d", id),
 			})
 		}
-		idRows.Close()
+		if err := idRows.Err(); err == nil {
+			idRows.Close()
+		}
 	}
 
 	// Search entity_indexes (profile fields like email, display_name, etc.)
@@ -634,7 +643,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 				Link:         fmt.Sprintf("/console/identities/%d", entityID),
 			})
 		}
-		eiRows.Close()
+		if err := eiRows.Err(); err == nil {
+			eiRows.Close()
+		}
 	}
 
 	// Search schemas by type or id
@@ -656,7 +667,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 				Link:         "/console/schemas",
 			})
 		}
-		schRows.Close()
+		if err := schRows.Err(); err == nil {
+			schRows.Close()
+		}
 	}
 
 	// Search events by event_type
@@ -679,7 +692,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 				Link:         "/console/events",
 			})
 		}
-		evtRows.Close()
+		if err := evtRows.Err(); err == nil {
+			evtRows.Close()
+		}
 	}
 
 	// Deduplicate identities (may appear from both direct + index search)
@@ -701,7 +716,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 }
 
 func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID int64, dataJSON string) {
-	tx.ExecContext(ctx,
+	_, _ = tx.ExecContext(ctx,
 		`DELETE FROM entity_indexes WHERE entity_type = ? AND entity_id = ?`,
 		entityType, entityID)
 
@@ -711,7 +726,7 @@ func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID
 	}
 	for field, val := range data {
 		if strVal, ok := val.(string); ok && strVal != "" {
-			tx.ExecContext(ctx,
+			_, _ = tx.ExecContext(ctx,
 				`INSERT OR REPLACE INTO entity_indexes (entity_type, entity_id, field, value) VALUES (?, ?, ?, ?)`,
 				entityType, entityID, field, strVal)
 		}
@@ -861,7 +876,7 @@ func (a *API) UpdateIdentityInternal(r *http.Request, identityID int64, req Iden
 	}
 	args = append(args, identityID)
 
-	query := "UPDATE identities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query := "UPDATE identities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		return IdentityResponse{}, fmt.Errorf("update: %w", err)

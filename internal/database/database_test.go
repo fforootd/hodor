@@ -29,8 +29,8 @@ func TestOpenDefault(t *testing.T) {
 	// Empty string should default to SQLite.
 	origDir, _ := os.Getwd()
 	dir := t.TempDir()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	_ = os.Chdir(dir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	db, err := Open("")
 	if err != nil {

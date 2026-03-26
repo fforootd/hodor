@@ -112,6 +112,10 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal([]byte(metadataStr), &evt.Metadata)
 		events = append(events, evt)
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
+	}
 
 	var nextCursor string
 	if len(events) > limit {
@@ -156,6 +160,10 @@ func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 			Dimensions: map[string]string{"event_type": key},
 			Count:      count,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, ListResponse{Items: result})
@@ -216,8 +224,8 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 			); err != nil {
 				continue
 			}
-			json.Unmarshal([]byte(payloadStr), &evt.Payload)
-			json.Unmarshal([]byte(metadataStr), &evt.Metadata)
+			_ = json.Unmarshal([]byte(payloadStr), &evt.Payload)
+			_ = json.Unmarshal([]byte(metadataStr), &evt.Metadata)
 
 			// Apply type filter.
 			if len(typeList) > 0 {
@@ -239,6 +247,9 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			cursor = evt.ID
 		}
-		rows.Close()
+		if err := rows.Err(); err != nil {
+			return // Rows iteration error.
+		}
+		_ = rows.Close() //nolint:sqlclosecheck // SSE loop: rows created each iteration, defer would leak.
 	}
 }

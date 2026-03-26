@@ -154,6 +154,9 @@ func (w *Writer) drainBatch(ctx context.Context) (int, error) {
 		}
 		events = append(events, e)
 	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("rows iteration: %w", err)
+	}
 
 	if len(events) == 0 {
 		return 0, nil

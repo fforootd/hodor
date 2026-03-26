@@ -32,7 +32,7 @@ func OTelMiddleware(next http.Handler) http.Handler {
 		ctx = WithTraceID(ctx, traceID)
 
 		// Set trace ID in response header for correlation.
-		w.Header().Set("X-Trace-ID", traceID)
+		w.Header().Set("X-Trace-Id", traceID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -40,7 +40,7 @@ func OTelMiddleware(next http.Handler) http.Handler {
 
 // extractTraceID extracts trace ID from W3C traceparent header.
 func extractTraceID(r *http.Request) string {
-	tp := r.Header.Get("traceparent")
+	tp := r.Header.Get("Traceparent")
 	if tp == "" {
 		return ""
 	}

@@ -97,6 +97,9 @@ func up006FlexSchema(db *sql.DB) error {
 		}
 		toMigrate = append(toMigrate, r)
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("migration 006 rows error: %w", err)
+	}
 	rows.Close()
 
 	for _, r := range toMigrate {

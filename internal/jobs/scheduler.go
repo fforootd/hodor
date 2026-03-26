@@ -79,10 +79,13 @@ func (s *Scheduler) initNextRun() {
 			continue
 		}
 		next := nextCronTime(now, cron)
-		s.db.SQL().Exec(
+		_, _ = s.db.SQL().Exec(
 			`UPDATE jobs SET next_run_at = ? WHERE name = ?`,
 			next.Format(time.RFC3339), name,
 		)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[scheduler] init rows error: %v", err)
 	}
 }
 
@@ -113,6 +116,10 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		}
 		due = append(due, j)
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[scheduler] rows error: %v", err)
+		return
+	}
 	rows.Close()
 
 	for _, j := range due {
@@ -122,7 +129,7 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		}
 
 		// Mark as running.
-		s.db.SQL().ExecContext(ctx,
+		_, _ = s.db.SQL().ExecContext(ctx,
 			`UPDATE jobs SET last_status = 'running', last_run_at = ? WHERE name = ?`,
 			now.Format(time.RFC3339), j.name,
 		)
@@ -142,7 +149,7 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		}
 
 		next := nextCronTime(time.Now().UTC(), j.cron)
-		s.db.SQL().ExecContext(ctx,
+		_, _ = s.db.SQL().ExecContext(ctx,
 			`UPDATE jobs SET last_status = ?, last_error = ?, run_count = run_count + 1, next_run_at = ? WHERE name = ?`,
 			status, errMsg, next.Format(time.RFC3339), j.name,
 		)

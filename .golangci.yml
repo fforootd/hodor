@@ -1,63 +1,131 @@
 version: "2"
 
 linters:
-  enable:
-    - govet
-    - staticcheck
-    - gosec
-    - ineffassign
-    - misspell
-    - errcheck
+  default: all
+  disable:
+    # Style preferences — not enforced in POC.
+    - nlreturn       # Blank line before return.
+    - wsl            # Whitespace style (deprecated).
+    - wsl_v5         # Whitespace style (v2).
+    - lll            # Line length.
+    - varnamelen     # Variable name length.
+    - nonamedreturns # Named returns are fine.
+    - tagliatelle    # JSON tag casing.
+    - ireturn        # Returning interfaces is idiomatic.
+    - godox          # TODO/FIXME are fine in POC.
+    - godot          # Comment punctuation.
+    - godoclint      # Doc comment strictness.
+    - funcorder      # Function ordering in file.
+    - inamedparam    # Named params in interfaces.
+    - gocritic       # Many opinionated suggestions — too noisy.
 
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - shadow         # Too noisy for early dev.
-      - fieldalignment # Cosmetic — revisit when optimizing.
-  staticcheck:
-    checks:
-      - all
-      - -SA1019 # Deprecated API usage — will migrate incrementally.
-  gosec:
-    excludes:
-      - G104 # Unhandled errors in deferred calls.
-      - G114 # net/http serve without timeouts — mock/dev servers.
-      - G115 # integer overflow uint64→int64 — Sonyflake IDs fit in int64.
-      - G202 # SQL string concatenation — parameterized values with dynamic column sets.
-      - G101 # Potential hardcoded credentials — test JWT tokens.
-  errcheck:
-    exclude-functions:
-      - (*html/template.Template).Execute
-      - (*text/template.Template).Execute
-      - (*database/sql.Row).Scan
-      - (*database/sql.Rows).Scan
-      - encoding/json.Unmarshal
-      - (*encoding/json.Encoder).Encode
-      - (*encoding/json.Decoder).Decode
-      - (*net/http.ResponseWriter).Write
-      - (net/http.ResponseWriter).Write
-      - fmt.Sscanf
-      - (*database/sql.Tx).ExecContext
-      - (*database/sql.DB).ExecContext
-      - (*database/sql.DB).Exec
-      - (*database/sql.Tx).Exec
-      - (*database/sql.Tx).Rollback
-      - (*net/http.Request).ParseForm
-      - os.Chdir
-      - crypto/rand.Read
+    # Complexity — reviewed by humans, not lint.
+    - funlen
+    - cyclop
+    - gocognit
+    - maintidx
+    - nestif
 
-issues:
-  exclude-dirs:
-    - gen
-    - proto
-  exclude-rules:
-    - path: internal/ui/
-      linters: [unused, gosimple]
-    - path: internal/api/account.go
-      linters: [unused]
-    - path: internal/database/
-      linters: [gosimple]
+    # Too strict for POC stage.
+    - depguard       # No import restrictions.
+    - exhaustruct    # Not all struct fields need init.
+    - exhaustive     # Exhaustive switch not needed.
+    - wrapcheck      # Error wrapping comes later.
+    - err113         # Dynamic errors are fine.
+    - testpackage    # Same-package tests are fine.
+    - paralleltest   # Not enforcing parallel tests.
+    - tparallel      # Same.
+    - containedctx   # Context in structs is fine.
+    - gochecknoglobals # Globals for templates, configs.
+    - goconst        # Repeated SQL strings.
+    - dupl           # Duplicate code in early stage.
+    - forcetypeassert # Controlled type assertions.
+    - mnd            # Magic numbers in SQL, HTTP.
+    - forbidigo      # fmt.Print is fine for now.
+    - noctx          # http.NewRequest without ctx — fix incrementally.
+    - perfsprint     # Performance sprintf variants.
+    - unparam        # Unused params in interface implementations.
+    - predeclared    # Shadowing builtins (rare false positives).
+    - intrange       # Range over int — Go 1.22 style suggestion.
+    - usestdlibvars  # Use stdlib constants — nice-to-have.
+    - gochecknoinits # Init functions are fine for migrations.
+    - modernize      # Modernize suggestions — do incrementally.
+    - noinlineerr    # Inline error style preference.
+    - usetesting     # testing.T context usage — incrementally.
+    - errchkjson     # JSON error checking — too strict for POC.
+    - errorlint      # Error wrapping style — comes later with err113.
 
-run:
-  timeout: 3m
+  settings:
+    errcheck:
+      exclude-functions:
+        # Deferred rollback — no-op after successful commit.
+        - (*database/sql.Tx).Rollback
+        # Row scanning — errors checked via rows.Err() after loop.
+        - (*database/sql.Row).Scan
+        - (*database/sql.Rows).Scan
+        # Template execution in HTTP handlers.
+        - (*html/template.Template).Execute
+        - (*text/template.Template).Execute
+        # Deferred close — best-effort cleanup.
+        - (*database/sql.Rows).Close
+        - (*os.File).Close
+        # JSON encoding/decoding in HTTP handlers — errors are write failures.
+        - encoding/json.Unmarshal
+        - (*encoding/json.Encoder).Encode
+        - (*encoding/json.Decoder).Decode
+        # HTTP response writes — errors mean client disconnected.
+        - (net/http.ResponseWriter).Write
+        - (*net/http.ResponseWriter).Write
+        # SQL fire-and-forget (audit events, cleanup, index promotion).
+        - (*database/sql.Tx).ExecContext
+        - (*database/sql.DB).ExecContext
+        - (*database/sql.DB).Exec
+        - (*database/sql.Tx).Exec
+        - (*net/http.Request).ParseForm
+    govet:
+      disable:
+        - fieldalignment
+    staticcheck:
+      checks:
+        - all
+        - -SA1019       # Deprecated APIs — migrate incrementally.
+    gosec:
+      excludes:
+        - G104          # Unhandled errors in deferred calls.
+        - G115          # Integer overflow uint64→int64.
+        - G101          # Hardcoded credentials in tests.
+        - G120          # Request body size — add middleware later.
+        - G705          # XSS taint in mock/dev endpoints.
+        - G706          # Log injection — add structured logging later.
+    revive:
+      rules:
+        - name: unexported-return
+          disabled: true
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Mock OIDC server — relaxed security rules.
+      - path: internal/mockoidc/
+        linters: [gosec]
+      # Legacy UI handlers being replaced by Vue.
+      - path: internal/ui/
+        linters: [unused]
+    paths:
+      - web
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

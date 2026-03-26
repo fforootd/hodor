@@ -120,7 +120,7 @@ func (s *Server) ClientSecret() string { return "mock-client-secret" }
 
 func (s *Server) discovery(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"issuer":                                s.issuer,
 		"authorization_endpoint":                s.issuer + "/authorize",
 		"token_endpoint":                        s.issuer + "/token",
@@ -190,7 +190,7 @@ func (s *Server) authorizeForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	_ = r.ParseForm()
 	email := r.FormValue("email")
 	password := r.FormValue("password")
 	state := r.FormValue("state")
@@ -229,7 +229,7 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 // --- Token ---
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	_ = r.ParseForm()
 	code := r.FormValue("code")
 
 	s.mu.Lock()
@@ -241,7 +241,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		w.WriteHeader(400)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
 		return
 	}
 
@@ -264,7 +264,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	idToken := s.signJWT(claims)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": "mock-access-token",
 		"token_type":   "Bearer",
 		"expires_in":   3600,

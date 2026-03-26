@@ -75,11 +75,11 @@ func up005Entities(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id)`,
 
 		// Seed default instance and default org.
-		fmt.Sprintf(`INSERT OR IGNORE INTO instances (id, name, created_at, updated_at)
-			VALUES (1, 'default', datetime('now'), datetime('now'))`),
+		`INSERT OR IGNORE INTO instances (id, name, created_at, updated_at)
+			VALUES (1, 'default', datetime('now'), datetime('now'))`,
 
-		fmt.Sprintf(`INSERT OR IGNORE INTO orgs (id, instance_id, name, created_at, updated_at)
-			VALUES (1, 1, 'default', datetime('now'), datetime('now'))`),
+		`INSERT OR IGNORE INTO orgs (id, instance_id, name, created_at, updated_at)
+			VALUES (1, 1, 'default', datetime('now'), datetime('now'))`,
 	}
 
 	for _, stmt := range statements {

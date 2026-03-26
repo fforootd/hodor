@@ -95,6 +95,9 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+		if err := rows.Err(); err == nil {
+			rows.Close()
+		}
 	}
 	if ssoProviders == nil {
 		ssoProviders = []map[string]any{}

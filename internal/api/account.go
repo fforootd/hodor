@@ -25,11 +25,7 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 
 // --- Session middleware (non-admin) ---
 
-type sessionContext struct {
-	IdentityID int64
-	SessionID  int64
-	TokenHash  string
-}
+
 
 // requireSession is middleware that ensures a valid session exists.
 // It injects the caller's identity ID into the request header.
@@ -56,8 +52,8 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// Inject caller info via headers (internal only).
-		r.Header.Set("X-Identity-ID", fmt.Sprintf("%d", identityID))
-		r.Header.Set("X-Session-ID", fmt.Sprintf("%d", sessionID))
+		r.Header.Set("X-Identity-Id", fmt.Sprintf("%d", identityID))
+		r.Header.Set("X-Session-Id", fmt.Sprintf("%d", sessionID))
 		r.Header.Set("X-Token-Hash", tokenHash)
 
 		next(w, r)
@@ -66,13 +62,13 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 
 func callerIdentityID(r *http.Request) int64 {
 	var id int64
-	fmt.Sscanf(r.Header.Get("X-Identity-ID"), "%d", &id)
+	_, _ = fmt.Sscanf(r.Header.Get("X-Identity-Id"), "%d", &id)
 	return id
 }
 
 func callerSessionID(r *http.Request) int64 {
 	var id int64
-	fmt.Sscanf(r.Header.Get("X-Session-ID"), "%d", &id)
+	_, _ = fmt.Sscanf(r.Header.Get("X-Session-Id"), "%d", &id)
 	return id
 }
 
@@ -269,6 +265,10 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 			"current":    sid == currentSessionID,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
+	}
 	if sessions == nil {
 		sessions = []map[string]any{}
 	}
@@ -339,7 +339,7 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		_, _ = fmt.Sscanf(l, "%d", &limit)
 		if limit > 100 {
 			limit = 100
 		}
@@ -373,6 +373,10 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 			"created_at":    createdAt,
 			"time_ago":      timeAgo(createdAt),
 		})
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
 	}
 	if events == nil {
 		events = []map[string]any{}

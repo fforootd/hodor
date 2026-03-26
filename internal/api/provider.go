@@ -230,6 +230,10 @@ func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
 			"updated_at":      updatedAt,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "rows error")
+		return
+	}
 	if providers == nil {
 		providers = []map[string]any{}
 	}

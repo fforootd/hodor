@@ -72,7 +72,7 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cfg oidcConfig
-	json.Unmarshal([]byte(configJSON), &cfg)
+	_ = json.Unmarshal([]byte(configJSON), &cfg)
 
 	// Substitute tenant_id in issuer if present.
 	issuer := cfg.Issuer
@@ -94,7 +94,7 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	pkceChallenge := sha256URLSafe(pkceVerifier)
 
 	// Store state in database.
-	h.db.SQL().ExecContext(r.Context(),
+	_, _ = h.db.SQL().ExecContext(r.Context(),
 		`INSERT INTO sso_states (state, provider_id, pkce_verifier, nonce, redirect_uri, created_at)
 		 VALUES (?, ?, ?, ?, ?, datetime('now'))`,
 		state, providerID, pkceVerifier, nonce, h.baseURL+"/v1/auth/sso/callback",
@@ -130,7 +130,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 
 	if errParam != "" {
 		errDesc := r.URL.Query().Get("error_description")
-		log.Printf("[sso] IDP returned error: %s — %s", errParam, errDesc)
+		log.Printf("[sso] IDP returned error: %s — %s", url.QueryEscape(errParam), url.QueryEscape(errDesc))
 		http.Redirect(w, r, "/login?error=sso_failed", http.StatusFound)
 		return
 	}
@@ -151,7 +151,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete used state.
-	h.db.SQL().ExecContext(r.Context(), `DELETE FROM sso_states WHERE state = ?`, state)
+	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM sso_states WHERE state = ?`, state)
 
 	// Load provider.
 	var configJSON, overridesJSON, template string
@@ -166,7 +166,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var cfg oidcConfig
-	json.Unmarshal([]byte(configJSON), &cfg)
+	_ = json.Unmarshal([]byte(configJSON), &cfg)
 
 	issuer := cfg.Issuer
 	if cfg.TenantID != "" {
@@ -261,7 +261,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	if err == nil {
 		// Already linked — update last_used_at and raw_claims.
 		claimsJSON, _ := json.Marshal(claims)
-		h.db.SQL().ExecContext(ctx,
+		_, _ = h.db.SQL().ExecContext(ctx,
 			`UPDATE linked_accounts SET last_used_at = datetime('now'), raw_claims = ?, external_email = ? WHERE provider_id = ? AND external_sub = ?`,
 			string(claimsJSON), externalEmail, providerID, externalSub,
 		)
@@ -275,7 +275,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	// Map claims to profile using schema + provider overrides.
 	schemaJSON := h.loadDefaultSchemaJSON(ctx)
 	var overrides map[string]string
-	json.Unmarshal([]byte(overridesJSON), &overrides)
+	_ = json.Unmarshal([]byte(overridesJSON), &overrides)
 
 	profile, _ := MapClaims(schemaJSON, overrides, claims)
 
@@ -436,7 +436,7 @@ func parseIDTokenClaims(idToken string) (map[string]any, error) {
 
 func randomString(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)[:n]
 }
 

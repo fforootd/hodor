@@ -151,7 +151,7 @@ func (s *testSrv) patchJSONAuth(path string, body map[string]any, token string) 
 
 func decodeBody(r io.Reader) map[string]any {
 	var result map[string]any
-	json.NewDecoder(r).Decode(&result)
+	_ = json.NewDecoder(r).Decode(&result)
 	return result
 }
 
@@ -211,7 +211,7 @@ func TestExpiredSession_Returns401(t *testing.T) {
 	token := srv.adminToken()
 
 	// Manually expire the session.
-	srv.db.SQL().Exec(`UPDATE sessions SET expires_at = datetime('now', '-1 hour')`)
+	_, _ = srv.db.SQL().Exec(`UPDATE sessions SET expires_at = datetime('now', '-1 hour')`)
 
 	code, _ := srv.getAuth("/v1/account/profile", token)
 	if code != 401 {
@@ -224,7 +224,7 @@ func TestRevokedSession_Returns401(t *testing.T) {
 	token := srv.adminToken()
 
 	// Revoke the session.
-	srv.db.SQL().Exec(`UPDATE sessions SET revoked_at = datetime('now')`)
+	_, _ = srv.db.SQL().Exec(`UPDATE sessions SET revoked_at = datetime('now')`)
 
 	code, _ := srv.getAuth("/v1/account/profile", token)
 	if code != 401 {

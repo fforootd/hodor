@@ -49,7 +49,7 @@ func (p *Passwords) Hash(plain string) (string, error) {
 func (p *Passwords) Verify(encoded, plain string) (ok bool, updated string, err error) {
 	updated, err = p.swapper.Verify(encoded, plain)
 	if err != nil {
-		return false, "", nil // Wrong password — not an error.
+		return false, "", err
 	}
 	return true, updated, nil
 }

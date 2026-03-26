@@ -50,13 +50,13 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	// Readiness check.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ready"))
+		_, _ = w.Write([]byte("ready"))
 	})
 
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
@@ -82,7 +82,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 			http.Error(w, "login page not found", http.StatusNotFound)
 			return
 		}
-		w.Write(data)
+		_, _ = w.Write(data)
 	}
 	mux.HandleFunc("GET /login", serveLogin)
 
