@@ -1,9 +1,30 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+// SPA history fallback: rewrite /console/*, /login/*, /account/* to
+// their respective HTML entry points so Vue Router handles routing.
+function spaFallback(): Plugin {
+  return {
+    name: 'spa-fallback',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url || ''
+        if (url.startsWith('/console') && !url.includes('.')) {
+          req.url = '/src/console/index.html'
+        } else if (url.startsWith('/login') && !url.includes('.')) {
+          req.url = '/src/login/index.html'
+        } else if (url.startsWith('/account') && !url.includes('.')) {
+          req.url = '/src/account/index.html'
+        }
+        next()
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), spaFallback()],
   resolve: {
     alias: { '@': resolve(__dirname, 'src') },
   },
@@ -21,10 +42,6 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/v1': 'http://localhost:8080',
-      '/login': 'http://localhost:8080',
-      '/admin': 'http://localhost:8080',
-      '/console': 'http://localhost:8080',
-      '/account': 'http://localhost:8080',
       '/healthz': 'http://localhost:8080',
       '/readyz': 'http://localhost:8080',
       '/assets': 'http://localhost:8080',
