@@ -148,16 +148,28 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 		return
 	}
 
-	var storedHash string
+	var credData string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT password_hash FROM passwords WHERE identity_id = ?`, flow.IdentityID,
-	).Scan(&storedHash)
+		`SELECT credential_data FROM identity_credentials WHERE identity_id = ? AND credential_type = 'password'`,
+		flow.IdentityID,
+	).Scan(&credData)
 	if err != nil {
+		log.Printf("[flow] %s password lookup failed for identity=%d: %v", flow.ID, flow.IdentityID, err)
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	ok, _, err := h.passwords.Verify(storedHash, password)
+	// Extract hash from credential_data JSON: {"hash":"..."}
+	var cred struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal([]byte(credData), &cred); err != nil || cred.Hash == "" {
+		log.Printf("[flow] %s invalid credential data for identity=%d", flow.ID, flow.IdentityID)
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	ok, _, err := h.passwords.Verify(cred.Hash, password)
 	if err != nil || !ok {
 		writeErr(w, http.StatusUnauthorized, "invalid_password")
 		return
