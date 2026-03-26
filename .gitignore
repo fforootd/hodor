@@ -1,5 +1,5 @@
 # Binaries
-zitadel
+/zitadel
 *.exe
 
 # Database files
