@@ -150,7 +150,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 	var storedHash string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT password_hash FROM identities WHERE id = ?`, flow.IdentityID,
+		`SELECT password_hash FROM passwords WHERE identity_id = ?`, flow.IdentityID,
 	).Scan(&storedHash)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
