@@ -1,0 +1,26 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - gosec
+    - ineffassign
+    - unused
+    - misspell
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - shadow # Too noisy for early development.
+  gosec:
+    excludes:
+      - G104 # Unhandled errors in deferred calls — acceptable in early code.
+
+issues:
+  exclude-dirs:
+    - gen
+    - proto
+
+run:
+  timeout: 3m

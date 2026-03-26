@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: zitadel
+
+builds:
+  - id: zitadel
+    main: ./cmd/zitadel
+    binary: zitadel
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.version={{.Commit}}
+
+dockers:
+  - image_templates:
+      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    dockerfile: Dockerfile.goreleaser
+    goos: linux
+    goarch: amd64
+  - image_templates:
+      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-arm64"
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    dockerfile: Dockerfile.goreleaser
+    goos: linux
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/zitadel/zitadel:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
+      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/zitadel/zitadel:latest"
+    image_templates:
+      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
+      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-arm64"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

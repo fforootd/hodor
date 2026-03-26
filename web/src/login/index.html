@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In — ZITADEL</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>* { margin: 0; padding: 0; box-sizing: border-box; } body { min-height: 100vh; font-family: Inter, system-ui, sans-serif; }</style>
+</head>
+<body>
+  <div id="login-app">
+    <!-- Server-rendered fallback form (works without JS) -->
+    <noscript>
+      <div style="max-width:400px;margin:20vh auto;padding:2rem;background:#fff;border-radius:16px;box-shadow:0 4px 10px rgba(0,0,0,.08)">
+        <h1 style="margin-bottom:1rem">Sign In</h1>
+        <form method="POST" action="/login">
+          <input name="identifier" placeholder="Email or username" style="width:100%;padding:.5rem;margin-bottom:.75rem;border:1px solid #e5e7eb;border-radius:8px">
+          <input name="password" type="password" placeholder="Password" style="width:100%;padding:.5rem;margin-bottom:.75rem;border:1px solid #e5e7eb;border-radius:8px">
+          <button type="submit" style="width:100%;padding:.5rem;background:#1a1a2e;color:#fff;border:none;border-radius:8px;cursor:pointer">Sign in</button>
+        </form>
+      </div>
+    </noscript>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
