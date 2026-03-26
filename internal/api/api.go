@@ -776,7 +776,7 @@ func emitEventSimple(ctx context.Context, db interface {
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
-	db.ExecContext(ctx,
+	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
 		 VALUES (?, ?, 0, ?, '', ?, ?, ?, '{}', '', 0, datetime('now'))`,
 		eventIDVal, eventType, actorID, aggregateID, aggregateType, payloadJSON)

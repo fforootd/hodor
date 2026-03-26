@@ -14,7 +14,7 @@ func FuzzParseIDTokenClaims(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, token string) {
 		// Must never panic.
-		parseIDTokenClaims(token)
+		_, _ = parseIDTokenClaims(token)
 	})
 }
 
@@ -31,6 +31,6 @@ func FuzzMapClaims(f *testing.F) {
 			"sub":   "123",
 		}
 		// Must never panic.
-		MapClaims(schema, nil, claims)
+		_, _ = MapClaims(schema, nil, claims)
 	})
 }

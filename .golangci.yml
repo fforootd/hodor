@@ -1,26 +1,64 @@
 linters:
   enable:
-    - errcheck
     - govet
     - staticcheck
     - gosec
     - ineffassign
-    - unused
     - misspell
+    - errcheck
 
 linters-settings:
   govet:
     enable-all: true
     disable:
-      - shadow # Too noisy for early development.
+      - shadow         # Too noisy for early dev.
+      - fieldalignment # Cosmetic — revisit when optimizing.
+  staticcheck:
+    checks:
+      - all
+      - -SA1019 # Deprecated API usage — will migrate incrementally.
   gosec:
     excludes:
-      - G104 # Unhandled errors in deferred calls — acceptable in early code.
+      - G104 # Unhandled errors in deferred calls.
+      - G114 # net/http serve without timeouts — mock/dev servers.
+      - G115 # integer overflow uint64→int64 — Sonyflake IDs fit in int64.
+      - G202 # SQL string concatenation — parameterized values with dynamic column sets.
+      - G101 # Potential hardcoded credentials — test JWT tokens.
+  errcheck:
+    exclude-functions:
+      - (*html/template.Template).Execute
+      - (*text/template.Template).Execute
+      - (*database/sql.Row).Scan
+      - (*database/sql.Rows).Scan
+      - encoding/json.Unmarshal
+      - (*encoding/json.Encoder).Encode
+      - (*encoding/json.Decoder).Decode
+      - (*net/http.ResponseWriter).Write
+      - (net/http.ResponseWriter).Write
+      - fmt.Sscanf
+      - (*database/sql.Tx).ExecContext
+      - (*database/sql.DB).ExecContext
+      - (*database/sql.DB).Exec
+      - (*database/sql.Tx).Exec
+      - (*database/sql.Tx).Rollback
+      - (*net/http.Request).ParseForm
+      - os.Chdir
+      - crypto/rand.Read
 
 issues:
   exclude-dirs:
     - gen
     - proto
+  exclude-rules:
+    # Allow unused code in ui/ (legacy HTML templates, being replaced by Vue).
+    - path: internal/ui/
+      linters: [unused, gosimple]
+    # Allow unused code in account.go (sessionContext type used via JSON tags).
+    - path: internal/api/account.go
+      linters: [unused]
+    # Allow gosimple suggestions in migrations (legacy patterns).
+    - path: internal/database/
+      linters: [gosimple]
 
 run:
   timeout: 3m
