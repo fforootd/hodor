@@ -77,9 +77,7 @@ jobs:
         run: cp -r web/dist internal/server/webdist
 
       - name: golangci-lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          golangci-lint run ./...
+        uses: golangci/golangci-lint-action@v9.2.0
 
       - name: Check formatting
         run: |
