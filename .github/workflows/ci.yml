@@ -25,11 +25,16 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
       - name: Build web assets
-        run: |
-          cd web && npm ci --prefer-offline
-          cd web && npx vite build
-          cp -r web/dist internal/server/webdist
+        working-directory: web
+        run: npx vite build
+
+      - name: Embed web assets for Go
+        run: cp -r web/dist internal/server/webdist
 
       - name: Build Go
         run: go build ./...
@@ -60,11 +65,16 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Build web assets (needed for go:embed)
-        run: |
-          cd web && npm ci --prefer-offline
-          cd web && npx vite build
-          cp -r web/dist internal/server/webdist
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web assets
+        working-directory: web
+        run: npx vite build
+
+      - name: Embed web assets for Go
+        run: cp -r web/dist internal/server/webdist
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -101,11 +111,16 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
       - name: Build web assets
-        run: |
-          cd web && npm ci --prefer-offline
-          cd web && npx vite build
-          cp -r web/dist internal/server/webdist
+        working-directory: web
+        run: npx vite build
+
+      - name: Embed web assets for Go
+        run: cp -r web/dist internal/server/webdist
 
       - uses: goreleaser/goreleaser-action@v6
         with:
