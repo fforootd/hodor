@@ -122,7 +122,7 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) int64 {
 // CreateSession inserts a valid session directly into the DB and returns the raw token.
 func (ts *TestServer) CreateSession(identityID int64) string {
 	ts.t.Helper()
-	
+
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		ts.t.Fatalf("rand.Read: %v", err)

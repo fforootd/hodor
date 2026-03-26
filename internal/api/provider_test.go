@@ -20,11 +20,11 @@ func TestProvider_CRUD(t *testing.T) {
 			"client_id": "client-123",
 		},
 	}, adminToken)
-	
+
 	if code != 201 {
 		t.Fatalf("expected 201 creating provider, got %d: %v", code, body)
 	}
-	
+
 	providerID := fmt.Sprintf("%v", body["id"])
 
 	// 2. List providers

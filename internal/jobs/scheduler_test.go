@@ -9,8 +9,8 @@ func TestNextCronTime_Interval(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		cron     string
-		wantAdd  time.Duration
+		cron    string
+		wantAdd time.Duration
 	}{
 		{"*/1 * * * *", 1 * time.Minute},
 		{"*/5 * * * *", 5 * time.Minute},

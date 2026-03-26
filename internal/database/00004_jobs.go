@@ -20,7 +20,7 @@ func up004Jobs(db *sql.DB) error {
 	pkAuto := "INTEGER PRIMARY KEY AUTOINCREMENT"
 	insertPrefix := "INSERT OR IGNORE INTO"
 	onConflict := ""
-	
+
 	if dialect == "postgres" {
 		timestampDefault = "TIMESTAMPTZ NOT NULL DEFAULT NOW()"
 		pkAuto = "SERIAL PRIMARY KEY"

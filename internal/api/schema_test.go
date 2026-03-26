@@ -17,13 +17,13 @@ func TestSchema_CRUD(t *testing.T) {
 			"test_field": map[string]any{"type": "string"},
 		},
 	}
-	
+
 	code, body := srv.PostJSONWithCookie("/v1/schemas", map[string]any{
 		"id":     "custom_test_schema_v1",
 		"type":   "custom_schema",
 		"schema": schemaDef,
 	}, adminToken)
-	
+
 	if code != 201 {
 		t.Fatalf("expected 201 creating schema, got %d: %v", code, body)
 	}
