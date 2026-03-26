@@ -121,7 +121,10 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 
 	log.Println("No identities found — bootstrapping admin account...")
 
-	password := "admin"
+	password, err := auth.GenerateRandomPassword(16)
+	if err != nil {
+		return fmt.Errorf("generate password: %w", err)
+	}
 
 	identityID, err := id.New()
 	if err != nil {
@@ -137,7 +140,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	// Create the admin identity using the human_user schema.
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, 'admin@zitadel.local', 'Admin', 'active', 'human_user_v1', '{"email":"admin@zitadel.local"}', '{}', datetime('now'), datetime('now'))`,
+		 VALUES (?, 1, 'admin', 'Admin', 'active', 'human_user_v1', '{"email":"admin@zitadel.local"}', '{}', datetime('now'), datetime('now'))`,
 		identityID,
 	)
 	if err != nil {
