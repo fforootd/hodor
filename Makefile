@@ -30,6 +30,11 @@ internal/server/webdist: web/dist
 
 webdist: internal/server/webdist
 
+# Copy only (assumes web/dist already exists, used by CI).
+webdist-only:
+	rm -rf internal/server/webdist
+	cp -r web/dist internal/server/webdist
+
 # ─── Go ────────────────────────────────────────────────────
 
 # Development — run server with embedded assets.
