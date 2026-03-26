@@ -66,6 +66,10 @@ export const identityApi = {
 export const schemaApi = {
   list: () => api.get<ListResponse<Schema>>('/v1/schemas').then(r => r.items || []),
   get: (id: string) => api.get<Schema>(`/v1/schemas/${id}`),
+  update: (id: string, schema: Record<string, unknown>) =>
+    api.patch<Schema>(`/v1/schemas/${id}`, { schema }),
+  identityCount: (id: string) =>
+    api.get<{ count: number }>(`/v1/schemas/${id}/identity-count`).then(r => r.count),
 }
 
 export const sessionApi = {

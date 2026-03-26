@@ -12,7 +12,7 @@
         <router-link to="/identities" class="nav-item" :class="{ active: $route.name?.toString().startsWith('identit') }">
           <span class="nav-icon">◇</span> Identities
         </router-link>
-        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name === 'schemas' }">
+        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name?.toString().startsWith('schema') }">
           <span class="nav-icon">◇</span> Schemas
         </router-link>
         <router-link to="/sessions" class="nav-item" :class="{ active: $route.name === 'sessions' }">
@@ -84,6 +84,7 @@ const pageTitle = computed(() => {
     'identity-detail': 'Identity Detail',
     'identity-create': 'New Identity',
     schemas: 'Schemas',
+    'schema-detail': 'Schema Editor',
     sessions: 'Sessions',
     events: 'Events',
     jobs: 'Jobs',

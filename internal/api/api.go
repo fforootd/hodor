@@ -45,6 +45,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/schemas", a.requireAdmin(a.createSchema))
 	mux.HandleFunc("GET /v1/schemas", a.listSchemas)
 	mux.HandleFunc("GET /v1/schemas/{id}", a.getSchema)
+	mux.HandleFunc("PATCH /v1/schemas/{id}", a.requireAdmin(a.updateSchema))
+	mux.HandleFunc("GET /v1/schemas/{id}/identity-count", a.schemaIdentityCount)
 
 	// Session CRUD
 	a.RegisterSessionRoutes(mux, a.requireAdmin)
@@ -471,7 +473,69 @@ func (a *API) getSchema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s)
 }
 
-// --- Helpers ---
+func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
+	schemaID := r.PathValue("id")
+
+	var req struct {
+		Schema any `json:"schema"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Schema == nil {
+		writeError(w, http.StatusBadRequest, "schema is required")
+		return
+	}
+
+	schemaJSON, err := json.Marshal(req.Schema)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid schema")
+		return
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(),
+		`UPDATE schemas SET schema = ?, version = version + 1 WHERE id = ?`,
+		string(schemaJSON), schemaID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update schema")
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		writeError(w, http.StatusNotFound, "schema not found")
+		return
+	}
+
+	// Return updated schema.
+	var s SchemaResponse
+	var updatedStr string
+	a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, type, org_id, schema, version, created_at FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&s.ID, &s.Type, &s.OrgID, &updatedStr, &s.Version, &s.CreatedAt)
+	json.Unmarshal([]byte(updatedStr), &s.Schema)
+
+	a.EmitAuthEvent(r.Context(), "schema.updated", 0, map[string]any{
+		"schema_id": schemaID,
+		"version":   s.Version,
+	})
+
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
+	schemaID := r.PathValue("id")
+
+	var count int
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM identities WHERE schema_id = ?`, schemaID,
+	).Scan(&count)
+	if err != nil {
+		count = 0
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
 
 func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse, error) {
 	var resp IdentityResponse
