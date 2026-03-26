@@ -23,10 +23,21 @@ var builtinSchemas = []struct {
 		Type: "human_user",
 		Schema: `{
   "type": "object",
+  "x-login": {
+    "preset": "identifier_first",
+    "auth_methods": {
+      "password":   {"enabled": true, "position": 1},
+      "passkey":    {"enabled": false, "position": 0},
+      "magic_link": {"enabled": true, "position": 2},
+      "sso":        {"enabled": true, "position": 3}
+    },
+    "mfa_required": false,
+    "registration_allowed": true
+  },
   "properties": {
     "display_name":  {"type": "string", "description": "Full name shown in UI", "x-user-editable": true, "x-claim-mapping": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"},
-    "email":         {"type": "string", "format": "email", "x-user-editable": true, "x-claim-mapping": "claims.email"},
-    "phone":         {"type": "string", "x-user-editable": true, "x-sensitive": true, "x-claim-mapping": "claims.phone_number ?? ''"},
+    "email":         {"type": "string", "format": "email", "x-user-editable": true, "x-claim-mapping": "claims.email", "x-auth": {"identifier": true, "verification": "email", "recovery": "email"}},
+    "phone":         {"type": "string", "x-user-editable": true, "x-sensitive": true, "x-claim-mapping": "claims.phone_number ?? ''", "x-auth": {"identifier": true, "mfa": "sms"}},
     "locale":        {"type": "string", "description": "BCP-47 language tag, e.g. en-US", "x-user-editable": true, "x-claim-mapping": "claims.locale ?? ''"},
     "timezone":      {"type": "string", "description": "IANA timezone, e.g. America/New_York", "x-user-editable": true, "x-claim-mapping": "claims.zoneinfo ?? ''"},
     "avatar_url":    {"type": "string", "format": "uri", "x-user-editable": true, "x-claim-mapping": "claims.picture ?? ''"},

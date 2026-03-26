@@ -29,6 +29,7 @@ type Handler struct {
 	api       *api.API
 	notify    notify.Channel
 	baseURL   string
+	flows     *FlowStore
 }
 
 // New creates a new login API handler.
@@ -39,6 +40,7 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API) *Handler 
 		api:       restAPI,
 		notify:    notify.NewStdout(),
 		baseURL:   "http://localhost:8080",
+		flows:     NewFlowStore(),
 	}
 }
 
@@ -46,6 +48,13 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API) *Handler 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/branding", h.handleBranding)
 	mux.HandleFunc("GET /v1/auth/settings", h.handleAuthSettings)
+
+	// Flow API (schema-driven).
+	mux.HandleFunc("POST /v1/login/flows", h.handleFlowCreate)
+	mux.HandleFunc("POST /v1/login/flows/", h.handleFlowSubmit)
+	mux.HandleFunc("GET /v1/login/flows/", h.handleFlowGet)
+
+	// Legacy routes (thin wrappers around flow API).
 	mux.HandleFunc("POST /v1/login/start", h.handleLoginStart)
 	mux.HandleFunc("POST /v1/login/password", h.handleLoginPassword)
 	mux.HandleFunc("POST /v1/login/complete", h.handleLoginComplete)
@@ -56,32 +65,62 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	h.RegisterSSORoutes(mux)
 }
 
-// --- Branding ---
+// --- Branding (schema-driven) ---
 
 func (h *Handler) handleBranding(w http.ResponseWriter, r *http.Request) {
+	cfg := h.getDefaultSchemaConfig(r)
+	b := cfg.Branding
 	writeJSON(w, map[string]any{
-		"org_id":      "",
-		"org_name":    "ZITADEL",
-		"logo_url":    "",
-		"heading":     "Welcome back",
-		"description": "Sign in to your account",
-		"colors": map[string]string{
-			"primary":    "#6366f1",
-			"background": "#f0f2ff",
-			"surface":    "#ffffff",
-			"text":       "#1a1a2e",
-			"error":      "#ef4444",
-		},
-		"font_family":           "Inter, system-ui, sans-serif",
-		"font_url":              "",
-		"hide_zitadel_branding": false,
+		"org_id":                "",
+		"org_name":              b.OrgName,
+		"logo_url":              b.LogoURL,
+		"heading":               b.Heading,
+		"description":           b.Description,
+		"colors":                b.Colors,
+		"font_family":           b.FontFamily,
+		"font_url":              b.FontURL,
+		"texts":                 b.Texts,
+		"custom_css":            b.CustomCSS,
+		"hide_zitadel_branding": b.HideZitadel,
 	})
 }
 
-// --- Auth Settings ---
+// --- Auth Settings (schema-driven) ---
 
 func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
-	// Load enabled providers from database.
+	cfg := h.getDefaultSchemaConfig(r)
+	ssoProviders := h.loadSSOProviders(r)
+
+	// Build auth_methods from schema config.
+	authMethods := make(map[string]any)
+	for name, m := range cfg.Login.AuthMethods {
+		entry := map[string]any{"enabled": m.Enabled, "position": m.Position}
+		if m.Preferred {
+			entry["preferred"] = true
+		}
+		authMethods[name] = entry
+	}
+	// Inject SSO providers into auth_methods.
+	if ssoEntry, ok := authMethods["sso"]; ok {
+		if ssoMap, ok := ssoEntry.(map[string]any); ok {
+			ssoMap["providers"] = ssoProviders
+			if len(ssoProviders) == 0 {
+				ssoMap["enabled"] = false
+			}
+		}
+	}
+
+	writeJSON(w, map[string]any{
+		"preset":               cfg.Login.Preset,
+		"auth_methods":         authMethods,
+		"mfa_required":         cfg.Login.MFARequired,
+		"registration_allowed": cfg.Login.RegistrationAllowed,
+		"identifier_fields":    cfg.Identifiers,
+	})
+}
+
+// loadSSOProviders reads enabled SSO providers from the database.
+func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
 	var ssoProviders []map[string]any
 	rows, err := h.db.SQL().QueryContext(r.Context(),
 		`SELECT id, name, template, protocol FROM providers WHERE enabled = 1 ORDER BY display_order, name`)
@@ -95,24 +134,23 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
-		if err := rows.Err(); err == nil {
-			rows.Close()
-		}
 	}
 	if ssoProviders == nil {
 		ssoProviders = []map[string]any{}
 	}
+	return ssoProviders
+}
 
-	writeJSON(w, map[string]any{
-		"auth_methods": map[string]any{
-			"password":   map[string]any{"enabled": true},
-			"magic_link": map[string]any{"enabled": true},
-			"passkey":    map[string]any{"enabled": false, "preferred": false},
-			"sso":        map[string]any{"enabled": len(ssoProviders) > 0, "providers": ssoProviders},
-		},
-		"mfa_required":         false,
-		"registration_allowed": true,
-	})
+// getDefaultSchemaConfig loads the default identity schema and extracts auth config.
+func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
+	var schemaJSON string
+	err := h.db.SQL().QueryRowContext(r.Context(),
+		`SELECT schema FROM schemas ORDER BY created_at ASC LIMIT 1`,
+	).Scan(&schemaJSON)
+	if err != nil || schemaJSON == "" {
+		return ExtractAuthConfig(`{}`)
+	}
+	return ExtractAuthConfig(schemaJSON)
 }
 
 // --- Login Start ---
