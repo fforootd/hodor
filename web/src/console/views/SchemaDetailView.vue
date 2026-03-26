@@ -634,10 +634,10 @@ function copyToClipboard() {
 
 /* Line number gutter */
 .line-gutter {
-  position: sticky; left: 0; z-index: 2;
+  position: sticky; left: 0; z-index: 3;
   min-width: 56px; padding: 1rem 0; background: #fafbfc;
   border-right: 1px solid #e5e7eb; user-select: none;
-  overflow: hidden;
+  overflow: hidden; pointer-events: auto;
 }
 .line-num {
   display: flex; align-items: center; justify-content: flex-end; gap: 0;
