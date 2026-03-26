@@ -1,3 +1,5 @@
+version: "2"
+
 linters:
   enable:
     - govet
@@ -50,13 +52,10 @@ issues:
     - gen
     - proto
   exclude-rules:
-    # Allow unused code in ui/ (legacy HTML templates, being replaced by Vue).
     - path: internal/ui/
       linters: [unused, gosimple]
-    # Allow unused code in account.go (sessionContext type used via JSON tags).
     - path: internal/api/account.go
       linters: [unused]
-    # Allow gosimple suggestions in migrations (legacy patterns).
     - path: internal/database/
       linters: [gosimple]
 
