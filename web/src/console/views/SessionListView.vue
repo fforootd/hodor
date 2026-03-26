@@ -31,7 +31,7 @@ onMounted(async () => {
   try { sessions.value = await sessionApi.list() } catch {}
 })
 
-async function revoke(id: number) {
+async function revoke(id: string) {
   await sessionApi.revoke(id)
   sessions.value = sessions.value.filter(s => s.id !== id)
 }

@@ -6,6 +6,8 @@ export interface Identity {
   identifier: string
   display_name: string
   state: string
+  schema_id?: string
+  schema_name?: string
   profile: Record<string, unknown>
   metadata: Record<string, unknown>
   capabilities: string[]
@@ -15,7 +17,9 @@ export interface Identity {
 
 export interface Schema {
   id: string
+  name?: string
   type: string
+  description?: string
   org_id: number
   schema: Record<string, unknown>
   version: number
