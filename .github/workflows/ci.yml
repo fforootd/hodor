@@ -25,20 +25,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Build web assets
-        working-directory: web
-        run: npx vite build
-
-      - name: Embed web assets for Go
-        run: cp -r web/dist internal/server/webdist
+      - name: Build web assets + embed
+        run: make webdist
 
       - name: Build Go
         run: go build ./...
@@ -65,20 +57,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Build web assets
-        working-directory: web
-        run: npx vite build
-
-      - name: Embed web assets for Go
-        run: cp -r web/dist internal/server/webdist
+      - name: Build web assets + embed
+        run: make webdist
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9.2.0
@@ -111,21 +95,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Build web assets
-        working-directory: web
-        run: npx vite build
-
-      - name: Embed web assets for Go
-        run: cp -r web/dist internal/server/webdist
-
+      # goreleaser before.hooks handles: npm ci → vite build → cp webdist
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
@@ -139,26 +113,3 @@ jobs:
           name: zitadel-snapshot
           path: dist/zitadel_*/
           retention-days: 7
-
-  # ─── E2E (placeholder — requires Playwright + testcontainers) ──
-  # e2e:
-  #   name: E2E
-  #   runs-on: ubuntu-latest
-  #   needs: [test]
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-go@v5
-  #       with:
-  #         go-version-file: go.mod
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #     - name: Build
-  #       run: make build
-  #     - name: Install Playwright
-  #       run: cd e2e && npm ci && npx playwright install --with-deps
-  #     - name: Run E2E
-  #       run: |
-  #         ./dist/zitadel serve --mock-oidc --seed fixtures/dev-seed.yaml &
-  #         sleep 3
-  #         cd e2e && npx playwright test

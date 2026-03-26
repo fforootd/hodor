@@ -1,15 +1,19 @@
-.PHONY: dev test fuzz lint generate build clean web webdist ci-test
+.PHONY: dev dev-hot dev-full test fuzz lint generate build clean web web-install webdist ci-test fmt vet release-snapshot
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
 #
-#   make build    (full pipeline: web → webdist → goreleaser)
-#   make dev      (fast: assumes webdist exists, runs Go server)
-#   make ci-test  (CI: web → webdist → go test)
+#   make build         (full pipeline: web → webdist → goreleaser)
+#   make dev           (fast: assumes webdist exists, runs Go server)
+#   make dev-hot       (Vite HMR on :5173 + Go server on :8080)
+#   make ci-test       (CI: web → webdist → go test)
 
 # ─── Web (Vue/Vite) ────────────────────────────────────────
 
 # Install web dependencies.
+web-install: web/package.json
+	cd web && npm ci --prefer-offline
+
 web/node_modules: web/package.json
 	cd web && npm ci --prefer-offline
 
@@ -28,13 +32,24 @@ webdist: internal/server/webdist
 
 # ─── Go ────────────────────────────────────────────────────
 
-# Development — run server (assumes webdist exists).
+# Development — run server with embedded assets.
 dev: webdist
 	go run ./cmd/zitadel serve
 
 # Development with mock OIDC + seed data.
 dev-full: webdist
 	go run ./cmd/zitadel serve --mock-oidc --seed fixtures/dev-seed.yaml
+
+# Hot reload development — Vite HMR on :5173 proxying to Go on :8080.
+# Access the app at http://localhost:5173 for instant CSS/JS reloads.
+# Go server still needs manual restart on .go changes (use `air` for that).
+dev-hot: web/node_modules
+	@echo "─── Starting Vite dev server (:5173) + Go server (:8080) ───"
+	@echo "→  Open http://localhost:5173 for hot-reload UI"
+	@echo "→  API calls proxy to http://localhost:8080"
+	@trap 'kill 0' EXIT; \
+	cd web && npm run dev & \
+	go run ./cmd/zitadel serve
 
 # Run all tests (requires webdist for embed).
 test: webdist

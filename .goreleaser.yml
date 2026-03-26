@@ -3,6 +3,13 @@ version: 2
 
 project_name: zitadel
 
+before:
+  hooks:
+    - npm ci --prefix web
+    - npx --prefix web vite build
+    - rm -rf internal/server/webdist
+    - cp -r web/dist internal/server/webdist
+
 builds:
   - id: zitadel
     main: ./cmd/zitadel
@@ -18,9 +25,9 @@ builds:
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
-      - -X main.version={{.Commit}}
+      - -X main.commit={{.Commit}}
 
-dockers:
+dockers_v2:
   - image_templates:
       - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
     use: buildx
