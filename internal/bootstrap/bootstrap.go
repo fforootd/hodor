@@ -121,10 +121,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 
 	log.Println("No identities found — bootstrapping admin account...")
 
-	password, err := auth.GenerateRandomPassword(16)
-	if err != nil {
-		return fmt.Errorf("generate password: %w", err)
-	}
+	password := "admin"
 
 	identityID, err := id.New()
 	if err != nil {
