@@ -25,8 +25,6 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 
 // --- Session middleware (non-admin) ---
 
-
-
 // requireSession is middleware that ensures a valid session exists.
 // It injects the caller's identity ID into the request header.
 func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {

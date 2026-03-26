@@ -49,7 +49,7 @@ func (p *Passwords) Hash(plain string) (string, error) {
 func (p *Passwords) Verify(encoded, plain string) (ok bool, updated string, err error) {
 	updated, err = p.swapper.Verify(encoded, plain)
 	if err != nil {
-		return false, "", err
+		return false, "", nil //nolint:nilerr // Intentional: passwap returns error for wrong password; we map to ok=false.
 	}
 	return true, updated, nil
 }
