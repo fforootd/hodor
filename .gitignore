@@ -29,3 +29,5 @@ internal/server/webdist/
 # Test artifacts
 *.test
 testdata/fuzz/
+lake_data/
+package-lock.json
