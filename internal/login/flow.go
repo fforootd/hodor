@@ -21,19 +21,20 @@ type AuthFieldConfig struct {
 	MFA          string `json:"mfa,omitempty"`          // "sms", "totp"
 }
 
-// AuthMethodConfig represents a single auth method inside x-login.
-type AuthMethodConfig struct {
-	Enabled   bool `json:"enabled"`
-	Position  int  `json:"position"`
-	Preferred bool `json:"preferred,omitempty"`
+// AuthMethodEntry represents a single auth method in x-auth-methods.
+type AuthMethodEntry struct {
+	Enabled     bool `json:"enabled"`
+	Interactive bool `json:"interactive"`
+	Position    int  `json:"position,omitempty"`
+	Preferred   bool `json:"preferred,omitempty"`
+	MaxTokens   int  `json:"max_tokens,omitempty"` // for PAT/API key limits
 }
 
 // LoginConfig represents the x-login schema-level annotation.
 type LoginConfig struct {
-	Preset              string                       `json:"preset"` // "identifier_first", "passkey_first", "sso_only", "custom"
-	AuthMethods         map[string]*AuthMethodConfig `json:"auth_methods"`
-	MFARequired         bool                         `json:"mfa_required"`
-	RegistrationAllowed bool                         `json:"registration_allowed"`
+	Preset              string `json:"preset"` // "identifier_first", "passkey_first", "sso_only", "custom"
+	MFARequired         bool   `json:"mfa_required"`
+	RegistrationAllowed bool   `json:"registration_allowed"`
 }
 
 // BrandingConfig represents the x-branding schema-level annotation.
@@ -52,29 +53,32 @@ type BrandingConfig struct {
 
 // SchemaAuthConfig is the fully extracted auth/login/branding config from a schema.
 type SchemaAuthConfig struct {
-	Identifiers []string                   // field names that can be used as identifiers
-	Fields      map[string]AuthFieldConfig // field name → auth config
+	Identifiers []string                      // field names that can be used as identifiers
+	Fields      map[string]AuthFieldConfig    // field name → auth config
+	AuthMethods map[string]*AuthMethodEntry   // method name → config (from x-auth-methods)
 	Login       LoginConfig
 	Branding    BrandingConfig
 }
 
 // ─── Annotation Extraction ──────────────────────────────────
 
-// ExtractAuthConfig parses x-auth, x-login, and x-branding from a JSON schema string.
+// ExtractAuthConfig parses x-auth, x-auth-methods, x-login, and x-branding from a JSON schema string.
 func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	var raw struct {
-		Properties map[string]map[string]any `json:"properties"`
-		XLogin     json.RawMessage           `json:"x-login"`
-		XBranding  json.RawMessage           `json:"x-branding"`
+		Properties  map[string]map[string]any `json:"properties"`
+		XAuthMethods json.RawMessage          `json:"x-auth-methods"`
+		XLogin      json.RawMessage           `json:"x-login"`
+		XBranding   json.RawMessage           `json:"x-branding"`
 	}
 	if err := json.Unmarshal([]byte(schemaJSON), &raw); err != nil {
 		return defaultConfig()
 	}
 
 	config := &SchemaAuthConfig{
-		Fields:   make(map[string]AuthFieldConfig),
-		Login:    defaultLoginConfig(),
-		Branding: defaultBrandingConfig(),
+		Fields:      make(map[string]AuthFieldConfig),
+		AuthMethods: defaultAuthMethods(),
+		Login:       defaultLoginConfig(),
+		Branding:    defaultBrandingConfig(),
 	}
 
 	// Extract per-field x-auth annotations.
@@ -94,6 +98,26 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 			if fc.Identifier {
 				config.Identifiers = append(config.Identifiers, name)
 			}
+		}
+	}
+
+	// Extract x-auth-methods (new format).
+	if len(raw.XAuthMethods) > 0 {
+		var methods map[string]*AuthMethodEntry
+		if json.Unmarshal(raw.XAuthMethods, &methods) == nil && len(methods) > 0 {
+			config.AuthMethods = methods
+		}
+	} else if len(raw.XLogin) > 0 {
+		// Backward compatibility: read from x-login.auth_methods
+		var legacy struct {
+			AuthMethods map[string]*AuthMethodEntry `json:"auth_methods"`
+		}
+		if json.Unmarshal(raw.XLogin, &legacy) == nil && len(legacy.AuthMethods) > 0 {
+			// Mark legacy methods as interactive (they all were)
+			for _, m := range legacy.AuthMethods {
+				m.Interactive = true
+			}
+			config.AuthMethods = legacy.AuthMethods
 		}
 	}
 
@@ -118,20 +142,27 @@ func defaultConfig() *SchemaAuthConfig {
 	return &SchemaAuthConfig{
 		Identifiers: []string{"email"},
 		Fields:      map[string]AuthFieldConfig{"email": {Identifier: true}},
+		AuthMethods: defaultAuthMethods(),
 		Login:       defaultLoginConfig(),
 		Branding:    defaultBrandingConfig(),
 	}
 }
 
+func defaultAuthMethods() map[string]*AuthMethodEntry {
+	return map[string]*AuthMethodEntry{
+		"password":    {Enabled: true, Interactive: true, Position: 1},
+		"passkey":     {Enabled: false, Interactive: true, Position: 0},
+		"magic_link":  {Enabled: true, Interactive: true, Position: 2},
+		"sso":         {Enabled: true, Interactive: true, Position: 3},
+		"pat":         {Enabled: false, Interactive: false},
+		"api_key":     {Enabled: false, Interactive: false},
+		"client_cert": {Enabled: false, Interactive: false},
+	}
+}
+
 func defaultLoginConfig() LoginConfig {
 	return LoginConfig{
-		Preset: "identifier_first",
-		AuthMethods: map[string]*AuthMethodConfig{
-			"password":   {Enabled: true, Position: 1},
-			"passkey":    {Enabled: false, Position: 0},
-			"magic_link": {Enabled: true, Position: 2},
-			"sso":        {Enabled: true, Position: 3},
-		},
+		Preset:              "identifier_first",
 		MFARequired:         false,
 		RegistrationAllowed: true,
 	}
@@ -156,9 +187,6 @@ func defaultBrandingConfig() BrandingConfig {
 func mergeLoginDefaults(lc LoginConfig) LoginConfig {
 	if lc.Preset == "" {
 		lc.Preset = "identifier_first"
-	}
-	if lc.AuthMethods == nil {
-		lc.AuthMethods = defaultLoginConfig().AuthMethods
 	}
 	return lc
 }
@@ -326,7 +354,7 @@ func buildIdentifierNodes(cfg *SchemaAuthConfig, texts map[string]string) []UINo
 
 	// If passkey_first, add passkey button before identifier.
 	if cfg.Login.Preset == "passkey_first" {
-		if m := cfg.Login.AuthMethods["passkey"]; m != nil && m.Enabled {
+		if m := cfg.AuthMethods["passkey"]; m != nil && m.Enabled {
 			nodes = append([]UINode{
 				{Type: "heading", Text: cfg.Branding.Heading},
 				{Type: "description", Text: cfg.Branding.Description},
@@ -354,7 +382,7 @@ func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 	}
 
 	// Password input (if enabled).
-	if m := cfg.Login.AuthMethods["password"]; m != nil && m.Enabled {
+	if m := cfg.AuthMethods["password"]; m != nil && m.Enabled {
 		nodes = append(nodes,
 			UINode{Type: "input", Name: "password", InputType: "password",
 				Label:       textOr(texts, "password_label", "Password"),
@@ -367,7 +395,7 @@ func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 	hasAlternatives := false
 
 	// Magic link.
-	if m := cfg.Login.AuthMethods["magic_link"]; m != nil && m.Enabled {
+	if m := cfg.AuthMethods["magic_link"]; m != nil && m.Enabled {
 		if !hasAlternatives {
 			nodes = append(nodes, UINode{Type: "divider"})
 			hasAlternatives = true
@@ -378,7 +406,7 @@ func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 	}
 
 	// Passkey.
-	if m := cfg.Login.AuthMethods["passkey"]; m != nil && m.Enabled {
+	if m := cfg.AuthMethods["passkey"]; m != nil && m.Enabled {
 		if !hasAlternatives {
 			nodes = append(nodes, UINode{Type: "divider"})
 			hasAlternatives = true
@@ -389,7 +417,7 @@ func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 	}
 
 	// SSO providers.
-	if m := cfg.Login.AuthMethods["sso"]; m != nil && m.Enabled {
+	if m := cfg.AuthMethods["sso"]; m != nil && m.Enabled {
 		for _, p := range flow.SSOProviders {
 			if !hasAlternatives {
 				nodes = append(nodes, UINode{Type: "divider"})

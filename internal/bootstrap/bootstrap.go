@@ -23,14 +23,15 @@ var builtinSchemas = []struct {
 		Type: "human_user",
 		Schema: `{
   "type": "object",
+  "x-auth-methods": {
+    "password":    {"enabled": true,  "interactive": true,  "position": 1},
+    "passkey":     {"enabled": false, "interactive": true,  "position": 0},
+    "magic_link":  {"enabled": true,  "interactive": true,  "position": 2},
+    "sso":         {"enabled": true,  "interactive": true,  "position": 3},
+    "pat":         {"enabled": false, "interactive": false}
+  },
   "x-login": {
     "preset": "identifier_first",
-    "auth_methods": {
-      "password":   {"enabled": true, "position": 1},
-      "passkey":    {"enabled": false, "position": 0},
-      "magic_link": {"enabled": true, "position": 2},
-      "sso":        {"enabled": true, "position": 3}
-    },
     "mfa_required": false,
     "registration_allowed": true
   },
@@ -51,6 +52,14 @@ var builtinSchemas = []struct {
 		Type: "service_user",
 		Schema: `{
   "type": "object",
+  "x-auth-methods": {
+    "pat":         {"enabled": true,  "interactive": false, "max_tokens": 10},
+    "api_key":     {"enabled": true,  "interactive": false},
+    "password":    {"enabled": true,  "interactive": true,  "position": 1}
+  },
+  "x-login": {
+    "preset": "identifier_first"
+  },
   "properties": {
     "display_name":  {"type": "string", "description": "Service account name"},
     "description":   {"type": "string", "description": "What this service does"},
@@ -86,6 +95,10 @@ var builtinSchemas = []struct {
 		Type: "ai_agent",
 		Schema: `{
   "type": "object",
+  "x-auth-methods": {
+    "pat":          {"enabled": true,  "interactive": false, "max_tokens": 5},
+    "client_cert":  {"enabled": false, "interactive": false}
+  },
   "properties": {
     "display_name":    {"type": "string", "description": "Agent name"},
     "description":     {"type": "string", "description": "What this agent does"},
@@ -176,8 +189,8 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	fmt.Println()
 	fmt.Println("  ┌──────────────────────────────────────────────────┐")
 	fmt.Println("  │  ZITADEL bootstrapped!                          │")
-	fmt.Printf("  │  Username: admin                 │\n")
-	fmt.Printf("  │  Password: %-36s  │\n", password)
+	fmt.Printf("   │  Username: admin                 				 │\n")
+	fmt.Printf("   │  Password: %-36s  │\n", password)
 	fmt.Println("  │                                                  │")
 	fmt.Println("  │  Change this password on first login.            │")
 	fmt.Println("  └──────────────────────────────────────────────────┘")

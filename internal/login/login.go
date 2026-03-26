@@ -93,7 +93,7 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Build auth_methods from schema config.
 	authMethods := make(map[string]any)
-	for name, m := range cfg.Login.AuthMethods {
+	for name, m := range cfg.AuthMethods {
 		entry := map[string]any{"enabled": m.Enabled, "position": m.Position}
 		if m.Preferred {
 			entry["preferred"] = true

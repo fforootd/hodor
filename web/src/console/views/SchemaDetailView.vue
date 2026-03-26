@@ -62,6 +62,24 @@
       </div>
 
       <div class="sidebar-section">
+        <h4 class="sidebar-heading">API Auth</h4>
+        <div class="toggle-group">
+          <label class="toggle-row">
+            <input type="checkbox" v-model="authPAT" @change="onQuickSettingChange" />
+            <span>Personal access tokens</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" v-model="authAPIKey" @change="onQuickSettingChange" />
+            <span>API keys</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" v-model="authClientCert" @change="onQuickSettingChange" />
+            <span>Client certificates</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
         <h4 class="sidebar-heading">Branding</h4>
         <div class="field-row">
           <span class="field-label">Heading</span>
@@ -205,6 +223,9 @@ const authPasskey = ref(false)
 const authSSO = ref(true)
 const mfaRequired = ref(false)
 const registrationAllowed = ref(true)
+const authPAT = ref(false)
+const authAPIKey = ref(false)
+const authClientCert = ref(false)
 const brandHeading = ref('Welcome back')
 const brandPrimary = ref('#6366f1')
 
@@ -425,7 +446,8 @@ function syncSidebarFromJson(json: string) {
     const parsed = JSON.parse(json)
     const login = parsed?.['x-login'] || {}
     const branding = parsed?.['x-branding'] || {}
-    const methods = login.auth_methods || {}
+    // Read from x-auth-methods (new) or x-login.auth_methods (legacy)
+    const methods = parsed?.['x-auth-methods'] || login.auth_methods || {}
 
     loginPreset.value = login.preset || 'identifier_first'
     authPassword.value = methods.password?.enabled ?? true
@@ -434,6 +456,9 @@ function syncSidebarFromJson(json: string) {
     authSSO.value = methods.sso?.enabled ?? true
     mfaRequired.value = login.mfa_required ?? false
     registrationAllowed.value = login.registration_allowed ?? true
+    authPAT.value = methods.pat?.enabled ?? false
+    authAPIKey.value = methods.api_key?.enabled ?? false
+    authClientCert.value = methods.client_cert?.enabled ?? false
     brandHeading.value = branding.heading || 'Welcome back'
     brandPrimary.value = branding.colors?.primary || '#6366f1'
   } catch {}
@@ -456,17 +481,26 @@ function onQuickSettingChange() {
   try {
     const parsed = JSON.parse(editorContent.value)
 
+    // Write x-auth-methods (new format)
+    if (!parsed['x-auth-methods']) parsed['x-auth-methods'] = {}
+    const am = parsed['x-auth-methods']
+    am.password = { ...(am.password || {}), enabled: authPassword.value, interactive: true }
+    am.magic_link = { ...(am.magic_link || {}), enabled: authMagicLink.value, interactive: true }
+    am.passkey = { ...(am.passkey || {}), enabled: authPasskey.value, interactive: true }
+    am.sso = { ...(am.sso || {}), enabled: authSSO.value, interactive: true }
+    am.pat = { ...(am.pat || {}), enabled: authPAT.value, interactive: false }
+    am.api_key = { ...(am.api_key || {}), enabled: authAPIKey.value, interactive: false }
+    am.client_cert = { ...(am.client_cert || {}), enabled: authClientCert.value, interactive: false }
+
+    // Write x-login (flow config only, no auth_methods)
     if (!parsed['x-login']) parsed['x-login'] = {}
     parsed['x-login'].preset = loginPreset.value
-    if (!parsed['x-login'].auth_methods) parsed['x-login'].auth_methods = {}
-    const m = parsed['x-login'].auth_methods
-    m.password = { ...(m.password || {}), enabled: authPassword.value }
-    m.magic_link = { ...(m.magic_link || {}), enabled: authMagicLink.value }
-    m.passkey = { ...(m.passkey || {}), enabled: authPasskey.value }
-    m.sso = { ...(m.sso || {}), enabled: authSSO.value }
     parsed['x-login'].mfa_required = mfaRequired.value
     parsed['x-login'].registration_allowed = registrationAllowed.value
+    // Remove legacy auth_methods from x-login if present
+    delete parsed['x-login'].auth_methods
 
+    // Update x-branding
     if (!parsed['x-branding']) parsed['x-branding'] = {}
     parsed['x-branding'].heading = brandHeading.value
     if (!parsed['x-branding'].colors) parsed['x-branding'].colors = {}

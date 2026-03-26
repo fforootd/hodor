@@ -93,11 +93,11 @@ func TestExtractAuthConfig_LoginConfig(t *testing.T) {
 		t.Error("registration_allowed should be true")
 	}
 
-	pw := cfg.Login.AuthMethods["password"]
+	pw := cfg.AuthMethods["password"]
 	if pw == nil || !pw.Enabled {
 		t.Error("password should be enabled")
 	}
-	pk := cfg.Login.AuthMethods["passkey"]
+	pk := cfg.AuthMethods["passkey"]
 	if pk == nil || !pk.Enabled || !pk.Preferred {
 		t.Error("passkey should be enabled and preferred")
 	}

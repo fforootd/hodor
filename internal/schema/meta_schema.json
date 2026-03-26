@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zitadel.com/schemas/identity-meta-schema",
+  "title": "ZITADEL Identity Schema Meta-Schema",
+  "description": "Validates x-* annotations on identity schemas: x-auth-methods, x-login, x-branding, and per-field x-auth.",
+  "type": "object",
+  "properties": {
+    "x-auth-methods": {
+      "type": "object",
+      "description": "Auth methods available for identities of this schema type.",
+      "additionalProperties": {
+        "$ref": "#/$defs/AuthMethodEntry"
+      },
+      "propertyNames": {
+        "enum": ["password", "passkey", "magic_link", "sso", "pat", "api_key", "client_cert"]
+      }
+    },
+    "x-login": {
+      "type": "object",
+      "description": "Interactive login flow configuration.",
+      "properties": {
+        "preset": {
+          "type": "string",
+          "enum": ["identifier_first", "passkey_first", "sso_only", "custom"],
+          "default": "identifier_first"
+        },
+        "mfa_required": {
+          "type": "boolean",
+          "default": false
+        },
+        "registration_allowed": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "x-branding": {
+      "type": "object",
+      "description": "Visual customization for the login UI.",
+      "properties": {
+        "heading":              { "type": "string" },
+        "description":          { "type": "string" },
+        "logo_url":             { "type": "string", "format": "uri" },
+        "org_name":             { "type": "string" },
+        "colors": {
+          "type": "object",
+          "properties": {
+            "primary":    { "type": "string" },
+            "background": { "type": "string" },
+            "surface":    { "type": "string" },
+            "text":       { "type": "string" },
+            "error":      { "type": "string" }
+          },
+          "additionalProperties": { "type": "string" }
+        },
+        "font_family":           { "type": "string" },
+        "font_url":              { "type": "string", "format": "uri" },
+        "texts":                 { "type": "object", "additionalProperties": { "type": "string" } },
+        "custom_css":            { "type": "string" },
+        "hide_zitadel_branding": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "x-auth": { "$ref": "#/$defs/AuthFieldConfig" },
+          "x-claim-mapping":  { "type": "string" },
+          "x-sensitive":      { "type": "boolean" },
+          "x-hidden":         { "type": "boolean" },
+          "x-user-editable":  { "type": "boolean" },
+          "x-source":         { "type": "string", "enum": ["admin", "user", "system", "sso"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "AuthMethodEntry": {
+      "type": "object",
+      "description": "Configuration for a single auth method.",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "interactive": { "type": "boolean", "description": "true = browser-based login, false = API/token-based" },
+        "position":    { "type": "integer", "minimum": 0, "description": "Display order for interactive methods" },
+        "preferred":   { "type": "boolean" },
+        "max_tokens":  { "type": "integer", "minimum": 1, "description": "Max tokens for PAT/API key methods" }
+      },
+      "required": ["enabled", "interactive"]
+    },
+    "AuthFieldConfig": {
+      "type": "object",
+      "description": "Per-field auth configuration from x-auth annotation.",
+      "properties": {
+        "identifier":   { "type": "boolean", "description": "Field can be used as a login identifier" },
+        "verification": { "type": "string", "enum": ["email", "sms"], "description": "Verification channel" },
+        "recovery":     { "type": "string", "enum": ["email", "sms"], "description": "Account recovery channel" },
+        "mfa":          { "type": "string", "enum": ["sms", "totp"], "description": "MFA method via this field" }
+      }
+    }
+  }
+}
