@@ -36,11 +36,11 @@ type CreateSessionResponse struct {
 }
 
 // RegisterSessionRoutes mounts session-related REST routes.
-func (a *API) RegisterSessionRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/sessions", a.createSession)
-	mux.HandleFunc("GET /v1/sessions", a.listSessions)
-	mux.HandleFunc("GET /v1/sessions/{id}", a.getSession)
-	mux.HandleFunc("POST /v1/sessions/{id}/revoke", a.revokeSession)
+func (a *API) RegisterSessionRoutes(mux *http.ServeMux, requireAdmin func(http.HandlerFunc) http.HandlerFunc) {
+	mux.HandleFunc("POST /v1/sessions", requireAdmin(a.createSession))
+	mux.HandleFunc("GET /v1/sessions", requireAdmin(a.listSessions))
+	mux.HandleFunc("GET /v1/sessions/{id}", requireAdmin(a.getSession))
+	mux.HandleFunc("POST /v1/sessions/{id}/revoke", requireAdmin(a.revokeSession))
 }
 
 func (a *API) createSession(w http.ResponseWriter, r *http.Request) {

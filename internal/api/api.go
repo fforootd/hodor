@@ -47,7 +47,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/schemas/{id}", a.getSchema)
 
 	// Session CRUD
-	a.RegisterSessionRoutes(mux)
+	a.RegisterSessionRoutes(mux, a.requireAdmin)
 
 	// Event read + streaming
 	a.RegisterEventRoutes(mux)

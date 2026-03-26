@@ -15,12 +15,18 @@ func init() {
 // (Lake Writer, Notification Workers, Threat Workers) to track their processing
 // position in the events table. Each consumer maintains its own cursor.
 func up003ConsumerCursors(db *sql.DB) error {
+	dialect := detectDialect(db)
+	timestampDefault := "TEXT NOT NULL DEFAULT (datetime('now'))"
+	if dialect == "postgres" {
+		timestampDefault = "TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+	}
+
 	statements := []string{
-		`CREATE TABLE IF NOT EXISTS consumer_cursors (
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS consumer_cursors (
 			consumer_name TEXT PRIMARY KEY,
 			last_event_id INTEGER NOT NULL DEFAULT 0,
-			updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
-		)`,
+			updated_at    %s
+		)`, timestampDefault),
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {

@@ -10,16 +10,16 @@
 
 # ─── Web (Vue/Vite) ────────────────────────────────────────
 
-# Install web dependencies.
-web-install: web/package.json
-	cd web && npm ci --prefer-offline
+# Install all workspace dependencies.
+install: package.json
+	npm ci --prefer-offline
 
-web/node_modules: web/package.json
-	cd web && npm ci --prefer-offline
+node_modules: package.json
+	npm ci --prefer-offline
 
 # Build Vue apps (login, console, account).
-web/dist: web/node_modules $(shell find web/src -type f 2>/dev/null)
-	cd web && npx vite build
+web/dist: node_modules $(shell find web/src -type f 2>/dev/null)
+	npm run build
 
 web: web/dist
 
@@ -43,12 +43,12 @@ dev-full: webdist
 # Hot reload development — Vite HMR on :5173 proxying to Go on :8080.
 # Access the app at http://localhost:5173 for instant CSS/JS reloads.
 # Go server still needs manual restart on .go changes (use `air` for that).
-dev-hot: web/node_modules
+dev-hot: node_modules
 	@echo "─── Starting Vite dev server (:5173) + Go server (:8080) ───"
 	@echo "→  Open http://localhost:5173 for hot-reload UI"
 	@echo "→  API calls proxy to http://localhost:8080"
 	@trap 'kill 0' EXIT; \
-	cd web && npm run dev & \
+	npm run dev & \
 	go run ./cmd/zitadel serve
 
 # Run all tests (requires webdist for embed).
@@ -58,6 +58,18 @@ test: webdist
 # CI test target — with race detector.
 ci-test: webdist
 	go test -race -count=1 -timeout 120s ./...
+
+# Run integration tests (requires docker for testcontainers).
+test-integration:
+	go test -v -count=1 -timeout 300s ./internal/database/...
+
+# Run web component tests (Vitest).
+test-web: node_modules
+	npm test -w web
+
+# Run E2E browser tests (Playwright).
+test-e2e: build
+	npm test -w e2e
 
 # Run fuzz tests (default 10s per target).
 fuzz: webdist

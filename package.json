@@ -1,0 +1,14 @@
+{
+  "name": "@zitadel/root",
+  "private": true,
+  "workspaces": [
+    "web",
+    "e2e"
+  ],
+  "scripts": {
+    "build": "npm run build -w web",
+    "dev": "npm run dev -w web",
+    "test": "npm test -w web",
+    "test:e2e": "npm test -w e2e"
+  }
+}

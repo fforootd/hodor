@@ -5,8 +5,8 @@ project_name: zitadel
 
 before:
   hooks:
-    - npm ci --prefix web
-    - npx --prefix web vite build
+    - npm ci
+    - npm run build
     - rm -rf internal/server/webdist
     - cp -r web/dist internal/server/webdist
 
@@ -28,36 +28,23 @@ builds:
       - -X main.commit={{.Commit}}
 
 dockers_v2:
-  - image_templates:
-      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
+  - id: zitadel
+    ids:
+      - zitadel
+    images:
+      - "ghcr.io/zitadel/zitadel"
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
     dockerfile: Dockerfile.goreleaser
-    goos: linux
-    goarch: amd64
-  - image_templates:
-      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-arm64"
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-    dockerfile: Dockerfile.goreleaser
-    goos: linux
-    goarch: arm64
-
-docker_manifests:
-  - name_template: "ghcr.io/zitadel/zitadel:{{ .Tag }}"
-    image_templates:
-      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
-      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-arm64"
-  - name_template: "ghcr.io/zitadel/zitadel:latest"
-    image_templates:
-      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-amd64"
-      - "ghcr.io/zitadel/zitadel:{{ .Tag }}-arm64"
+    build_args:
+      TARGETPLATFORM: "{{ .TargetPlatform }}"
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.version: "{{ .Version }}"
 
 checksum:
   name_template: "checksums.txt"

@@ -3,12 +3,16 @@ package testutil
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zitadel/zitadel/internal/bootstrap"
 	"github.com/zitadel/zitadel/internal/config"
@@ -81,32 +85,64 @@ func (ts *TestServer) URL() string {
 	return ts.Server.URL
 }
 
-// LoginAdmin performs a full login flow for the admin user and returns the session token.
+// LoginAdmin returns a session token for the bootstrap admin identity.
 func (ts *TestServer) LoginAdmin() string {
 	ts.t.Helper()
+	var adminID int64
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM identities WHERE identifier = 'admin@zitadel.local'`).Scan(&adminID)
+	if err != nil {
+		ts.t.Fatalf("find admin: %v", err)
+	}
+	return ts.CreateSession(adminID)
+}
 
-	// Start login.
-	startResp := ts.PostJSON("/v1/login/start", map[string]any{
-		"identifier": "admin@zitadel.local",
-	})
-	loginSessionID, _ := startResp["login_session_id"].(string)
-	if loginSessionID == "" {
-		ts.t.Fatal("no login_session_id from start")
+// CreateIdentity inserts a new identity into the database directly for testing.
+func (ts *TestServer) CreateIdentity(identifier, displayName string) int64 {
+	ts.t.Helper()
+
+	var identityID int64
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM identities WHERE identifier = ?`, identifier).Scan(&identityID)
+	if err == nil {
+		return identityID
 	}
 
-	// Read admin password.
-	var adminRow struct{ password string }
-	ts.DB.SQL().QueryRow(`SELECT p.password_hash FROM passwords p
-		JOIN identities i ON i.id = p.identity_id
-		WHERE i.identifier = 'admin@zitadel.local'`).Scan(&adminRow.password)
+	identityID = time.Now().UnixNano() + int64(ts.t.Name()[0])
 
-	// Submit password (we need the raw password, not hash).
-	// Since we can't reverse the hash, we'll use the bootstrap password extraction.
-	// For tests, let's read from the bootstrap directly.
-	// Actually, let's just track it differently — the test server should capture it.
-	// For now, skip the password step and use a direct session creation approach.
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = ts.DB.SQL().Exec(
+		`INSERT INTO identities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, 'active', '{}', '{}', ?, ?)`,
+		identityID, identifier, displayName, now, now)
+	if err != nil {
+		ts.t.Fatalf("insert identity: %v", err)
+	}
+	return identityID
+}
 
-	return loginSessionID // placeholder — full flow requires knowing the raw password
+// CreateSession inserts a valid session directly into the DB and returns the raw token.
+func (ts *TestServer) CreateSession(identityID int64) string {
+	ts.t.Helper()
+	
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		ts.t.Fatalf("rand.Read: %v", err)
+	}
+	raw := hex.EncodeToString(b)
+	h := sha256.Sum256([]byte(raw))
+	hash := hex.EncodeToString(h[:])
+
+	sessionID := time.Now().UnixNano()
+	now := time.Now().UTC().Format(time.RFC3339)
+	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
+
+	_, err := ts.DB.SQL().Exec(
+		`INSERT INTO sessions (id, identity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		 VALUES (?, ?, 1, ?, 'testutil', '127.0.0.1', '{}', ?, ?)`,
+		sessionID, identityID, hash, now, expiresAt)
+	if err != nil {
+		ts.t.Fatalf("insert session: %v", err)
+	}
+	return raw
 }
 
 // Get makes a GET request and returns the decoded JSON response.
@@ -166,6 +202,34 @@ func (ts *TestServer) GetWithCookie(path string, token string) (int, map[string]
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		ts.t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ts.decodeJSON(resp.Body)
+}
+
+// PatchJSONWithCookie makes a PATCH with a session cookie.
+func (ts *TestServer) PatchJSONWithCookie(path string, body map[string]any, token string) (int, map[string]any) {
+	ts.t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("PATCH", ts.URL()+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "__zitadel_session", Value: token})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ts.t.Fatalf("PATCH %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ts.decodeJSON(resp.Body)
+}
+
+// DeleteWithCookie makes a DELETE with a session cookie.
+func (ts *TestServer) DeleteWithCookie(path string, token string) (int, map[string]any) {
+	ts.t.Helper()
+	req, _ := http.NewRequest("DELETE", ts.URL()+path, nil)
+	req.AddCookie(&http.Cookie{Name: "__zitadel_session", Value: token})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ts.t.Fatalf("DELETE %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode, ts.decodeJSON(resp.Body)

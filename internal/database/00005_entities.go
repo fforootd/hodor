@@ -20,11 +20,17 @@ func up005Entities(db *sql.DB) error {
 	bigint := "INTEGER"
 	textJSON := "TEXT DEFAULT '{}'"
 	timestampDefault := "TEXT NOT NULL DEFAULT (datetime('now'))"
+	timestampVal := "datetime('now')"
+	insertPrefix := "INSERT OR IGNORE INTO"
+	onConflict := ""
 
 	if dialect == "postgres" {
 		bigint = "BIGINT"
 		textJSON = "JSONB DEFAULT '{}'"
 		timestampDefault = "TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+		timestampVal = "NOW()"
+		insertPrefix = "INSERT INTO"
+		onConflict = "ON CONFLICT DO NOTHING"
 	}
 
 	statements := []string{
@@ -75,11 +81,11 @@ func up005Entities(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id)`,
 
 		// Seed default instance and default org.
-		`INSERT OR IGNORE INTO instances (id, name, created_at, updated_at)
-			VALUES (1, 'default', datetime('now'), datetime('now'))`,
+		fmt.Sprintf(`%s instances (id, name, created_at, updated_at)
+			VALUES (1, 'default', %s, %s) %s`, insertPrefix, timestampVal, timestampVal, onConflict),
 
-		`INSERT OR IGNORE INTO orgs (id, instance_id, name, created_at, updated_at)
-			VALUES (1, 1, 'default', datetime('now'), datetime('now'))`,
+		fmt.Sprintf(`%s orgs (id, instance_id, name, created_at, updated_at)
+			VALUES (1, 1, 'default', %s, %s) %s`, insertPrefix, timestampVal, timestampVal, onConflict),
 	}
 
 	for _, stmt := range statements {

@@ -20,10 +20,12 @@ func up007Providers(db *sql.DB) error {
 
 	bigint := "INTEGER"
 	timestampDefault := "TEXT NOT NULL DEFAULT (datetime('now'))"
+	boolTrue := "1"
 
 	if dialect == "postgres" {
 		bigint = "BIGINT"
 		timestampDefault = "TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+		boolTrue = "TRUE"
 	}
 
 	stmts := []string{
@@ -36,12 +38,12 @@ func up007Providers(db *sql.DB) error {
 			template        TEXT NOT NULL DEFAULT 'custom',
 			config          TEXT NOT NULL DEFAULT '{}',
 			claim_overrides TEXT NOT NULL DEFAULT '{}',
-			auto_register   BOOLEAN NOT NULL DEFAULT 1,
-			enabled         BOOLEAN NOT NULL DEFAULT 1,
+			auto_register   BOOLEAN NOT NULL DEFAULT %s,
+			enabled         BOOLEAN NOT NULL DEFAULT %s,
 			display_order   INTEGER NOT NULL DEFAULT 0,
 			created_at      %s,
 			updated_at      %s
-		)`, bigint, timestampDefault, timestampDefault),
+		)`, bigint, boolTrue, boolTrue, timestampDefault, timestampDefault),
 
 		`CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id)`,
 

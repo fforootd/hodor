@@ -1,4 +1,5 @@
 FROM scratch
-COPY zitadel /zitadel
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/zitadel /zitadel
 ENTRYPOINT ["/zitadel"]
 CMD ["serve"]
