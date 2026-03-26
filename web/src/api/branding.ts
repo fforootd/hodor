@@ -54,3 +54,66 @@ export const loginApi = {
       '/v1/auth/magic-link', { email }
     ),
 }
+
+// --- Flow API (schema-driven) ---
+
+export interface UINode {
+  type: string           // heading, description, input, submit, button, divider, sso_button, avatar, link, icon, info, spinner
+  name?: string          // form field name
+  input_type?: string    // text, password, email
+  label?: string
+  text?: string
+  placeholder?: string
+  autocomplete?: string
+  required?: boolean
+  action?: string        // identifier, password, magic_link, sso, passkey, back, resend_magic_link
+  provider_id?: string
+  provider_name?: string
+  template?: string      // google, entraid, etc.
+  initial?: string       // avatar initial
+}
+
+export interface FlowBranding {
+  heading: string
+  description: string
+  logo_url: string
+  org_name: string
+  colors: Record<string, string>
+  font_family: string
+  font_url: string
+  texts: Record<string, string>
+  custom_css: string
+  hide_zitadel_branding: boolean
+}
+
+export interface FlowIdentity {
+  display_name: string
+  avatar_initial: string
+}
+
+export interface FlowStep {
+  flow_id: string
+  step: string
+  nodes: UINode[]
+  branding: FlowBranding
+  identity?: FlowIdentity
+}
+
+export interface FlowCompleteResponse {
+  flow_id: string
+  step: string
+  session_id: number
+  redirect_uri: string
+}
+
+export const flowApi = {
+  create: () =>
+    api.post<FlowStep>('/v1/login/flows', {}),
+
+  submit: (flowId: string, action: string, data?: Record<string, string>) =>
+    api.post<FlowStep | FlowCompleteResponse>(`/v1/login/flows/${flowId}/submit`, { action, ...data }),
+
+  get: (flowId: string) =>
+    api.get<FlowStep>(`/v1/login/flows/${flowId}`),
+}
+
