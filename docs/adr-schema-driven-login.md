@@ -35,14 +35,14 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
 ```json
 {
   "type": "object",
+  "x-auth-methods": {
+    "password":   {"enabled": true,  "interactive": true,  "position": 1},
+    "passkey":    {"enabled": false, "interactive": true,  "position": 0},
+    "magic_link": {"enabled": true,  "interactive": true,  "position": 2},
+    "sso":        {"enabled": true,  "interactive": true,  "position": 3}
+  },
   "x-login": {
     "preset": "identifier_first",
-    "auth_methods": {
-      "password":   {"enabled": true, "position": 1},
-      "passkey":    {"enabled": false, "position": 0},
-      "magic_link": {"enabled": true, "position": 2},
-      "sso":        {"enabled": true, "position": 3}
-    },
     "mfa_required": false,
     "registration_allowed": true
   },
@@ -80,6 +80,101 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
    - **Headless** (5%): call `POST /v1/login/flows` and render your own UI
 
 5. **JSON Schema is standard.** The `x-*` extension pattern is explicitly supported by JSON Schema spec. Validators ignore unknown extensions. No custom DSL to learn.
+
+## Meta-Schema: The Canonical ZITADEL Identity Schema
+
+All `x-*` annotations are defined in a single **meta-schema** (`internal/schema/meta_schema.json`). This is not just an internal validation tool — it is **THE** schema definition for ZITADEL identity schemas. It defines the allowed structure and vocabulary of `x-auth-methods`, `x-login`, `x-branding`, per-field `x-auth`, `x-claim-mapping`, `x-sensitive`, `x-hidden`, `x-user-editable`, and `x-source`.
+
+See [ADR: Unified Auth Methods and Meta-Schema Validation](./adr-auth-methods-meta-schema.md) for the full decision on `x-auth-methods` and the meta-schema introduction.
+
+### Public exposure
+
+The meta-schema **must be publicly accessible** — it's the contract between ZITADEL and every customer, SDK, and integration:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/schemas/$meta` | Returns the meta-schema JSON — the canonical definition of what a valid identity schema looks like |
+| `GET /.well-known/zitadel-identity-schema` | Optional well-known endpoint for discovery |
+
+### What this enables
+
+- **SDK generation**: SDKs can fetch the meta-schema to validate schemas client-side before `POST /v1/schemas`
+- **Monaco autocomplete**: The console JSON editor loads the meta-schema for IntelliSense on `x-*` keys
+- **Customer documentation**: The meta-schema IS the documentation — no separate prose needed
+- **Schema evolution**: The meta-schema `$id` includes a version path (e.g., `/v1/`) so it can evolve without breaking existing schemas
+
+### Versioning
+
+The meta-schema `$id` should include a version: `https://zitadel.com/schemas/v1/identity-meta-schema`. When new annotations are added, the version increments. Old schemas remain valid — new annotations are additive.
+
+## Default Schema & Gradual Rollout
+
+### Problem
+
+Today, `getDefaultSchemaConfig()` picks the oldest schema (`ORDER BY created_at ASC LIMIT 1`). There's no way to:
+- Deploy a new schema version alongside the old one
+- Roll it out to a subset of identities
+- Roll back without deleting the schema
+
+### Decision: `is_default` flag + identity-level `schema_id` override
+
+#### 1. Multiple schema versions coexist as separate rows
+
+The `schemas` table already has `id`, `type`, and `version` columns. Remove the unique constraint on `(type, org_id)` to allow multiple versions per type:
+
+```
+human_user_v1  (is_default: true,  version: 1)
+human_user_v2  (is_default: false, version: 2)  ← new login flow, rolling out
+```
+
+Each row is a self-contained JSON Schema blob with its own annotations.
+
+#### 2. `is_default` flag
+
+```sql
+ALTER TABLE schemas ADD COLUMN is_default BOOLEAN DEFAULT false;
+```
+
+One schema per `(type, org_id)` is marked `is_default = true`. Setting a new default via `PATCH /v1/schemas/{id}` automatically unsets the previous default.
+
+#### 3. Schema resolution order
+
+The flow engine resolves the schema for a given identity:
+
+```
+1. If identity.schema_id is set and non-empty → use that schema
+2. Else → use the is_default=true schema for the identity's type + org
+```
+
+Before identity is known (pre-login branding/auth settings), always use the default.
+
+#### 4. Assignment via existing bulk endpoint
+
+Customers assign the new schema to specific identities using the existing bulk identity endpoint:
+
+```http
+PATCH /v1/identities/bulk
+{
+  "filter": {"state": "active", "metadata.cohort": "beta"},
+  "update": {"schema_id": "human_user_v2"}
+}
+```
+
+This enables gradual rollout:
+1. Create `human_user_v2` (not default)
+2. Bulk-assign to beta cohort
+3. Monitor login success rates, support tickets
+4. If good → `PATCH /v1/schemas/human_user_v2 {"is_default": true}`
+5. If bad → bulk-reassign affected identities back to `human_user_v1`
+
+#### Use cases
+
+| Scenario | How |
+|---|---|
+| **Gradual rollout** | Assign new schema to 10% of identities, monitor, expand |
+| **A/B testing** | Different login flows for different cohorts |
+| **Migration safety** | Rollback by bulk-reassigning identities to old schema |
+| **Per-customer config** | Different orgs can have different defaults |
 
 ## What was added
 
