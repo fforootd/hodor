@@ -52,6 +52,9 @@ dev-hot: node_modules
 	@echo "─── Starting Vite dev server (:5173) + Go server (:8080) ───"
 	@echo "→  Open http://localhost:5173 for hot-reload UI"
 	@echo "→  API calls proxy to http://localhost:8080"
+	@-pkill -f "cmd/zitadel" 2>/dev/null || true
+	@rm -f zitadel.db-journal zitadel.db-wal zitadel.db-shm
+	@sleep 0.5
 	@trap 'kill 0' EXIT; \
 	npm run dev & \
 	go run ./cmd/zitadel serve
