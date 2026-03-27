@@ -1,6 +1,6 @@
-# ZITADEL
+# Zitadel
 
-> ⚠️ **Experimental** — This is a research/prototype project exploring a reimagined identity platform architecture. It is not production-ready and APIs may change without notice. See [ZITADEL](https://github.com/zitadel/zitadel) for the production IAM system.
+> ⚠️ **Experimental** — This is a research/prototype project exploring a reimagined identity platform architecture. It is not production-ready and APIs may change without notice. See [Zitadel](https://github.com/zitadel/zitadel) for the production IAM system.
 
 **Identity infrastructure for humans and AI.** Open-source identity platform with unified auth, fine-grained authorization, and schema-driven identity management — in a single binary.
 

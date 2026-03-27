@@ -21,7 +21,7 @@ import (
 	"github.com/zitadel/zitadel/internal/server"
 )
 
-// TestServer wraps a full ZITADEL server for integration testing.
+// TestServer wraps a full Zitadel server for integration testing.
 type TestServer struct {
 	Server   *httptest.Server
 	DB       *database.DB
@@ -31,7 +31,7 @@ type TestServer struct {
 	t        *testing.T
 }
 
-// NewTestServer creates a full ZITADEL server backed by SQLite in a temp dir.
+// NewTestServer creates a full Zitadel server backed by SQLite in a temp dir.
 // The server is automatically cleaned up when the test finishes.
 func NewTestServer(t *testing.T) *TestServer {
 	t.Helper()

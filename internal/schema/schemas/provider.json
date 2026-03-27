@@ -43,7 +43,7 @@
     },
     "claim_mapping": {
       "type": "object",
-      "description": "Map external claims to ZITADEL fields"
+      "description": "Map external claims to Zitadel fields"
     },
     "auto_register": {
       "type": "boolean",

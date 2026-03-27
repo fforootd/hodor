@@ -166,7 +166,7 @@ func defaultBrandingConfig() BrandingConfig {
 	return BrandingConfig{
 		Heading:     "Welcome back",
 		Description: "Sign in to your account",
-		OrgName:     "ZITADEL",
+		OrgName:     "Zitadel",
 		Colors: map[string]string{
 			"primary":    "#6366f1",
 			"background": "#f0f2ff",

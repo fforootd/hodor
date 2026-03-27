@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zitadel/zitadel/internal/bootstrap"
+	"github.com/zitadel/zitadel/internal/cli"
 	"github.com/zitadel/zitadel/internal/config"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
@@ -25,7 +26,7 @@ func main() {
 	root := &cobra.Command{
 		Use:   "zitadel",
 		Short: "Identity infrastructure for humans and AI",
-		Long:  "ZITADEL — open-source identity platform with unified auth, fine-grained authorization, and AI agent governance.",
+		Long:  "Zitadel — open-source identity platform with unified auth, fine-grained authorization, and AI agent governance.",
 	}
 
 	root.AddCommand(serveCmd())
@@ -43,7 +44,7 @@ func serveCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the ZITADEL identity server",
+		Short: "Start the Zitadel identity server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configPath)
 			if err != nil {
@@ -105,7 +106,8 @@ func serveCmd() *cobra.Command {
 				}
 			}
 
-			fmt.Printf("ZITADEL %s starting on :%d\n", version, cfg.Server.Port)
+			cli.PrintLogo()
+			fmt.Printf("Zitadel %s starting on :%d\n", version, cfg.Server.Port)
 			fmt.Printf("Database: %s\n", cfg.Database.URL)
 
 			srv := server.New(cfg, db, bus)
@@ -123,7 +125,7 @@ func serveCmd() *cobra.Command {
 func versionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the ZITADEL version",
+		Short: "Print the Zitadel version",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("zitadel %s\n", version)
 		},

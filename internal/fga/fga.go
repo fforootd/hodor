@@ -1,6 +1,6 @@
 // Package fga provides an embedded OpenFGA authorization engine.
 // It shares the application's SQLite (or Postgres) database and exposes
-// Check / Write / ListObjects for both internal ZITADEL authorization
+// Check / Write / ListObjects for both internal Zitadel authorization
 // and customer-facing FGA-as-a-service.
 package fga
 
@@ -230,7 +230,7 @@ func (s *Service) ensureSystemStore(ctx context.Context) error {
 	return nil
 }
 
-// ensureAuthModel writes the ZITADEL authorization model (idempotent).
+// ensureAuthModel writes the Zitadel authorization model (idempotent).
 // Model defines: user, org (admin/member), identity (owner, org-admin permissions).
 func (s *Service) ensureAuthModel(ctx context.Context) error {
 	// Check if a model already exists.
@@ -245,7 +245,7 @@ func (s *Service) ensureAuthModel(ctx context.Context) error {
 		return nil // model already loaded
 	}
 
-	// Write the ZITADEL authorization model.
+	// Write the Zitadel authorization model.
 	_, err = s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
 		StoreId:       s.storeID,
 		SchemaVersion: "1.1",

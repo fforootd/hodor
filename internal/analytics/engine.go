@@ -1,4 +1,4 @@
-// Package analytics provides the OLAP query layer for ZITADEL.
+// Package analytics provides the OLAP query layer for Zitadel.
 //
 // Architecture (ADR-009):
 //

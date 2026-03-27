@@ -86,7 +86,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 
 	fmt.Println()
 	fmt.Println("  ┌──────────────────────────────────────────────────┐")
-	fmt.Println("  │  ZITADEL bootstrapped!                          │")
+	fmt.Println("  │  Zitadel bootstrapped!                          │")
 	fmt.Printf("   │  Username: admin                 \t\t\t\t │\n")
 	fmt.Printf("   │  Password: %-36s  │\n", password)
 	fmt.Println("  │                                                  │")
@@ -154,7 +154,7 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	}
 
 	consoleData := `{
-		"client_name": "ZITADEL Console",
+		"client_name": "Zitadel Console",
 		"app_type": "spa",
 		"redirect_uris": ["http://localhost:5173/console", "http://localhost:8080/console"],
 		"post_logout_redirect_uris": ["http://localhost:5173", "http://localhost:8080"]
@@ -162,7 +162,7 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 
 	_, err = db.SQL().ExecContext(ctx,
 		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
-		 VALUES (?, 1, 'console', 'ZITADEL Console', 'active', 'app_v1', ?, datetime('now'), datetime('now'))`,
+		 VALUES (?, 1, 'console', 'Zitadel Console', 'active', 'app_v1', ?, datetime('now'), datetime('now'))`,
 		consoleID, consoleData,
 	)
 	if err != nil {

@@ -3,7 +3,7 @@
     <aside class="sidebar">
       <div class="sidebar-brand">
         <div class="brand-icon">Z</div>
-        <span class="brand-text">ZITADEL</span>
+        <span class="brand-text">Zitadel</span>
       </div>
       <nav class="sidebar-nav">
         <router-link to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">

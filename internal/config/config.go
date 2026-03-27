@@ -1,4 +1,4 @@
-// Package config handles runtime configuration for the ZITADEL server.
+// Package config handles runtime configuration for the Zitadel server.
 // Config is loaded from TOML files, environment variables, and CLI flags.
 // Domain-specific configuration (policies, whitelabeling, etc.) lives in
 // bootstrap.yaml, NOT here.
@@ -12,7 +12,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the runtime configuration for the ZITADEL server.
+// Config is the runtime configuration for the Zitadel server.
 // This covers infrastructure-level settings only (~30 total).
 type Config struct {
 	Server        ServerConfig        `toml:"server"`

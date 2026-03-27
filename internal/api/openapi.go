@@ -30,7 +30,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 	spec := map[string]any{
 		"openapi": "3.1.0",
 		"info": map[string]any{
-			"title":       "ZITADEL v2 API",
+			"title":       "Zitadel v2 API",
 			"version":     "0.1.0",
 			"description": "Identity and access management API with flexible schemas.",
 		},

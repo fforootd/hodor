@@ -241,7 +241,7 @@ const baseHead = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}} — ZITADEL</title>
+  <title>{{.Title}} — Zitadel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -255,7 +255,7 @@ const baseFoot = `</body></html>`
 var loginTmpl = template.Must(template.New("login").Parse(baseHead + `
 <div class="login-page">
   <div class="login-card">
-    <div class="login-logo">ZITADEL</div>
+    <div class="login-logo">Zitadel</div>
     <h1>Sign in</h1>
     <p class="subtitle">Enter your credentials to continue</p>
     {{if .Error}}
@@ -317,7 +317,7 @@ var dashTmpl = template.Must(template.New("dash").Parse(baseHead + adminSidebar 
 const adminSidebar = `
 <div class="admin-layout">
   <aside class="admin-sidebar">
-    <div class="logo">ZITADEL</div>
+    <div class="logo">Zitadel</div>
     <nav>
       <a href="/admin">◆ Dashboard</a>
       <a href="/admin/entities">◇ Entities</a>

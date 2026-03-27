@@ -1,4 +1,4 @@
-// Package auth provides authentication primitives for ZITADEL.
+// Package auth provides authentication primitives for Zitadel.
 // Password hashing uses zitadel/passwap with argon2id as the default algorithm.
 package auth
 

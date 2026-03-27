@@ -26,7 +26,7 @@ var (
 	_ op.ClientCredentialsStorage = &Storage{}
 )
 
-// Storage implements op.Storage backed by the ZITADEL database.
+// Storage implements op.Storage backed by the Zitadel database.
 type Storage struct {
 	db *database.DB
 }

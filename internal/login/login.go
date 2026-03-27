@@ -364,9 +364,9 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Send notification via channel (stdout by default).
-	subject := "Sign in to ZITADEL"
+	subject := "Sign in to Zitadel"
 	if purpose == "register" {
-		subject = "Complete your ZITADEL registration"
+		subject = "Complete your Zitadel registration"
 	}
 	body := notify.FormatMagicLink(h.baseURL, token, expiresAt)
 	if err := h.notify.Send(email, subject, body); err != nil {

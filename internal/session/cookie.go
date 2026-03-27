@@ -1,4 +1,4 @@
-// Package session provides hardened cookie management for ZITADEL sessions.
+// Package session provides hardened cookie management for Zitadel sessions.
 // All session cookies are HMAC-SHA256 signed, HttpOnly, SameSite=Lax, and
 // Secure (when not on localhost). Cookie format: base64(token.hmac_signature).
 package session

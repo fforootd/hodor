@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://zitadel.com/schemas/v1/entity-meta-schema",
-  "title": "ZITADEL Entity Meta-Schema",
+  "title": "Zitadel Entity Meta-Schema",
   "description": "Catalog of entity types, nav groups, and annotation validation.",
 
   "x-groups": {

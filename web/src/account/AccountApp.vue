@@ -2,7 +2,7 @@
   <div class="account-shell">
     <header class="account-header">
       <div class="header-brand">
-        <span class="logo-text">{{ branding.org_name || 'ZITADEL' }}</span>
+        <span class="logo-text">{{ branding.org_name || 'Zitadel' }}</span>
         <span class="sep">·</span>
         <span class="header-title">My Account</span>
       </div>
@@ -103,7 +103,7 @@ import { api } from '@/api/client'
 import { brandingApi, type Branding } from '@/api/branding'
 
 const DEFAULT_BRANDING: Branding = {
-  org_id: '', org_name: 'ZITADEL', logo_url: '',
+  org_id: '', org_name: 'Zitadel', logo_url: '',
   heading: '', description: '',
   colors: { primary: '#6366f1', background: '#f0f2ff', surface: '#fff', text: '#1a1a2e', error: '#ef4444' },
   font_family: 'Inter, system-ui, sans-serif', hide_zitadel_branding: false,

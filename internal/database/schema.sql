@@ -1,4 +1,4 @@
--- ZITADEL POC Schema — single-file DDL (SQLite)
+-- Zitadel POC Schema — single-file DDL (SQLite)
 -- This replaces the 7 individual goose migration files (00001–00007).
 -- All statements use IF NOT EXISTS for idempotent re-runs.
 

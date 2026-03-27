@@ -31,7 +31,7 @@ import (
 //go:embed all:webdist
 var webAssets embed.FS
 
-// Server is the main ZITADEL HTTP server.
+// Server is the main Zitadel HTTP server.
 type Server struct {
 	cfg       *config.Config
 	db        *database.DB

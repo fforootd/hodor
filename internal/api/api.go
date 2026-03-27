@@ -1,4 +1,4 @@
-// Package api provides REST+JSON handlers for the ZITADEL v2 API.
+// Package api provides REST+JSON handlers for the Zitadel v2 API.
 // Identity and schema CRUD are served as plain JSON endpoints.
 // OpenAPI spec is dynamically generated from the schema registry.
 package api
@@ -938,7 +938,7 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getMetaSchema returns the canonical ZITADEL identity schema meta-schema.
+// getMetaSchema returns the canonical Zitadel identity schema meta-schema.
 func (a *API) getMetaSchema(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/schema+json")
 	w.WriteHeader(http.StatusOK)

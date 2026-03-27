@@ -216,7 +216,7 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	// Redirect back to ZITADEL with code + state.
+	// Redirect back to Zitadel with code + state.
 	u, _ := url.Parse(redirectURI)
 	q := u.Query()
 	q.Set("code", code)

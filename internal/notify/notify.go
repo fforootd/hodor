@@ -1,4 +1,4 @@
-// Package notify provides notification channels for ZITADEL.
+// Package notify provides notification channels for Zitadel.
 // The default channel logs to stdout, but can be swapped for
 // SMTP, webhook, or any other implementation.
 package notify

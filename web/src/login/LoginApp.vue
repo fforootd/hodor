@@ -5,7 +5,7 @@
       <div v-if="branding?.logo_url" class="logo">
         <img :src="branding.logo_url" :alt="branding.org_name">
       </div>
-      <div v-else class="logo-text">{{ branding?.org_name || 'ZITADEL' }}</div>
+      <div v-else class="logo-text">{{ branding?.org_name || 'Zitadel' }}</div>
 
       <!-- Error message (shown above any step) -->
       <div v-if="error" class="error-msg">{{ error }}</div>
@@ -99,7 +99,7 @@
     </div>
 
     <div v-if="!branding?.hide_zitadel_branding" class="powered-by">
-      Powered by ZITADEL
+      Powered by Zitadel
     </div>
   </div>
 </template>
