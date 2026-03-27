@@ -1,87 +1,209 @@
 <template>
-  <div class="console">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <div class="brand-icon">Z</div>
-        <span class="brand-text">Zitadel</span>
-      </div>
-      <nav class="sidebar-nav">
-        <router-link to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
-          <span class="nav-icon">◆</span> Dashboard
-        </router-link>
-
-        <!-- Catalog-driven nav sections -->
-        <template v-for="group in navGroups" :key="group.key">
-          <div v-if="group.items.length" class="nav-section">{{ group.label }}</div>
-          <router-link
-            v-for="item in group.items" :key="item.type"
-            :to="item.route"
-            class="nav-item"
-            :class="{ active: isNavActive(item) }"
-          >
-            <span class="nav-icon">◇</span> {{ item.label }}
-          </router-link>
-        </template>
-      </nav>
-    </aside>
-    <main class="content">
-      <header class="topbar">
-        <div class="topbar-left">
-          <div class="org-switcher" ref="orgSwitcherRef">
-            <button class="org-switcher-btn" @click="showOrgDropdown = !showOrgDropdown">
-              <span class="org-icon">⬡</span>
-              <span class="org-name">{{ selectedOrg?.display_name || 'All Orgs' }}</span>
-              <span class="org-chevron">▾</span>
-            </button>
-            <div v-if="showOrgDropdown" class="org-dropdown">
-              <div class="org-dropdown-item" :class="{ selected: !selectedOrgId }" @click="selectOrg(null)">
-                <span class="org-icon">◈</span> All Organizations
-              </div>
-              <div
-                v-for="org in orgs" :key="org.id"
-                class="org-dropdown-item"
-                :class="{ selected: selectedOrgId === org.id }"
-                @click="selectOrg(org)"
-              >
-                <span class="org-icon">⬡</span> {{ org.display_name }}
-              </div>
-            </div>
-          </div>
-          <h2 class="page-title">{{ pageTitle }}</h2>
-        </div>
-        <div class="topbar-right">
-          <div class="search-wrap" ref="searchWrap">
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="Search identities, schemas, events…"
-              class="search-input"
-              @input="onSearch"
-              @focus="showResults = searchResults.length > 0"
-            />
-            <div v-if="showResults && searchResults.length" class="search-dropdown">
-              <div
-                v-for="r in searchResults" :key="r.resource_type + r.id"
-                class="search-result"
-                @click="goToResult(r)"
-              >
-                <span class="result-type" :class="r.resource_type">{{ r.resource_type }}</span>
-                <div class="result-info">
-                  <span class="result-title">{{ r.title }}</span>
-                  <span class="result-sub">{{ r.subtitle }}</span>
+  <SidebarProvider>
+    <Sidebar collapsible="icon">
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" as-child>
+              <router-link to="/">
+                <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                  <Shield class="size-4" />
                 </div>
-              </div>
-              <div v-if="searchResults.length === 0 && searchQuery" class="search-empty">No results</div>
-            </div>
-          </div>
-          <a href="/logout" class="sign-out">Sign out</a>
+                <div class="grid flex-1 text-left text-sm leading-tight">
+                  <span class="truncate font-semibold">Zitadel</span>
+                  <span class="truncate text-xs text-muted-foreground">Console</span>
+                </div>
+              </router-link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+
+      <SidebarContent>
+        <!-- Dashboard (always shown) -->
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton as-child :data-active="$route.name === 'dashboard'">
+                  <router-link to="/">
+                    <LayoutDashboard class="size-4" />
+                    <span>Dashboard</span>
+                  </router-link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <!-- Catalog-driven nav -->
+        <SidebarGroup v-for="group in navGroups" :key="group.key">
+          <SidebarGroupLabel>{{ group.label }}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem v-for="item in group.items" :key="item.type">
+                <SidebarMenuButton as-child :data-active="isNavActive(item)">
+                  <router-link :to="item.route">
+                    <component :is="getIcon(item.type)" class="size-4" />
+                    <span>{{ item.label }}</span>
+                  </router-link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <!-- Observability -->
+        <SidebarGroup>
+          <SidebarGroupLabel>Observability</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton as-child :data-active="$route.name === 'obs-overview'">
+                  <router-link to="/observability">
+                    <BarChart3 class="size-4" />
+                    <span>Overview</span>
+                  </router-link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton as-child :data-active="$route.name === 'obs-query'">
+                  <router-link to="/observability/query">
+                    <Search class="size-4" />
+                    <span>Query</span>
+                  </router-link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <SidebarMenuButton size="lg">
+                  <Avatar class="size-8 rounded-lg">
+                    <AvatarFallback class="rounded-lg">ZA</AvatarFallback>
+                  </Avatar>
+                  <div class="grid flex-1 text-left text-sm leading-tight">
+                    <span class="truncate font-semibold">Admin</span>
+                    <span class="truncate text-xs text-muted-foreground">admin@localhost</span>
+                  </div>
+                  <ChevronsUpDown class="ml-auto size-4" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="w-56" side="top" align="start">
+                <DropdownMenuItem as-child>
+                  <a href="/account">
+                    <User class="mr-2 size-4" />
+                    <span>My Account</span>
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem as-child>
+                  <a href="/logout">
+                    <LogOut class="mr-2 size-4" />
+                    <span>Sign out</span>
+                  </a>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </Sidebar>
+
+    <SidebarInset>
+      <!-- Header -->
+      <header class="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <SidebarTrigger class="-ml-1" />
+        <Separator orientation="vertical" class="mr-2 h-4" />
+
+        <!-- Breadcrumb -->
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbPage>{{ pageTitle }}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <div class="ml-auto flex items-center gap-2">
+          <!-- Org Switcher -->
+          <Popover v-model:open="showOrgDropdown">
+            <PopoverTrigger as-child>
+              <Button variant="outline" size="sm" class="gap-1.5 text-xs">
+                <Building2 class="size-3.5" />
+                {{ selectedOrg?.display_name || 'All Orgs' }}
+                <ChevronsUpDown class="size-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent class="w-56 p-0" align="end">
+              <Command>
+                <CommandInput placeholder="Search organizations..." />
+                <CommandList>
+                  <CommandEmpty>No organization found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem value="all-orgs" @select="selectOrg(null)">
+                      <Globe class="mr-2 size-4" />
+                      All Organizations
+                    </CommandItem>
+                    <CommandItem
+                      v-for="org in orgs"
+                      :key="org.id"
+                      :value="org.display_name"
+                      @select="selectOrg(org)"
+                    >
+                      <Building2 class="mr-2 size-4" />
+                      {{ org.display_name }}
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          <!-- Command Palette Trigger -->
+          <Button variant="outline" size="sm" class="gap-1.5 text-xs text-muted-foreground" @click="showCommandPalette = true">
+            <Search class="size-3.5" />
+            <span class="hidden sm:inline">Search...</span>
+            <kbd class="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">⌘K</kbd>
+          </Button>
         </div>
       </header>
-      <div class="page-body">
+
+      <!-- Command Palette Dialog -->
+      <CommandDialog v-model:open="showCommandPalette">
+        <CommandInput placeholder="Search identities, schemas, events…" @input="onCommandSearch" />
+        <CommandList>
+          <CommandEmpty>No results found.</CommandEmpty>
+          <CommandGroup v-if="searchResults.length" heading="Results">
+            <CommandItem
+              v-for="r in searchResults"
+              :key="r.resource_type + r.id"
+              :value="r.title"
+              @select="goToResult(r)"
+            >
+              <component :is="getResultIcon(r.resource_type)" class="mr-2 size-4" />
+              <div>
+                <div class="text-sm font-medium">{{ r.title }}</div>
+                <div class="text-xs text-muted-foreground">{{ r.subtitle }}</div>
+              </div>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+
+      <!-- Main Content -->
+      <div class="flex-1 overflow-auto p-4 md:p-6">
         <router-view :key="`${$route.fullPath}__org_${selectedOrgId || 'all'}`" />
       </div>
-    </main>
-  </div>
+    </SidebarInset>
+  </SidebarProvider>
 </template>
 
 <script setup lang="ts">
@@ -89,16 +211,37 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { searchApi, type SearchResult } from '@/api/resources'
 
+// shadcn components
+import {
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
+  SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
+  SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger,
+} from '@/components/ui/sidebar'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage,
+} from '@/components/ui/breadcrumb'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from '@/components/ui/command'
+
+// Lucide icons
+import {
+  Shield, LayoutDashboard, Users, KeyRound, Boxes, Globe, Settings, FileJson, Workflow,
+  Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
+  Bot, AppWindow, Activity, BookOpen, Calendar,
+} from 'lucide-vue-next'
+
 const route = useRoute()
 const router = useRouter()
-const searchQuery = ref('')
-const searchResults = ref<SearchResult[]>([])
-const showResults = ref(false)
-const searchWrap = ref<HTMLElement | null>(null)
-const orgSwitcherRef = ref<HTMLElement | null>(null)
-let debounceTimer: ReturnType<typeof setTimeout>
 
-// Org context switcher state
+// ─── Org Switcher ───
 interface OrgEntry { id: number; display_name: string; identifier: string }
 const orgs = ref<OrgEntry[]>([])
 const showOrgDropdown = ref(false)
@@ -115,32 +258,81 @@ function selectOrg(org: OrgEntry | null) {
   }
 }
 
-// No default org filter — show "All Orgs" by default
+// ─── Command Palette ───
+const showCommandPalette = ref(false)
+const searchResults = ref<SearchResult[]>([])
+let debounceTimer: ReturnType<typeof setTimeout>
 
-// Nav items built from the meta schema catalog
+function onCommandSearch(e: Event) {
+  const query = (e.target as HTMLInputElement).value
+  clearTimeout(debounceTimer)
+  if (!query.trim()) {
+    searchResults.value = []
+    return
+  }
+  debounceTimer = setTimeout(async () => {
+    try {
+      const resp = await searchApi.search(query.trim())
+      searchResults.value = resp.results || []
+    } catch {
+      searchResults.value = []
+    }
+  }, 200)
+}
+
+function goToResult(r: SearchResult) {
+  showCommandPalette.value = false
+  searchResults.value = []
+  const path = r.link.replace(/^\/console/, '') || '/'
+  router.push(path)
+}
+
+// ⌘K shortcut
+function handleKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault()
+    showCommandPalette.value = true
+  }
+}
+onMounted(() => document.addEventListener('keydown', handleKeydown))
+onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
+
+// ─── Catalog-driven Nav ───
 interface NavItem { type: string; label: string; icon: string; route: string; sortOrder: number; storage: string }
 interface NavGroup { key: string; label: string; sortOrder: number; items: NavItem[] }
 const navGroups = ref<NavGroup[]>([])
 
 function isNavActive(item: NavItem): boolean {
   const r = route
-  // Entity-backed types use /s/:type routes
   if (item.storage === 'entities') return r.params.schemaType === item.type
-  // Dedicated views use named routes matching the type
   return r.name === item.type || r.name === item.type + 's' || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
 }
 
-onMounted(async () => {
-  document.addEventListener('click', handleClickOutside)
+const iconMap: Record<string, any> = {
+  human_user: Users, service_user: KeyRound, ai_agent: Bot, app: AppWindow,
+  org: Building2, rule: Zap, provider: Globe, session: Clock,
+  event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
+}
 
-  // Fetch the meta schema to build nav from x-catalog and x-groups.
+function getIcon(type: string) {
+  return iconMap[type] || Boxes
+}
+
+function getResultIcon(resourceType: string) {
+  if (resourceType === 'identity') return Users
+  if (resourceType === 'schema') return FileJson
+  if (resourceType === 'event') return Activity
+  return Database
+}
+
+onMounted(async () => {
+  // Fetch meta schema for nav
   try {
     const res = await fetch('/v1/schemas/$meta')
     const meta = await res.json()
     const catalog = meta['x-catalog'] || {}
     const groups = meta['x-groups'] || {}
 
-    // Build nav groups from catalog entries
     const groupMap: Record<string, NavGroup> = {}
     for (const [groupKey, groupDef] of Object.entries(groups) as [string, any][]) {
       if (groupDef.nav === 'hidden') continue
@@ -168,13 +360,12 @@ onMounted(async () => {
       groupMap[groupKey].items.push(item)
     }
 
-    // Sort groups and items within each group
     navGroups.value = Object.values(groupMap)
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map(g => ({ ...g, items: g.items.sort((a, b) => a.sortOrder - b.sortOrder) }))
   } catch { /* ignore */ }
 
-  // Fetch orgs for context switcher.
+  // Fetch orgs
   try {
     const res = await fetch('/v1/orgs')
     const data = await res.json()
@@ -183,27 +374,13 @@ onMounted(async () => {
       display_name: o.display_name || o.identifier,
       identifier: o.identifier,
     }))
-    // Validate saved org_id still exists in current DB; clear if stale.
     if (selectedOrgId.value && !orgs.value.find(o => o.id === selectedOrgId.value)) {
       selectOrg(null)
     }
-    // No auto-select — always start with "All Orgs"
   } catch { /* ignore */ }
 })
 
-onUnmounted(() => document.removeEventListener('click', handleClickOutside))
-
-function handleClickOutside(e: MouseEvent) {
-  if (searchWrap.value && !searchWrap.value.contains(e.target as Node)) {
-    showResults.value = false
-  }
-  if (orgSwitcherRef.value && !orgSwitcherRef.value.contains(e.target as Node)) {
-    showOrgDropdown.value = false
-  }
-}
-
 const pageTitle = computed(() => {
-  // Dynamic schema-type pages: /s/:schemaType
   if (route.params.schemaType) {
     const st = route.params.schemaType as string
     const allItems = navGroups.value.flatMap(g => g.items)
@@ -220,142 +397,10 @@ const pageTitle = computed(() => {
     sessions: 'Sessions',
     events: 'Events',
     jobs: 'Jobs',
+    analytics: 'Analytics',
+    'obs-overview': 'Observability',
+    'obs-query': 'Query',
   }
   return titles[route.name as string] || 'Console'
 })
-
-function onSearch() {
-  clearTimeout(debounceTimer)
-  if (!searchQuery.value.trim()) {
-    searchResults.value = []
-    showResults.value = false
-    return
-  }
-  debounceTimer = setTimeout(async () => {
-    try {
-      const resp = await searchApi.search(searchQuery.value.trim())
-      searchResults.value = resp.results || []
-      showResults.value = true
-    } catch {
-      searchResults.value = []
-    }
-  }, 200)
-}
-
-function goToResult(r: SearchResult) {
-  showResults.value = false
-  searchQuery.value = ''
-  searchResults.value = []
-  const path = r.link.replace(/^\/console/, '') || '/'
-  router.push(path)
-}
-
 </script>
-
-<style scoped>
-.console { display: flex; min-height: 100vh; background: #f8f9fb; }
-
-/* Sidebar */
-.sidebar {
-  width: 240px; background: #fff; border-right: 1px solid #e5e7eb;
-  display: flex; flex-direction: column; padding: 1.25rem 0;
-}
-.sidebar-brand { display: flex; align-items: center; gap: 0.75rem; padding: 0 1.25rem 1.5rem; }
-.brand-icon {
-  width: 28px; height: 28px; background: #1a1a2e; color: #fff; border-radius: 6px;
-  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.875rem;
-}
-.brand-text { font-weight: 800; font-size: 1rem; color: #1a1a2e; letter-spacing: -0.02em; }
-
-.sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 0.75rem; }
-.nav-section {
-  font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-  color: #9ca3af; padding: 0.75rem 0.75rem 0.25rem; margin-top: 0.5rem;
-}
-.nav-item {
-  display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem;
-  border-radius: 6px; color: #4b5563; font-size: 0.875rem; text-decoration: none;
-  transition: all 0.15s;
-}
-.nav-item:hover { background: #f3f4f6; color: #1a1a2e; }
-.nav-item.active { background: #f0f2ff; color: #4f46e5; font-weight: 600; }
-.nav-icon { font-size: 0.75rem; }
-
-/* Content */
-.content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.topbar {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 1rem 2rem; background: #fff; border-bottom: 1px solid #e5e7eb;
-}
-.topbar-left { display: flex; align-items: center; gap: 1rem; }
-.topbar-right { display: flex; align-items: center; gap: 1rem; }
-.page-title { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
-.sign-out { color: #6b7280; font-size: 0.875rem; text-decoration: none; }
-.sign-out:hover { color: #ef4444; }
-
-/* Org Switcher */
-.org-switcher { position: relative; }
-.org-switcher-btn {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
-  background: #f9fafb; cursor: pointer; font-family: inherit;
-  font-size: 0.8125rem; color: #1a1a2e; font-weight: 600;
-  transition: all 0.15s;
-}
-.org-switcher-btn:hover { border-color: #6366f1; background: #fff; }
-.org-icon { font-size: 0.875rem; color: #6366f1; }
-.org-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.org-chevron { font-size: 0.625rem; color: #9ca3af; margin-left: 0.25rem; }
-
-.org-dropdown {
-  position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px;
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08); z-index: 100;
-  padding: 0.25rem 0; max-height: 300px; overflow-y: auto;
-}
-.org-dropdown-item {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.5rem 0.75rem; font-size: 0.8125rem; color: #4b5563;
-  cursor: pointer; transition: background 0.1s;
-}
-.org-dropdown-item:hover { background: #f3f4f6; }
-.org-dropdown-item.selected { background: #f0f2ff; color: #4f46e5; font-weight: 600; }
-
-/* Search */
-.search-wrap { position: relative; }
-.search-input {
-  width: 280px; padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
-  font-size: 0.8125rem; font-family: inherit; background: #f9fafb;
-  transition: border-color 0.15s, width 0.2s;
-}
-.search-input:focus {
-  outline: none; border-color: #6366f1; background: #fff; width: 360px;
-  box-shadow: 0 0 0 3px rgba(99,102,241,.1);
-}
-.search-dropdown {
-  position: absolute; top: calc(100% + 4px); right: 0; width: 420px;
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.12); max-height: 360px; overflow-y: auto; z-index: 50;
-}
-.search-result {
-  display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 1rem;
-  cursor: pointer; transition: background 0.1s;
-}
-.search-result:hover { background: #f3f4f6; }
-.search-result:first-child { border-radius: 10px 10px 0 0; }
-.search-result:last-child { border-radius: 0 0 10px 10px; }
-.result-type {
-  font-size: 0.625rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-  padding: 0.125rem 0.5rem; border-radius: 4px; white-space: nowrap;
-  background: #f3f4f6; color: #6b7280;
-}
-.result-type.identity { background: #eff6ff; color: #2563eb; }
-.result-type.schema { background: #f0fdf4; color: #16a34a; }
-.result-type.event { background: #fef3c7; color: #92400e; }
-.result-info { display: flex; flex-direction: column; min-width: 0; }
-.result-title { font-size: 0.8125rem; font-weight: 500; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.result-sub { font-size: 0.6875rem; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.search-empty { padding: 1rem; text-align: center; color: #9ca3af; font-size: 0.8125rem; }
-
-.page-body { padding: 2rem; flex: 1; }
-</style>

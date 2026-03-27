@@ -1,89 +1,105 @@
 <template>
-  <div class="dashboard">
-    <div class="stats">
-      <div class="stat-card">
-        <div class="stat-label">IDENTITIES</div>
-        <div class="stat-value">{{ stats.identities }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">ACTIVE SESSIONS</div>
-        <div class="stat-value">{{ stats.sessions }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">EVENTS</div>
-        <div class="stat-value">{{ stats.events }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">SCHEMAS</div>
-        <div class="stat-value">{{ stats.schemas }}</div>
-      </div>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+      <p class="text-sm text-muted-foreground">Welcome to Zitadel Console.</p>
     </div>
 
-    <div class="section">
-      <h3>Recent Events</h3>
-      <div class="event-list">
-        <div v-for="event in recentEvents" :key="event.id" class="event-row">
-          <span class="event-type" :class="eventClass(event.event_type)">{{ event.event_type }}</span>
-          <span class="event-time">{{ formatTime(event.created_at) }}</span>
-        </div>
-        <div v-if="!recentEvents.length" class="empty">No events yet</div>
-      </div>
+    <!-- Quick Stats -->
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <Card v-for="stat in stats" :key="stat.label">
+        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle class="text-sm font-medium">{{ stat.label }}</CardTitle>
+          <component :is="stat.icon" class="size-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ stat.value }}</div>
+          <p class="text-xs text-muted-foreground">{{ stat.description }}</p>
+        </CardContent>
+      </Card>
     </div>
+
+    <!-- Recent Events -->
+    <Card>
+      <CardHeader>
+        <CardTitle>Recent Events</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Type</TableHead>
+              <TableHead>Subject</TableHead>
+              <TableHead>Time</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="event in recentEvents" :key="event.id">
+              <TableCell>
+                <Badge variant="outline" class="font-mono text-xs">{{ event.event_type }}</Badge>
+              </TableCell>
+              <TableCell class="text-sm">{{ event.subject || '—' }}</TableCell>
+              <TableCell class="text-sm text-muted-foreground">{{ event.time_ago }}</TableCell>
+            </TableRow>
+            <TableRow v-if="!recentEvents.length">
+              <TableCell colspan="3" class="text-center text-muted-foreground py-8">
+                <Activity class="mx-auto size-8 mb-2 opacity-40" />
+                No recent events
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { entityApi, schemaApi, sessionApi, eventApi, type Event } from '@/api/resources'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Users, FileJson, Globe, Activity } from 'lucide-vue-next'
 
-const stats = ref({ identities: 0, sessions: 0, events: 0, schemas: 0 })
-const recentEvents = ref<Event[]>([])
+const stats = ref([
+  { label: 'Identities', value: '—', icon: Users, description: 'Total identities' },
+  { label: 'Schemas', value: '—', icon: FileJson, description: 'Active schemas' },
+  { label: 'Providers', value: '—', icon: Globe, description: 'Configured providers' },
+  { label: 'Events', value: '—', icon: Activity, description: 'Last 24 hours' },
+])
+
+const recentEvents = ref<any[]>([])
+
+function timeAgo(ts: string): string {
+  const d = Date.now() - new Date(ts).getTime()
+  if (d < 60000) return 'just now'
+  if (d < 3600000) return `${Math.floor(d / 60000)}m ago`
+  if (d < 86400000) return `${Math.floor(d / 3600000)}h ago`
+  return `${Math.floor(d / 86400000)}d ago`
+}
 
 onMounted(async () => {
   try {
-    const [identities, schemas, sessions, events] = await Promise.all([
-      entityApi.list(), schemaApi.list(), sessionApi.list(), eventApi.list({ limit: 10 }),
+    const [identities, schemas, providers, events] = await Promise.allSettled([
+      fetch('/v1/identities?limit=0').then(r => r.json()),
+      fetch('/v1/schemas').then(r => r.json()),
+      fetch('/v1/providers').then(r => r.json()),
+      fetch('/v1/events?limit=10&order=desc').then(r => r.json()),
     ])
-    stats.value = {
-      identities: identities.length, schemas: schemas.length,
-      sessions: sessions.length, events: events.length,
+
+    if (identities.status === 'fulfilled') stats.value[0].value = String(identities.value.total ?? identities.value.items?.length ?? 0)
+    if (schemas.status === 'fulfilled') stats.value[1].value = String(schemas.value.items?.length ?? 0)
+    if (providers.status === 'fulfilled') stats.value[2].value = String(providers.value.items?.length ?? 0)
+    if (events.status === 'fulfilled') {
+      const items = events.value.items || []
+      stats.value[3].value = String(events.value.total ?? items.length)
+      recentEvents.value = items.slice(0, 10).map((e: any) => ({
+        id: e.id,
+        event_type: e.event_type,
+        subject: e.identity_identifier || e.aggregate_id,
+        time_ago: timeAgo(e.created_at),
+      }))
     }
-    recentEvents.value = events.slice(0, 5)
-  } catch { /* fallback to zeros */ }
+  } catch { /* demo fallback */ }
 })
-
-function eventClass(type: string) {
-  if (type.includes('created')) return 'created'
-  if (type.includes('deleted')) return 'deleted'
-  return 'default'
-}
-
-function formatTime(ts: string) {
-  return new Date(ts).toLocaleString()
-}
 </script>
-
-<style scoped>
-.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-.stat-card {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem 1.5rem;
-}
-.stat-label { font-size: 0.75rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-.stat-value { font-size: 2rem; font-weight: 700; color: #1a1a2e; margin-top: 0.25rem; }
-
-.section h3 { font-size: 1rem; font-weight: 600; color: #1a1a2e; margin-bottom: 1rem; }
-.event-list { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
-.event-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.75rem 1.25rem; border-bottom: 1px solid #f3f4f6;
-}
-.event-row:last-child { border-bottom: none; }
-.event-type {
-  font-size: 0.8125rem; font-weight: 500; padding: 0.125rem 0.5rem;
-  border-radius: 4px; background: #f3f4f6; color: #4b5563;
-}
-.event-type.created { background: #ecfdf5; color: #059669; }
-.event-type.deleted { background: #fef2f2; color: #dc2626; }
-.event-time { font-size: 0.75rem; color: #9ca3af; }
-.empty { padding: 2rem; text-align: center; color: #9ca3af; font-size: 0.875rem; }
-</style>

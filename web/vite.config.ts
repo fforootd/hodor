@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
 // SPA history fallback: rewrite /console/*, /login/*, /account/* to
@@ -24,7 +25,7 @@ function spaFallback(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [vue(), spaFallback()],
+  plugins: [vue(), tailwindcss(), spaFallback()],
   resolve: {
     alias: { '@': resolve(__dirname, 'src') },
   },

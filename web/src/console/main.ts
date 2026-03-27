@@ -1,3 +1,4 @@
+import '@/assets/index.css'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { install as VueMonacoEditorPlugin } from '@guolao/vue-monaco-editor'

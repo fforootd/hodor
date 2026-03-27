@@ -1,3 +1,4 @@
+import '@/assets/index.css'
 import { createApp } from 'vue'
 import LoginApp from './LoginApp.vue'
 
