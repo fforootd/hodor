@@ -56,7 +56,8 @@ const typeLabels: Record<string, string> = {
   human_user: 'Users',
   service_user: 'Service Accounts',
   ai_agent: 'AI Agents',
-  app: 'Applications',
+  app: 'OIDC Clients',
+  app_saml: 'SAML Clients',
 }
 
 const label = computed(() => typeLabels[props.schemaType] || props.schemaType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's')

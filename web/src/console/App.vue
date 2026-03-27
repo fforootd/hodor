@@ -10,10 +10,10 @@
           <span class="nav-icon">◆</span> Dashboard
         </router-link>
 
-        <!-- Dynamic identity sections from schemas -->
-        <div v-if="schemaTypes.length" class="nav-section">Identities</div>
+        <!-- IDENTITIES section (dynamic from schemas) -->
+        <div v-if="identityTypes.length" class="nav-section">Identities</div>
         <router-link
-          v-for="st in schemaTypes" :key="st.type"
+          v-for="st in identityTypes" :key="st.type"
           :to="`/s/${st.type}`"
           class="nav-item"
           :class="{ active: $route.params.schemaType === st.type }"
@@ -21,14 +21,25 @@
           <span class="nav-icon">◇</span> {{ st.label }}
         </router-link>
 
-        <!-- System section -->
-        <div class="nav-section">System</div>
-        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name === 'schemas' || $route.name === 'schema-detail' }">
-          <span class="nav-icon">◇</span> Schemas
+        <!-- APPLICATIONS section (dynamic from schemas) -->
+        <div v-if="appTypes.length" class="nav-section">Applications</div>
+        <router-link
+          v-for="st in appTypes" :key="st.type"
+          :to="`/s/${st.type}`"
+          class="nav-item"
+          :class="{ active: $route.params.schemaType === st.type }"
+        >
+          <span class="nav-icon">◇</span> {{ st.label }}
         </router-link>
+
+        <!-- CONFIGURE section -->
+        <div class="nav-section">Configure</div>
         <router-link to="/providers" class="nav-item" :class="{ active: $route.name === 'providers' }">
           <span class="nav-icon">◇</span> Providers
         </router-link>
+
+        <!-- OBSERVABILITY section -->
+        <div class="nav-section">Observability</div>
         <router-link to="/sessions" class="nav-item" :class="{ active: $route.name === 'sessions' }">
           <span class="nav-icon">◇</span> Sessions
         </router-link>
@@ -37,6 +48,12 @@
         </router-link>
         <router-link to="/jobs" class="nav-item" :class="{ active: $route.name === 'jobs' }">
           <span class="nav-icon">◇</span> Jobs
+        </router-link>
+
+        <!-- SYSTEM section -->
+        <div class="nav-section">System</div>
+        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name === 'schemas' || $route.name === 'schema-detail' }">
+          <span class="nav-icon">◇</span> Schemas
         </router-link>
       </nav>
     </aside>
@@ -96,24 +113,40 @@ const typeLabels: Record<string, string> = {
   human_user: 'Users',
   service_user: 'Service Accounts',
   ai_agent: 'AI Agents',
-  app: 'Applications',
+  app: 'OIDC Clients',
+  app_saml: 'SAML Clients',
 }
 
-// Explicit nav ordering — lower number = higher in the list.
-// Unknown types get 99 and sort alphabetically among themselves.
+// Explicit nav ordering within each section.
 const typeOrder: Record<string, number> = {
   human_user: 1,
   service_user: 2,
   ai_agent: 3,
-  app: 4,
+  app: 1,
+  app_saml: 2,
 }
 
+// Which nav section a schema type belongs to.
+// Types not listed here go into IDENTITIES by default.
+const appSchemaTypes = new Set(['app', 'app_saml', 'app_oauth_api'])
+
 interface SchemaTypeEntry { type: string; label: string }
-const schemaTypes = ref<SchemaTypeEntry[]>([])
+const identityTypes = ref<SchemaTypeEntry[]>([])
+const appTypes = ref<SchemaTypeEntry[]>([])
+
+function buildEntry(t: string): SchemaTypeEntry {
+  return {
+    type: t,
+    label: typeLabels[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's',
+  }
+}
+
+function sortEntries(entries: SchemaTypeEntry[]): SchemaTypeEntry[] {
+  return entries.sort((a, b) => (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99) || a.label.localeCompare(b.label))
+}
 
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
-  // Fetch schema types for dynamic nav.
   try {
     const res = await fetch('/v1/schemas')
     const data = await res.json()
@@ -121,13 +154,18 @@ onMounted(async () => {
     for (const s of (data.items || [])) {
       types.add(s.type)
     }
-    schemaTypes.value = [...types]
-      .map(t => ({
-        type: t,
-        label: typeLabels[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's',
-      }))
-      .sort((a, b) => (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99) || a.label.localeCompare(b.label))
-  } catch { /* ignore — nav will be empty */ }
+    const ids: SchemaTypeEntry[] = []
+    const apps: SchemaTypeEntry[] = []
+    for (const t of types) {
+      if (appSchemaTypes.has(t)) {
+        apps.push(buildEntry(t))
+      } else {
+        ids.push(buildEntry(t))
+      }
+    }
+    identityTypes.value = sortEntries(ids)
+    appTypes.value = sortEntries(apps)
+  } catch { /* ignore */ }
 })
 
 onUnmounted(() => document.removeEventListener('click', handleClickOutside))
