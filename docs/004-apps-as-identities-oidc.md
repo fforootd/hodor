@@ -6,7 +6,7 @@
 
 ## Context
 
-ZITADEL needs to be an **OpenID Provider (OP)** — issuing ID tokens and access tokens to relying parties. The old ZITADEL used a Projects → Apps hierarchy, but our schema-driven model offers a simpler, more powerful approach: **apps ARE identities**.
+Zitadel needs to be an **OpenID Provider (OP)** — issuing ID tokens and access tokens to relying parties. The old Zitadel used a Projects → Apps hierarchy, but our schema-driven model offers a simpler, more powerful approach: **apps ARE identities**.
 
 ## Decision
 
@@ -134,7 +134,7 @@ The authorization code flow works like this:
 ```mermaid
 sequenceDiagram
     participant App as Relying Party
-    participant OP as ZITADEL OP
+    participant OP as Zitadel OP
     participant Login as Login UI
     participant DB as Database
 
@@ -173,4 +173,4 @@ Navigation:
 - **Schema-validated**: OIDC config validated at write time via JSON Schema
 - **Extensible**: SAML, SCIM, or custom protocols just need new `x-*` annotations
 - **Standard compliant**: Full OIDC Core via `zitadel/oidc` library
-- **Migration path**: Old ZITADEL apps can be imported as identities with `oidc_client` schemas
+- **Migration path**: Old Zitadel apps can be imported as identities with `oidc_client` schemas

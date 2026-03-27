@@ -16,6 +16,7 @@ const router = createRouter({
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionListView.vue') },
     { path: '/events', name: 'events', component: () => import('./views/EventListView.vue') },
     { path: '/jobs', name: 'jobs', component: () => import('./views/JobsView.vue') },
+    { path: '/analytics', name: 'analytics', component: () => import('./views/AnalyticsView.vue') },
   ],
 })
 

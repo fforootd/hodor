@@ -1,8 +1,8 @@
-# ADR: Schema-Driven Identity, Auth, and Login Flows
+# ADR-002: Schema-Driven Identity, Auth, and Login Flows
 
-**Date:** 2026-03-26  
-**Status:** Accepted  
-**Context:** POC identity platform with flexible, customer-defined schemas
+**Status**: Accepted  
+**Date**: 2026-03-26  
+**Amended by**: ADR-003 (Unified Auth Methods)
 
 ## Decision
 
@@ -81,15 +81,15 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
 
 5. **JSON Schema is standard.** The `x-*` extension pattern is explicitly supported by JSON Schema spec. Validators ignore unknown extensions. No custom DSL to learn.
 
-## Meta-Schema: The Canonical ZITADEL Identity Schema
+## Meta-Schema: The Canonical Zitadel Identity Schema
 
-All `x-*` annotations are defined in a single **meta-schema** (`internal/schema/meta_schema.json`). This is not just an internal validation tool — it is **THE** schema definition for ZITADEL identity schemas. It defines the allowed structure and vocabulary of `x-auth-methods`, `x-login`, `x-branding`, per-field `x-auth`, `x-claim-mapping`, `x-sensitive`, `x-hidden`, `x-user-editable`, and `x-source`.
+All `x-*` annotations are defined in a single **meta-schema** (`internal/schema/meta_schema.json`). This is not just an internal validation tool — it is **THE** schema definition for Zitadel identity schemas. It defines the allowed structure and vocabulary of `x-auth-methods`, `x-login`, `x-branding`, per-field `x-auth`, `x-claim-mapping`, `x-sensitive`, `x-hidden`, `x-user-editable`, and `x-source`.
 
-See [ADR: Unified Auth Methods and Meta-Schema Validation](./adr-auth-methods-meta-schema.md) for the full decision on `x-auth-methods` and the meta-schema introduction.
+See [ADR-003: Unified Auth Methods and Meta-Schema Validation](./003-auth-methods-meta-schema.md) for the full decision on `x-auth-methods` and the meta-schema introduction.
 
 ### Public exposure
 
-The meta-schema **must be publicly accessible** — it's the contract between ZITADEL and every customer, SDK, and integration:
+The meta-schema **must be publicly accessible** — it's the contract between Zitadel and every customer, SDK, and integration:
 
 | Endpoint | Purpose |
 |---|---|

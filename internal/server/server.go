@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/analytics"
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/config"
@@ -21,7 +22,6 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/fga"
 	"github.com/zitadel/zitadel/internal/jobs"
-	"github.com/zitadel/zitadel/internal/lake"
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/session"
@@ -33,12 +33,13 @@ var webAssets embed.FS
 
 // Server is the main ZITADEL HTTP server.
 type Server struct {
-	cfg  *config.Config
-	db   *database.DB
-	bus  *eventbus.Bus
-	http *http.Server
-	api  *api.API
-	fga  *fga.Service
+	cfg       *config.Config
+	db        *database.DB
+	bus       *eventbus.Bus
+	http      *http.Server
+	api       *api.API
+	fga       *fga.Service
+	analytics *analytics.Engine
 }
 
 // New creates a new Server with all routes registered.
@@ -67,6 +68,11 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
 	restAPI := api.New(db, bus, cookieCfg)
 	restAPI.RegisterRoutes(mux)
+
+	// Mount analytics engine (queries OLTP database directly — pure Go, no DuckDB).
+	oltpBackend := analytics.NewOLTPBackend(db.SQL(), db.Dialect())
+	analyticsEngine := analytics.New(oltpBackend)
+	analyticsEngine.RegisterRoutes(mux)
 
 	// Mount login flow API (serves <zitadel-login> web component).
 	passwords := auth.NewPasswords(db)
@@ -167,11 +173,12 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	}
 
 	return &Server{
-		cfg:  cfg,
-		db:   db,
-		bus:  bus,
-		http: httpSrv,
-		api:  restAPI,
+		cfg:       cfg,
+		db:        db,
+		bus:       bus,
+		http:      httpSrv,
+		api:       restAPI,
+		analytics: analyticsEngine,
 	}
 }
 
@@ -192,13 +199,11 @@ func (s *Server) ListenAndServe() error {
 	}
 	s.fga = fgaSvc
 
-	// Start job scheduler with all registered jobs.
+	// Start job scheduler with registered jobs.
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	defer schedCancel()
 
-	lakeWriter := lake.New(s.db, "./lake_data")
 	sched := jobs.New(s.db)
-	sched.Register("lake_writer", lakeWriter.DrainAll)
 	sched.Register("session_gc", jobs.SessionGC(s.db, s.bus))
 	sched.Register("event_gc", jobs.EventGC(s.db, s.bus))
 	go sched.Run(schedCtx)

@@ -1,8 +1,8 @@
-# ADR: Unified Auth Methods and Meta-Schema Validation
+# ADR-003: Unified Auth Methods and Meta-Schema Validation
 
-**Date:** 2026-03-26  
-**Status:** Accepted  
-**Supersedes:** Partial overlap with `adr-schema-driven-login.md` (auth_methods section)
+**Status**: Accepted  
+**Date**: 2026-03-26  
+**Amends**: ADR-002 (Schema-Driven Login) — extracts `x-auth-methods` to root level
 
 ## Problem
 

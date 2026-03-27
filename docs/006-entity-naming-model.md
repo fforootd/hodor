@@ -14,7 +14,7 @@ This creates a split brain: some things are schema-driven, others aren't. We nee
 
 > **If it doesn't have a schema, it doesn't exist.**
 
-The schema registry is the system's ontology — the complete catalog of everything ZITADEL knows about. Every concept in the system, whether it's a user, an app, a session, or an event, has a schema that defines its shape, behavior, and presentation.
+The schema registry is the system's ontology — the complete catalog of everything Zitadel knows about. Every concept in the system, whether it's a user, an app, a session, or an event, has a schema that defines its shape, behavior, and presentation.
 
 ## Decision
 

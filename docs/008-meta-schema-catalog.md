@@ -12,7 +12,7 @@ This causes three problems:
 
 1. **UI can't self-bootstrap** — navigation, create forms, and component rendering all need hardcoded maps
 2. **No canonical type registry** — adding a new entity type requires Go code changes
-3. **Defaults scattered** — where to define "ZITADEL ships with OIDC providers" vs. "here's the provider schema" is unclear
+3. **Defaults scattered** — where to define "Zitadel ships with OIDC providers" vs. "here's the provider schema" is unclear
 
 ## Decision
 

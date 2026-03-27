@@ -132,6 +132,17 @@
       "storage": "dedicated",
       "route": "/jobs"
     },
+    "analytics": {
+      "version": "1.0",
+      "group": "observability",
+      "alias": "Analytics",
+      "singular": "Analytics",
+      "path": "analytics",
+      "icon": "📊",
+      "sort_order": 4,
+      "storage": "virtual",
+      "route": "/analytics"
+    },
     "password_policy": {
       "$ref": "schemas/password_policy.json",
       "version": "1.0",

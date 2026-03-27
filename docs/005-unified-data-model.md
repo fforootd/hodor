@@ -7,9 +7,9 @@
 
 ## Context
 
-As ZITADEL grows beyond identities and OIDC, we need a coherent model for how all domain objects, their relationships, and configuration fit together.
+As Zitadel grows beyond identities and OIDC, we need a coherent model for how all domain objects, their relationships, and configuration fit together.
 
-Old ZITADEL had separate tables and models for each concept (projects, actions, login policies, branding, etc.), leading to a rigid system that was hard to extend. The schema-driven approach from ADR-001 through ADR-004 gives us a foundation — this ADR extends it to cover the full domain.
+Old Zitadel had separate tables and models for each concept (projects, actions, login policies, branding, etc.), leading to a rigid system that was hard to extend. The schema-driven approach from ADR-001 through ADR-004 gives us a foundation — this ADR extends it to cover the full domain.
 
 ## Decision
 

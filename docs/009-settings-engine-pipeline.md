@@ -6,7 +6,7 @@
 
 ## Context
 
-ZITADEL needs two capabilities that are deeply connected:
+Zitadel needs two capabilities that are deeply connected:
 
 1. **Hierarchical settings** — password policies, login policies, rate limits that cascade from instance → org → project → app
 2. **An engine pipeline** — pluggable processing stages where rules (expr, webhooks, captcha, risk scoring) execute at defined points in the request lifecycle

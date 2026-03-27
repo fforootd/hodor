@@ -1,8 +1,8 @@
-# ADR: REST+JSON over ConnectRPC
+# ADR-001: REST+JSON over ConnectRPC
 
-**Date:** 2026-03-26  
-**Status:** Accepted  
-**Context:** POC identity platform with flexible, customer-defined schemas
+**Status**: Accepted  
+**Date**: 2026-03-26  
+**Supersedes**: N/A (original architecture decision)
 
 ## Decision
 
