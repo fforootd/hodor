@@ -155,10 +155,23 @@ onMounted(async () => {
       .filter((s: Schema) => s.type === props.schemaType)
       .sort((a: Schema, b: Schema) => b.version - a.version)
 
-    // Extract x-display from the default version
+    // Extract display metadata from catalog
+    try {
+      const metaRes = await fetch('/v1/schemas/$meta')
+      const metaData = await metaRes.json()
+      const entry = (metaData['x-catalog'] || {})[props.schemaType]
+      if (entry) {
+        displayMeta.value = {
+          singular: entry.singular,
+          alias: entry.alias,
+          path: entry.path,
+          icon: entry.icon,
+        }
+      }
+    } catch { /* ignore */ }
+
     const defaultVersion = versions.value.find(s => s.is_default) || versions.value[0]
     if (defaultVersion) {
-      displayMeta.value = (defaultVersion.schema as any)?.['x-display'] || {}
       selectSchema(defaultVersion.id)
     }
   } catch {}

@@ -60,15 +60,21 @@ const issuer = window.location.origin
 const identities = ref<Identity[]>([])
 
 onMounted(async () => {
-  // Resolve the API path from the schema's x-display metadata
+  // Resolve the API path from the meta schema catalog
   let apiPath = props.schemaType
   try {
-    const schemaRes = await fetch('/v1/schemas')
-    const schemaData = await schemaRes.json()
-    const match = (schemaData.items || []).find((s: any) => s.type === props.schemaType)
-    if (match?.schema?.['x-display']) {
-      schemaDisplay.value = match.schema['x-display']
-      apiPath = match.schema['x-display'].path || props.schemaType
+    const metaRes = await fetch('/v1/schemas/$meta')
+    const metaData = await metaRes.json()
+    const catalog = metaData['x-catalog'] || {}
+    const entry = catalog[props.schemaType]
+    if (entry) {
+      schemaDisplay.value = {
+        alias: entry.alias,
+        singular: entry.singular,
+        path: entry.path,
+        icon: entry.icon,
+      }
+      apiPath = entry.path || props.schemaType
     }
   } catch { /* ignore */ }
 
