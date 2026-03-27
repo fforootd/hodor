@@ -2,7 +2,7 @@
   <div>
     <div class="toolbar">
       <h3>{{ identities.length }} {{ label.toLowerCase() }}</h3>
-      <router-link to="/identities/new" class="btn-primary">+ New {{ singularLabel }}</router-link>
+      <router-link :to="`/s/${schemaType}/new`" class="btn-primary">+ New {{ singularLabel }}</router-link>
     </div>
 
     <!-- Use ApplicationListView-style for 'app' type -->

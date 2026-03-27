@@ -7,7 +7,7 @@ const router = createRouter({
     // Dynamic schema-type identity list: /s/human_user, /s/app, /s/ai_agent, etc.
     { path: '/s/:schemaType', name: 'schema-identities', component: () => import('./views/IdentityListView.vue'), props: true },
     // Shared identity detail/create
-    { path: '/identities/new', name: 'identity-create', component: () => import('./views/IdentityCreateView.vue') },
+    { path: '/s/:schemaType/new', name: 'identity-create', component: () => import('./views/IdentityCreateView.vue'), props: true },
     { path: '/identities/:id', name: 'identity-detail', component: () => import('./views/IdentityDetailView.vue') },
     // System views
     { path: '/schemas', name: 'schemas', component: () => import('./views/SchemaListView.vue') },

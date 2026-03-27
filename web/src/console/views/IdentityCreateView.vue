@@ -1,21 +1,22 @@
 <template>
   <div>
     <div class="form-header">
-      <router-link to="/identities" class="back-link">← Back</router-link>
-      <h2>Create Identity</h2>
+      <router-link :to="`/s/${schemaType}`" class="back-link">← Back</router-link>
+      <h2>Create {{ currentLabel }}</h2>
     </div>
 
     <form @submit.prevent="submit" class="form">
-      <!-- Schema picker -->
-      <div class="form-section">
-        <h3>Identity Type</h3>
+      <!-- Schema picker (filtered by group) -->
+      <div class="form-section" v-if="schemas.length > 1">
+        <h3>Type</h3>
         <div class="schema-picker">
           <button
             v-for="s in schemas" :key="s.id" type="button"
             class="schema-option" :class="{ active: selectedSchema === s.id }"
             @click="selectSchema(s.id)"
           >
-            <span class="schema-type">{{ s.type }}</span>
+            <span class="schema-icon">{{ s._icon }}</span>
+            <span class="schema-type">{{ s._label }}</span>
             <span class="schema-desc">{{ fieldCount(s) }} fields</span>
           </button>
         </div>
@@ -32,7 +33,7 @@
           <label>Display Name</label>
           <input v-model="form.display_name" type="text" placeholder="Jane Doe" />
         </div>
-        <div class="field-group">
+        <div class="field-group" v-if="hasPassword">
           <label>Password</label>
           <input v-model="form.password" type="password" placeholder="Set initial password" />
         </div>
@@ -62,8 +63,8 @@
         </div>
       </div>
 
-      <!-- Invite -->
-      <div class="form-section">
+      <!-- Invite (only for interactive schemas with x-login) -->
+      <div class="form-section" v-if="hasLogin">
         <label class="invite-check">
           <input type="checkbox" v-model="sendInvite" />
           <span>Send invite link after creation</span>
@@ -73,9 +74,9 @@
 
       <!-- Actions -->
       <div class="form-actions">
-        <router-link to="/identities" class="btn-cancel">Cancel</router-link>
+        <router-link :to="`/s/${schemaType}`" class="btn-cancel">Cancel</router-link>
         <button type="submit" class="btn-create" :disabled="submitting">
-          {{ submitting ? 'Creating…' : 'Create Identity' }}
+          {{ submitting ? 'Creating…' : `Create ${currentLabel}` }}
         </button>
       </div>
 
@@ -91,8 +92,10 @@ import { useRouter } from 'vue-router'
 import { entityApi, magicLinkApi, schemaApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
 
+const props = defineProps<{ schemaType: string }>()
+
 const router = useRouter()
-const schemas = ref<Schema[]>([])
+const schemas = ref<(Schema & { _icon: string; _label: string; _singular: string; _path: string; _group: string })[]>([])
 const selectedSchema = ref('')
 const submitting = ref(false)
 const error = ref('')
@@ -109,6 +112,15 @@ const form = reactive({
 const profileData = reactive<Record<string, string>>({})
 const availableCaps = ['password', 'magic_link', 'admin', 'api_key']
 
+// Current schema's display metadata
+const currentSchema = computed(() => schemas.value.find(s => s.id === selectedSchema.value))
+const currentLabel = computed(() => currentSchema.value?._singular || props.schemaType.replace(/_/g, ' '))
+const hasLogin = computed(() => !!(currentSchema.value?.schema as any)?.['x-login'])
+const hasPassword = computed(() => {
+  const methods = (currentSchema.value?.schema as any)?.['x-auth-methods'] || {}
+  return methods.password?.enabled ?? true
+})
+
 interface SchemaField {
   name: string
   label: string
@@ -117,20 +129,21 @@ interface SchemaField {
 }
 
 const schemaFields = computed<SchemaField[]>(() => {
-  const s = schemas.value.find(s => s.id === selectedSchema.value)
+  const s = currentSchema.value
   if (!s) return []
   const props = (s.schema as any)?.properties || {}
-  return Object.entries(props).map(([name, def]: [string, any]) => ({
-    name,
-    label: name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-    description: def?.description || '',
-    inputType: def?.format === 'email' ? 'email' : def?.format === 'uri' ? 'url' : 'text',
-  }))
+  return Object.entries(props)
+    .filter(([, def]: [string, any]) => !def?.['x-hidden'])
+    .map(([name, def]: [string, any]) => ({
+      name,
+      label: name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      description: def?.description || '',
+      inputType: def?.format === 'email' ? 'email' : def?.format === 'uri' ? 'url' : 'text',
+    }))
 })
 
 function selectSchema(id: string) {
   selectedSchema.value = id
-  // Reset profile fields
   Object.keys(profileData).forEach(k => delete profileData[k])
 }
 
@@ -139,8 +152,35 @@ function fieldCount(s: Schema) {
 }
 
 onMounted(async () => {
-  try { schemas.value = await schemaApi.list() } catch {}
-  if (schemas.value.length) selectSchema(schemas.value[0].id)
+  try {
+    const allSchemas = await schemaApi.list()
+    // Find the x-display.group of the current schemaType
+    const current = allSchemas.find((s: Schema) => s.type === props.schemaType)
+    const currentGroup = (current?.schema as any)?.['x-display']?.group || 'identities'
+
+    // Filter: only show schemas from the same group
+    schemas.value = allSchemas
+      .filter((s: Schema) => {
+        const display = (s.schema as any)?.['x-display'] || {}
+        return (display.group || 'identities') === currentGroup
+      })
+      .map((s: Schema) => {
+        const display = (s.schema as any)?.['x-display'] || {}
+        return {
+          ...s,
+          _icon: display.icon || '◇',
+          _label: display.alias || s.type,
+          _singular: display.singular || s.type,
+          _path: display.path || s.type,
+          _group: display.group || 'identities',
+        }
+      })
+
+    // Pre-select the matching schema type
+    const match = schemas.value.find(s => s.type === props.schemaType)
+    if (match) selectSchema(match.id)
+    else if (schemas.value.length) selectSchema(schemas.value[0].id)
+  } catch {}
 })
 
 async function submit() {
@@ -149,7 +189,6 @@ async function submit() {
   error.value = ''
 
   try {
-    // Build profile from display_name + schema fields
     const profile: Record<string, string> = {}
     if (form.display_name) profile.display_name = form.display_name
     for (const [k, v] of Object.entries(profileData)) {
@@ -161,23 +200,24 @@ async function submit() {
       display_name: form.display_name.trim() || form.identifier.trim(),
       profile,
       capabilities: form.capabilities,
+      schema_id: selectedSchema.value,
     } as any)
 
     // Set password if provided
     if (form.password && created.id) {
       await api.post(`/v1/entities/${created.id}/password`, { password: form.password })
-        .catch(() => { /* password endpoint may not exist yet */ })
+        .catch(() => {})
     }
 
     // Send invite if checked
-    if (sendInvite.value && created.id) {
+    if (sendInvite.value && hasLogin.value && created.id) {
       await magicLinkApi.send(form.identifier.trim()).catch(() => {})
     }
 
     success.value = true
     setTimeout(() => router.push(`/identities/${created.id}`), 800)
   } catch (e: any) {
-    error.value = e?.message || 'Failed to create identity'
+    error.value = e?.message || 'Failed to create'
   } finally {
     submitting.value = false
   }
