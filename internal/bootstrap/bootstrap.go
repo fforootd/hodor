@@ -77,17 +77,25 @@ var builtinSchemas = []struct {
 		Type: "app",
 		Schema: `{
   "type": "object",
-  "properties": {
-    "display_name":   {"type": "string", "description": "Application name"},
-    "description":    {"type": "string"},
-    "app_type":       {"type": "string", "enum": ["web", "native", "spa", "m2m"], "description": "Application type"},
-    "redirect_uris":  {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "OAuth redirect URIs"},
-    "grant_types":    {"type": "array", "items": {"type": "string", "enum": ["authorization_code", "client_credentials", "refresh_token", "device_code"]}, "description": "Allowed OAuth grant types"},
-    "logo_url":       {"type": "string", "format": "uri"},
-    "homepage_url":   {"type": "string", "format": "uri"},
-    "metadata":       {"type": "object"}
+  "x-auth-methods": {
+    "client_secret": {"enabled": true, "interactive": false}
   },
-  "required": ["display_name", "app_type"]
+  "x-oidc": {
+    "grant_types": ["authorization_code", "client_credentials", "refresh_token"],
+    "response_types": ["code"],
+    "token_endpoint_auth_method": "client_secret_post",
+    "id_token_signed_response_alg": "RS256"
+  },
+  "properties": {
+    "client_name":   {"type": "string", "description": "Application display name"},
+    "description":   {"type": "string"},
+    "app_type":      {"type": "string", "enum": ["web", "native", "spa", "m2m"], "description": "Application type"},
+    "redirect_uris": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "OAuth redirect URIs"},
+    "post_logout_redirect_uris": {"type": "array", "items": {"type": "string", "format": "uri"}},
+    "logo_uri":      {"type": "string", "format": "uri"},
+    "metadata":      {"type": "object"}
+  },
+  "required": ["client_name"]
 }`,
 	},
 	{
@@ -196,6 +204,44 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	fmt.Println("  └──────────────────────────────────────────────────┘")
 	fmt.Println()
 
+	// Seed the default console OIDC client (public SPA, no secret).
+	if err := seedConsoleClient(ctx, db); err != nil {
+		log.Printf("WARN: seed console client: %v", err)
+	}
+
+	return nil
+}
+
+// seedConsoleClient creates the default console OIDC client identity if it doesn't exist.
+func seedConsoleClient(ctx context.Context, db *database.DB) error {
+	var exists int
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM identities WHERE identifier = 'console'`).Scan(&exists)
+	if err != nil || exists > 0 {
+		return nil // Already exists or DB error — skip silently.
+	}
+
+	consoleID, err := id.New()
+	if err != nil {
+		return fmt.Errorf("gen console id: %w", err)
+	}
+
+	consoleData := `{
+		"client_name": "ZITADEL Console",
+		"app_type": "spa",
+		"redirect_uris": ["http://localhost:5173/console", "http://localhost:8080/console"],
+		"post_logout_redirect_uris": ["http://localhost:5173", "http://localhost:8080"]
+	}`
+
+	_, err = db.SQL().ExecContext(ctx,
+		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
+		 VALUES (?, 1, 'console', 'ZITADEL Console', 'active', 'app_v1', ?, datetime('now'), datetime('now'))`,
+		consoleID, consoleData,
+	)
+	if err != nil {
+		return fmt.Errorf("insert console identity: %w", err)
+	}
+
+	log.Println("seeded default console OIDC client (client_id=console)")
 	return nil
 }
 

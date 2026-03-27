@@ -23,6 +23,7 @@ import (
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/lake"
 	"github.com/zitadel/zitadel/internal/login"
+	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/ui"
 )
@@ -131,6 +132,28 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Mount UI routes — login, logout, admin console.
 	uiHandlers := ui.New(db, bus, restAPI, cookieCfg)
 	uiHandlers.RegisterRoutes(mux)
+
+	// Mount OIDC Provider (OP) — handles /.well-known/openid-configuration,
+	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
+	issues := fmt.Sprintf("http://%s:%d", cfg.Server.ExternalDomain, cfg.Server.Port)
+	oidcStorage := oidcop.NewStorage(db)
+	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil)
+	if err != nil {
+		log.Printf("WARN: OIDC Provider setup failed: %v", err)
+	} else {
+		// The OP handler is mounted as a fallback: the mux tries registered patterns first,
+		// and if none match, falls through to the OP which handles OIDC-specific paths.
+		mux.Handle("/authorize", opHandler)
+		mux.Handle("/oauth/", opHandler)
+		mux.Handle("/userinfo", opHandler)
+		mux.Handle("/end_session", opHandler)
+		mux.Handle("/keys", opHandler)
+		mux.Handle("/revoke", opHandler)
+		mux.Handle("/devicecode", opHandler)
+		// Discovery endpoint (appended — the existing well-known in api.go is a redirect)
+		mux.Handle("GET /.well-known/openid-configuration", opHandler)
+		log.Printf("OIDC Provider ready (issuer=%s)", issues)
+	}
 
 	// Wrap the mux with OTel middleware for trace_id injection.
 	wrappedHandler := OTelMiddleware(mux)

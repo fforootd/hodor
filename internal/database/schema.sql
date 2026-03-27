@@ -276,6 +276,74 @@ CREATE TABLE IF NOT EXISTS sso_states (
 );
 
 -- ============================================================================
+-- OIDC AUTH REQUESTS — ephemeral authorization requests (ADR-004)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS oidc_auth_requests (
+    id                    TEXT PRIMARY KEY,
+    client_id             TEXT NOT NULL,
+    redirect_uri          TEXT NOT NULL,
+    scopes                TEXT NOT NULL DEFAULT '',
+    state                 TEXT DEFAULT '',
+    nonce                 TEXT DEFAULT '',
+    response_type         TEXT DEFAULT 'code',
+    code_challenge        TEXT DEFAULT '',
+    code_challenge_method TEXT DEFAULT '',
+    user_id               TEXT DEFAULT '',
+    auth_time             TEXT,
+    done                  INTEGER DEFAULT 0,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================================
+-- OIDC CODES — authorization codes → request mapping
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS oidc_codes (
+    code       TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================================
+-- OIDC TOKENS — opaque access tokens
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS oidc_tokens (
+    id               TEXT PRIMARY KEY,
+    application_id   TEXT NOT NULL,
+    subject          TEXT NOT NULL,
+    audience         TEXT NOT NULL DEFAULT '',
+    scopes           TEXT NOT NULL DEFAULT '',
+    refresh_token_id TEXT DEFAULT '',
+    expiration       TEXT NOT NULL,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================================
+-- OIDC REFRESH TOKENS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS oidc_refresh_tokens (
+    id             TEXT PRIMARY KEY,
+    token          TEXT NOT NULL UNIQUE,
+    application_id TEXT NOT NULL,
+    user_id        TEXT NOT NULL,
+    audience       TEXT NOT NULL DEFAULT '',
+    scopes         TEXT NOT NULL DEFAULT '',
+    auth_time      TEXT NOT NULL,
+    amr            TEXT DEFAULT '',
+    access_token   TEXT NOT NULL,
+    expiration     TEXT NOT NULL
+);
+
+-- ============================================================================
+-- OIDC SIGNING KEYS — RSA keys for JWT signing
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS oidc_signing_keys (
+    id          TEXT PRIMARY KEY,
+    algorithm   TEXT NOT NULL DEFAULT 'RS256',
+    private_key BLOB NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================================
 -- SEED DATA
 -- ============================================================================
 

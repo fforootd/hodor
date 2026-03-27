@@ -28,8 +28,8 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 
 	var count1 int
 	db.SQL().QueryRow("SELECT COUNT(*) FROM identities").Scan(&count1)
-	if count1 != 1 {
-		t.Fatalf("expected 1 identity after first bootstrap, got %d", count1)
+	if count1 != 2 {
+		t.Fatalf("expected 2 identities after first bootstrap (admin + console), got %d", count1)
 	}
 
 	// Second call should be a no-op (idempotent).
@@ -39,8 +39,8 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 
 	var count2 int
 	db.SQL().QueryRow("SELECT COUNT(*) FROM identities").Scan(&count2)
-	if count2 != 1 {
-		t.Fatalf("expected 1 identity after second bootstrap (idempotent), got %d", count2)
+	if count2 != 2 {
+		t.Fatalf("expected 2 identities after second bootstrap (idempotent), got %d", count2)
 	}
 }
 
