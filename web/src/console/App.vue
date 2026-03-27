@@ -99,6 +99,15 @@ const typeLabels: Record<string, string> = {
   app: 'Applications',
 }
 
+// Explicit nav ordering — lower number = higher in the list.
+// Unknown types get 99 and sort alphabetically among themselves.
+const typeOrder: Record<string, number> = {
+  human_user: 1,
+  service_user: 2,
+  ai_agent: 3,
+  app: 4,
+}
+
 interface SchemaTypeEntry { type: string; label: string }
 const schemaTypes = ref<SchemaTypeEntry[]>([])
 
@@ -112,10 +121,12 @@ onMounted(async () => {
     for (const s of (data.items || [])) {
       types.add(s.type)
     }
-    schemaTypes.value = [...types].map(t => ({
-      type: t,
-      label: typeLabels[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's',
-    }))
+    schemaTypes.value = [...types]
+      .map(t => ({
+        type: t,
+        label: typeLabels[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's',
+      }))
+      .sort((a, b) => (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99) || a.label.localeCompare(b.label))
   } catch { /* ignore — nav will be empty */ }
 })
 
