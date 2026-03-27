@@ -156,6 +156,7 @@ CREATE TABLE settings (
 | Setting | Stages affected | Hierarchy | Key fields |
 |---|---|---|---|
 | **Password Policy** | `auth` | instance → org | min_length, complexity, history |
+| **Identifier Policy** | `pre_auth`, `auth` | instance → org | format, pattern, min/max length |
 | **Login Policy** | `pre_auth`, `auth` | instance → org → app | MFA, registration, passwordless |
 | **Lockout Policy** | `auth`, `post_auth` | instance → org | max_attempts, duration |
 | **Rate Limit** | `on_request` | instance → org → app | rpm, burst, by_ip/by_user |
@@ -164,7 +165,89 @@ CREATE TABLE settings (
 | **Notification** | `on_event` | instance → org | SMTP, SMS provider |
 | **Domain** | — | org | verified domains, primary |
 
-### 5. Engines in the Pipeline
+### 5. Validation Layering: Schema → Settings → Expr
+
+Field validation (e.g., username/identifier format) uses three tiers. Each tier is progressively more powerful. The UI reads all three for inline validation.
+
+#### Tier 1: JSON Schema constraints (native, fast, both sides)
+
+Standard JSON Schema keywords on entity schema fields:
+
+```json
+"email": {
+  "type": "string",
+  "format": "email",
+  "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+  "minLength": 5,
+  "maxLength": 255
+}
+```
+
+- **Backend**: Go `regexp.MatchString()` — runs on every create/update
+- **Frontend**: JS `new RegExp(pattern).test(value)` — instant inline validation
+- **No engine needed** — standard JSON Schema that every language supports
+
+#### Tier 2: Settings overrides (per-org, cascading)
+
+An `identifier_policy` setting lets each org customize validation rules:
+
+```json
+{
+  "x-settings": {
+    "hierarchy": ["instance", "org"],
+    "merge_strategy": "deep_merge"
+  },
+  "properties": {
+    "format":           { "type": "string", "enum": ["email", "phone", "username", "any"], "default": "email" },
+    "pattern":          { "type": "string", "default": ".*" },
+    "min_length":       { "type": "integer", "default": 3 },
+    "max_length":       { "type": "integer", "default": 255 },
+    "blocked_patterns": { "type": "array", "items": { "type": "string" } },
+    "case_sensitive":   { "type": "boolean", "default": false }
+  }
+}
+```
+
+Org A: `"format": "email"` — identifiers must be email addresses  
+Org B: `"format": "username", "pattern": "^[a-z][a-z0-9_-]{2,30}$"` — lowercase usernames only
+
+- **Backend**: Go native regexp, resolved from `effective = instance ← org`
+- **Frontend**: fetches `GET /v1/settings/identifier_policy?scope=org&scope_id=123`, shows validation inline
+- **No engine needed** — just regexp with cascading overrides
+
+#### Tier 3: Expr rules (conditional, programmable)
+
+For complex logic that can't be expressed as a static pattern:
+
+```json
+{
+  "x-rule": {
+    "stage": "pre_auth",
+    "condition": "true",
+    "engine": "expr",
+    "config": {
+      "expression": "not(identifier matches settings.blocked_patterns) && (settings.format == 'email' ? isEmail(identifier) : len(identifier) >= settings.min_length)"
+    }
+  }
+}
+```
+
+Use cases:
+- Block disposable email domains from a dynamic list
+- Conditional format: enterprise orgs require email, free orgs allow username
+- Cross-entity uniqueness: identifier must not match any existing display_name
+
+#### Resolution order
+
+```
+effective_validation = schema.pattern       ← always applies (base constraint)
+                     + settings.pattern     ← org override (if set)
+                     + expr rule            ← programmable (if defined)
+```
+
+The UI fetches both the schema (`pattern`, `format`) and the effective settings, merges them, and validates client-side before submission.
+
+### 6. Engines in the Pipeline
 
 Each stage can have multiple engines. The engine type determines what runs:
 
@@ -178,7 +261,7 @@ Each stage can have multiple engines. The engine type determines what runs:
 | `fga` | `post_auth` | Fine-grained authorization check |
 | `built-in` | `auth` | Core auth flows (password, passkey, etc.) |
 
-### 6. How Rules Cascade
+### 7. How Rules Cascade
 
 Rules follow the same cascade as settings, but **additive** instead of override:
 
@@ -194,7 +277,7 @@ Effective:       [rate_limit, audit_log, captcha_on_login, webhook_slack, custom
 
 Priority ordering within each stage determines execution order.
 
-### 7. Event Stream Hooks
+### 8. Event Stream Hooks
 
 The `on_event` stage is special — it's **asynchronous** and fires after the event is persisted:
 
@@ -219,7 +302,7 @@ Use cases:
 - **Audit enrichment** — add GeoIP data to events
 - **Sync** — push changes to external SCIM directory
 
-### 8. Catalog Integration
+### 9. Catalog Integration
 
 ```json
 {
