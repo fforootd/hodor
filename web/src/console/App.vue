@@ -152,43 +152,15 @@ function selectOrg(org: OrgEntry | null) {
 const savedOrg = localStorage.getItem('zitadel_org')
 if (savedOrg) selectedOrgId.value = Number(savedOrg)
 
-// Pretty labels for known schema types; unknown types get auto-formatted.
-const typeLabels: Record<string, string> = {
-  human_user: 'Users',
-  service_user: 'Service Accounts',
-  ai_agent: 'AI Agents',
-  app: 'OIDC Clients',
-  app_saml: 'SAML Clients',
-}
-
-// Explicit nav ordering within each section.
-const typeOrder: Record<string, number> = {
-  human_user: 1,
-  service_user: 2,
-  ai_agent: 3,
-  app: 1,
-  app_saml: 2,
-}
-
-// Which nav section a schema type belongs to.
-// Types not listed here go into IDENTITIES by default.
-const appSchemaTypes = new Set(['app', 'app_saml', 'app_oauth_api'])
 // Types excluded from nav entirely (org = topbar switcher).
 const hiddenSchemaTypes = new Set(['org'])
 
-interface SchemaTypeEntry { type: string; label: string }
+interface SchemaTypeEntry { type: string; label: string; icon: string; path: string; sortOrder: number }
 const identityTypes = ref<SchemaTypeEntry[]>([])
 const appTypes = ref<SchemaTypeEntry[]>([])
 
-function buildEntry(t: string): SchemaTypeEntry {
-  return {
-    type: t,
-    label: typeLabels[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's',
-  }
-}
-
 function sortEntries(entries: SchemaTypeEntry[]): SchemaTypeEntry[] {
-  return entries.sort((a, b) => (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99) || a.label.localeCompare(b.label))
+  return entries.sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label))
 }
 
 onMounted(async () => {
@@ -196,18 +168,24 @@ onMounted(async () => {
   try {
     const res = await fetch('/v1/schemas')
     const data = await res.json()
-    const types = new Set<string>()
-    for (const s of (data.items || [])) {
-      types.add(s.type)
-    }
+    const seen = new Set<string>()
     const ids: SchemaTypeEntry[] = []
     const apps: SchemaTypeEntry[] = []
-    for (const t of types) {
-      if (hiddenSchemaTypes.has(t)) continue
-      if (appSchemaTypes.has(t)) {
-        apps.push(buildEntry(t))
+    for (const s of (data.items || [])) {
+      if (seen.has(s.type) || hiddenSchemaTypes.has(s.type)) continue
+      seen.add(s.type)
+      const display = s.schema?.['x-display'] || {}
+      const entry: SchemaTypeEntry = {
+        type: s.type,
+        label: display.alias || s.type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) + 's',
+        icon: display.icon || '◇',
+        path: display.path || s.type,
+        sortOrder: display.sort_order ?? 99,
+      }
+      if (display.group === 'applications') {
+        apps.push(entry)
       } else {
-        ids.push(buildEntry(t))
+        ids.push(entry)
       }
     }
     identityTypes.value = sortEntries(ids)
@@ -216,7 +194,7 @@ onMounted(async () => {
 
   // Fetch orgs for context switcher.
   try {
-    const res = await fetch('/v1/entities?schema_type=org')
+    const res = await fetch('/v1/orgs')
     const data = await res.json()
     orgs.value = (data.items || []).map((o: any) => ({
       id: o.id,
@@ -245,7 +223,8 @@ const pageTitle = computed(() => {
   // Dynamic schema-type pages: /s/:schemaType
   if (route.params.schemaType) {
     const st = route.params.schemaType as string
-    return typeLabels[st] || st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's'
+    const entry = [...identityTypes.value, ...appTypes.value].find(e => e.type === st)
+    return entry?.label || st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's'
   }
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',

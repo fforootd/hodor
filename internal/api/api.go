@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -80,6 +81,64 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/zitadel-identity-schema", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/v1/schemas/$meta", http.StatusPermanentRedirect)
 	})
+
+	// Schema-driven route aliases (e.g. /v1/users → entities?schema_type=human_user)
+	a.registerAliasRoutes(mux)
+}
+
+// registerAliasRoutes reads all schemas from the DB and registers
+// /v1/{path} aliases from x-display.path annotations.
+func (a *API) registerAliasRoutes(mux *http.ServeMux) {
+	rows, err := a.db.SQL().Query(`SELECT type, schema FROM schemas WHERE is_default = true`)
+	if err != nil {
+		log.Printf("[alias] failed to query schemas: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var schemaType, schemaJSON string
+		if err := rows.Scan(&schemaType, &schemaJSON); err != nil {
+			continue
+		}
+		var parsed map[string]any
+		if json.Unmarshal([]byte(schemaJSON), &parsed) != nil {
+			continue
+		}
+		display, ok := parsed["x-display"].(map[string]any)
+		if !ok {
+			continue
+		}
+		path, ok := display["path"].(string)
+		if !ok || path == "" {
+			continue
+		}
+
+		// Capture for closure
+		st := schemaType
+		prefix := "/v1/" + path
+
+		// Alias handlers that inject schema_type into the query
+		mux.HandleFunc("GET "+prefix, a.aliasHandler(st, a.listIdentities))
+		mux.HandleFunc("POST "+prefix, a.aliasHandler(st, a.createIdentity))
+		mux.HandleFunc("GET "+prefix+"/{id}", a.getIdentity)
+		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
+		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
+
+		log.Printf("[alias] registered /v1/%s → entities (type=%s)", path, st)
+	}
+}
+
+// aliasHandler wraps a handler to inject schema_type into query params.
+func (a *API) aliasHandler(schemaType string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("schema_type") == "" {
+			q.Set("schema_type", schemaType)
+			r.URL.RawQuery = q.Encode()
+		}
+		next(w, r)
+	}
 }
 
 // --- Identity types ---

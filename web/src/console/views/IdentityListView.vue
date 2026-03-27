@@ -52,25 +52,31 @@ import { type Identity } from '@/api/resources'
 
 const props = defineProps<{ schemaType: string }>()
 
-const typeLabels: Record<string, string> = {
-  human_user: 'Users',
-  service_user: 'Service Accounts',
-  ai_agent: 'AI Agents',
-  app: 'OIDC Clients',
-  app_saml: 'SAML Clients',
-}
-
-const label = computed(() => typeLabels[props.schemaType] || props.schemaType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's')
-const singularLabel = computed(() => label.value.replace(/s$/, '').replace(/ie$/, 'y'))
+const schemaDisplay = ref<any>({})
+const label = computed(() => schemaDisplay.value.alias || props.schemaType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) + 's')
+const singularLabel = computed(() => schemaDisplay.value.singular || label.value.replace(/s$/, '').replace(/ie$/, 'y'))
 const issuer = window.location.origin
 
 const identities = ref<Identity[]>([])
 
 onMounted(async () => {
+  // Resolve the API path from the schema's x-display metadata
+  let apiPath = props.schemaType
   try {
-    let url = `/v1/entities?schema_type=${props.schemaType}`
+    const schemaRes = await fetch('/v1/schemas')
+    const schemaData = await schemaRes.json()
+    const match = (schemaData.items || []).find((s: any) => s.type === props.schemaType)
+    if (match?.schema?.['x-display']) {
+      schemaDisplay.value = match.schema['x-display']
+      apiPath = match.schema['x-display'].path || props.schemaType
+    }
+  } catch { /* ignore */ }
+
+  // Use the alias route: /v1/users, /v1/apps, etc.
+  try {
+    let url = `/v1/${apiPath}`
     const orgId = localStorage.getItem('zitadel_org')
-    if (orgId) url += `&org_id=${orgId}`
+    if (orgId) url += `?org_id=${orgId}`
     const res = await fetch(url)
     const data = await res.json()
     identities.value = data.items || []
