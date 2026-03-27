@@ -50,6 +50,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/schemas/$meta", a.getMetaSchema)
 	mux.HandleFunc("GET /v1/schemas/{id}", a.getSchema)
 	mux.HandleFunc("PATCH /v1/schemas/{id}", a.requireAdmin(a.updateSchema))
+	mux.HandleFunc("POST /v1/schemas/{id}/promote", a.requireAdmin(a.promoteSchema))
+	mux.HandleFunc("GET /v1/schemas/{id}/diff", a.diffSchema)
+	mux.HandleFunc("POST /v1/schemas/{id}/preview", a.previewSchema)
 	mux.HandleFunc("GET /v1/schemas/{id}/identity-count", a.schemaIdentityCount)
 
 	// Session CRUD
@@ -402,10 +405,11 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 // --- Schema handlers ---
 
 type SchemaRequest struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	OrgID  int64  `json:"org_id,omitempty"`
-	Schema any    `json:"schema"` // JSON Schema document
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	OrgID   int64  `json:"org_id,omitempty"`
+	Schema  any    `json:"schema"`  // JSON Schema document
+	Message string `json:"message"` // Version commit message
 }
 
 type SchemaResponse struct {
@@ -415,6 +419,8 @@ type SchemaResponse struct {
 	Schema    any    `json:"schema"`
 	Version   int    `json:"version"`
 	IsDefault bool   `json:"is_default"`
+	Message   string `json:"message"`
+	CreatedBy string `json:"created_by,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -424,8 +430,8 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.ID == "" || req.Type == "" || req.Schema == nil {
-		writeError(w, http.StatusBadRequest, "id, type, and schema are required")
+	if req.Type == "" || req.Schema == nil {
+		writeError(w, http.StatusBadRequest, "type and schema are required")
 		return
 	}
 	if req.OrgID == 0 {
@@ -446,29 +452,48 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Check if there's already a default for this type+org.
+	// Auto-increment version for this type+org.
+	var maxVersion int
+	a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COALESCE(MAX(version), 0) FROM schemas WHERE type = ? AND org_id = ?`,
+		req.Type, req.OrgID).Scan(&maxVersion)
+	newVersion := maxVersion + 1
+
+	// First version of a type becomes default automatically.
 	var existingDefault int
 	a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM schemas WHERE type = ? AND org_id = ? AND is_default = true`,
 		req.Type, req.OrgID).Scan(&existingDefault)
-	isDefault := existingDefault == 0 // First schema of this type becomes default.
+	isDefault := existingDefault == 0
+
+	// Generate ID: {type}_v{version}
+	schemaID := req.ID
+	if schemaID == "" {
+		schemaID = fmt.Sprintf("%s_v%d", req.Type, newVersion)
+	}
+
+	// Get actor from session.
+	createdBy := "" // TODO: extract from session when available
 
 	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
-		 VALUES (?, ?, ?, ?, 1, ?, ?)`,
-		req.ID, req.Type, req.OrgID, string(schemaJSON), isDefault, now)
+		`INSERT INTO schemas (id, type, org_id, schema, version, is_default, message, created_by, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		schemaID, req.Type, req.OrgID, string(schemaJSON), newVersion, isDefault,
+		req.Message, createdBy, now)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save schema")
+		writeError(w, http.StatusInternalServerError, "failed to save schema: "+err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, SchemaResponse{
-		ID:        req.ID,
+		ID:        schemaID,
 		Type:      req.Type,
 		OrgID:     req.OrgID,
 		Schema:    req.Schema,
-		Version:   1,
+		Version:   newVersion,
 		IsDefault: isDefault,
+		Message:   req.Message,
+		CreatedBy: createdBy,
 		CreatedAt: now,
 	})
 }
@@ -476,11 +501,14 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 	typeFilter := r.URL.Query().Get("type")
 
-	query := `SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas ORDER BY id`
+	baseQuery := `SELECT id, type, org_id, schema, version, COALESCE(is_default, false), COALESCE(message,''), COALESCE(created_by,''), created_at FROM schemas`
 	var args []any
+	var query string
 	if typeFilter != "" {
-		query = `SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas WHERE type = ? ORDER BY id`
+		query = baseQuery + ` WHERE type = ? ORDER BY version DESC`
 		args = []any{typeFilter}
+	} else {
+		query = baseQuery + ` ORDER BY type, version DESC`
 	}
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
@@ -494,7 +522,7 @@ func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s SchemaResponse
 		var schemaStr string
-		if err := rows.Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.Message, &s.CreatedBy, &s.CreatedAt); err != nil {
 			continue
 		}
 		json.Unmarshal([]byte(schemaStr), &s.Schema)
@@ -514,8 +542,8 @@ func (a *API) getSchema(w http.ResponseWriter, r *http.Request) {
 	var s SchemaResponse
 	var schemaStr string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas WHERE id = ?`, schemaID,
-	).Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.CreatedAt)
+		`SELECT id, type, org_id, schema, version, COALESCE(is_default, false), COALESCE(message,''), COALESCE(created_by,''), created_at FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.Message, &s.CreatedBy, &s.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "schema not found")
 		return
@@ -525,83 +553,346 @@ func (a *API) getSchema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s)
 }
 
+// updateSchema creates a NEW version of the schema (append-only).
+// The old version is preserved. The new version is NOT default until promoted.
 func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 	schemaID := r.PathValue("id")
 
 	var req struct {
-		Schema    any  `json:"schema"`
-		IsDefault *bool `json:"is_default,omitempty"`
+		Schema  any    `json:"schema"`
+		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-
-	// Handle is_default toggle.
-	if req.IsDefault != nil {
-		if *req.IsDefault {
-			// Unset previous default for this type+org.
-			var schemaType string
-			var orgID int64
-			a.db.SQL().QueryRowContext(r.Context(),
-				`SELECT type, org_id FROM schemas WHERE id = ?`, schemaID,
-			).Scan(&schemaType, &orgID)
-			if schemaType != "" {
-				a.db.SQL().ExecContext(r.Context(),
-					`UPDATE schemas SET is_default = false WHERE type = ? AND org_id = ? AND id != ?`,
-					schemaType, orgID, schemaID)
-			}
-		}
-		a.db.SQL().ExecContext(r.Context(),
-			`UPDATE schemas SET is_default = ? WHERE id = ?`,
-			*req.IsDefault, schemaID)
-	}
-
-	// Handle schema body update.
-	if req.Schema != nil {
-		schemaJSON, err := json.Marshal(req.Schema)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid schema")
-			return
-		}
-
-		// Validate x-auth-methods keys.
-		if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
-			writeError(w, http.StatusBadRequest, validationErr)
-			return
-		}
-
-		result, err := a.db.SQL().ExecContext(r.Context(),
-			`UPDATE schemas SET schema = ?, version = version + 1 WHERE id = ?`,
-			string(schemaJSON), schemaID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update schema")
-			return
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			writeError(w, http.StatusNotFound, "schema not found")
-			return
-		}
-	} else if req.IsDefault == nil {
-		writeError(w, http.StatusBadRequest, "schema or is_default is required")
+	if req.Schema == nil {
+		writeError(w, http.StatusBadRequest, "schema is required")
 		return
 	}
 
-	// Return updated schema.
-	var s SchemaResponse
-	var updatedStr string
-	a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas WHERE id = ?`, schemaID,
-	).Scan(&s.ID, &s.Type, &s.OrgID, &updatedStr, &s.Version, &s.IsDefault, &s.CreatedAt)
-	json.Unmarshal([]byte(updatedStr), &s.Schema)
+	// Load existing schema to get type+org.
+	var schemaType string
+	var orgID int64
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT type, org_id FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&schemaType, &orgID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "schema not found")
+		return
+	}
 
-	a.EmitAuthEvent(r.Context(), "schema.updated", 0, map[string]any{
-		"schema_id": schemaID,
-		"version":   s.Version,
+	schemaJSON, err := json.Marshal(req.Schema)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid schema")
+		return
+	}
+
+	// Validate x-auth-methods keys.
+	if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
+		writeError(w, http.StatusBadRequest, validationErr)
+		return
+	}
+
+	// Auto-increment version.
+	var maxVersion int
+	a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COALESCE(MAX(version), 0) FROM schemas WHERE type = ? AND org_id = ?`,
+		schemaType, orgID).Scan(&maxVersion)
+	newVersion := maxVersion + 1
+	newID := fmt.Sprintf("%s_v%d", schemaType, newVersion)
+
+	createdBy := "" // TODO: extract from session when available
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// INSERT new version (append-only). NOT default until promoted.
+	_, err = a.db.SQL().ExecContext(r.Context(),
+		`INSERT INTO schemas (id, type, org_id, schema, version, is_default, message, created_by, created_at)
+		 VALUES (?, ?, ?, ?, ?, false, ?, ?, ?)`,
+		newID, schemaType, orgID, string(schemaJSON), newVersion,
+		req.Message, createdBy, now)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create version: "+err.Error())
+		return
+	}
+
+	a.EmitAuthEvent(r.Context(), "schema.version_created", 0, map[string]any{
+		"schema_id":  newID,
+		"type":       schemaType,
+		"version":    newVersion,
+		"message":    req.Message,
+		"from_version": schemaID,
 	})
 
-	writeJSON(w, http.StatusOK, s)
+	writeJSON(w, http.StatusCreated, SchemaResponse{
+		ID:        newID,
+		Type:      schemaType,
+		OrgID:     orgID,
+		Schema:    req.Schema,
+		Version:   newVersion,
+		IsDefault: false,
+		Message:   req.Message,
+		CreatedBy: createdBy,
+		CreatedAt: now,
+	})
+}
+
+// promoteSchema sets a schema version as the default for its type.
+func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
+	schemaID := r.PathValue("id")
+
+	// Get type+org of the target schema.
+	var schemaType string
+	var orgID int64
+	var version int
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT type, org_id, version FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&schemaType, &orgID, &version)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "schema not found")
+		return
+	}
+
+	// Count affected entities (those NOT pinned to a specific version).
+	var affected int
+	a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM identities i
+		 JOIN schemas s ON i.schema_id = s.id
+		 WHERE s.type = ? AND s.org_id = ? AND s.is_default = true`,
+		schemaType, orgID).Scan(&affected)
+
+	// Unset previous default.
+	a.db.SQL().ExecContext(r.Context(),
+		`UPDATE schemas SET is_default = false WHERE type = ? AND org_id = ?`,
+		schemaType, orgID)
+
+	// Set new default.
+	a.db.SQL().ExecContext(r.Context(),
+		`UPDATE schemas SET is_default = true WHERE id = ?`, schemaID)
+
+	a.EmitAuthEvent(r.Context(), "schema.promoted", 0, map[string]any{
+		"schema_id": schemaID, "type": schemaType, "version": version,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":            "promoted",
+		"schema_id":         schemaID,
+		"version":           version,
+		"affected_entities": affected,
+	})
+}
+
+// diffSchema returns a JSON diff between two schema versions.
+func (a *API) diffSchema(w http.ResponseWriter, r *http.Request) {
+	schemaID := r.PathValue("id")
+	compareID := r.URL.Query().Get("compare")
+	if compareID == "" {
+		writeError(w, http.StatusBadRequest, "compare query parameter required")
+		return
+	}
+
+	// Load both schemas.
+	var leftStr, rightStr string
+	var leftVersion, rightVersion int
+	var leftMsg, rightMsg string
+
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT schema, version, COALESCE(message,'') FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&leftStr, &leftVersion, &leftMsg)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "schema not found: "+schemaID)
+		return
+	}
+
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT schema, version, COALESCE(message,'') FROM schemas WHERE id = ?`, compareID,
+	).Scan(&rightStr, &rightVersion, &rightMsg)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "schema not found: "+compareID)
+		return
+	}
+
+	// Parse into maps for field-level diff.
+	var leftSchema, rightSchema map[string]any
+	json.Unmarshal([]byte(leftStr), &leftSchema)
+	json.Unmarshal([]byte(rightStr), &rightSchema)
+
+	// Extract properties for comparison.
+	leftProps, _ := extractProperties(leftSchema)
+	rightProps, _ := extractProperties(rightSchema)
+
+	// Build diff.
+	var changes []map[string]any
+	allFields := make(map[string]bool)
+	for k := range leftProps {
+		allFields[k] = true
+	}
+	for k := range rightProps {
+		allFields[k] = true
+	}
+
+	for field := range allFields {
+		leftJSON, _ := json.Marshal(leftProps[field])
+		rightJSON, _ := json.Marshal(rightProps[field])
+
+		if leftProps[field] == nil {
+			changes = append(changes, map[string]any{
+				"field": field, "action": "added", "new": rightProps[field],
+			})
+		} else if rightProps[field] == nil {
+			changes = append(changes, map[string]any{
+				"field": field, "action": "removed", "old": leftProps[field],
+			})
+		} else if string(leftJSON) != string(rightJSON) {
+			changes = append(changes, map[string]any{
+				"field": field, "action": "modified", "old": leftProps[field], "new": rightProps[field],
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"left":    map[string]any{"id": schemaID, "version": leftVersion, "message": leftMsg},
+		"right":   map[string]any{"id": compareID, "version": rightVersion, "message": rightMsg},
+		"changes": changes,
+	})
+}
+
+func extractProperties(schema map[string]any) (map[string]any, bool) {
+	props, ok := schema["properties"].(map[string]any)
+	return props, ok
+}
+
+// schemaClaims maps identity data fields to standard OIDC claim names using
+// x-claim-mapping annotations from the schema. Inline version to avoid
+// import cycle with login package.
+func schemaClaims(schemaJSON string, data map[string]any) map[string]any {
+	var s struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schemaJSON), &s); err != nil {
+		return nil
+	}
+
+	// Fallback: well-known field name → OIDC claim name
+	knownClaims := map[string]string{
+		"email": "email", "phone": "phone_number", "display_name": "name",
+		"first_name": "given_name", "last_name": "family_name",
+		"locale": "locale", "timezone": "zoneinfo", "avatar_url": "picture",
+	}
+
+	result := make(map[string]any)
+	for field, def := range s.Properties {
+		val, ok := data[field]
+		if !ok || val == nil || val == "" {
+			continue
+		}
+		claimName := ""
+		if mapping, ok := def["x-claim-mapping"].(string); ok && strings.HasPrefix(mapping, "claims.") {
+			// Extract "claims.email" → "email"
+			rest := mapping[7:]
+			end := 0
+			for end < len(rest) {
+				c := rest[end]
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+					end++
+				} else {
+					break
+				}
+			}
+			if end > 0 {
+				claimName = rest[:end]
+			}
+		}
+		if claimName == "" {
+			claimName = knownClaims[field]
+		}
+		if claimName != "" {
+			result[claimName] = val
+		}
+	}
+	return result
+}
+
+// previewSchema dry-runs claim mapping against a specific entity.
+func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
+	schemaID := r.PathValue("id")
+
+	var req struct {
+		EntityID string `json:"entity_id"` // identity ID or identifier
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.EntityID == "" {
+		writeError(w, http.StatusBadRequest, "entity_id is required")
+		return
+	}
+
+	// Load the draft schema.
+	var draftSchemaStr string
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT schema FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&draftSchemaStr)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "schema not found")
+		return
+	}
+
+	// Load entity data.
+	var dataStr, currentSchemaStr sql.NullString
+	var identifier string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
+		 FROM identities i
+		 LEFT JOIN schemas sc ON i.schema_id = sc.id
+		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
+		req.EntityID, req.EntityID,
+	).Scan(&identifier, &dataStr, &currentSchemaStr)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "entity not found")
+		return
+	}
+
+	var data map[string]any
+	if dataStr.Valid {
+		json.Unmarshal([]byte(dataStr.String), &data)
+	}
+	if data == nil {
+		data = make(map[string]any)
+	}
+
+	// Current claims (with existing schema).
+	currentClaims := schemaClaims(currentSchemaStr.String, data)
+
+	// Draft claims (with new schema).
+	draftClaims := schemaClaims(draftSchemaStr, data)
+
+	// Build diff.
+	allClaims := make(map[string]bool)
+	for k := range currentClaims {
+		allClaims[k] = true
+	}
+	for k := range draftClaims {
+		allClaims[k] = true
+	}
+	var claimChanges []map[string]any
+	for claim := range allClaims {
+		old := currentClaims[claim]
+		new_ := draftClaims[claim]
+		if fmt.Sprint(old) != fmt.Sprint(new_) {
+			claimChanges = append(claimChanges, map[string]any{
+				"claim": claim, "current": old, "draft": new_,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entity":         identifier,
+		"current_claims": currentClaims,
+		"draft_claims":   draftClaims,
+		"changes":        claimChanges,
+	})
 }
 
 // getMetaSchema returns the canonical ZITADEL identity schema meta-schema.

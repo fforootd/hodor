@@ -210,10 +210,13 @@ CREATE TABLE IF NOT EXISTS schemas (
     schema     TEXT NOT NULL,
     version    INTEGER DEFAULT 1,
     is_default BOOLEAN DEFAULT false,
+    message    TEXT DEFAULT '',
+    created_by TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id);
 CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default);
+CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
 
 -- ============================================================================
 -- ENTITY INDEXES — promoted fields for O(log N) lookups
