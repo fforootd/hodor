@@ -7,6 +7,7 @@ const router = createRouter({
     { path: '/identities', name: 'identities', component: () => import('./views/IdentityListView.vue') },
     { path: '/identities/new', name: 'identity-create', component: () => import('./views/IdentityCreateView.vue') },
     { path: '/identities/:id', name: 'identity-detail', component: () => import('./views/IdentityDetailView.vue') },
+    { path: '/applications', name: 'applications', component: () => import('./views/ApplicationListView.vue') },
     { path: '/schemas', name: 'schemas', component: () => import('./views/SchemaListView.vue') },
     { path: '/schemas/:id', name: 'schema-detail', component: () => import('./views/SchemaDetailView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionListView.vue') },

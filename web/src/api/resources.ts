@@ -10,6 +10,7 @@ export interface Identity {
   schema_name?: string
   profile: Record<string, unknown>
   metadata: Record<string, unknown>
+  data?: Record<string, unknown> | string
   capabilities: string[]
   created_at: string
   updated_at: string

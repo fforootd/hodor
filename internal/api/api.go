@@ -97,6 +97,7 @@ type IdentityResponse struct {
 	State        string   `json:"state"`
 	Profile      any      `json:"profile,omitempty"`
 	Metadata     any      `json:"metadata,omitempty"`
+	Data         any      `json:"data,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	CreatedAt    string   `json:"created_at"`
 	UpdatedAt    string   `json:"updated_at"`
@@ -231,10 +232,24 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 		cursor, _ = strconv.ParseInt(c, 10, 64)
 	}
 
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at
-		 FROM identities WHERE id > ? ORDER BY id ASC LIMIT ?`,
-		cursor, limit+1)
+	// Optional schema_type filter (e.g. ?schema_type=app for OIDC clients).
+	schemaType := r.URL.Query().Get("schema_type")
+
+	var rows *sql.Rows
+	var err error
+	if schemaType != "" {
+		rows, err = a.db.SQL().QueryContext(r.Context(),
+			`SELECT i.id, i.org_id, i.identifier, i.display_name, i.state, i.profile, i.metadata, i.data, i.created_at, i.updated_at
+			 FROM identities i
+			 JOIN schemas s ON i.schema_id = s.id
+			 WHERE s.type = ? AND i.id > ? ORDER BY i.id ASC LIMIT ?`,
+			schemaType, cursor, limit+1)
+	} else {
+		rows, err = a.db.SQL().QueryContext(r.Context(),
+			`SELECT id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at
+			 FROM identities WHERE id > ? ORDER BY id ASC LIMIT ?`,
+			cursor, limit+1)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -627,12 +642,12 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse, error) {
 	var resp IdentityResponse
-	var displayName, profileStr, metaStr sql.NullString
+	var displayName, profileStr, metaStr, dataStr sql.NullString
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at
+		`SELECT id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at
 		 FROM identities WHERE id = ?`, identityID,
 	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
-		&profileStr, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
+		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		return resp, err
 	}
@@ -644,6 +659,9 @@ func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse,
 	}
 	if metaStr.Valid {
 		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)
+	}
+	if dataStr.Valid {
+		json.Unmarshal([]byte(dataStr.String), &resp.Data)
 	}
 	resp.Capabilities = a.loadCapabilities(r, identityID)
 	return resp, nil
@@ -670,9 +688,9 @@ func (a *API) loadCapabilities(r *http.Request, identityID int64) []string {
 
 func scanIdentityRow(rows *sql.Rows) (IdentityResponse, error) {
 	var resp IdentityResponse
-	var displayName, profileStr, metaStr sql.NullString
+	var displayName, profileStr, metaStr, dataStr sql.NullString
 	err := rows.Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
-		&profileStr, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
+		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		return resp, err
 	}
@@ -684,6 +702,9 @@ func scanIdentityRow(rows *sql.Rows) (IdentityResponse, error) {
 	}
 	if metaStr.Valid {
 		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)
+	}
+	if dataStr.Valid {
+		json.Unmarshal([]byte(dataStr.String), &resp.Data)
 	}
 	return resp, nil
 }
