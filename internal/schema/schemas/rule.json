@@ -1,0 +1,82 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Rules",
+    "singular": "Rule",
+    "group": "configure",
+    "path": "rules",
+    "icon": "⚡"
+  },
+  "x-storage": "entities",
+  "description": "Engine pipeline rule — an expr program bound to a pipeline stage.",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Rule display name"
+    },
+    "description": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "on_request",
+        "pre_auth",
+        "auth",
+        "post_auth",
+        "on_token",
+        "on_event"
+      ],
+      "description": "Pipeline stage"
+    },
+    "priority": {
+      "type": "integer",
+      "default": 50,
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Execution order within stage (lower = earlier)"
+    },
+    "condition": {
+      "type": "string",
+      "default": "true",
+      "description": "Expr condition — rule only fires if this evaluates to true"
+    },
+    "engine": {
+      "type": "string",
+      "enum": [
+        "expr",
+        "rate_limit",
+        "captcha",
+        "risk",
+        "webhook",
+        "fga",
+        "built-in"
+      ],
+      "description": "Engine type"
+    },
+    "config": {
+      "type": "object",
+      "description": "Engine-specific configuration"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "default": 5000,
+      "description": "Max execution time in milliseconds"
+    },
+    "fail_open": {
+      "type": "boolean",
+      "default": false,
+      "description": "Allow request if rule errors (true) or block (false)"
+    }
+  },
+  "required": [
+    "display_name",
+    "stage",
+    "engine"
+  ]
+}

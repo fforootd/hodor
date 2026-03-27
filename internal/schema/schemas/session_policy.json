@@ -1,0 +1,51 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Session Policy",
+    "singular": "Session Policy",
+    "group": "settings",
+    "path": "settings/session-policy",
+    "icon": "⏳"
+  },
+  "x-settings": {
+    "hierarchy": [
+      "instance",
+      "org"
+    ],
+    "merge_strategy": "deep_merge",
+    "inherit": true
+  },
+  "properties": {
+    "max_lifetime": {
+      "type": "string",
+      "default": "12h",
+      "description": "Maximum session duration"
+    },
+    "idle_timeout": {
+      "type": "string",
+      "default": "30m",
+      "description": "Timeout after last activity"
+    },
+    "renew_on_activity": {
+      "type": "boolean",
+      "default": true,
+      "description": "Reset idle timer on each request"
+    },
+    "single_session": {
+      "type": "boolean",
+      "default": false,
+      "description": "Only allow one active session per user"
+    },
+    "bind_ip": {
+      "type": "boolean",
+      "default": false,
+      "description": "Invalidate session if IP changes"
+    },
+    "bind_user_agent": {
+      "type": "boolean",
+      "default": false,
+      "description": "Invalidate session if user agent changes"
+    }
+  }
+}

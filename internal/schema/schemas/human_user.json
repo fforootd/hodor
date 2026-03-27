@@ -1,20 +1,56 @@
 {
+  "$version": "1.0",
   "type": "object",
   "x-display": {
-    "alias": "Users", "singular": "User",
-    "group": "identities", "group_label": "Identities",
-    "path": "users", "icon": "👤", "sort_order": 1
+    "alias": "Users",
+    "singular": "User",
+    "group": "identities",
+    "group_label": "Identities",
+    "path": "users",
+    "icon": "👤",
+    "sort_order": 1
   },
   "x-storage": "entities",
-  "x-engine-claim-mapping": {"engine": "expr", "direction": "outbound"},
-  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner", "viewer"]},
-  "x-engine-login": {"engine": "built-in"},
+  "x-engine-claim-mapping": {
+    "engine": "expr",
+    "direction": "outbound"
+  },
+  "x-engine-authorization": {
+    "engine": "fga",
+    "relations": [
+      "member",
+      "owner",
+      "viewer"
+    ]
+  },
+  "x-engine-login": {
+    "engine": "built-in"
+  },
   "x-auth-methods": {
-    "password":    {"enabled": true,  "interactive": true,  "position": 1},
-    "passkey":     {"enabled": false, "interactive": true,  "position": 0},
-    "magic_link":  {"enabled": true,  "interactive": true,  "position": 2},
-    "sso":         {"enabled": true,  "interactive": true,  "position": 3},
-    "pat":         {"enabled": false, "interactive": false}
+    "password": {
+      "enabled": true,
+      "interactive": true,
+      "position": 1
+    },
+    "passkey": {
+      "enabled": false,
+      "interactive": true,
+      "position": 0
+    },
+    "magic_link": {
+      "enabled": true,
+      "interactive": true,
+      "position": 2
+    },
+    "sso": {
+      "enabled": true,
+      "interactive": true,
+      "position": 3
+    },
+    "pat": {
+      "enabled": false,
+      "interactive": false
+    }
   },
   "x-login": {
     "preset": "identifier_first",
@@ -23,16 +59,65 @@
   },
   "x-branding": {
     "heading": "Welcome back",
-    "colors": {"primary": "#6366f1"}
+    "colors": {
+      "primary": "#6366f1"
+    }
   },
   "properties": {
-    "display_name":  {"type": "string", "description": "Full name shown in UI", "x-user-editable": true, "x-claim-mapping": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"},
-    "email":         {"type": "string", "format": "email", "x-user-editable": true, "x-claim-mapping": "claims.email", "x-auth": {"identifier": true, "verification": "email", "recovery": "email"}},
-    "phone":         {"type": "string", "x-user-editable": true, "x-sensitive": true, "x-claim-mapping": "claims.phone_number ?? ''", "x-auth": {"identifier": true, "mfa": "sms"}},
-    "locale":        {"type": "string", "description": "BCP-47 language tag, e.g. en-US", "x-user-editable": true, "x-claim-mapping": "claims.locale ?? ''"},
-    "timezone":      {"type": "string", "description": "IANA timezone, e.g. America/New_York", "x-user-editable": true, "x-claim-mapping": "claims.zoneinfo ?? ''"},
-    "avatar_url":    {"type": "string", "format": "uri", "x-user-editable": true, "x-claim-mapping": "claims.picture ?? ''"},
-    "metadata":      {"type": "object", "description": "Arbitrary key-value pairs", "x-user-editable": false, "x-hidden": true, "x-source": "admin"}
+    "display_name": {
+      "type": "string",
+      "description": "Full name shown in UI",
+      "x-user-editable": true,
+      "x-claim-mapping": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "x-user-editable": true,
+      "x-claim-mapping": "claims.email",
+      "x-auth": {
+        "identifier": true,
+        "verification": "email",
+        "recovery": "email"
+      }
+    },
+    "phone": {
+      "type": "string",
+      "x-user-editable": true,
+      "x-sensitive": true,
+      "x-claim-mapping": "claims.phone_number ?? ''",
+      "x-auth": {
+        "identifier": true,
+        "mfa": "sms"
+      }
+    },
+    "locale": {
+      "type": "string",
+      "description": "BCP-47 language tag, e.g. en-US",
+      "x-user-editable": true,
+      "x-claim-mapping": "claims.locale ?? ''"
+    },
+    "timezone": {
+      "type": "string",
+      "description": "IANA timezone, e.g. America/New_York",
+      "x-user-editable": true,
+      "x-claim-mapping": "claims.zoneinfo ?? ''"
+    },
+    "avatar_url": {
+      "type": "string",
+      "format": "uri",
+      "x-user-editable": true,
+      "x-claim-mapping": "claims.picture ?? ''"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary key-value pairs",
+      "x-user-editable": false,
+      "x-hidden": true,
+      "x-source": "admin"
+    }
   },
-  "required": ["display_name"]
+  "required": [
+    "display_name"
+  ]
 }

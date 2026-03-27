@@ -1,0 +1,64 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Events",
+    "singular": "Event",
+    "group": "observability",
+    "path": "events",
+    "icon": "📋"
+  },
+  "x-storage": "dedicated",
+  "description": "Audit event recorded in the event stream. Read-only.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "readOnly": true
+    },
+    "type": {
+      "type": "string",
+      "description": "Event type (e.g., entity.created, auth.login)"
+    },
+    "aggregate_type": {
+      "type": "string",
+      "description": "Aggregate this event belongs to (e.g., user, org, app)"
+    },
+    "aggregate_id": {
+      "type": "string",
+      "description": "ID of the aggregate"
+    },
+    "org_id": {
+      "type": "integer"
+    },
+    "actor_id": {
+      "type": "string",
+      "description": "Identity that caused the event"
+    },
+    "actor_type": {
+      "type": "string",
+      "enum": [
+        "human",
+        "service",
+        "system"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-specific data"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Contextual metadata (IP, user-agent, geo)"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "readOnly": true
+    }
+  },
+  "required": [
+    "type",
+    "aggregate_type",
+    "aggregate_id"
+  ]
+}

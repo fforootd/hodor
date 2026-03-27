@@ -1,0 +1,24 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Providers", "singular": "Provider",
+    "group": "configure", "path": "providers", "icon": "🔗"
+  },
+  "x-storage": "dedicated",
+  "description": "External identity provider (OIDC, SAML, social login).",
+  "properties": {
+    "display_name":  { "type": "string", "description": "Provider display name (shown on login)" },
+    "protocol":      { "type": "string", "enum": ["oidc", "saml", "oauth2", "ldap"], "description": "Protocol type" },
+    "issuer":        { "type": "string", "format": "uri", "description": "Issuer URL (OIDC discovery)" },
+    "client_id":     { "type": "string" },
+    "client_secret": { "type": "string", "x-sensitive": true },
+    "scopes":        { "type": "array", "items": { "type": "string" }, "default": ["openid", "profile", "email"] },
+    "claim_mapping": { "type": "object", "description": "Map external claims to ZITADEL fields" },
+    "auto_register": { "type": "boolean", "default": false, "description": "Auto-create user on first login" },
+    "auto_link":     { "type": "string", "enum": ["email", "username", "none"], "default": "email", "description": "Auto-link to existing user by field" },
+    "logo_url":      { "type": "string", "format": "uri" },
+    "enabled":       { "type": "boolean", "default": true }
+  },
+  "required": ["display_name", "protocol"]
+}

@@ -1,0 +1,68 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Identifier Policy",
+    "singular": "Identifier Policy",
+    "group": "settings",
+    "path": "settings/identifier-policy",
+    "icon": "🆔"
+  },
+  "x-settings": {
+    "hierarchy": [
+      "instance",
+      "org"
+    ],
+    "merge_strategy": "deep_merge",
+    "inherit": true
+  },
+  "properties": {
+    "format": {
+      "type": "string",
+      "enum": [
+        "email",
+        "phone",
+        "username",
+        "any"
+      ],
+      "default": "email",
+      "description": "Required identifier format"
+    },
+    "pattern": {
+      "type": "string",
+      "default": ".*",
+      "description": "Regexp pattern for custom validation"
+    },
+    "pattern_message": {
+      "type": "string",
+      "description": "Human-readable error when pattern fails"
+    },
+    "min_length": {
+      "type": "integer",
+      "default": 3,
+      "minimum": 1
+    },
+    "max_length": {
+      "type": "integer",
+      "default": 255,
+      "maximum": 1024
+    },
+    "blocked_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Regexp patterns that identifiers must NOT match"
+    },
+    "case_sensitive": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether identifiers are case-sensitive"
+    },
+    "allow_change": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether users can change their identifier"
+    }
+  }
+}

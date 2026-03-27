@@ -1,0 +1,61 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Rate Limit",
+    "singular": "Rate Limit",
+    "group": "settings",
+    "path": "settings/rate-limit",
+    "icon": "⏱️"
+  },
+  "x-settings": {
+    "hierarchy": [
+      "instance",
+      "org",
+      "app"
+    ],
+    "merge_strategy": "deep_merge",
+    "inherit": true
+  },
+  "properties": {
+    "requests_per_minute": {
+      "type": "integer",
+      "default": 1000,
+      "minimum": 0,
+      "description": "Max requests per minute (0 = unlimited)"
+    },
+    "burst": {
+      "type": "integer",
+      "default": 50,
+      "minimum": 1,
+      "description": "Max burst size"
+    },
+    "by_ip": {
+      "type": "boolean",
+      "default": true,
+      "description": "Rate limit per IP address"
+    },
+    "by_user": {
+      "type": "boolean",
+      "default": false,
+      "description": "Rate limit per authenticated user"
+    },
+    "by_api_key": {
+      "type": "boolean",
+      "default": true,
+      "description": "Rate limit per API key/PAT"
+    },
+    "whitelist_ips": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IPs exempt from rate limiting"
+    },
+    "custom_headers": {
+      "type": "boolean",
+      "default": true,
+      "description": "Include X-RateLimit-* response headers"
+    }
+  }
+}

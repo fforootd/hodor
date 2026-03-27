@@ -1,0 +1,78 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Jobs",
+    "singular": "Job",
+    "group": "observability",
+    "path": "jobs",
+    "icon": "⚡"
+  },
+  "x-storage": "dedicated",
+  "description": "Background job execution state.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "readOnly": true
+    },
+    "type": {
+      "type": "string",
+      "description": "Job type (e.g., send_email, sync_scim, webhook_delivery)"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "default": "pending"
+    },
+    "org_id": {
+      "type": "integer"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Job-specific input data"
+    },
+    "result": {
+      "type": "object",
+      "description": "Job output after completion"
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if failed"
+    },
+    "attempts": {
+      "type": "integer",
+      "default": 0,
+      "description": "Number of execution attempts"
+    },
+    "max_attempts": {
+      "type": "integer",
+      "default": 3
+    },
+    "scheduled_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "readOnly": true
+    }
+  },
+  "required": [
+    "type"
+  ]
+}

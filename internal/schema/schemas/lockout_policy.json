@@ -1,0 +1,47 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Lockout Policy",
+    "singular": "Lockout Policy",
+    "group": "settings",
+    "path": "settings/lockout-policy",
+    "icon": "🔐"
+  },
+  "x-settings": {
+    "hierarchy": [
+      "instance",
+      "org"
+    ],
+    "merge_strategy": "deep_merge",
+    "inherit": true
+  },
+  "properties": {
+    "max_attempts": {
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "description": "Failed attempts before lockout"
+    },
+    "lockout_duration": {
+      "type": "string",
+      "default": "15m",
+      "description": "Duration of lockout (e.g., 15m, 1h, 24h)"
+    },
+    "permanent_lockout": {
+      "type": "boolean",
+      "default": false,
+      "description": "Lock permanently until admin unlock"
+    },
+    "notify_user": {
+      "type": "boolean",
+      "default": true,
+      "description": "Send notification on lockout"
+    },
+    "notify_admin": {
+      "type": "boolean",
+      "default": false,
+      "description": "Notify org admin on lockout"
+    }
+  }
+}

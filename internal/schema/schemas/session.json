@@ -1,0 +1,90 @@
+{
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Sessions",
+    "singular": "Session",
+    "group": "observability",
+    "path": "sessions",
+    "icon": "🔑"
+  },
+  "x-storage": "dedicated",
+  "description": "Active user session. Ephemeral, high-write.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "readOnly": true
+    },
+    "entity_id": {
+      "type": "string",
+      "description": "Authenticated identity"
+    },
+    "org_id": {
+      "type": "integer"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "revoked"
+      ],
+      "default": "active"
+    },
+    "auth_method": {
+      "type": "string",
+      "enum": [
+        "password",
+        "passkey",
+        "magic_link",
+        "sso",
+        "pat",
+        "client_secret"
+      ],
+      "description": "How the session was created"
+    },
+    "mfa_verified": {
+      "type": "boolean",
+      "default": false
+    },
+    "ip_address": {
+      "type": "string"
+    },
+    "user_agent": {
+      "type": "string"
+    },
+    "geo": {
+      "type": "object",
+      "properties": {
+        "country": {
+          "type": "string"
+        },
+        "city": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "readOnly": true
+    },
+    "last_active": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "entity_id"
+  ]
+}

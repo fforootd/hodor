@@ -15,6 +15,7 @@
   "x-catalog": {
     "human_user": {
       "schema_file": "schemas/human_user.json",
+      "default_version": "1.0",
       "group": "identities",
       "alias": "Users",
       "singular": "User",
@@ -27,6 +28,7 @@
     },
     "service_user": {
       "schema_file": "schemas/service_user.json",
+      "default_version": "1.0",
       "group": "identities",
       "alias": "Service Accounts",
       "singular": "Service Account",
@@ -38,6 +40,7 @@
     },
     "ai_agent": {
       "schema_file": "schemas/ai_agent.json",
+      "default_version": "1.0",
       "group": "identities",
       "alias": "AI Agents",
       "singular": "AI Agent",
@@ -49,6 +52,7 @@
     },
     "app": {
       "schema_file": "schemas/app.json",
+      "default_version": "1.0",
       "group": "applications",
       "alias": "OIDC Clients",
       "singular": "OIDC Client",
@@ -58,7 +62,21 @@
       "storage": "entities",
       "components": ["x-oidc", "x-engine-claim-mapping", "x-engine-authorization"]
     },
+    "rule": {
+      "schema_file": "schemas/rule.json",
+      "default_version": "1.0",
+      "group": "configure",
+      "alias": "Rules",
+      "singular": "Rule",
+      "path": "rules",
+      "icon": "⚡",
+      "sort_order": 2,
+      "storage": "entities",
+      "components": ["x-rule"]
+    },
     "provider": {
+      "schema_file": "schemas/provider.json",
+      "default_version": "1.0",
       "group": "configure",
       "alias": "Providers",
       "singular": "Provider",
@@ -69,6 +87,8 @@
       "route": "/providers"
     },
     "session": {
+      "schema_file": "schemas/session.json",
+      "default_version": "1.0",
       "group": "observability",
       "alias": "Sessions",
       "singular": "Session",
@@ -79,6 +99,8 @@
       "route": "/sessions"
     },
     "event": {
+      "schema_file": "schemas/event.json",
+      "default_version": "1.0",
       "group": "observability",
       "alias": "Events",
       "singular": "Event",
@@ -89,6 +111,8 @@
       "route": "/events"
     },
     "job": {
+      "schema_file": "schemas/job.json",
+      "default_version": "1.0",
       "group": "observability",
       "alias": "Jobs",
       "singular": "Job",
@@ -97,6 +121,90 @@
       "sort_order": 3,
       "storage": "dedicated",
       "route": "/jobs"
+    },
+    "password_policy": {
+      "schema_file": "schemas/password_policy.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Password Policy",
+      "singular": "Password Policy",
+      "path": "settings/password-policy",
+      "icon": "🔒",
+      "sort_order": 1,
+      "storage": "settings",
+      "nav": "hidden"
+    },
+    "identifier_policy": {
+      "schema_file": "schemas/identifier_policy.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Identifier Policy",
+      "singular": "Identifier Policy",
+      "path": "settings/identifier-policy",
+      "icon": "🆔",
+      "sort_order": 2,
+      "storage": "settings",
+      "nav": "hidden"
+    },
+    "login_policy": {
+      "schema_file": "schemas/login_policy.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Login Policy",
+      "singular": "Login Policy",
+      "path": "settings/login-policy",
+      "icon": "🚪",
+      "sort_order": 3,
+      "storage": "settings",
+      "nav": "hidden"
+    },
+    "lockout_policy": {
+      "schema_file": "schemas/lockout_policy.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Lockout Policy",
+      "singular": "Lockout Policy",
+      "path": "settings/lockout-policy",
+      "icon": "🔐",
+      "sort_order": 4,
+      "storage": "settings",
+      "nav": "hidden"
+    },
+    "rate_limit": {
+      "schema_file": "schemas/rate_limit.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Rate Limit",
+      "singular": "Rate Limit",
+      "path": "settings/rate-limit",
+      "icon": "⏱️",
+      "sort_order": 5,
+      "storage": "settings",
+      "nav": "hidden"
+    },
+    "session_policy": {
+      "schema_file": "schemas/session_policy.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Session Policy",
+      "singular": "Session Policy",
+      "path": "settings/session-policy",
+      "icon": "⏳",
+      "sort_order": 6,
+      "storage": "settings",
+      "nav": "hidden"
+    },
+    "notification": {
+      "schema_file": "schemas/notification.json",
+      "default_version": "1.0",
+      "group": "settings",
+      "alias": "Notification",
+      "singular": "Notification Settings",
+      "path": "settings/notification",
+      "icon": "🔔",
+      "sort_order": 7,
+      "storage": "settings",
+      "nav": "hidden"
     },
     "schema": {
       "group": "system",
@@ -111,6 +219,7 @@
     },
     "org": {
       "schema_file": "schemas/org.json",
+      "default_version": "1.0",
       "group": "system",
       "alias": "Organizations",
       "singular": "Organization",
