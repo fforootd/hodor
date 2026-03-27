@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "x-display": {
+    "alias": "Service Accounts", "singular": "Service Account",
+    "group": "identities", "group_label": "Identities",
+    "path": "service-accounts", "icon": "🤖", "sort_order": 2
+  },
+  "x-storage": "entities",
+  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner"]},
+  "x-auth-methods": {
+    "pat":         {"enabled": true,  "interactive": false, "max_tokens": 10},
+    "api_key":     {"enabled": true,  "interactive": false},
+    "password":    {"enabled": true,  "interactive": true,  "position": 1}
+  },
+  "properties": {
+    "display_name":  {"type": "string", "description": "Service account name"},
+    "description":   {"type": "string", "description": "What this service does"},
+    "owner":         {"type": "string", "description": "Team or person responsible"},
+    "api_scopes":    {"type": "array", "items": {"type": "string"}, "description": "Allowed API scopes"},
+    "rate_limit":    {"type": "integer", "description": "Requests per minute, 0 = unlimited"},
+    "expires_at":    {"type": "string", "format": "date-time", "description": "Optional expiry"},
+    "metadata":      {"type": "object"}
+  },
+  "required": ["display_name"]
+}

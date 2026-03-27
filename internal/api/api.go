@@ -86,46 +86,30 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	a.registerAliasRoutes(mux)
 }
 
-// registerAliasRoutes reads all schemas from the DB and registers
-// /v1/{path} aliases from x-display.path annotations.
+// registerAliasRoutes reads the x-catalog from the meta schema and registers
+// /v1/{path} aliases for entity types.
 func (a *API) registerAliasRoutes(mux *http.ServeMux) {
-	rows, err := a.db.SQL().Query(`SELECT type, schema FROM schemas WHERE is_default = true`)
+	catalog, err := schema.Catalog()
 	if err != nil {
-		log.Printf("[alias] failed to query schemas: %v", err)
+		log.Printf("[alias] failed to load catalog: %v", err)
 		return
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var schemaType, schemaJSON string
-		if err := rows.Scan(&schemaType, &schemaJSON); err != nil {
-			continue
-		}
-		var parsed map[string]any
-		if json.Unmarshal([]byte(schemaJSON), &parsed) != nil {
-			continue
-		}
-		display, ok := parsed["x-display"].(map[string]any)
-		if !ok {
-			continue
-		}
-		path, ok := display["path"].(string)
-		if !ok || path == "" {
-			continue
+	for typeName, entry := range catalog {
+		if entry.Storage != "entities" || entry.Path == "" {
+			continue // Skip system views (sessions, events, jobs).
 		}
 
-		// Capture for closure
-		st := schemaType
-		prefix := "/v1/" + path
+		st := typeName
+		prefix := "/v1/" + entry.Path
 
-		// Alias handlers that inject schema_type into the query
 		mux.HandleFunc("GET "+prefix, a.aliasHandler(st, a.listIdentities))
 		mux.HandleFunc("POST "+prefix, a.aliasHandler(st, a.createIdentity))
 		mux.HandleFunc("GET "+prefix+"/{id}", a.getIdentity)
 		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
 		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
 
-		log.Printf("[alias] registered /v1/%s → entities (type=%s)", path, st)
+		log.Printf("[alias] registered /v1/%s → entities (type=%s)", entry.Path, st)
 	}
 }
 

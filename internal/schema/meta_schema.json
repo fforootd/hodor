@@ -1,8 +1,128 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://zitadel.com/schemas/identity-meta-schema",
-  "title": "ZITADEL Identity Schema Meta-Schema",
-  "description": "Validates x-* annotations on identity schemas: x-auth-methods, x-login, x-branding, and per-field x-auth.",
+  "title": "ZITADEL Entity Meta-Schema",
+  "description": "Catalog of entity types, nav groups, and annotation validation.",
+
+  "x-groups": {
+    "identities":    { "label": "Identities",    "icon": "👥", "sort_order": 1 },
+    "applications":  { "label": "Applications",  "icon": "📱", "sort_order": 2 },
+    "configure":     { "label": "Configure",     "icon": "⚙️", "sort_order": 3 },
+    "observability": { "label": "Observability", "icon": "📊", "sort_order": 4 },
+    "system":        { "label": "System",        "icon": "🔧", "sort_order": 5, "nav": "hidden" }
+  },
+
+  "x-catalog": {
+    "human_user": {
+      "schema_file": "schemas/human_user.json",
+      "group": "identities",
+      "alias": "Users",
+      "singular": "User",
+      "path": "users",
+      "icon": "👤",
+      "sort_order": 1,
+      "required": true,
+      "storage": "entities",
+      "components": ["x-login", "x-branding", "x-auth-methods", "x-engine-claim-mapping", "x-engine-authorization"]
+    },
+    "service_user": {
+      "schema_file": "schemas/service_user.json",
+      "group": "identities",
+      "alias": "Service Accounts",
+      "singular": "Service Account",
+      "path": "service-accounts",
+      "icon": "🤖",
+      "sort_order": 2,
+      "storage": "entities",
+      "components": ["x-auth-methods", "x-engine-authorization"]
+    },
+    "ai_agent": {
+      "schema_file": "schemas/ai_agent.json",
+      "group": "identities",
+      "alias": "AI Agents",
+      "singular": "AI Agent",
+      "path": "ai-agents",
+      "icon": "🧠",
+      "sort_order": 3,
+      "storage": "entities",
+      "components": ["x-auth-methods", "x-engine-authorization"]
+    },
+    "app": {
+      "schema_file": "schemas/app.json",
+      "group": "applications",
+      "alias": "OIDC Clients",
+      "singular": "OIDC Client",
+      "path": "apps",
+      "icon": "📱",
+      "sort_order": 1,
+      "storage": "entities",
+      "components": ["x-oidc", "x-engine-claim-mapping", "x-engine-authorization"]
+    },
+    "provider": {
+      "group": "configure",
+      "alias": "Providers",
+      "singular": "Provider",
+      "path": "providers",
+      "icon": "🔗",
+      "sort_order": 1,
+      "storage": "dedicated",
+      "route": "/providers"
+    },
+    "session": {
+      "group": "observability",
+      "alias": "Sessions",
+      "singular": "Session",
+      "path": "sessions",
+      "icon": "🔑",
+      "sort_order": 1,
+      "storage": "dedicated",
+      "route": "/sessions"
+    },
+    "event": {
+      "group": "observability",
+      "alias": "Events",
+      "singular": "Event",
+      "path": "events",
+      "icon": "📋",
+      "sort_order": 2,
+      "storage": "dedicated",
+      "route": "/events"
+    },
+    "job": {
+      "group": "observability",
+      "alias": "Jobs",
+      "singular": "Job",
+      "path": "jobs",
+      "icon": "⚡",
+      "sort_order": 3,
+      "storage": "dedicated",
+      "route": "/jobs"
+    },
+    "schema": {
+      "group": "system",
+      "alias": "Schemas",
+      "singular": "Schema",
+      "path": "schemas",
+      "icon": "📐",
+      "sort_order": 1,
+      "storage": "dedicated",
+      "route": "/schemas",
+      "nav": "visible"
+    },
+    "org": {
+      "schema_file": "schemas/org.json",
+      "group": "system",
+      "alias": "Organizations",
+      "singular": "Organization",
+      "path": "orgs",
+      "icon": "🏢",
+      "sort_order": 2,
+      "storage": "entities",
+      "nav": "hidden",
+      "components": ["x-branding", "x-login", "x-engine-authorization"]
+    }
+  },
+
   "type": "object",
   "properties": {
     "x-auth-methods": {
@@ -12,7 +132,7 @@
         "$ref": "#/$defs/AuthMethodEntry"
       },
       "propertyNames": {
-        "enum": ["password", "passkey", "magic_link", "sso", "pat", "api_key", "client_cert"]
+        "enum": ["password", "passkey", "magic_link", "sso", "pat", "api_key", "client_cert", "client_secret"]
       }
     },
     "x-login": {

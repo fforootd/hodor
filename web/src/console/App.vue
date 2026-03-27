@@ -10,51 +10,18 @@
           <span class="nav-icon">◆</span> Dashboard
         </router-link>
 
-        <!-- IDENTITIES section (dynamic from schemas) -->
-        <div v-if="identityTypes.length" class="nav-section">Identities</div>
-        <router-link
-          v-for="st in identityTypes" :key="st.type"
-          :to="`/s/${st.type}`"
-          class="nav-item"
-          :class="{ active: $route.params.schemaType === st.type }"
-        >
-          <span class="nav-icon">◇</span> {{ st.label }}
-        </router-link>
-
-        <!-- APPLICATIONS section (dynamic from schemas) -->
-        <div v-if="appTypes.length" class="nav-section">Applications</div>
-        <router-link
-          v-for="st in appTypes" :key="st.type"
-          :to="`/s/${st.type}`"
-          class="nav-item"
-          :class="{ active: $route.params.schemaType === st.type }"
-        >
-          <span class="nav-icon">◇</span> {{ st.label }}
-        </router-link>
-
-        <!-- CONFIGURE section -->
-        <div class="nav-section">Configure</div>
-        <router-link to="/providers" class="nav-item" :class="{ active: $route.name === 'providers' }">
-          <span class="nav-icon">◇</span> Providers
-        </router-link>
-
-        <!-- OBSERVABILITY section -->
-        <div class="nav-section">Observability</div>
-        <router-link to="/sessions" class="nav-item" :class="{ active: $route.name === 'sessions' }">
-          <span class="nav-icon">◇</span> Sessions
-        </router-link>
-        <router-link to="/events" class="nav-item" :class="{ active: $route.name === 'events' }">
-          <span class="nav-icon">◇</span> Events
-        </router-link>
-        <router-link to="/jobs" class="nav-item" :class="{ active: $route.name === 'jobs' }">
-          <span class="nav-icon">◇</span> Jobs
-        </router-link>
-
-        <!-- SYSTEM section -->
-        <div class="nav-section">System</div>
-        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name === 'schemas' || $route.name === 'schema-detail' }">
-          <span class="nav-icon">◇</span> Schemas
-        </router-link>
+        <!-- Catalog-driven nav sections -->
+        <template v-for="group in navGroups" :key="group.key">
+          <div v-if="group.items.length" class="nav-section">{{ group.label }}</div>
+          <router-link
+            v-for="item in group.items" :key="item.type"
+            :to="item.route"
+            class="nav-item"
+            :class="{ active: isNavActive(item) }"
+          >
+            <span class="nav-icon">◇</span> {{ item.label }}
+          </router-link>
+        </template>
       </nav>
     </aside>
     <main class="content">
@@ -152,44 +119,61 @@ function selectOrg(org: OrgEntry | null) {
 const savedOrg = localStorage.getItem('zitadel_org')
 if (savedOrg) selectedOrgId.value = Number(savedOrg)
 
-// Types excluded from nav entirely (org = topbar switcher).
-const hiddenSchemaTypes = new Set(['org'])
+// Nav items built from the meta schema catalog
+interface NavItem { type: string; label: string; icon: string; route: string; sortOrder: number; storage: string }
+interface NavGroup { key: string; label: string; sortOrder: number; items: NavItem[] }
+const navGroups = ref<NavGroup[]>([])
 
-interface SchemaTypeEntry { type: string; label: string; icon: string; path: string; sortOrder: number }
-const identityTypes = ref<SchemaTypeEntry[]>([])
-const appTypes = ref<SchemaTypeEntry[]>([])
-
-function sortEntries(entries: SchemaTypeEntry[]): SchemaTypeEntry[] {
-  return entries.sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label))
+function isNavActive(item: NavItem): boolean {
+  const r = route
+  // Entity-backed types use /s/:type routes
+  if (item.storage === 'entities') return r.params.schemaType === item.type
+  // Dedicated views use named routes matching the type
+  return r.name === item.type || r.name === item.type + 's' || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
 }
 
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+
+  // Fetch the meta schema to build nav from x-catalog and x-groups.
   try {
-    const res = await fetch('/v1/schemas')
-    const data = await res.json()
-    const seen = new Set<string>()
-    const ids: SchemaTypeEntry[] = []
-    const apps: SchemaTypeEntry[] = []
-    for (const s of (data.items || [])) {
-      if (seen.has(s.type) || hiddenSchemaTypes.has(s.type)) continue
-      seen.add(s.type)
-      const display = s.schema?.['x-display'] || {}
-      const entry: SchemaTypeEntry = {
-        type: s.type,
-        label: display.alias || s.type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) + 's',
-        icon: display.icon || '◇',
-        path: display.path || s.type,
-        sortOrder: display.sort_order ?? 99,
-      }
-      if (display.group === 'applications') {
-        apps.push(entry)
-      } else {
-        ids.push(entry)
+    const res = await fetch('/v1/schemas/$meta')
+    const meta = await res.json()
+    const catalog = meta['x-catalog'] || {}
+    const groups = meta['x-groups'] || {}
+
+    // Build nav groups from catalog entries
+    const groupMap: Record<string, NavGroup> = {}
+    for (const [groupKey, groupDef] of Object.entries(groups) as [string, any][]) {
+      if (groupDef.nav === 'hidden') continue
+      groupMap[groupKey] = {
+        key: groupKey,
+        label: groupDef.label || groupKey,
+        sortOrder: groupDef.sort_order ?? 99,
+        items: [],
       }
     }
-    identityTypes.value = sortEntries(ids)
-    appTypes.value = sortEntries(apps)
+
+    for (const [typeName, entry] of Object.entries(catalog) as [string, any][]) {
+      if (entry.nav === 'hidden') continue
+      const groupKey = entry.group
+      if (!groupMap[groupKey]) continue
+
+      const item: NavItem = {
+        type: typeName,
+        label: entry.alias || typeName,
+        icon: entry.icon || '◇',
+        sortOrder: entry.sort_order ?? 99,
+        storage: entry.storage || 'entities',
+        route: entry.storage === 'entities' ? `/s/${typeName}` : (entry.route || `/${entry.path}`),
+      }
+      groupMap[groupKey].items.push(item)
+    }
+
+    // Sort groups and items within each group
+    navGroups.value = Object.values(groupMap)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(g => ({ ...g, items: g.items.sort((a, b) => a.sortOrder - b.sortOrder) }))
   } catch { /* ignore */ }
 
   // Fetch orgs for context switcher.
@@ -227,7 +211,8 @@ const pageTitle = computed(() => {
   // Dynamic schema-type pages: /s/:schemaType
   if (route.params.schemaType) {
     const st = route.params.schemaType as string
-    const entry = [...identityTypes.value, ...appTypes.value].find(e => e.type === st)
+    const allItems = navGroups.value.flatMap(g => g.items)
+    const entry = allItems.find(e => e.type === st)
     return entry?.label || st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's'
   }
   const titles: Record<string, string> = {

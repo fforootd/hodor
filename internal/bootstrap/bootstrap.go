@@ -10,209 +10,8 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/schema"
 )
-
-// Built-in entity schemas shipped with every ZITADEL instance.
-var builtinSchemas = []struct {
-	ID     string
-	Type   string
-	Schema string
-}{
-	{
-		ID:   "human_user_v1",
-		Type: "human_user",
-		Schema: `{
-  "type": "object",
-  "x-display": {
-    "alias": "Users", "singular": "User",
-    "group": "identities", "group_label": "Identities",
-    "path": "users", "icon": "👤", "sort_order": 1
-  },
-  "x-storage": "entities",
-  "x-engine-claim-mapping": {"engine": "expr", "direction": "outbound"},
-  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner", "viewer"]},
-  "x-engine-login": {"engine": "built-in"},
-  "x-auth-methods": {
-    "password":    {"enabled": true,  "interactive": true,  "position": 1},
-    "passkey":     {"enabled": false, "interactive": true,  "position": 0},
-    "magic_link":  {"enabled": true,  "interactive": true,  "position": 2},
-    "sso":         {"enabled": true,  "interactive": true,  "position": 3},
-    "pat":         {"enabled": false, "interactive": false}
-  },
-  "x-login": {
-    "preset": "identifier_first",
-    "mfa_required": false,
-    "registration_allowed": true
-  },
-  "x-branding": {
-    "heading": "Welcome back",
-    "colors": {"primary": "#6366f1"}
-  },
-  "properties": {
-    "display_name":  {"type": "string", "description": "Full name shown in UI", "x-user-editable": true, "x-claim-mapping": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"},
-    "email":         {"type": "string", "format": "email", "x-user-editable": true, "x-claim-mapping": "claims.email", "x-auth": {"identifier": true, "verification": "email", "recovery": "email"}},
-    "phone":         {"type": "string", "x-user-editable": true, "x-sensitive": true, "x-claim-mapping": "claims.phone_number ?? ''", "x-auth": {"identifier": true, "mfa": "sms"}},
-    "locale":        {"type": "string", "description": "BCP-47 language tag, e.g. en-US", "x-user-editable": true, "x-claim-mapping": "claims.locale ?? ''"},
-    "timezone":      {"type": "string", "description": "IANA timezone, e.g. America/New_York", "x-user-editable": true, "x-claim-mapping": "claims.zoneinfo ?? ''"},
-    "avatar_url":    {"type": "string", "format": "uri", "x-user-editable": true, "x-claim-mapping": "claims.picture ?? ''"},
-    "metadata":      {"type": "object", "description": "Arbitrary key-value pairs", "x-user-editable": false, "x-hidden": true, "x-source": "admin"}
-  },
-  "required": ["display_name"]
-}`,
-	},
-	{
-		ID:   "service_user_v1",
-		Type: "service_user",
-		Schema: `{
-  "type": "object",
-  "x-display": {
-    "alias": "Service Accounts", "singular": "Service Account",
-    "group": "identities", "group_label": "Identities",
-    "path": "service-accounts", "icon": "🤖", "sort_order": 2
-  },
-  "x-storage": "entities",
-  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner"]},
-  "x-auth-methods": {
-    "pat":         {"enabled": true,  "interactive": false, "max_tokens": 10},
-    "api_key":     {"enabled": true,  "interactive": false},
-    "password":    {"enabled": true,  "interactive": true,  "position": 1}
-  },
-  "properties": {
-    "display_name":  {"type": "string", "description": "Service account name"},
-    "description":   {"type": "string", "description": "What this service does"},
-    "owner":         {"type": "string", "description": "Team or person responsible"},
-    "api_scopes":    {"type": "array", "items": {"type": "string"}, "description": "Allowed API scopes"},
-    "rate_limit":    {"type": "integer", "description": "Requests per minute, 0 = unlimited"},
-    "expires_at":    {"type": "string", "format": "date-time", "description": "Optional expiry"},
-    "metadata":      {"type": "object"}
-  },
-  "required": ["display_name"]
-}`,
-	},
-	{
-		ID:   "app_v1",
-		Type: "app",
-		Schema: `{
-  "type": "object",
-  "x-display": {
-    "alias": "OIDC Clients", "singular": "OIDC Client",
-    "group": "applications", "group_label": "Applications",
-    "path": "apps", "icon": "📱", "sort_order": 1
-  },
-  "x-storage": "entities",
-  "x-engine-claim-mapping": {"engine": "expr", "direction": "outbound"},
-  "x-engine-authorization": {"engine": "fga", "relations": ["owner", "viewer"]},
-  "x-auth-methods": {
-    "client_secret": {"enabled": true, "interactive": false}
-  },
-  "x-oidc": {
-    "grant_types": ["authorization_code", "client_credentials", "refresh_token"],
-    "response_types": ["code"],
-    "token_endpoint_auth_method": "client_secret_post",
-    "id_token_signed_response_alg": "RS256"
-  },
-  "properties": {
-    "client_name":   {"type": "string", "description": "Application display name"},
-    "description":   {"type": "string"},
-    "app_type":      {"type": "string", "enum": ["web", "native", "spa", "m2m"], "description": "Application type"},
-    "redirect_uris": {"type": "array", "items": {"type": "string", "format": "uri"}, "description": "OAuth redirect URIs"},
-    "post_logout_redirect_uris": {"type": "array", "items": {"type": "string", "format": "uri"}},
-    "logo_uri":      {"type": "string", "format": "uri"},
-    "metadata":      {"type": "object"}
-  },
-  "required": ["client_name"]
-}`,
-	},
-	{
-		ID:   "ai_agent_v1",
-		Type: "ai_agent",
-		Schema: `{
-  "type": "object",
-  "x-display": {
-    "alias": "AI Agents", "singular": "AI Agent",
-    "group": "identities", "group_label": "Identities",
-    "path": "ai-agents", "icon": "🧠", "sort_order": 3
-  },
-  "x-storage": "entities",
-  "x-engine-authorization": {"engine": "fga", "relations": ["owner", "viewer"]},
-  "x-auth-methods": {
-    "pat":          {"enabled": true,  "interactive": false, "max_tokens": 5},
-    "client_cert":  {"enabled": false, "interactive": false}
-  },
-  "properties": {
-    "display_name":    {"type": "string", "description": "Agent name"},
-    "description":     {"type": "string", "description": "What this agent does"},
-    "model":           {"type": "string", "description": "Model identifier, e.g. gpt-4o, claude-3.5-sonnet"},
-    "provider":        {"type": "string", "description": "AI provider, e.g. openai, anthropic, google"},
-    "tool_access":     {"type": "array", "items": {"type": "string"}, "description": "Tools/APIs this agent can invoke"},
-    "max_tokens":      {"type": "integer", "description": "Max token budget per request"},
-    "delegation_chain": {"type": "string", "description": "Parent entity that delegated authority"},
-    "trust_level":     {"type": "string", "enum": ["sandboxed", "supervised", "autonomous"], "description": "Level of autonomous action allowed"},
-    "metadata":        {"type": "object"}
-  },
-  "required": ["display_name", "model", "trust_level"]
-}`,
-	},
-	{
-		ID:   "org_v1",
-		Type: "org",
-		Schema: `{
-  "type": "object",
-  "x-display": {
-    "alias": "Organizations", "singular": "Organization",
-    "group": "system", "group_label": "System",
-    "path": "orgs", "icon": "🏢", "sort_order": 1
-  },
-  "x-storage": "entities",
-  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner", "admin"]},
-  "x-branding": {
-    "heading": "Welcome",
-    "colors": {"primary": "#6366f1"}
-  },
-  "x-login": {
-    "preset": "identifier_first",
-    "mfa_required": false,
-    "registration_allowed": true
-  },
-  "properties": {
-    "display_name":  {"type": "string", "description": "Organization display name"},
-    "description":   {"type": "string"},
-    "branding": {
-      "type": "object",
-      "properties": {
-        "primary_color":  {"type": "string", "description": "Primary brand color"},
-        "logo_url":       {"type": "string", "format": "uri"},
-        "logo_dark_url":  {"type": "string", "format": "uri"},
-        "font_family":    {"type": "string"},
-        "favicon_url":    {"type": "string", "format": "uri"}
-      }
-    },
-    "login_policy": {
-      "type": "object",
-      "properties": {
-        "mfa_required":         {"type": "boolean"},
-        "passwordless_enabled": {"type": "boolean"},
-        "registration_allowed": {"type": "boolean"},
-        "external_idp_only":    {"type": "boolean"}
-      }
-    },
-    "notification_channels": {
-      "type": "object",
-      "properties": {
-        "email_from":    {"type": "string", "format": "email"},
-        "smtp_host":     {"type": "string"},
-        "smtp_port":     {"type": "integer"},
-        "smtp_user":     {"type": "string"},
-        "sms_provider":  {"type": "string", "enum": ["twilio", "custom"]},
-        "webhook_url":   {"type": "string", "format": "uri"}
-      }
-    },
-    "metadata": {"type": "object"}
-  },
-  "required": ["display_name"]
-}`,
-	},
-}
 
 // EnsureAdmin checks if any entities exist. If not, it creates a default
 // admin identity with a random password and prints the credentials to stdout.
@@ -288,7 +87,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	fmt.Println()
 	fmt.Println("  ┌──────────────────────────────────────────────────┐")
 	fmt.Println("  │  ZITADEL bootstrapped!                          │")
-	fmt.Printf("   │  Username: admin                 				 │\n")
+	fmt.Printf("   │  Username: admin                 \t\t\t\t │\n")
 	fmt.Printf("   │  Password: %-36s  │\n", password)
 	fmt.Println("  │                                                  │")
 	fmt.Println("  │  Change this password on first login.            │")
@@ -374,27 +173,47 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	return nil
 }
 
-// seedSchemas inserts or updates the built-in entity schemas.
+// seedSchemas reads the x-catalog from the meta schema and seeds each entity
+// schema that has a schema_file into the database.
 func seedSchemas(ctx context.Context, db *database.DB) error {
-	for _, s := range builtinSchemas {
+	catalog, err := schema.Catalog()
+	if err != nil {
+		return fmt.Errorf("load catalog: %w", err)
+	}
+
+	seeded := 0
+	for typeName, entry := range catalog {
+		if entry.SchemaFile == "" {
+			continue // System views (sessions, events, jobs) have no schema file.
+		}
+
+		schemaJSON, err := schema.LoadSchemaFile(entry.SchemaFile)
+		if err != nil {
+			return fmt.Errorf("load schema file for %s: %w", typeName, err)
+		}
+
+		schemaID := typeName + "_v1"
+
 		// Try with is_default column first; fall back without it for older schemas.
-		_, err := db.SQL().ExecContext(ctx,
+		_, err = db.SQL().ExecContext(ctx,
 			`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
 			 VALUES (?, ?, 0, ?, 1, true, datetime('now'))`,
-			s.ID, s.Type, s.Schema,
+			schemaID, typeName, schemaJSON,
 		)
 		if err != nil {
 			// Column may not exist in fuzz worker subprocess or old DB.
 			_, err = db.SQL().ExecContext(ctx,
 				`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, created_at)
 				 VALUES (?, ?, 0, ?, 1, datetime('now'))`,
-				s.ID, s.Type, s.Schema,
+				schemaID, typeName, schemaJSON,
 			)
 		}
 		if err != nil {
-			return fmt.Errorf("seed schema %s: %w", s.ID, err)
+			return fmt.Errorf("seed schema %s: %w", schemaID, err)
 		}
+		seeded++
 	}
-	log.Printf("seeded %d built-in entity schemas", len(builtinSchemas))
+
+	log.Printf("seeded %d built-in entity schemas from catalog", seeded)
 	return nil
 }
