@@ -70,7 +70,7 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID int64, plain str
 
 	// Delete existing password credential if any.
 	_, err = tx.ExecContext(ctx,
-		`DELETE FROM identity_credentials WHERE identity_id = ? AND credential_type = 'password'`,
+		`DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`,
 		identityID,
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID int64, plain str
 	// Store the encoded hash as credential_data JSON.
 	credJSON := fmt.Sprintf(`{"hash":"%s"}`, encoded)
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO identity_credentials (id, identity_id, credential_type, credential_data)
+		`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data)
 		 VALUES (?, ?, 'password', ?)`,
 		credID, identityID, credJSON,
 	)
@@ -104,8 +104,8 @@ func (p *Passwords) CheckPassword(ctx context.Context, identityID int64, plain s
 	var credJSON string
 	var credID int64
 	err := p.db.SQL().QueryRowContext(ctx,
-		`SELECT id, credential_data FROM identity_credentials
-		 WHERE identity_id = ? AND credential_type = 'password'`,
+		`SELECT id, credential_data FROM entity_credentials
+		 WHERE entity_id = ? AND credential_type = 'password'`,
 		identityID,
 	).Scan(&credID, &credJSON)
 	if err == sql.ErrNoRows {
@@ -133,7 +133,7 @@ func (p *Passwords) CheckPassword(ctx context.Context, identityID int64, plain s
 	if updated != "" {
 		updatedJSON := fmt.Sprintf(`{"hash":"%s"}`, updated)
 		_, _ = p.db.SQL().ExecContext(ctx,
-			`UPDATE identity_credentials SET credential_data = ? WHERE id = ?`,
+			`UPDATE entity_credentials SET credential_data = ? WHERE id = ?`,
 			updatedJSON, credID,
 		)
 	}

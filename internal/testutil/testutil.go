@@ -89,7 +89,7 @@ func (ts *TestServer) URL() string {
 func (ts *TestServer) LoginAdmin() string {
 	ts.t.Helper()
 	var adminID int64
-	err := ts.DB.SQL().QueryRow(`SELECT id FROM identities WHERE identifier = 'admin'`).Scan(&adminID)
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID)
 	if err != nil {
 		ts.t.Fatalf("find admin: %v", err)
 	}
@@ -101,7 +101,7 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) int64 {
 	ts.t.Helper()
 
 	var identityID int64
-	err := ts.DB.SQL().QueryRow(`SELECT id FROM identities WHERE identifier = ?`, identifier).Scan(&identityID)
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = ?`, identifier).Scan(&identityID)
 	if err == nil {
 		return identityID
 	}
@@ -110,7 +110,7 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) int64 {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', '{}', '{}', ?, ?)`,
 		identityID, identifier, displayName, now, now)
 	if err != nil {
@@ -136,7 +136,7 @@ func (ts *TestServer) CreateSession(identityID int64) string {
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
 
 	_, err := ts.DB.SQL().Exec(
-		`INSERT INTO sessions (id, identity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, 1, ?, 'testutil', '127.0.0.1', '{}', ?, ?)`,
 		sessionID, identityID, hash, now, expiresAt)
 	if err != nil {

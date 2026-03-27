@@ -1,6 +1,6 @@
 // Package seed loads declarative YAML seed files and applies them to the database.
 //
-// Seed files describe a desired state: schemas → providers → identities → linked accounts.
+// Seed files describe a desired state: schemas → providers → entities → linked accounts.
 // They support environment variable substitution (${VAR}) and are idempotent (on_conflict: skip).
 package seed
 
@@ -23,7 +23,7 @@ import (
 // SeedFile represents the top-level structure of a seed YAML file.
 type SeedFile struct {
 	Providers  []SeedProvider `yaml:"providers"`
-	Identities []SeedIdentity `yaml:"identities"`
+	Identities []SeedIdentity `yaml:"entities"`
 }
 
 // SeedProvider defines a provider to seed.
@@ -166,7 +166,7 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	// Skip if exists by identifier.
 	var existingID int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM identities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		log.Printf("[seed] identity %q already exists, skipping", ident.Identifier)
 		// Still process linked accounts for this existing identity.
@@ -196,7 +196,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))`,
 		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON, profileJSON)
 	if err != nil {
@@ -208,7 +208,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		hash, err := bcrypt.GenerateFromPassword([]byte(ident.Password), bcrypt.DefaultCost)
 		if err == nil {
 			tx.ExecContext(ctx,
-				`INSERT INTO passwords (identity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
+				`INSERT INTO passwords (entity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
 				newID, string(hash))
 		}
 	}
@@ -243,7 +243,7 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID int64, la See
 
 	linkID, _ := id.New()
 	tx.ExecContext(ctx,
-		`INSERT INTO linked_accounts (id, identity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
 		linkID, identityID, providerID, la.ExternalSub, la.ExternalEmail)
 

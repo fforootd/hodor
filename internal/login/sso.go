@@ -248,7 +248,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	// Check if already linked.
 	var identityID int64
 	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT identity_id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
+		`SELECT entity_id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
 		providerID, externalSub,
 	).Scan(&identityID)
 
@@ -295,7 +295,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	profileJSON, _ := json.Marshal(profile)
 
 	_, err = h.db.SQL().ExecContext(ctx,
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', 'human_user_v1', ?, '{}', datetime('now'), datetime('now'))`,
 		newID, identifier, displayName, string(profileJSON),
 	)
@@ -307,7 +307,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	linkID, _ := id.New()
 	claimsJSON, _ := json.Marshal(claims)
 	_, err = h.db.SQL().ExecContext(ctx,
-		`INSERT INTO linked_accounts (id, identity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
 		linkID, newID, providerID, externalSub, externalEmail, string(claimsJSON),
 	)

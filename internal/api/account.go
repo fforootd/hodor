@@ -40,7 +40,7 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 
 		var identityID, sessionID int64
 		err := a.db.SQL().QueryRowContext(r.Context(),
-			`SELECT identity_id, id FROM sessions
+			`SELECT entity_id, id FROM sessions
 			 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > datetime('now')`,
 			tokenHash,
 		).Scan(&identityID, &sessionID)
@@ -81,7 +81,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT identifier, COALESCE(display_name,''), state, COALESCE(profile,'{}'),
 		        org_id, COALESCE(schema_id,''), created_at, updated_at
-		 FROM identities WHERE id = ?`, identityID,
+		 FROM entities WHERE id = ?`, identityID,
 	).Scan(&identifier, &displayName, &state, &profile, &orgID, &schemaID, &createdAt, &updatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "identity not found")
@@ -108,7 +108,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Emit view event.
 	a.EmitAuthEvent(r.Context(), "account.profile_viewed", identityID, map[string]any{
-		"identity_id": identityID,
+		"entity_id": identityID,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -147,7 +147,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	// Load current identity data.
 	var currentProfile, schemaID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(profile,'{}'), COALESCE(schema_id,'') FROM identities WHERE id = ?`, identityID,
+		`SELECT COALESCE(profile,'{}'), COALESCE(schema_id,'') FROM entities WHERE id = ?`, identityID,
 	).Scan(&currentProfile, &schemaID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "identity not found")
@@ -215,7 +215,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	args = append(args, string(profileBytes))
 	args = append(args, identityID)
 
-	query := fmt.Sprintf("UPDATE identities SET %s WHERE id = ?", strings.Join(updates, ", "))
+	query := fmt.Sprintf("UPDATE entities SET %s WHERE id = ?", strings.Join(updates, ", "))
 	_, err = a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update failed")
@@ -240,7 +240,7 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT id, user_agent, ip_address, created_at, expires_at
-		 FROM sessions WHERE identity_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
+		 FROM sessions WHERE entity_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
 		 ORDER BY created_at DESC`, identityID,
 	)
 	if err != nil {
@@ -284,7 +284,7 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	var ownerID int64
 	var userAgent, ipAddress string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT identity_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
+		`SELECT entity_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
 		 FROM sessions WHERE id = ? AND revoked_at IS NULL`, sessionID,
 	).Scan(&ownerID, &userAgent, &ipAddress)
 	if err != nil || ownerID != identityID {
@@ -312,7 +312,7 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.db.SQL().ExecContext(r.Context(),
 		`UPDATE sessions SET revoked_at = datetime('now')
-		 WHERE identity_id = ? AND id != ? AND revoked_at IS NULL`,
+		 WHERE entity_id = ? AND id != ? AND revoked_at IS NULL`,
 		identityID, currentSessionID,
 	)
 	if err != nil {

@@ -27,7 +27,7 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 	}
 
 	var count1 int
-	db.SQL().QueryRow("SELECT COUNT(*) FROM identities").Scan(&count1)
+	db.SQL().QueryRow("SELECT COUNT(*) FROM entities").Scan(&count1)
 	if count1 != 2 {
 		t.Fatalf("expected 2 identities after first bootstrap (admin + console), got %d", count1)
 	}
@@ -38,7 +38,7 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 	}
 
 	var count2 int
-	db.SQL().QueryRow("SELECT COUNT(*) FROM identities").Scan(&count2)
+	db.SQL().QueryRow("SELECT COUNT(*) FROM entities").Scan(&count2)
 	if count2 != 2 {
 		t.Fatalf("expected 2 identities after second bootstrap (idempotent), got %d", count2)
 	}
@@ -88,8 +88,8 @@ func TestEnsureAdmin_AdminHasCapabilities(t *testing.T) {
 
 	// Admin should have "admin" and "password" capabilities.
 	var capCount int
-	db.SQL().QueryRow(`SELECT COUNT(*) FROM identity_capabilities
-		WHERE identity_id = (SELECT id FROM identities WHERE identifier = 'admin')`).Scan(&capCount)
+	db.SQL().QueryRow(`SELECT COUNT(*) FROM entity_capabilities
+		WHERE entity_id = (SELECT id FROM entities WHERE identifier = 'admin')`).Scan(&capCount)
 	if capCount != 2 {
 		t.Errorf("expected 2 capabilities (admin, password), got %d", capCount)
 	}

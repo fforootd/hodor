@@ -31,7 +31,7 @@ func FuzzAPIJSON(f *testing.F) {
 			method string
 			path   string
 		}{
-			{"POST", "/v1/identities"},
+			{"POST", "/v1/entities"},
 			{"POST", "/v1/schemas"},
 			{"POST", "/v1/import"},
 			{"POST", "/v1/sessions"},

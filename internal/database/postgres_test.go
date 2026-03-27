@@ -73,7 +73,7 @@ func TestPostgresMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identities table not found after migrations: %v", err)
 	}
-	if tableName != "identities" {
+	if tableName != "entities" {
 		t.Errorf("expected identities table, got %v", tableName)
 	}
 

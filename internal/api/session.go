@@ -16,7 +16,7 @@ import (
 
 type SessionResponse struct {
 	ID         int64  `json:"id,string"`
-	IdentityID int64  `json:"identity_id,string"`
+	IdentityID int64  `json:"entity_id,string"`
 	OrgID      int64  `json:"org_id,string"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
@@ -25,7 +25,7 @@ type SessionResponse struct {
 }
 
 type CreateSessionRequest struct {
-	IdentityID int64  `json:"identity_id"`
+	IdentityID int64  `json:"entity_id"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
 }
@@ -50,7 +50,7 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.IdentityID == 0 {
-		writeError(w, http.StatusBadRequest, "identity_id is required")
+		writeError(w, http.StatusBadRequest, "entity_id is required")
 		return
 	}
 
@@ -86,7 +86,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 
 	// Verify identity exists.
 	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM identities WHERE id = ?`, identityID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM entities WHERE id = ?`, identityID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("identity %d not found", identityID)
 	}
@@ -95,7 +95,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, identity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, 1, ?, ?, ?, '{}', ?, ?)`,
 		sessionID, identityID, tokenHash,
 		userAgent, ipAddress,
@@ -106,7 +106,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 	}
 
 	emitEvent(ctx, tx, "session.created", identityID, sessionID, "session", map[string]any{
-		"identity_id": identityID,
+		"entity_id": identityID,
 		"user_agent":  userAgent,
 		"ip_address":  ipAddress,
 	})
@@ -148,15 +148,15 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
-	identityID, _ := strconv.ParseInt(r.URL.Query().Get("identity_id"), 10, 64)
+	identityID, _ := strconv.ParseInt(r.URL.Query().Get("entity_id"), 10, 64)
 	limit := 50
 
-	query := `SELECT id, identity_id, org_id, user_agent, ip_address, created_at, expires_at
+	query := `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
 	          FROM sessions WHERE revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
 	args := []any{limit}
 	if identityID > 0 {
-		query = `SELECT id, identity_id, org_id, user_agent, ip_address, created_at, expires_at
-		         FROM sessions WHERE identity_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
+		query = `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
+		         FROM sessions WHERE entity_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
 		args = []any{identityID, limit}
 	}
 
@@ -217,10 +217,10 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error 
 	}
 
 	var revokedIdentityID int64
-	tx.QueryRowContext(ctx, `SELECT identity_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIdentityID)
+	tx.QueryRowContext(ctx, `SELECT entity_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIdentityID)
 
 	emitEvent(ctx, tx, "session.revoked", revokedIdentityID, sessionID, "session", map[string]any{
-		"identity_id": revokedIdentityID,
+		"entity_id": revokedIdentityID,
 		"reason":      "api_revoke",
 	})
 
@@ -235,7 +235,7 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error 
 func (a *API) loadSession(ctx context.Context, sessionID int64) (SessionResponse, error) {
 	var s SessionResponse
 	err := a.db.SQL().QueryRowContext(ctx,
-		`SELECT id, identity_id, org_id, user_agent, ip_address, created_at, expires_at
+		`SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
 		 FROM sessions WHERE id = ? AND revoked_at IS NULL`, sessionID,
 	).Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt)
 	return s, err

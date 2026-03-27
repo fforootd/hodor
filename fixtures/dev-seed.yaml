@@ -1,10 +1,10 @@
 # Example seed file for local development.
 # Load via: go run ./cmd/zitadel serve --seed fixtures/dev-seed.yaml --mock-oidc
 
-identities:
+entities:
   - identifier: jane@example.com
     display_name: Jane Doe
-    schema_id: human_user_v1
+    type: human_user_v1
     password: password123
     profile:
       email: jane@example.com
@@ -14,7 +14,7 @@ identities:
 
   - identifier: bob@example.com
     display_name: Bob Smith
-    schema_id: human_user_v1
+    type: human_user_v1
     password: password123
     profile:
       email: bob@example.com
@@ -23,7 +23,7 @@ identities:
 
   - identifier: alice@example.com
     display_name: Alice Wonder
-    schema_id: human_user_v1
+    type: human_user_v1
     password: password123
     profile:
       email: alice@example.com

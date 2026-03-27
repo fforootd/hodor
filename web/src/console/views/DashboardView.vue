@@ -34,7 +34,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { identityApi, schemaApi, sessionApi, eventApi, type Event } from '@/api/resources'
+import { entityApi, schemaApi, sessionApi, eventApi, type Event } from '@/api/resources'
 
 const stats = ref({ identities: 0, sessions: 0, events: 0, schemas: 0 })
 const recentEvents = ref<Event[]>([])
@@ -42,7 +42,7 @@ const recentEvents = ref<Event[]>([])
 onMounted(async () => {
   try {
     const [identities, schemas, sessions, events] = await Promise.all([
-      identityApi.list(), schemaApi.list(), sessionApi.list(), eventApi.list({ limit: 10 }),
+      entityApi.list(), schemaApi.list(), sessionApi.list(), eventApi.list({ limit: 10 }),
     ])
     stats.value = {
       identities: identities.length, schemas: schemas.length,

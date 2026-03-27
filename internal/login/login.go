@@ -193,7 +193,7 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	var identityID int64
 	var displayName string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, COALESCE(display_name, identifier) FROM identities WHERE identifier = ? AND state = 'active'`,
+		`SELECT id, COALESCE(display_name, identifier) FROM entities WHERE identifier = ? AND state = 'active'`,
 		identifier,
 	).Scan(&identityID, &displayName)
 	if err == sql.ErrNoRows {
@@ -216,7 +216,7 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{
 		"login_session_id": sid,
-		"identity_id":      identityID,
+		"entity_id":      identityID,
 		"org_id":           "",
 		"display_name":     displayName,
 		"auth_methods":     []string{"password", "magic_link"},
@@ -319,7 +319,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	var identityID int64
 	var purpose string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id FROM identities WHERE identifier = ?`, email,
+		`SELECT id FROM entities WHERE identifier = ?`, email,
 	).Scan(&identityID)
 
 	if err == sql.ErrNoRows {
@@ -327,7 +327,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 		purpose = "register"
 		newID, _ := id.New()
 		_, err = h.db.SQL().ExecContext(r.Context(),
-			`INSERT INTO identities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 			 VALUES (?, 1, ?, ?, 'pending', '{}', '{}', datetime('now'), datetime('now'))`,
 			newID, email, email,
 		)
@@ -355,7 +355,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 
 	// Store token.
 	_, err = h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO magic_tokens (token, identity_id, expires_at) VALUES (?, ?, ?)`,
+		`INSERT INTO magic_tokens (token, entity_id, expires_at) VALUES (?, ?, ?)`,
 		token, identityID, expiresAt.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -398,9 +398,9 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	var expiresAt, identifier string
 	var usedAt sql.NullString
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT mt.identity_id, mt.expires_at, mt.used_at, i.identifier
+		`SELECT mt.entity_id, mt.expires_at, mt.used_at, i.identifier
 		 FROM magic_tokens mt
-		 JOIN identities i ON i.id = mt.identity_id
+		 JOIN entities e ON i.id = mt.entity_id
 		 WHERE mt.token = ?`, token,
 	).Scan(&identityID, &expiresAt, &usedAt, &identifier)
 
@@ -449,7 +449,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Activate identity if pending (registration flow).
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE identities SET state = 'active' WHERE id = ? AND state = 'pending'`, identityID)
+		`UPDATE entities SET state = 'active' WHERE id = ? AND state = 'pending'`, identityID)
 
 	// Create session.
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)

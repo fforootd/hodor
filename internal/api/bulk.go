@@ -13,7 +13,7 @@ import (
 // ImportRequest is the body for POST /v1/import.
 type ImportRequest struct {
 	Providers      []ImportProvider      `json:"providers,omitempty"`
-	Identities     []ImportIdentity      `json:"identities,omitempty"`
+	Entities       []ImportEntity      `json:"identities,omitempty"`
 	LinkedAccounts []ImportLinkedAccount `json:"linked_accounts,omitempty"`
 	OnConflict     string                `json:"on_conflict"` // skip (default), fail, update
 }
@@ -29,8 +29,8 @@ type ImportProvider struct {
 	AutoRegister   *bool             `json:"auto_register,omitempty"`
 }
 
-// ImportIdentity is an identity to import.
-type ImportIdentity struct {
+// ImportEntity is an identity to import.
+type ImportEntity struct {
 	Identifier  string         `json:"identifier"`
 	DisplayName string         `json:"display_name"`
 	SchemaID    string         `json:"schema_id,omitempty"`
@@ -41,7 +41,7 @@ type ImportIdentity struct {
 
 // ImportLinkedAccount links an identity to a provider.
 type ImportLinkedAccount struct {
-	IdentityIdentifier string `json:"identity_identifier"` // resolves to identity ID
+	IdentityIdentifier string `json:"entity_identifier"` // resolves to identity ID
 	ProviderName       string `json:"provider_name"`       // resolves to provider ID
 	ExternalSub        string `json:"external_sub"`
 	ExternalEmail      string `json:"external_email,omitempty"`
@@ -59,7 +59,7 @@ type ImportResult struct {
 // RegisterBulkRoutes mounts import and bulk endpoints.
 func (a *API) RegisterBulkRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/import", a.requireAdmin(a.handleImport))
-	mux.HandleFunc("POST /v1/identities/bulk", a.requireAdmin(a.handleIdentitiesBulk))
+	mux.HandleFunc("POST /v1/entities/bulk", a.requireAdmin(a.handleEntitiesBulk))
 }
 
 // --- Global Import ---
@@ -103,7 +103,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Phase 2: Identities (may reference schemas).
-	for i, ident := range req.Identities {
+	for i, ident := range req.Entities {
 		res := a.importIdentity(r, tx, ident, len(req.Providers)+i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {
@@ -120,9 +120,9 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Phase 3: Linked accounts (depends on identities + providers).
+	// Phase 3: Linked accounts (depends on entities + providers).
 	for i, la := range req.LinkedAccounts {
-		res := a.importLinkedAccount(r, tx, la, len(req.Providers)+len(req.Identities)+i, req.OnConflict)
+		res := a.importLinkedAccount(r, tx, la, len(req.Providers)+len(req.Entities)+i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {
 		case "created":
@@ -211,14 +211,14 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 	return ImportResult{Index: idx, Resource: "provider", Status: "created", ID: provID}
 }
 
-func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportIdentity, idx int, onConflict string) ImportResult {
+func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, idx int, onConflict string) ImportResult {
 	if ident.Identifier == "" {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: "identifier required"}
 	}
 
 	// Check conflict.
 	var existingID int64
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM identities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
+	err := tx.QueryRowContext(r.Context(), `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		if onConflict == "update" {
 			// Upsert: update display_name and profile.
@@ -228,7 +228,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportIdentity, 
 				profileJSON = string(b)
 			}
 			tx.ExecContext(r.Context(),
-				`UPDATE identities SET display_name = ?, profile = ?, data = ?, updated_at = datetime('now') WHERE id = ?`,
+				`UPDATE entities SET display_name = ?, profile = ?, data = ?, updated_at = datetime('now') WHERE id = ?`,
 				ident.DisplayName, profileJSON, profileJSON, existingID)
 			return ImportResult{Index: idx, Resource: "identity", Status: "updated", ID: existingID}
 		}
@@ -259,7 +259,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportIdentity, 
 	}
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))`,
 		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON, profileJSON)
 	if err != nil {
@@ -271,7 +271,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportIdentity, 
 		hash, err := bcrypt.GenerateFromPassword([]byte(ident.Password), bcrypt.DefaultCost)
 		if err == nil {
 			tx.ExecContext(r.Context(),
-				`INSERT INTO passwords (identity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
+				`INSERT INTO passwords (entity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
 				newID, string(hash))
 		}
 	}
@@ -282,7 +282,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportIdentity, 
 func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAccount, idx int, onConflict string) ImportResult {
 	// Resolve identity by identifier.
 	var identityID int64
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM identities WHERE identifier = ?`, la.IdentityIdentifier).Scan(&identityID)
+	err := tx.QueryRowContext(r.Context(), `SELECT id FROM entities WHERE identifier = ?`, la.IdentityIdentifier).Scan(&identityID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "identity not found: " + la.IdentityIdentifier}
 	}
@@ -308,7 +308,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 
 	linkID, _ := id.New()
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO linked_accounts (id, identity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
 		linkID, identityID, providerID, la.ExternalSub, la.ExternalEmail)
 	if err != nil {
@@ -320,9 +320,9 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 
 // --- Per-Resource Bulk: Identities ---
 
-func (a *API) handleIdentitiesBulk(w http.ResponseWriter, r *http.Request) {
+func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Identities []ImportIdentity `json:"identities"`
+		Entities   []ImportEntity `json:"entities"`
 		OnConflict string           `json:"on_conflict"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -343,7 +343,7 @@ func (a *API) handleIdentitiesBulk(w http.ResponseWriter, r *http.Request) {
 
 	var results []ImportResult
 	var created, skipped, errors int
-	for i, ident := range req.Identities {
+	for i, ident := range req.Entities {
 		res := a.importIdentity(r, tx, ident, i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {

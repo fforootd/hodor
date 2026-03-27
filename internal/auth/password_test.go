@@ -28,7 +28,7 @@ func createTestIdentity(t *testing.T, db *database.DB) int64 {
 	t.Helper()
 	identityID := id.MustNew()
 	_, err := db.SQL().Exec(
-		`INSERT INTO identities (id, org_id, identifier, state, data, schema_id, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, state, data, schema_id, created_at, updated_at)
 		 VALUES (?, 1, 'test@example.com', 'active', '{"display_name":"Test User"}', '', datetime('now'), datetime('now'))`,
 		identityID,
 	)

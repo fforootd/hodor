@@ -58,13 +58,13 @@ interface ListResponse<T> {
   total?: number
 }
 
-export const identityApi = {
-  list: () => api.get<ListResponse<Identity>>('/v1/identities').then(r => r.items || []),
-  get: (id: string) => api.get<Identity>(`/v1/identities/${id}`),
-  create: (data: Partial<Identity>) => api.post<Identity>('/v1/identities', data),
+export const entityApi = {
+  list: () => api.get<ListResponse<Identity>>('/v1/entities').then(r => r.items || []),
+  get: (id: string) => api.get<Identity>(`/v1/entities/${id}`),
+  create: (data: Partial<Identity>) => api.post<Identity>('/v1/entities', data),
   update: (id: string, data: Partial<Identity>) =>
-    api.patch<Identity>(`/v1/identities/${id}`, data),
-  delete: (id: string) => api.delete<void>(`/v1/identities/${id}`),
+    api.patch<Identity>(`/v1/entities/${id}`, data),
+  delete: (id: string) => api.delete<void>(`/v1/entities/${id}`),
 }
 
 export const schemaApi = {
@@ -81,7 +81,7 @@ export const schemaApi = {
     api.post<{ entity: string; current_claims: Record<string, any>; draft_claims: Record<string, any>; changes: any[] }>(
       `/v1/schemas/${id}/preview`, { entity_id: entityId }
     ),
-  identityCount: (id: string) =>
+  entityCount: (id: string) =>
     api.get<{ count: number }>(`/v1/schemas/${id}/identity-count`).then(r => r.count),
 }
 

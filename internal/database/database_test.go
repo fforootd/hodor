@@ -72,9 +72,9 @@ func TestMigrate(t *testing.T) {
 	}
 
 	// Verify capabilities table exists.
-	err = db.SQL().QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='identity_capabilities'").Scan(&name)
+	err = db.SQL().QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_capabilities'").Scan(&name)
 	if err != nil {
-		t.Fatalf("identity_capabilities table not found: %v", err)
+		t.Fatalf("entity_capabilities table not found: %v", err)
 	}
 
 	// Verify events table exists.

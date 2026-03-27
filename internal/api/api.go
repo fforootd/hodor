@@ -38,11 +38,11 @@ func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API
 // RegisterRoutes mounts all REST API routes on the given mux.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Identity CRUD
-	mux.HandleFunc("POST /v1/identities", a.createIdentity)
-	mux.HandleFunc("GET /v1/identities", a.listIdentities)
-	mux.HandleFunc("GET /v1/identities/{id}", a.getIdentity)
-	mux.HandleFunc("PATCH /v1/identities/{id}", a.updateIdentity)
-	mux.HandleFunc("DELETE /v1/identities/{id}", a.deleteIdentity)
+	mux.HandleFunc("POST /v1/entities", a.createIdentity)
+	mux.HandleFunc("GET /v1/entities", a.listIdentities)
+	mux.HandleFunc("GET /v1/entities/{id}", a.getIdentity)
+	mux.HandleFunc("PATCH /v1/entities/{id}", a.updateIdentity)
+	mux.HandleFunc("DELETE /v1/entities/{id}", a.deleteIdentity)
 
 	// Schema CRUD (write = admin-only, read = public)
 	mux.HandleFunc("POST /v1/schemas", a.requireAdmin(a.createSchema))
@@ -158,7 +158,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', ?, '{}', ?, ?)`,
 		identityID, req.Identifier, req.DisplayName, profileJSON, now, now,
 	)
@@ -170,7 +170,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	// Insert capabilities.
 	for _, cap := range req.Capabilities {
 		_, err = tx.ExecContext(r.Context(),
-			`INSERT INTO identity_capabilities (identity_id, capability) VALUES (?, ?)`,
+			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
 			identityID, cap)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to add capability")
@@ -247,7 +247,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	var where []string
 	var args []any
 	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.state, i.profile, i.metadata, i.data, i.created_at, i.updated_at
-		 FROM identities i`
+		 FROM entities i`
 	if schemaType != "" {
 		baseSelect += ` JOIN schemas s ON i.schema_id = s.id`
 		where = append(where, `s.type = ?`)
@@ -336,7 +336,7 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, identityID)
 
-	query := "UPDATE identities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
+	query := "UPDATE entities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update failed")
@@ -380,7 +380,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	// Clean up promoted indexes.
 	_, _ = tx.ExecContext(r.Context(), `DELETE FROM entity_indexes WHERE entity_type = 'identity' AND entity_id = ?`, identityID)
 
-	result, err := tx.ExecContext(r.Context(), `DELETE FROM identities WHERE id = ?`, identityID)
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM entities WHERE id = ?`, identityID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -656,7 +656,7 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 	// Count affected entities (those NOT pinned to a specific version).
 	var affected int
 	a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM identities i
+		`SELECT COUNT(*) FROM entities i
 		 JOIN schemas s ON i.schema_id = s.id
 		 WHERE s.type = ? AND s.org_id = ? AND s.is_default = true`,
 		schemaType, orgID).Scan(&affected)
@@ -844,7 +844,7 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 	var identifier string
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
-		 FROM identities i
+		 FROM entities i
 		 LEFT JOIN schemas sc ON i.schema_id = sc.id
 		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
 		req.EntityID, req.EntityID,
@@ -934,7 +934,7 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 
 	var count int
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM identities WHERE schema_id = ?`, schemaID,
+		`SELECT COUNT(*) FROM entities WHERE schema_id = ?`, schemaID,
 	).Scan(&count)
 	if err != nil {
 		count = 0
@@ -948,7 +948,7 @@ func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse,
 	var displayName, profileStr, metaStr, dataStr sql.NullString
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at
-		 FROM identities WHERE id = ?`, identityID,
+		 FROM entities WHERE id = ?`, identityID,
 	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
 		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
@@ -972,7 +972,7 @@ func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse,
 
 func (a *API) loadCapabilities(r *http.Request, identityID int64) []string {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT capability FROM identity_capabilities WHERE identity_id = ?`, identityID)
+		`SELECT capability FROM entity_capabilities WHERE entity_id = ?`, identityID)
 	if err != nil {
 		return nil
 	}
@@ -1029,7 +1029,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // --- Universal Search ---
 
 type SearchResult struct {
-	ResourceType string `json:"resource_type"` // identity, schema, event, session
+	ResourceType string `json:"resource_type"` // entity, schema, event, session, provider
 	ID           string `json:"id"`
 	Title        string `json:"title"`
 	Subtitle     string `json:"subtitle,omitempty"`
@@ -1053,9 +1053,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	pattern := "%" + q + "%"
 	var results []SearchResult
 
-	// Search identities by identifier, display_name
+	// Search entities by identifier, display_name
 	idRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, identifier, display_name, state FROM identities
+		`SELECT id, identifier, display_name, state FROM entities
 		 WHERE identifier LIKE ? OR display_name LIKE ?
 		 ORDER BY id DESC LIMIT ?`,
 		pattern, pattern, limit)
@@ -1088,7 +1088,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	eiRows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT DISTINCT ei.entity_id, i.identifier, i.display_name, ei.field, ei.value
 		 FROM entity_indexes ei
-		 JOIN identities i ON ei.entity_id = i.id AND ei.entity_type = 'identity'
+		 JOIN entities e ON ei.entity_id = i.id AND ei.entity_type = 'identity'
 		 WHERE ei.value LIKE ?
 		 LIMIT ?`,
 		pattern, limit)
@@ -1173,7 +1173,33 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Deduplicate identities (may appear from both direct + index search)
+	// Search providers by name
+	provRows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, name, protocol, template FROM providers
+		 WHERE name LIKE ? OR template LIKE ?
+		 ORDER BY name LIMIT ?`,
+		pattern, pattern, limit)
+	if err == nil {
+		defer provRows.Close()
+		for provRows.Next() {
+			var provID, name, protocol, tmpl string
+			if err := provRows.Scan(&provID, &name, &protocol, &tmpl); err != nil {
+				continue
+			}
+			results = append(results, SearchResult{
+				ResourceType: "provider",
+				ID:           provID,
+				Title:        name,
+				Subtitle:     protocol + " · " + tmpl,
+				Link:         "/console/providers",
+			})
+		}
+		if err := provRows.Err(); err == nil {
+			provRows.Close()
+		}
+	}
+
+	// Deduplicate entities (may appear from both direct + index search)
 	seen := map[string]bool{}
 	var deduped []SearchResult
 	for _, r := range results {
@@ -1299,7 +1325,7 @@ func (a *API) CreateIdentityInternal(r *http.Request, req IdentityRequest) (Iden
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', ?, '{}', ?, ?)`,
 		identityID, req.Identifier, req.DisplayName, profileJSON, now, now)
 	if err != nil {
@@ -1308,7 +1334,7 @@ func (a *API) CreateIdentityInternal(r *http.Request, req IdentityRequest) (Iden
 
 	for _, cap := range req.Capabilities {
 		tx.ExecContext(r.Context(),
-			`INSERT INTO identity_capabilities (identity_id, capability) VALUES (?, ?)`,
+			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
 			identityID, cap)
 	}
 
@@ -1352,7 +1378,7 @@ func (a *API) UpdateIdentityInternal(r *http.Request, identityID int64, req Iden
 	}
 	args = append(args, identityID)
 
-	query := "UPDATE identities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
+	query := "UPDATE entities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		return IdentityResponse{}, fmt.Errorf("update: %w", err)
@@ -1380,7 +1406,7 @@ func (a *API) DeleteIdentityInternal(r *http.Request, identityID int64) error {
 	defer tx.Rollback()
 
 	tx.ExecContext(r.Context(), `DELETE FROM entity_indexes WHERE entity_type = 'identity' AND entity_id = ?`, identityID)
-	result, err := tx.ExecContext(r.Context(), `DELETE FROM identities WHERE id = ?`, identityID)
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM entities WHERE id = ?`, identityID)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}

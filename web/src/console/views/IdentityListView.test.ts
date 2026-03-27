@@ -5,10 +5,10 @@ import IdentityListView from './IdentityListView.vue'
 
 // Mock the API layer.
 vi.mock('@/api/resources', () => ({
-  identityApi: { list: vi.fn() },
+  entityApi: { list: vi.fn() },
 }))
 
-import { identityApi } from '@/api/resources'
+import { entityApi } from '@/api/resources'
 
 // Minimal router for tests.
 function makeRouter() {
@@ -28,7 +28,7 @@ describe('IdentityListView', () => {
   })
 
   it('renders "No identities found" when empty', async () => {
-    ;(identityApi.list as any).mockResolvedValue([])
+    ;(entityApi.list as any).mockResolvedValue([])
 
     const router = makeRouter()
     await router.push('/')
@@ -44,7 +44,7 @@ describe('IdentityListView', () => {
   })
 
   it('renders identity rows from API', async () => {
-    ;(identityApi.list as any).mockResolvedValue([
+    ;(entityApi.list as any).mockResolvedValue([
       { id: '1', identifier: 'admin@test.com', display_name: 'Admin', state: 'active', created_at: '2026-01-01T00:00:00Z' },
       { id: '2', identifier: 'user@test.com', display_name: 'User', state: 'deactivated', created_at: '2026-01-02T00:00:00Z' },
     ])
@@ -73,7 +73,7 @@ describe('IdentityListView', () => {
   })
 
   it('has a "New Identity" link', async () => {
-    ;(identityApi.list as any).mockResolvedValue([])
+    ;(entityApi.list as any).mockResolvedValue([])
 
     const router = makeRouter()
     await router.push('/')

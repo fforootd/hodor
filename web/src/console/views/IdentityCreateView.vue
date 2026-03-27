@@ -88,7 +88,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { identityApi, magicLinkApi, schemaApi, type Schema } from '@/api/resources'
+import { entityApi, magicLinkApi, schemaApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
 
 const router = useRouter()
@@ -156,7 +156,7 @@ async function submit() {
       if (v) profile[k] = v
     }
 
-    const created = await identityApi.create({
+    const created = await entityApi.create({
       identifier: form.identifier.trim(),
       display_name: form.display_name.trim() || form.identifier.trim(),
       profile,
@@ -165,7 +165,7 @@ async function submit() {
 
     // Set password if provided
     if (form.password && created.id) {
-      await api.post(`/v1/identities/${created.id}/password`, { password: form.password })
+      await api.post(`/v1/entities/${created.id}/password`, { password: form.password })
         .catch(() => { /* password endpoint may not exist yet */ })
     }
 

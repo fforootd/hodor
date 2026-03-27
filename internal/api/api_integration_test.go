@@ -121,7 +121,7 @@ func TestAdmin_CanCreateIdentity(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithCookie("/v1/identities", map[string]any{
+	code, body := srv.PostJSONWithCookie("/v1/entities", map[string]any{
 		"identifier":   "new@test.com",
 		"display_name": "New User",
 		"schema_id":    "human_user_v1",
@@ -140,7 +140,7 @@ func TestBulkImport_CreatesIdentities(t *testing.T) {
 	token := srv.LoginAdmin()
 
 	code, body := srv.PostJSONWithCookie("/v1/import", map[string]any{
-		"identities": []map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "bulk1@test.com", "display_name": "Bulk One", "password": "pass123"},
 			{"identifier": "bulk2@test.com", "display_name": "Bulk Two", "password": "pass456"},
 		},
@@ -163,14 +163,14 @@ func TestBulkImport_SkipsDuplicates(t *testing.T) {
 
 	// Import once.
 	srv.PostJSONWithCookie("/v1/import", map[string]any{
-		"identities": []map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "dup@test.com", "display_name": "Dup User"},
 		},
 	}, token)
 
 	// Import again with same identifier.
 	code, body := srv.PostJSONWithCookie("/v1/import", map[string]any{
-		"identities": []map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "dup@test.com", "display_name": "Dup User Updated"},
 		},
 		"on_conflict": "skip",
@@ -194,11 +194,11 @@ func TestBulkImport_WithProviders(t *testing.T) {
 		"providers": []map[string]any{
 			{"name": "Test OIDC", "protocol": "oidc", "config": map[string]any{"issuer": "https://test.example.com"}},
 		},
-		"identities": []map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "linked@test.com", "display_name": "Linked User"},
 		},
 		"linked_accounts": []map[string]any{
-			{"identity_identifier": "linked@test.com", "provider_name": "Test OIDC", "external_sub": "ext-123"},
+			{"entity_identifier": "linked@test.com", "provider_name": "Test OIDC", "external_sub": "ext-123"},
 		},
 		"on_conflict": "skip",
 	}, token)
@@ -217,8 +217,8 @@ func TestIdentitiesBulk_Creates(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithCookie("/v1/identities/bulk", map[string]any{
-		"identities": []map[string]any{
+	code, body := srv.PostJSONWithCookie("/v1/entities/bulk", map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "batch1@test.com", "display_name": "Batch 1"},
 			{"identifier": "batch2@test.com", "display_name": "Batch 2"},
 			{"identifier": "batch3@test.com", "display_name": "Batch 3"},
@@ -245,7 +245,7 @@ func TestBulkImport_Unauthorized(t *testing.T) {
 
 	// No token — should be 401.
 	code, _ := srv.PostJSONWithCookie("/v1/import", map[string]any{
-		"identities": []map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "unauth@test.com"},
 		},
 	}, "")
@@ -261,7 +261,7 @@ func TestBulkImport_NonAdminForbidden(t *testing.T) {
 	userToken := srv.CreateSession(identityID)
 
 	code, _ := srv.PostJSONWithCookie("/v1/import", map[string]any{
-		"identities": []map[string]any{
+		"entities": []map[string]any{
 			{"identifier": "hack@test.com"},
 		},
 	}, userToken)
@@ -277,7 +277,7 @@ func TestIdentity_CRUD(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 
 	// List should have at least admin.
-	code, body := srv.GetRaw("/v1/identities")
+	code, body := srv.GetRaw("/v1/entities")
 	if code != 200 {
 		t.Fatalf("list: expected 200, got %d", code)
 	}
@@ -290,7 +290,7 @@ func TestIdentity_CRUD(t *testing.T) {
 	firstItem, _ := items[0].(map[string]any)
 	adminID := fmt.Sprintf("%v", firstItem["id"])
 
-	code, body = srv.GetRaw("/v1/identities/" + adminID)
+	code, body = srv.GetRaw("/v1/entities/" + adminID)
 	if code != 200 {
 		t.Fatalf("get: expected 200, got %d", code)
 	}

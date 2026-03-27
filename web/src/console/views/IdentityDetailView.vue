@@ -123,7 +123,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { identityApi, magicLinkApi, type Identity } from '@/api/resources'
+import { entityApi, magicLinkApi, type Identity } from '@/api/resources'
 
 const route = useRoute()
 const router = useRouter()
@@ -199,14 +199,14 @@ async function save() {
       if (v.trim()) profile[k] = v.trim()
     }
 
-    await identityApi.update(identity.value.id, {
+    await entityApi.update(identity.value.id, {
       display_name: editForm.display_name.trim(),
       state: editForm.state,
       profile,
     } as any)
 
     // Reload
-    identity.value = await identityApi.get(route.params.id as string)
+    identity.value = await entityApi.get(route.params.id as string)
     editing.value = false
     message.value = 'Identity updated successfully'
     messageType.value = 'success'
@@ -241,7 +241,7 @@ async function deleteIdentity() {
   if (!identity.value) return
   deleting.value = true
   try {
-    await identityApi.delete(identity.value.id)
+    await entityApi.delete(identity.value.id)
     router.push('/identities')
   } catch (e: any) {
     showDeleteConfirm.value = false
@@ -253,7 +253,7 @@ async function deleteIdentity() {
 
 onMounted(async () => {
   try {
-    identity.value = await identityApi.get(route.params.id as string)
+    identity.value = await entityApi.get(route.params.id as string)
   } catch {}
 })
 </script>

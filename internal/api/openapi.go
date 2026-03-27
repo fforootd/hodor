@@ -8,7 +8,7 @@ import (
 // openAPISpec serves a dynamically generated OpenAPI 3.1 spec.
 // The Identity data schema is composed from the schemas table at runtime.
 func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
-	// Load identity schemas from the registry.
+	// Load entity schemas from the registry.
 	var dataSchema any
 	var schemaStr string
 	err := a.db.SQL().QueryRowContext(r.Context(),
@@ -38,9 +38,9 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 			{"url": "/", "description": "This instance"},
 		},
 		"paths": map[string]any{
-			"/v1/identities": map[string]any{
+			"/v1/entities": map[string]any{
 				"get": map[string]any{
-					"summary":     "List identities",
+					"summary":     "List entities",
 					"operationId": "listIdentities",
 					"parameters": []map[string]any{
 						{"name": "cursor", "in": "query", "schema": map[string]any{"type": "string"}},
@@ -48,7 +48,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 					},
 					"responses": map[string]any{
 						"200": map[string]any{
-							"description": "List of identities",
+							"description": "List of entities",
 							"content": map[string]any{
 								"application/json": map[string]any{
 									"schema": map[string]any{"$ref": "#/components/schemas/ListIdentitiesResponse"},
@@ -59,7 +59,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 				},
 				"post": map[string]any{
 					"summary":     "Create an identity",
-					"operationId": "createIdentity",
+					"operationId": "createEntity",
 					"requestBody": map[string]any{
 						"required": true,
 						"content": map[string]any{
@@ -73,17 +73,17 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 							"description": "Identity created",
 							"content": map[string]any{
 								"application/json": map[string]any{
-									"schema": map[string]any{"$ref": "#/components/schemas/Identity"},
+									"schema": map[string]any{"$ref": "#/components/schemas/Entity"},
 								},
 							},
 						},
 					},
 				},
 			},
-			"/v1/identities/{id}": map[string]any{
+			"/v1/entities/{id}": map[string]any{
 				"get": map[string]any{
 					"summary":     "Get an identity",
-					"operationId": "getIdentity",
+					"operationId": "getEntity",
 					"parameters": []map[string]any{
 						{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "integer"}},
 					},
@@ -92,7 +92,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 							"description": "Identity found",
 							"content": map[string]any{
 								"application/json": map[string]any{
-									"schema": map[string]any{"$ref": "#/components/schemas/Identity"},
+									"schema": map[string]any{"$ref": "#/components/schemas/Entity"},
 								},
 							},
 						},
@@ -100,7 +100,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 				},
 				"patch": map[string]any{
 					"summary":     "Update an identity",
-					"operationId": "updateIdentity",
+					"operationId": "updateEntity",
 					"parameters": []map[string]any{
 						{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "integer"}},
 					},
@@ -116,7 +116,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 							"description": "Identity updated",
 							"content": map[string]any{
 								"application/json": map[string]any{
-									"schema": map[string]any{"$ref": "#/components/schemas/Identity"},
+									"schema": map[string]any{"$ref": "#/components/schemas/Entity"},
 								},
 							},
 						},
@@ -124,7 +124,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 				},
 				"delete": map[string]any{
 					"summary":     "Delete an identity",
-					"operationId": "deleteIdentity",
+					"operationId": "deleteEntity",
 					"parameters": []map[string]any{
 						{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "integer"}},
 					},
@@ -196,7 +196,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 		},
 		"components": map[string]any{
 			"schemas": map[string]any{
-				"Identity": map[string]any{
+				"Entity": map[string]any{
 					"type":     "object",
 					"required": []string{"id", "identifier", "state"},
 					"properties": map[string]any{
@@ -232,7 +232,7 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 				"ListIdentitiesResponse": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"items":       map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Identity"}},
+						"items":       map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/Entity"}},
 						"next_cursor": map[string]any{"type": "string"},
 					},
 				},

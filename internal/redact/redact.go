@@ -1,5 +1,5 @@
 // Package redact provides sensitive field redaction for event payloads.
-// It reads x-sensitive annotations from identity schemas and masks
+// It reads x-sensitive annotations from entity schemas and masks
 // marked fields with "***REDACTED***" before event emission.
 package redact
 

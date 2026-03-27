@@ -216,7 +216,7 @@ onMounted(async () => {
 
   // Fetch orgs for context switcher.
   try {
-    const res = await fetch('/v1/identities?schema_type=org')
+    const res = await fetch('/v1/entities?schema_type=org')
     const data = await res.json()
     orgs.value = (data.items || []).map((o: any) => ({
       id: o.id,

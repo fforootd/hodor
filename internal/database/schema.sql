@@ -3,9 +3,9 @@
 -- All statements use IF NOT EXISTS for idempotent re-runs.
 
 -- ============================================================================
--- IDENTITIES — the universal identity table (ADR-001)
+-- ENTITIES — the universal identity table (ADR-001)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS identities (
+CREATE TABLE IF NOT EXISTS entities (
     id           INTEGER PRIMARY KEY,
     org_id       INTEGER NOT NULL DEFAULT 0,
     identifier   TEXT NOT NULL,
@@ -18,37 +18,37 @@ CREATE TABLE IF NOT EXISTS identities (
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_identities_org ON identities(org_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_identities_identifier ON identities(org_id, identifier);
+CREATE INDEX IF NOT EXISTS idx_entities_org ON entities(org_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_identifier ON entities(org_id, identifier);
 
 -- ============================================================================
--- IDENTITY CAPABILITIES — junction table for hot-path indexed checks
+-- ENTITY CAPABILITIES — junction table for hot-path indexed checks
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS identity_capabilities (
-    identity_id INTEGER NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS entity_capabilities (
+    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     capability  TEXT NOT NULL,
-    PRIMARY KEY (identity_id, capability)
+    PRIMARY KEY (entity_id, capability)
 );
-CREATE INDEX IF NOT EXISTS idx_caps_capability ON identity_capabilities(capability);
+CREATE INDEX IF NOT EXISTS idx_caps_capability ON entity_capabilities(capability);
 
 -- ============================================================================
--- IDENTITY CREDENTIALS — type-specific credential data
+-- ENTITY CREDENTIALS — type-specific credential data
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS identity_credentials (
+CREATE TABLE IF NOT EXISTS entity_credentials (
     id              INTEGER PRIMARY KEY,
-    identity_id     INTEGER NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+    entity_id     INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     credential_type TEXT NOT NULL,
     credential_data TEXT DEFAULT '{}',
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_creds_identity ON identity_credentials(identity_id);
+CREATE INDEX IF NOT EXISTS idx_creds_identity ON entity_credentials(entity_id);
 
 -- ============================================================================
 -- SESSIONS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sessions (
     id          INTEGER PRIMARY KEY,
-    identity_id INTEGER NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     org_id      INTEGER NOT NULL DEFAULT 0,
     token_hash  TEXT NOT NULL,
     user_agent  TEXT,
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at  TEXT NOT NULL,
     revoked_at  TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_identity ON sessions(identity_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_identity ON sessions(entity_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 
 -- ============================================================================
@@ -116,7 +116,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_tpl_unique ON notification_templates
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS magic_tokens (
     token       TEXT PRIMARY KEY,
-    identity_id INTEGER NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
+    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     expires_at  TEXT NOT NULL,
     used_at     TEXT,
     session_id  INTEGER
@@ -254,7 +254,7 @@ CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS linked_accounts (
     id             INTEGER PRIMARY KEY,
-    identity_id    INTEGER NOT NULL,
+    entity_id    INTEGER NOT NULL,
     provider_id    TEXT NOT NULL,
     external_sub   TEXT NOT NULL,
     external_email TEXT DEFAULT '',
@@ -263,7 +263,7 @@ CREATE TABLE IF NOT EXISTS linked_accounts (
     last_used_at   TEXT,
     UNIQUE(provider_id, external_sub)
 );
-CREATE INDEX IF NOT EXISTS idx_linked_identity ON linked_accounts(identity_id);
+CREATE INDEX IF NOT EXISTS idx_linked_identity ON linked_accounts(entity_id);
 CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_accounts(provider_id, external_sub);
 
 -- ============================================================================

@@ -28,7 +28,7 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 		var identityID int64
 		err := a.db.SQL().QueryRowContext(r.Context(),
-			`SELECT s.identity_id FROM sessions s
+			`SELECT s.entity_id FROM sessions s
 			 WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
 			tokenHash,
 		).Scan(&identityID)
@@ -40,7 +40,7 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 		// Check for admin capability.
 		var adminCap int
 		err = a.db.SQL().QueryRowContext(r.Context(),
-			`SELECT 1 FROM identity_capabilities WHERE identity_id = ? AND capability = 'admin'`,
+			`SELECT 1 FROM entity_capabilities WHERE entity_id = ? AND capability = 'admin'`,
 			identityID,
 		).Scan(&adminCap)
 		if err == sql.ErrNoRows {

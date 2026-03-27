@@ -12,7 +12,7 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 )
 
-// Built-in identity schemas shipped with every ZITADEL instance.
+// Built-in entity schemas shipped with every ZITADEL instance.
 var builtinSchemas = []struct {
 	ID     string
 	Type   string
@@ -23,6 +23,15 @@ var builtinSchemas = []struct {
 		Type: "human_user",
 		Schema: `{
   "type": "object",
+  "x-display": {
+    "alias": "Users", "singular": "User",
+    "group": "identities", "group_label": "Identities",
+    "path": "users", "icon": "👤", "sort_order": 1
+  },
+  "x-storage": "entities",
+  "x-engine-claim-mapping": {"engine": "expr", "direction": "outbound"},
+  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner", "viewer"]},
+  "x-engine-login": {"engine": "built-in"},
   "x-auth-methods": {
     "password":    {"enabled": true,  "interactive": true,  "position": 1},
     "passkey":     {"enabled": false, "interactive": true,  "position": 0},
@@ -34,6 +43,10 @@ var builtinSchemas = []struct {
     "preset": "identifier_first",
     "mfa_required": false,
     "registration_allowed": true
+  },
+  "x-branding": {
+    "heading": "Welcome back",
+    "colors": {"primary": "#6366f1"}
   },
   "properties": {
     "display_name":  {"type": "string", "description": "Full name shown in UI", "x-user-editable": true, "x-claim-mapping": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"},
@@ -52,13 +65,17 @@ var builtinSchemas = []struct {
 		Type: "service_user",
 		Schema: `{
   "type": "object",
+  "x-display": {
+    "alias": "Service Accounts", "singular": "Service Account",
+    "group": "identities", "group_label": "Identities",
+    "path": "service-accounts", "icon": "🤖", "sort_order": 2
+  },
+  "x-storage": "entities",
+  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner"]},
   "x-auth-methods": {
     "pat":         {"enabled": true,  "interactive": false, "max_tokens": 10},
     "api_key":     {"enabled": true,  "interactive": false},
     "password":    {"enabled": true,  "interactive": true,  "position": 1}
-  },
-  "x-login": {
-    "preset": "identifier_first"
   },
   "properties": {
     "display_name":  {"type": "string", "description": "Service account name"},
@@ -77,6 +94,14 @@ var builtinSchemas = []struct {
 		Type: "app",
 		Schema: `{
   "type": "object",
+  "x-display": {
+    "alias": "OIDC Clients", "singular": "OIDC Client",
+    "group": "applications", "group_label": "Applications",
+    "path": "apps", "icon": "📱", "sort_order": 1
+  },
+  "x-storage": "entities",
+  "x-engine-claim-mapping": {"engine": "expr", "direction": "outbound"},
+  "x-engine-authorization": {"engine": "fga", "relations": ["owner", "viewer"]},
   "x-auth-methods": {
     "client_secret": {"enabled": true, "interactive": false}
   },
@@ -103,6 +128,13 @@ var builtinSchemas = []struct {
 		Type: "ai_agent",
 		Schema: `{
   "type": "object",
+  "x-display": {
+    "alias": "AI Agents", "singular": "AI Agent",
+    "group": "identities", "group_label": "Identities",
+    "path": "ai-agents", "icon": "🧠", "sort_order": 3
+  },
+  "x-storage": "entities",
+  "x-engine-authorization": {"engine": "fga", "relations": ["owner", "viewer"]},
   "x-auth-methods": {
     "pat":          {"enabled": true,  "interactive": false, "max_tokens": 5},
     "client_cert":  {"enabled": false, "interactive": false}
@@ -114,7 +146,7 @@ var builtinSchemas = []struct {
     "provider":        {"type": "string", "description": "AI provider, e.g. openai, anthropic, google"},
     "tool_access":     {"type": "array", "items": {"type": "string"}, "description": "Tools/APIs this agent can invoke"},
     "max_tokens":      {"type": "integer", "description": "Max token budget per request"},
-    "delegation_chain": {"type": "string", "description": "Parent identity that delegated authority"},
+    "delegation_chain": {"type": "string", "description": "Parent entity that delegated authority"},
     "trust_level":     {"type": "string", "enum": ["sandboxed", "supervised", "autonomous"], "description": "Level of autonomous action allowed"},
     "metadata":        {"type": "object"}
   },
@@ -126,6 +158,22 @@ var builtinSchemas = []struct {
 		Type: "org",
 		Schema: `{
   "type": "object",
+  "x-display": {
+    "alias": "Organizations", "singular": "Organization",
+    "group": "system", "group_label": "System",
+    "path": "orgs", "icon": "🏢", "sort_order": 1
+  },
+  "x-storage": "entities",
+  "x-engine-authorization": {"engine": "fga", "relations": ["member", "owner", "admin"]},
+  "x-branding": {
+    "heading": "Welcome",
+    "colors": {"primary": "#6366f1"}
+  },
+  "x-login": {
+    "preset": "identifier_first",
+    "mfa_required": false,
+    "registration_allowed": true
+  },
   "properties": {
     "display_name":  {"type": "string", "description": "Organization display name"},
     "description":   {"type": "string"},
@@ -166,7 +214,7 @@ var builtinSchemas = []struct {
 	},
 }
 
-// EnsureAdmin checks if any identities exist. If not, it creates a default
+// EnsureAdmin checks if any entities exist. If not, it creates a default
 // admin identity with a random password and prints the credentials to stdout.
 func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	// Always seed built-in schemas (idempotent).
@@ -175,15 +223,15 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	}
 
 	var count int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM identities`).Scan(&count)
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities`).Scan(&count)
 	if err != nil {
-		return fmt.Errorf("count identities: %w", err)
+		return fmt.Errorf("count entities: %w", err)
 	}
 	if count > 0 {
 		return nil // Already bootstrapped.
 	}
 
-	log.Println("No identities found — bootstrapping admin account...")
+	log.Println("No entities found — bootstrapping admin account...")
 
 	password, err := auth.GenerateRandomPassword(16)
 	if err != nil {
@@ -203,7 +251,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 
 	// Create the admin identity using the human_user schema.
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, 'admin', 'Admin', 'active', 'human_user_v1', '{"email":"admin@zitadel.local"}', '{}', datetime('now'), datetime('now'))`,
 		identityID,
 	)
@@ -214,7 +262,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	// Add capabilities — password + admin.
 	for _, cap := range []string{"password", "admin"} {
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO identity_capabilities (identity_id, capability) VALUES (?, ?)`,
+			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
 			identityID, cap,
 		)
 		if err != nil {
@@ -263,7 +311,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 // seedDefaultOrg creates the default organization if it doesn't exist.
 func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 	var exists int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM identities WHERE identifier = 'default' AND schema_id = 'org_v1'`).Scan(&exists)
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE identifier = 'default' AND schema_id = 'org_v1'`).Scan(&exists)
 	if err != nil || exists > 0 {
 		return nil
 	}
@@ -281,7 +329,7 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 	}`
 
 	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
 		 VALUES (?, 0, 'default', 'Default', 'active', 'org_v1', ?, datetime('now'), datetime('now'))`,
 		orgID, orgData,
 	)
@@ -296,7 +344,7 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 // seedConsoleClient creates the default console OIDC client identity if it doesn't exist.
 func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	var exists int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM identities WHERE identifier = 'console'`).Scan(&exists)
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE identifier = 'console'`).Scan(&exists)
 	if err != nil || exists > 0 {
 		return nil // Already exists or DB error — skip silently.
 	}
@@ -314,19 +362,19 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	}`
 
 	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
 		 VALUES (?, 1, 'console', 'ZITADEL Console', 'active', 'app_v1', ?, datetime('now'), datetime('now'))`,
 		consoleID, consoleData,
 	)
 	if err != nil {
-		return fmt.Errorf("insert console identity: %w", err)
+		return fmt.Errorf("insert console entity: %w", err)
 	}
 
 	log.Println("seeded default console OIDC client (client_id=console)")
 	return nil
 }
 
-// seedSchemas inserts or updates the built-in identity schemas.
+// seedSchemas inserts or updates the built-in entity schemas.
 func seedSchemas(ctx context.Context, db *database.DB) error {
 	for _, s := range builtinSchemas {
 		// Try with is_default column first; fall back without it for older schemas.
@@ -347,6 +395,6 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 			return fmt.Errorf("seed schema %s: %w", s.ID, err)
 		}
 	}
-	log.Printf("seeded %d built-in identity schemas", len(builtinSchemas))
+	log.Printf("seeded %d built-in entity schemas", len(builtinSchemas))
 	return nil
 }

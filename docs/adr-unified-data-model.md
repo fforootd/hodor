@@ -1,12 +1,13 @@
 # ADR-005: Unified Data Model — Schemas, Orgs, and Config Cascade
 
-**Status**: Accepted  
+**Status**: Accepted (amended by ADR-006)  
 **Date**: 2026-03-27  
-**Builds on**: ADR-004 (Apps as Identities)
+**Builds on**: ADR-004 (Apps as Identities)  
+**Amended by**: ADR-006 (Entity Naming Model)
 
 ## Context
 
-As ZITADEL grows beyond identities and OIDC, we need a coherent model for how all entities (users, apps, orgs, providers, rules), their relationships (groups, grants), and configuration (branding, login policies, notifications) fit together.
+As ZITADEL grows beyond identities and OIDC, we need a coherent model for how all domain objects, their relationships, and configuration fit together.
 
 Old ZITADEL had separate tables and models for each concept (projects, actions, login policies, branding, etc.), leading to a rigid system that was hard to extend. The schema-driven approach from ADR-001 through ADR-004 gives us a foundation — this ADR extends it to cover the full domain.
 
@@ -23,7 +24,7 @@ Layer 4: Runtime (ephemeral state)        — what's HAPPENING NOW
 
 ### 2. Layer 1: Everything is a Schema Entity
 
-All persistent domain objects are identities with schemas:
+All persistent domain objects are **entities** with schemas. The term "entity" replaces "identity" as the universal noun — see ADR-006 for full naming model.
 
 | Entity | Schema Type | Key Properties |
 |---|---|---|
@@ -34,20 +35,21 @@ All persistent domain objects are identities with schemas:
 | SAML App | `app_saml` | entity_id, acs_url (`x-saml`) |
 | Organization | `org` | branding, login_policy, notification_channels |
 | Provider | `provider` | protocol, issuer, client_id, mapping |
+| Group | `group` | description, membership rules |
 | Rule | `rule` | triggers, conditions, actions |
 
-Apps and organizations are identities in the same `identities` table, differentiated by their schema type.
+All live in the `entities` table, differentiated by their schema type.
 
 ### 3. Layer 2: Relationships via FGA
 
-Relationships are graph edges, not tables. They live in the authorization model:
+Relationships are graph edges, not tables:
 
 | Relationship | Subject | Object | Semantics |
 |---|---|---|---|
-| `member` | identity | org | User/app belongs to org |
-| `owner` | identity | org | Administers org |
-| `member` | identity | group | In a group |
-| `grant` | identity/group | app/role | Authorization grant |
+| `member` | entity | org | Entity belongs to org |
+| `owner` | entity | org | Administers org |
+| `member` | entity | group | In a group |
+| `grant` | entity/group | app/role | Authorization grant |
 
 **Groups replace Projects. A group containing apps + users + grants IS a project.**
 
@@ -63,17 +65,15 @@ Instance defaults
 
 Resolution: `app.config ?? org.config ?? instance.config`
 
-- **Instance config**: schema `default` values
-- **Org config**: org entity's `data` field
-- **App config**: app entity's `data` field
-
 Applies to: branding, login policy, rate limits, captcha, notification channels, rules.
 
 ### 5. Layer 4: Runtime State
 
-Ephemeral, high-write state stays in dedicated tables (not schemas):
+Ephemeral, high-write state stays in dedicated tables (not the `entities` table):
 
 Sessions, tokens, auth requests, events, jobs.
+
+**These still have schemas** that describe their shape (see ADR-006 `x-storage: "dedicated"`), but data lives in optimized storage.
 
 ### 6. Organizations as Scope/Context
 
@@ -87,45 +87,56 @@ Orgs are the **top-level scope** (like Vercel's project switcher):
 
 ### 7. Console Nav Structure
 
+Nav sections are **dynamically generated** from schema `x-display` metadata (see ADR-006):
+
 ```
 [🔽 Org Switcher] [⚙ Settings]
 
 ◆ Dashboard
 
-IDENTITIES        (scoped to selected org)
-◇ Users           ← human_user
+IDENTITIES        ← group: "identities"
+◇ Users           ← human_user (alias: "Users", path: "users")
 ◇ Service Accounts ← service_user
 ◇ AI Agents       ← ai_agent
 
-APPLICATIONS      (scoped to selected org)
-◇ OIDC Clients    ← app (x-oidc)
-◇ SAML Clients    ← app_saml (future)
+APPLICATIONS      ← group: "applications"
+◇ OIDC Clients    ← app
 
-ACCESS
-◇ Groups          ← group + membership edges
+ACCESS            ← group: "access"
+◇ Groups          ← group entity
 ◇ Authorizations  ← FGA grants
 
-CONFIGURE
-◇ Providers       ← provider entities
-◇ Rules           ← rule entities
+CONFIGURE         ← group: "configure"
+◇ Providers       ← provider entity
+◇ Rules           ← rule entity
 
-OBSERVABILITY
-◇ Sessions
-◇ Events
-◇ Jobs
+OBSERVABILITY     ← group: "observability"
+◇ Sessions        ← x-storage: "dedicated"
+◇ Events          ← x-storage: "dedicated"
+◇ Jobs            ← x-storage: "dedicated"
 
 SYSTEM
 ◇ Schemas
 ```
 
-Nav entries under IDENTITIES and APPLICATIONS are **dynamically generated** from registered schemas (sorted by explicit `typeOrder` priority).
+Adding a new schema type with the right `x-display` annotations automatically adds it to the correct nav section and creates API routes.
+
+## Terminology
+
+| Term | Meaning |
+|---|---|
+| **Entity** | An instance of a schema. The universal noun for all domain objects. |
+| **Schema** | A versioned JSON Schema that defines the shape, behavior, and display of an entity type. |
+| **Type** | The machine identifier for a schema (e.g., `human_user`). Immutable. |
+| **Alias** | The human-readable name for a type (e.g., "Users"). From `x-display`. |
+| **Group** | A nav section that categorizes schema types (e.g., "identities"). From `x-display`. |
+| **Path** | An API route alias (e.g., "users" → `/v1/users`). From `x-display`. |
 
 ## Consequences
 
-- **Uniform model**: users, apps, orgs, providers, rules — all identities with different schemas
-- **No separate tables**: per-concept (branding, login policy, etc.) — config lives in schema `data`
-- **Extensible nav**: new schema types automatically add nav entries
-- **Org scoping**: everything filters by org context, reducing complexity
-- **1:N orgs**: users can switch between organizations freely
+- **Uniform model**: users, apps, orgs, providers, rules — all entities with different schemas
+- **No separate tables**: per-concept config lives in schema `data`
+- **Extensible**: new schema types add nav entries and API routes automatically
+- **Org scoping**: everything filters by org context
 - **Groups replace projects**: simpler model, same capability
-- **Cascade config**: instance defaults with org/app overrides, no config table sprawl
+- **Cascade config**: instance defaults with org/app overrides

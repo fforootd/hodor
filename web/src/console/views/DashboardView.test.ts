@@ -4,13 +4,13 @@ import DashboardView from './DashboardView.vue'
 
 // Mock the API layer.
 vi.mock('@/api/resources', () => ({
-  identityApi: { list: vi.fn() },
+  entityApi: { list: vi.fn() },
   schemaApi: { list: vi.fn() },
   sessionApi: { list: vi.fn() },
   eventApi: { list: vi.fn() },
 }))
 
-import { identityApi, schemaApi, sessionApi, eventApi } from '@/api/resources'
+import { entityApi, schemaApi, sessionApi, eventApi } from '@/api/resources'
 
 describe('DashboardView', () => {
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe('DashboardView', () => {
 
   it('renders stat cards with zeros initially', () => {
     // APIs never resolve — test initial state.
-    ;(identityApi.list as any).mockReturnValue(new Promise(() => {}))
+    ;(entityApi.list as any).mockReturnValue(new Promise(() => {}))
     ;(schemaApi.list as any).mockReturnValue(new Promise(() => {}))
     ;(sessionApi.list as any).mockReturnValue(new Promise(() => {}))
     ;(eventApi.list as any).mockReturnValue(new Promise(() => {}))
@@ -33,7 +33,7 @@ describe('DashboardView', () => {
   })
 
   it('loads and displays stats from API', async () => {
-    ;(identityApi.list as any).mockResolvedValue([{ id: 1 }, { id: 2 }])
+    ;(entityApi.list as any).mockResolvedValue([{ id: 1 }, { id: 2 }])
     ;(schemaApi.list as any).mockResolvedValue([{ id: 's1' }])
     ;(sessionApi.list as any).mockResolvedValue([{ id: 'ses1' }, { id: 'ses2' }, { id: 'ses3' }])
     ;(eventApi.list as any).mockResolvedValue([
@@ -51,7 +51,7 @@ describe('DashboardView', () => {
   })
 
   it('displays "No events yet" when empty', async () => {
-    ;(identityApi.list as any).mockResolvedValue([])
+    ;(entityApi.list as any).mockResolvedValue([])
     ;(schemaApi.list as any).mockResolvedValue([])
     ;(sessionApi.list as any).mockResolvedValue([])
     ;(eventApi.list as any).mockResolvedValue([])
@@ -63,7 +63,7 @@ describe('DashboardView', () => {
   })
 
   it('renders recent events with type badges', async () => {
-    ;(identityApi.list as any).mockResolvedValue([])
+    ;(entityApi.list as any).mockResolvedValue([])
     ;(schemaApi.list as any).mockResolvedValue([])
     ;(sessionApi.list as any).mockResolvedValue([])
     ;(eventApi.list as any).mockResolvedValue([

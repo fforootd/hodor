@@ -2,156 +2,23 @@
   <div v-if="loading" class="loading">Loading schema…</div>
   <div v-else-if="!schema" class="loading">Schema not found</div>
   <div v-else class="editor-layout">
-    <!-- Quick Settings Sidebar -->
+    <!-- Annotation-Driven Sidebar -->
     <aside class="sidebar">
-      <div class="sidebar-section">
-        <h4 class="sidebar-heading">Schema</h4>
-        <div class="field-row">
-          <span class="field-label">Type</span>
-          <span class="field-value mono">{{ schema.type }}</span>
-        </div>
-        <div class="field-row">
-          <span class="field-label">Version</span>
-          <span class="version-badge">v{{ schema.version }}</span>
-          <span v-if="schema.is_default" class="default-tag">default</span>
-          <span v-else class="draft-tag">draft</span>
-        </div>
-        <div v-if="schema.message" class="field-row">
-          <span class="field-label">Message</span>
-          <span class="field-value">{{ schema.message }}</span>
-        </div>
-        <div v-if="identityCount >= 0" class="field-row">
-          <span class="field-label">Identities</span>
-          <span class="impact-badge" :class="{ warn: identityCount > 0 }">
-            {{ identityCount.toLocaleString() }} {{ identityCount === 1 ? 'user' : 'users' }}
-          </span>
-        </div>
-        <!-- Version history -->
-        <div v-if="versionHistory.length > 1" class="version-list">
-          <h5 class="version-list-title">Version History</h5>
-          <div
-            v-for="v in versionHistory" :key="v.id"
-            class="version-item"
-            :class="{ active: v.id === schema.id }"
-          >
-            <router-link :to="'/schemas/' + v.id" class="version-item-link">
-              <span class="version-badge-sm">v{{ v.version }}</span>
-              <span v-if="v.is_default" class="default-dot">★</span>
-              <span class="version-item-msg">{{ v.message || 'No message' }}</span>
-            </router-link>
-          </div>
-        </div>
-        <!-- Promote button -->
-        <button
-          v-if="!schema.is_default"
-          class="btn-promote"
-          @click="promoteThis"
-          :disabled="promoteLoading"
-        >
-          {{ promoteLoading ? 'Promoting…' : '★ Promote to Default' }}
-        </button>
-      </div>
-
-      <div class="sidebar-section">
-        <h4 class="sidebar-heading">Login Flow</h4>
-        <div class="field-row">
-          <span class="field-label">Preset</span>
-          <select v-model="loginPreset" class="select-input" @change="onQuickSettingChange">
-            <option value="identifier_first">Identifier first</option>
-            <option value="passkey_first">Passkey first</option>
-            <option value="sso_only">SSO only</option>
-            <option value="custom">Custom</option>
-          </select>
-        </div>
-        <div class="toggle-group">
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authPassword" @change="onQuickSettingChange" />
-            <span>Password</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authMagicLink" @change="onQuickSettingChange" />
-            <span>Magic link</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authPasskey" @change="onQuickSettingChange" />
-            <span>Passkey</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authSSO" @change="onQuickSettingChange" />
-            <span>SSO</span>
-          </label>
-        </div>
-        <label class="toggle-row mfa-row">
-          <input type="checkbox" v-model="mfaRequired" @change="onQuickSettingChange" />
-          <span>Require MFA</span>
-        </label>
-        <label class="toggle-row">
-          <input type="checkbox" v-model="registrationAllowed" @change="onQuickSettingChange" />
-          <span>Allow registration</span>
-        </label>
-      </div>
-
-      <div class="sidebar-section">
-        <h4 class="sidebar-heading">API Auth</h4>
-        <div class="toggle-group">
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authPAT" @change="onQuickSettingChange" />
-            <span>Personal access tokens</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authAPIKey" @change="onQuickSettingChange" />
-            <span>API keys</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" v-model="authClientCert" @change="onQuickSettingChange" />
-            <span>Client certificates</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="sidebar-section">
-        <h4 class="sidebar-heading">Branding</h4>
-        <div class="field-row">
-          <span class="field-label">Heading</span>
-          <input type="text" v-model="brandHeading" class="text-input" @input="onQuickSettingChange" />
-        </div>
-        <div class="field-row">
-          <span class="field-label">Primary</span>
-          <div class="color-row">
-            <input type="color" v-model="brandPrimary" class="color-input" @input="onQuickSettingChange" />
-            <span class="mono">{{ brandPrimary }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="sidebar-section">
-        <h4 class="sidebar-heading">Fields</h4>
-        <div v-for="f in schemaFields" :key="f.name" class="field-chip">
-          <span class="field-name">{{ f.name }}</span>
-          <span v-if="f.identifier" class="chip-tag id">ID</span>
-          <span v-if="f.sensitive" class="chip-tag sens">PII</span>
-          <span v-if="f.mfa" class="chip-tag mfa">MFA</span>
-        </div>
-        <div v-if="!schemaFields.length" class="empty-fields">No properties defined</div>
-      </div>
-
-      <div class="sidebar-actions">
-        <div v-if="dirty" class="commit-msg-row">
-          <input
-            type="text"
-            v-model="commitMessage"
-            placeholder="What changed? (optional)"
-            class="commit-input"
-          />
-        </div>
-        <button class="btn-save" :disabled="!dirty || saving" @click="saveSchema">
-          {{ saving ? 'Saving…' : 'Save as new version' }}
-        </button>
-        <button v-if="dirty" class="btn-diff" @click="showDiff = !showDiff">
+      <SchemaAnnotationRenderer
+        :parsed-schema="parsedSchemaJSON"
+        :schema-meta="schema"
+        :versions="versionHistory"
+        :entity-count="entityCount"
+        :promote-loading="promoteLoading"
+        :save-status="saveSuccess ? '✓ Created v' + newVersionNum : saveError || ''"
+        @promote="promoteThis"
+        @change="onQuickSettingChange"
+        @save="saveSchemaWithMsg"
+      />
+      <div class="sidebar-actions" v-if="dirty">
+        <button class="btn-diff" @click="showDiff = !showDiff">
           {{ showDiff ? '← Editor' : 'Review changes' }}
         </button>
-        <span v-if="saveSuccess" class="save-msg success">✓ Created v{{ newVersionNum }}</span>
-        <span v-if="saveError" class="save-msg error">{{ saveError }}</span>
       </div>
     </aside>
 
@@ -232,6 +99,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { schemaApi, type Schema } from '@/api/resources'
+import SchemaAnnotationRenderer from '@/console/components/schema/SchemaAnnotationRenderer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -244,7 +112,7 @@ const jsonError = ref('')
 const saving = ref(false)
 const saveSuccess = ref(false)
 const saveError = ref('')
-const identityCount = ref(-1)
+const entityCount = ref(-1)
 const showDiff = ref(false)
 const commitMessage = ref('')
 const newVersionNum = ref(0)
@@ -274,6 +142,21 @@ const brandPrimary = ref('#6366f1')
 const dirty = computed(() => editorContent.value !== originalContent.value)
 const editorLines = computed(() => editorContent.value.split('\n'))
 const lineCount = computed(() => editorLines.value.length)
+
+// Parsed schema JSON for annotation renderer
+const parsedSchemaJSON = computed(() => {
+  try {
+    return JSON.parse(editorContent.value || '{}')
+  } catch {
+    return {}
+  }
+})
+
+// Save with commit message from annotation renderer
+function saveSchemaWithMsg(msg: string) {
+  commitMessage.value = msg || ''
+  saveSchema()
+}
 
 // --- Fold State ---
 const collapsedLines = ref(new Set<number>())
@@ -475,7 +358,7 @@ onMounted(async () => {
     originalContent.value = json
     syncSidebarFromJson(json)
 
-    schemaApi.identityCount(id).then(c => { identityCount.value = c }).catch(() => {})
+    schemaApi.entityCount(id).then(c => { entityCount.value = c }).catch(() => {})
     // Load version history for this type
     schemaApi.listByType(s.type).then(versions => { versionHistory.value = versions }).catch(() => {})
   } catch {

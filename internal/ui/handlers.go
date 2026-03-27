@@ -93,7 +93,7 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	// Look up identity by identifier.
 	var identityID int64
 	err := u.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id FROM identities WHERE identifier = ? AND state = 'active'`,
+		`SELECT id FROM entities WHERE identifier = ? AND state = 'active'`,
 		identifier,
 	).Scan(&identityID)
 	if err == sql.ErrNoRows {
@@ -185,7 +185,7 @@ func (u *UI) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
 
 	var identityCount, sessionCount, eventCount int
-	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM identities`).Scan(&identityCount)
+	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM entities`).Scan(&identityCount)
 	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL`).Scan(&sessionCount)
 	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM events`).Scan(&eventCount)
 
@@ -197,9 +197,9 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT i.id, i.identifier, json_extract(i.data, '$.display_name'), i.state, i.created_at
-		 FROM identities i ORDER BY i.id ASC LIMIT 100`)
+		 FROM entities i ORDER BY i.id ASC LIMIT 100`)
 	if err != nil {
-		http.Error(w, "Failed to load identities", http.StatusInternalServerError)
+		http.Error(w, "Failed to load entities", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -228,7 +228,7 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderAdminIdentities(w, ident, identities)
+	renderAdminEntities(w, ident, identities)
 }
 
 func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +236,7 @@ func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT s.id, i.identifier, s.user_agent, s.ip_address, s.created_at, s.expires_at
-		 FROM sessions s JOIN identities i ON s.identity_id = i.id
+		 FROM sessions s JOIN entities e ON s.entity_id = i.id
 		 WHERE s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 100`)
 	if err != nil {
 		http.Error(w, "Failed to load sessions", http.StatusInternalServerError)
@@ -508,7 +508,7 @@ func (u *UI) handleAdminIdentityCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.Redirect(w, r, "/admin/identities", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/entities", http.StatusSeeOther)
 }
 
 func (u *UI) handleAdminIdentityEdit(w http.ResponseWriter, r *http.Request) {
@@ -576,7 +576,7 @@ func (u *UI) handleAdminIdentityUpdate(w http.ResponseWriter, r *http.Request) {
 		_ = u.passwords.SetPassword(r.Context(), parsedID, password)
 	}
 
-	http.Redirect(w, r, "/admin/identities", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/entities", http.StatusSeeOther)
 }
 
 func (u *UI) handleAdminIdentityDelete(w http.ResponseWriter, r *http.Request) {
@@ -592,7 +592,7 @@ func (u *UI) handleAdminIdentityDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/admin/identities", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/entities", http.StatusSeeOther)
 }
 
 // --- Session helpers ---
@@ -610,8 +610,8 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 	var identifier string
 	var dataJSON sql.NullString
 	err := u.db.SQL().QueryRowContext(r.Context(),
-		`SELECT s.identity_id, i.identifier, i.data
-		 FROM sessions s JOIN identities i ON s.identity_id = i.id
+		`SELECT s.entity_id, i.identifier, i.data
+		 FROM sessions s JOIN entities e ON s.entity_id = i.id
 		 WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
 		tokenHash,
 	).Scan(&identityID, &identifier, &dataJSON)
@@ -632,7 +632,7 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 
 	// Load capabilities.
 	capRows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT capability FROM identity_capabilities WHERE identity_id = ?`, identityID)
+		`SELECT capability FROM entity_capabilities WHERE entity_id = ?`, identityID)
 	if err != nil {
 		return nil, false
 	}

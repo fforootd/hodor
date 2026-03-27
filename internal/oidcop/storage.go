@@ -48,7 +48,7 @@ func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.
 	var dataJSON, schemaJSON sql.NullString
 	err := s.db.SQL().QueryRowContext(ctx,
 		`SELECT i.data, COALESCE(sc.schema, '{}')
-		 FROM identities i
+		 FROM entities i
 		 LEFT JOIN schemas sc ON i.schema_id = sc.id
 		 WHERE i.identifier = ? AND i.state = 'active'`,
 		clientID,
@@ -64,8 +64,8 @@ func (s *Storage) AuthorizeClientIDSecret(ctx context.Context, clientID, clientS
 	// Look up the identity and its credential.
 	var credData string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT ic.credential_data FROM identity_credentials ic
-		 JOIN identities i ON ic.identity_id = i.id
+		`SELECT ic.credential_data FROM entity_credentials ic
+		 JOIN entities e ON ic.entity_id = i.id
 		 WHERE i.identifier = ? AND ic.credential_type = 'client_secret'`,
 		clientID,
 	).Scan(&credData)
@@ -484,7 +484,7 @@ func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, user
 	// Load identity data + schema in one query.
 	err := s.db.SQL().QueryRowContext(ctx,
 		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
-		 FROM identities i
+		 FROM entities i
 		 LEFT JOIN schemas sc ON i.schema_id = sc.id
 		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
 		userID, userID,
@@ -504,7 +504,7 @@ func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, user
 	// Also check profile column for legacy data.
 	var profileJSON sql.NullString
 	_ = s.db.SQL().QueryRowContext(ctx,
-		`SELECT profile FROM identities WHERE identifier = ? OR CAST(id AS TEXT) = ?`,
+		`SELECT profile FROM entities WHERE identifier = ? OR CAST(id AS TEXT) = ?`,
 		userID, userID,
 	).Scan(&profileJSON)
 	if profileJSON.Valid {

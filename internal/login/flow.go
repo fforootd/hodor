@@ -1,7 +1,7 @@
 // Package login Flow Engine — schema-driven login flow state machine.
 //
 // Reads x-auth (per-field), x-login (schema-level), and x-branding
-// annotations from identity schemas to determine step ordering
+// annotations from entity schemas to determine step ordering
 // and generate UI node trees.
 package login
 

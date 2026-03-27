@@ -121,7 +121,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	var identityID int64
 	var displayName string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, COALESCE(display_name, identifier) FROM identities WHERE identifier = ? AND state = 'active'`,
+		`SELECT id, COALESCE(display_name, identifier) FROM entities WHERE identifier = ? AND state = 'active'`,
 		identifier,
 	).Scan(&identityID, &displayName)
 	if err == sql.ErrNoRows {
@@ -151,7 +151,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 	var credData string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT credential_data FROM identity_credentials WHERE identity_id = ? AND credential_type = 'password'`,
+		`SELECT credential_data FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`,
 		flow.IdentityID,
 	).Scan(&credData)
 	if err != nil {

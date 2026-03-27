@@ -320,7 +320,7 @@ const adminSidebar = `
     <div class="logo">ZITADEL</div>
     <nav>
       <a href="/admin">◆ Dashboard</a>
-      <a href="/admin/identities">◇ Identities</a>
+      <a href="/admin/entities">◇ Entities</a>
       <a href="/admin/schemas">◇ Schemas</a>
       <a href="/admin/sessions">◇ Sessions</a>
       <a href="/admin/events">◇ Events</a>
@@ -341,7 +341,7 @@ func renderAdminDashboard(w http.ResponseWriter, ident *IdentityContext, identit
 }
 
 // Admin identities list template.
-var identitiesListTmpl = template.Must(template.New("identities").Parse(baseHead + adminSidebar + `
+var entitiesListTmpl = template.Must(template.New("entities").Parse(baseHead + adminSidebar + `
   <div class="admin-main">
     <div class="admin-header">
       <h1>Identities</h1>
@@ -351,7 +351,7 @@ var identitiesListTmpl = template.Must(template.New("identities").Parse(baseHead
     </div>
     <div class="toolbar">
       <div></div>
-      <a href="/admin/identities/new" class="btn-sm btn-primary-sm">+ New Identity</a>
+      <a href="/admin/entities/new" class="btn-sm btn-primary-sm">+ New Entity</a>
     </div>
     <table class="data-table">
       <thead>
@@ -373,14 +373,14 @@ var identitiesListTmpl = template.Must(template.New("identities").Parse(baseHead
           <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
           <td>{{.CreatedAt}}</td>
           <td class="actions-cell">
-            <a href="/admin/identities/{{.ID}}" class="btn-sm">Edit</a>
-            <form method="POST" action="/admin/identities/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this identity?')">
+            <a href="/admin/entities/{{.ID}}" class="btn-sm">Edit</a>
+            <form method="POST" action="/admin/entities/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this entity?')">
               <button type="submit" class="btn-danger">Delete</button>
             </form>
           </td>
         </tr>
         {{else}}
-        <tr><td colspan="6" style="text-align:center;color:var(--z-text-muted)">No identities found</td></tr>
+        <tr><td colspan="6" style="text-align:center;color:var(--z-text-muted)">No entities found</td></tr>
         {{end}}
       </tbody>
     </table>
@@ -388,12 +388,12 @@ var identitiesListTmpl = template.Must(template.New("identities").Parse(baseHead
 </div>
 ` + baseFoot))
 
-func renderAdminIdentities(w http.ResponseWriter, ident *IdentityContext, identities any) {
+func renderAdminEntities(w http.ResponseWriter, ident *IdentityContext, identities any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	identitiesListTmpl.Execute(w, map[string]any{
-		"Title":      "Identities",
+	entitiesListTmpl.Execute(w, map[string]any{
+		"Title":      "Entities",
 		"Ident":      ident,
-		"Identities": identities,
+		"Entities": identities,
 	})
 }
 
@@ -401,7 +401,7 @@ func renderAdminIdentities(w http.ResponseWriter, ident *IdentityContext, identi
 var identityFormTmpl = template.Must(template.New("identity-form").Parse(baseHead + adminSidebar + `
   <div class="admin-main">
     <div class="admin-header">
-      <h1>{{if .IsEdit}}Edit Identity{{else}}New Identity{{end}}</h1>
+      <h1>{{if .IsEdit}}Edit Identity{{else}}New Entity{{end}}</h1>
       <div class="user-info">
         {{.Ident.DisplayName}} · <a href="/logout">Sign out</a>
       </div>
@@ -477,7 +477,7 @@ var identityFormTmpl = template.Must(template.New("identity-form").Parse(baseHea
 
         <div class="form-actions">
           <button type="submit" class="btn">{{if .IsEdit}}Save Changes{{else}}Create Identity{{end}}</button>
-          <a href="/admin/identities" class="btn-sm" style="align-self:center">Cancel</a>
+          <a href="/admin/entities" class="btn-sm" style="align-self:center">Cancel</a>
         </div>
       </form>
     </div>
@@ -573,10 +573,10 @@ func renderAdminIdentityForm(w http.ResponseWriter, ident *IdentityContext, iden
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := map[string]any{
-		"Title":        "New Identity",
+		"Title":        "New Entity",
 		"Ident":        ident,
 		"IsEdit":       false,
-		"FormAction":   "/admin/identities/new",
+		"FormAction":   "/admin/entities/new",
 		"Identifier":   "",
 		"DisplayName":  "",
 		"State":        "active",
@@ -591,7 +591,7 @@ func renderAdminIdentityForm(w http.ResponseWriter, ident *IdentityContext, iden
 	if identity != nil {
 		data["Title"] = "Edit " + identity.Identifier
 		data["IsEdit"] = true
-		data["FormAction"] = fmt.Sprintf("/admin/identities/%d", identity.ID)
+		data["FormAction"] = fmt.Sprintf("/admin/entities/%d", identity.ID)
 		data["Identifier"] = identity.Identifier
 		data["State"] = identity.State
 
@@ -841,7 +841,7 @@ var schemasListTmpl = template.Must(template.New("schemas").Parse(baseHead + adm
       </div>
     </div>
 
-    <p style="color:var(--muted);margin-bottom:1.5rem">Schemas define the data shape for each identity type. Each schema is a JSON Schema document that validates the <code>data</code> field on identities.</p>
+    <p style="color:var(--muted);margin-bottom:1.5rem">Schemas define the data shape for each identity type. Each schema is a JSON Schema document that validates the <code>data</code> field on entities.</p>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:1.2rem">
       {{range .Schemas}}
