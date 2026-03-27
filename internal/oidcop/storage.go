@@ -15,8 +15,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"github.com/zitadel/oidc/v3/pkg/op"
+	"golang.org/x/text/language"
 
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/login"
 )
 
 var (
@@ -477,12 +479,16 @@ func (s *Storage) SetUserinfoFromToken(ctx context.Context, userinfo *oidc.UserI
 
 func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, userID string, scopes []string) error {
 	var identifier string
-	var dataJSON sql.NullString
+	var dataJSON, schemaJSON sql.NullString
 
+	// Load identity data + schema in one query.
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT identifier, data FROM identities WHERE identifier = ? OR CAST(id AS TEXT) = ?`,
+		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
+		 FROM identities i
+		 LEFT JOIN schemas sc ON i.schema_id = sc.id
+		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
 		userID, userID,
-	).Scan(&identifier, &dataJSON)
+	).Scan(&identifier, &dataJSON, &schemaJSON)
 	if err != nil {
 		return fmt.Errorf("user not found: %w", err)
 	}
@@ -491,41 +497,91 @@ func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, user
 	if dataJSON.Valid {
 		_ = json.Unmarshal([]byte(dataJSON.String), &data)
 	}
+	if data == nil {
+		data = make(map[string]any)
+	}
 
+	// Also check profile column for legacy data.
+	var profileJSON sql.NullString
+	_ = s.db.SQL().QueryRowContext(ctx,
+		`SELECT profile FROM identities WHERE identifier = ? OR CAST(id AS TEXT) = ?`,
+		userID, userID,
+	).Scan(&profileJSON)
+	if profileJSON.Valid {
+		var profile map[string]any
+		if json.Unmarshal([]byte(profileJSON.String), &profile) == nil {
+			// Merge: data takes priority, profile is fallback.
+			for k, v := range profile {
+				if _, exists := data[k]; !exists {
+					data[k] = v
+				}
+			}
+		}
+	}
+
+	// Get schema-driven claim map.
+	claims := login.UserinfoClaims(schemaJSON.String, data)
+	if claims == nil {
+		claims = make(map[string]any)
+	}
+
+	// Map scoped claims to oidc.UserInfo fields.
 	for _, scope := range scopes {
 		switch scope {
 		case oidc.ScopeOpenID:
 			userinfo.Subject = userID
+
 		case oidc.ScopeEmail:
-			if email, ok := data["email"].(string); ok {
+			if email, ok := claims["email"].(string); ok && email != "" {
 				userinfo.Email = email
 				userinfo.EmailVerified = oidc.Bool(true)
-			} else {
-				// Fall back to identifier if it looks like an email
-				if strings.Contains(identifier, "@") {
-					userinfo.Email = identifier
-					userinfo.EmailVerified = oidc.Bool(true)
-				}
+			} else if strings.Contains(identifier, "@") {
+				userinfo.Email = identifier
+				userinfo.EmailVerified = oidc.Bool(true)
 			}
+
 		case oidc.ScopeProfile:
 			userinfo.PreferredUsername = identifier
-			if dn, ok := data["display_name"].(string); ok {
-				userinfo.Name = dn
+			if name, ok := claims["name"].(string); ok {
+				userinfo.Name = name
 			}
-			if fn, ok := data["first_name"].(string); ok {
-				userinfo.GivenName = fn
+			if gn, ok := claims["given_name"].(string); ok {
+				userinfo.GivenName = gn
 			}
-			if ln, ok := data["last_name"].(string); ok {
-				userinfo.FamilyName = ln
+			if fn, ok := claims["family_name"].(string); ok {
+				userinfo.FamilyName = fn
 			}
+			if nick, ok := claims["nickname"].(string); ok {
+				userinfo.Nickname = nick
+			}
+			if pic, ok := claims["picture"].(string); ok {
+				userinfo.Picture = pic
+			}
+			if locale, ok := claims["locale"].(string); ok {
+				userinfo.Locale = oidc.NewLocale(parseLocale(locale))
+			}
+			if zi, ok := claims["zoneinfo"].(string); ok {
+				userinfo.Zoneinfo = zi
+			}
+
 		case oidc.ScopePhone:
-			if phone, ok := data["phone"].(string); ok {
+			if phone, ok := claims["phone_number"].(string); ok && phone != "" {
 				userinfo.PhoneNumber = phone
 				userinfo.PhoneNumberVerified = oidc.Bool(true)
 			}
 		}
 	}
 	return nil
+}
+
+// parseLocale parses a BCP-47 language tag into a language.Tag.
+// Returns language.Und on failure.
+func parseLocale(s string) language.Tag {
+	tag, err := language.Parse(s)
+	if err != nil {
+		return language.Und
+	}
+	return tag
 }
 
 // ---------- Introspection ----------

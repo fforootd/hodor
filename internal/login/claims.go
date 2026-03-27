@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/expr-lang/expr"
 )
@@ -98,4 +99,98 @@ func DefaultEntraIDOverrides() map[string]string {
 	return map[string]string{
 		"email": "claims.preferred_username ?? claims.email ?? claims.upn",
 	}
+}
+
+// ---------- Outbound: Identity → OIDC Userinfo Claims ----------
+
+// standardOIDCClaims maps schema field names to their standard OIDC claim names.
+// This provides a fallback when x-claim-mapping is not present.
+var standardOIDCClaims = map[string]string{
+	"email":        "email",
+	"phone":        "phone_number",
+	"display_name": "name",
+	"first_name":   "given_name",
+	"last_name":    "family_name",
+	"locale":       "locale",
+	"timezone":     "zoneinfo",
+	"avatar_url":   "picture",
+	"nickname":     "nickname",
+}
+
+// UserinfoClaims reads x-claim-mapping annotations from a JSON schema and
+// maps identity data fields to standard OIDC claims. This is the outbound
+// counterpart to MapClaims (which handles inbound IDP claims).
+//
+// Resolution: for each schema property with x-claim-mapping, extract the
+// target OIDC claim name from the expression, then emit data[field] under
+// that claim name.
+func UserinfoClaims(schemaJSON string, data map[string]any) map[string]any {
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schemaJSON), &schema); err != nil {
+		return nil
+	}
+
+	result := make(map[string]any)
+
+	for field, def := range schema.Properties {
+		val, ok := data[field]
+		if !ok || val == nil || val == "" {
+			continue
+		}
+
+		// Determine the OIDC claim name.
+		var claimName string
+		if mapping, ok := def["x-claim-mapping"].(string); ok && mapping != "" {
+			claimName = OIDCClaimName(mapping)
+		}
+		if claimName == "" {
+			// Fallback: use the standardOIDCClaims table.
+			claimName = standardOIDCClaims[field]
+		}
+		if claimName == "" {
+			// No mapping known — skip (don't leak arbitrary fields).
+			continue
+		}
+
+		result[claimName] = val
+	}
+
+	return result
+}
+
+// OIDCClaimName extracts the standard OIDC claim name from an x-claim-mapping
+// expression. It handles common patterns:
+//
+//	"claims.email"                                    → "email"
+//	"claims.name ?? (claims.given_name + ' ' + ...)"  → "name"
+//	"claims.phone_number ?? ''"                       → "phone_number"
+func OIDCClaimName(expr string) string {
+	expr = strings.TrimSpace(expr)
+
+	// Must start with "claims."
+	if !strings.HasPrefix(expr, "claims.") {
+		return ""
+	}
+
+	// Strip "claims." prefix.
+	rest := expr[7:]
+
+	// Take everything until a non-identifier character.
+	// Identifier chars: a-z, A-Z, 0-9, _
+	end := 0
+	for end < len(rest) {
+		c := rest[end]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			end++
+		} else {
+			break
+		}
+	}
+
+	if end == 0 {
+		return ""
+	}
+	return rest[:end]
 }
