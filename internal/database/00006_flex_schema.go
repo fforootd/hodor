@@ -39,10 +39,12 @@ func up006FlexSchema(db *sql.DB) error {
 			org_id     %s NOT NULL DEFAULT 1,
 			schema     TEXT NOT NULL,
 			version    INTEGER DEFAULT 1,
+			is_default BOOLEAN DEFAULT false,
 			created_at %s
 		)`, bigint, timestampDefault),
 
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default)`,
 
 		// Promoted indexes — extracts x-indexed fields for O(log N) lookups.
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS entity_indexes (

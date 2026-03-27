@@ -202,11 +202,20 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 // seedSchemas inserts or updates the built-in identity schemas.
 func seedSchemas(ctx context.Context, db *database.DB) error {
 	for _, s := range builtinSchemas {
+		// Try with is_default column first; fall back without it for older schemas.
 		_, err := db.SQL().ExecContext(ctx,
-			`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, created_at)
-			 VALUES (?, ?, 0, ?, 1, datetime('now'))`,
+			`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
+			 VALUES (?, ?, 0, ?, 1, true, datetime('now'))`,
 			s.ID, s.Type, s.Schema,
 		)
+		if err != nil {
+			// Column may not exist in fuzz worker subprocess or old DB.
+			_, err = db.SQL().ExecContext(ctx,
+				`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, created_at)
+				 VALUES (?, ?, 0, ?, 1, datetime('now'))`,
+				s.ID, s.Type, s.Schema,
+			)
+		}
 		if err != nil {
 			return fmt.Errorf("seed schema %s: %w", s.ID, err)
 		}

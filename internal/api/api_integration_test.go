@@ -53,8 +53,8 @@ func TestValidAdminToken_Returns200(t *testing.T) {
 
 	// Verify we got the admin identity.
 	identity, _ := body["identity"].(map[string]any)
-	if identity["identifier"] != "admin@zitadel.local" {
-		t.Errorf("expected admin@zitadel.local, got %v", identity["identifier"])
+	if identity["identifier"] != "admin" {
+		t.Errorf("expected admin, got %v", identity["identifier"])
 	}
 }
 
@@ -294,7 +294,7 @@ func TestIdentity_CRUD(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("get: expected 200, got %d", code)
 	}
-	if body["identifier"] != "admin@zitadel.local" {
+	if body["identifier"] != "admin" {
 		t.Errorf("expected admin, got %v", body["identifier"])
 	}
 }

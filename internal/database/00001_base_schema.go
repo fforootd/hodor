@@ -39,6 +39,7 @@ func up001Base(db *sql.DB) error {
 			identifier   TEXT NOT NULL,
 			display_name TEXT,
 			state        TEXT NOT NULL DEFAULT 'active',
+			schema_id    TEXT DEFAULT '',
 			profile      %s,
 			metadata     %s,
 			created_at   %s,

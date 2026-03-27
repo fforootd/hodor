@@ -142,13 +142,21 @@ func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
 }
 
 // getDefaultSchemaConfig loads the default identity schema and extracts auth config.
+// Resolution order: is_default=true for the type, fallback to oldest schema.
 func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
 	var schemaJSON string
+	// Try is_default first.
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT schema FROM schemas ORDER BY created_at ASC LIMIT 1`,
+		`SELECT schema FROM schemas WHERE is_default = true ORDER BY created_at ASC LIMIT 1`,
 	).Scan(&schemaJSON)
 	if err != nil || schemaJSON == "" {
-		return ExtractAuthConfig(`{}`)
+		// Fallback to oldest schema (pre-migration compatibility).
+		err = h.db.SQL().QueryRowContext(r.Context(),
+			`SELECT schema FROM schemas ORDER BY created_at ASC LIMIT 1`,
+		).Scan(&schemaJSON)
+		if err != nil || schemaJSON == "" {
+			return ExtractAuthConfig(`{}`)
+		}
 	}
 	return ExtractAuthConfig(schemaJSON)
 }

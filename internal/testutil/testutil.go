@@ -89,7 +89,7 @@ func (ts *TestServer) URL() string {
 func (ts *TestServer) LoginAdmin() string {
 	ts.t.Helper()
 	var adminID int64
-	err := ts.DB.SQL().QueryRow(`SELECT id FROM identities WHERE identifier = 'admin@zitadel.local'`).Scan(&adminID)
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM identities WHERE identifier = 'admin'`).Scan(&adminID)
 	if err != nil {
 		ts.t.Fatalf("find admin: %v", err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/schema"
 )
 
 // API holds the REST handlers and their dependencies.
@@ -44,6 +45,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Schema CRUD (write = admin-only, read = public)
 	mux.HandleFunc("POST /v1/schemas", a.requireAdmin(a.createSchema))
 	mux.HandleFunc("GET /v1/schemas", a.listSchemas)
+	mux.HandleFunc("GET /v1/schemas/$meta", a.getMetaSchema)
 	mux.HandleFunc("GET /v1/schemas/{id}", a.getSchema)
 	mux.HandleFunc("PATCH /v1/schemas/{id}", a.requireAdmin(a.updateSchema))
 	mux.HandleFunc("GET /v1/schemas/{id}/identity-count", a.schemaIdentityCount)
@@ -378,6 +380,7 @@ type SchemaResponse struct {
 	OrgID     int64  `json:"org_id"`
 	Schema    any    `json:"schema"`
 	Version   int    `json:"version"`
+	IsDefault bool   `json:"is_default"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -401,11 +404,25 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate x-auth-methods keys.
+	if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
+		writeError(w, http.StatusBadRequest, validationErr)
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Check if there's already a default for this type+org.
+	var existingDefault int
+	a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM schemas WHERE type = ? AND org_id = ? AND is_default = true`,
+		req.Type, req.OrgID).Scan(&existingDefault)
+	isDefault := existingDefault == 0 // First schema of this type becomes default.
+
 	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, created_at)
-		 VALUES (?, ?, ?, ?, 1, ?)`,
-		req.ID, req.Type, req.OrgID, string(schemaJSON), now)
+		`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
+		 VALUES (?, ?, ?, ?, 1, ?, ?)`,
+		req.ID, req.Type, req.OrgID, string(schemaJSON), isDefault, now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save schema")
 		return
@@ -417,6 +434,7 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		OrgID:     req.OrgID,
 		Schema:    req.Schema,
 		Version:   1,
+		IsDefault: isDefault,
 		CreatedAt: now,
 	})
 }
@@ -424,10 +442,10 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 	typeFilter := r.URL.Query().Get("type")
 
-	query := `SELECT id, type, org_id, schema, version, created_at FROM schemas ORDER BY id`
+	query := `SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas ORDER BY id`
 	var args []any
 	if typeFilter != "" {
-		query = `SELECT id, type, org_id, schema, version, created_at FROM schemas WHERE type = ? ORDER BY id`
+		query = `SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas WHERE type = ? ORDER BY id`
 		args = []any{typeFilter}
 	}
 
@@ -442,7 +460,7 @@ func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s SchemaResponse
 		var schemaStr string
-		if err := rows.Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.CreatedAt); err != nil {
 			continue
 		}
 		json.Unmarshal([]byte(schemaStr), &s.Schema)
@@ -462,8 +480,8 @@ func (a *API) getSchema(w http.ResponseWriter, r *http.Request) {
 	var s SchemaResponse
 	var schemaStr string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, type, org_id, schema, version, created_at FROM schemas WHERE id = ?`, schemaID,
-	).Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.CreatedAt)
+		`SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "schema not found")
 		return
@@ -477,33 +495,62 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 	schemaID := r.PathValue("id")
 
 	var req struct {
-		Schema any `json:"schema"`
+		Schema    any  `json:"schema"`
+		IsDefault *bool `json:"is_default,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Schema == nil {
-		writeError(w, http.StatusBadRequest, "schema is required")
-		return
+
+	// Handle is_default toggle.
+	if req.IsDefault != nil {
+		if *req.IsDefault {
+			// Unset previous default for this type+org.
+			var schemaType string
+			var orgID int64
+			a.db.SQL().QueryRowContext(r.Context(),
+				`SELECT type, org_id FROM schemas WHERE id = ?`, schemaID,
+			).Scan(&schemaType, &orgID)
+			if schemaType != "" {
+				a.db.SQL().ExecContext(r.Context(),
+					`UPDATE schemas SET is_default = false WHERE type = ? AND org_id = ? AND id != ?`,
+					schemaType, orgID, schemaID)
+			}
+		}
+		a.db.SQL().ExecContext(r.Context(),
+			`UPDATE schemas SET is_default = ? WHERE id = ?`,
+			*req.IsDefault, schemaID)
 	}
 
-	schemaJSON, err := json.Marshal(req.Schema)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid schema")
-		return
-	}
+	// Handle schema body update.
+	if req.Schema != nil {
+		schemaJSON, err := json.Marshal(req.Schema)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid schema")
+			return
+		}
 
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		`UPDATE schemas SET schema = ?, version = version + 1 WHERE id = ?`,
-		string(schemaJSON), schemaID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update schema")
-		return
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		writeError(w, http.StatusNotFound, "schema not found")
+		// Validate x-auth-methods keys.
+		if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
+			writeError(w, http.StatusBadRequest, validationErr)
+			return
+		}
+
+		result, err := a.db.SQL().ExecContext(r.Context(),
+			`UPDATE schemas SET schema = ?, version = version + 1 WHERE id = ?`,
+			string(schemaJSON), schemaID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update schema")
+			return
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			writeError(w, http.StatusNotFound, "schema not found")
+			return
+		}
+	} else if req.IsDefault == nil {
+		writeError(w, http.StatusBadRequest, "schema or is_default is required")
 		return
 	}
 
@@ -511,8 +558,8 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 	var s SchemaResponse
 	var updatedStr string
 	a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, type, org_id, schema, version, created_at FROM schemas WHERE id = ?`, schemaID,
-	).Scan(&s.ID, &s.Type, &s.OrgID, &updatedStr, &s.Version, &s.CreatedAt)
+		`SELECT id, type, org_id, schema, version, COALESCE(is_default, false), created_at FROM schemas WHERE id = ?`, schemaID,
+	).Scan(&s.ID, &s.Type, &s.OrgID, &updatedStr, &s.Version, &s.IsDefault, &s.CreatedAt)
 	json.Unmarshal([]byte(updatedStr), &s.Schema)
 
 	a.EmitAuthEvent(r.Context(), "schema.updated", 0, map[string]any{
@@ -521,6 +568,40 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, s)
+}
+
+// getMetaSchema returns the canonical ZITADEL identity schema meta-schema.
+func (a *API) getMetaSchema(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/schema+json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(schema.MetaSchema))
+}
+
+// validateSchemaAnnotations validates x-auth-methods keys against the allowed set.
+func validateSchemaAnnotations(schemaJSON []byte) string {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(schemaJSON, &raw) != nil {
+		return "invalid JSON"
+	}
+
+	// Validate x-auth-methods keys.
+	if authMethodsRaw, ok := raw["x-auth-methods"]; ok {
+		var methods map[string]any
+		if json.Unmarshal(authMethodsRaw, &methods) != nil {
+			return "x-auth-methods must be an object"
+		}
+		allowed := map[string]bool{
+			"password": true, "passkey": true, "magic_link": true,
+			"sso": true, "pat": true, "api_key": true, "client_cert": true,
+		}
+		for key := range methods {
+			if !allowed[key] {
+				return fmt.Sprintf("unknown auth method %q in x-auth-methods; allowed: password, passkey, magic_link, sso, pat, api_key, client_cert", key)
+			}
+		}
+	}
+
+	return ""
 }
 
 func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
