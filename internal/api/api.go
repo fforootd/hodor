@@ -72,6 +72,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Dynamic OpenAPI
 	mux.HandleFunc("GET /openapi.json", a.openAPISpec)
+
+	// Well-known discovery
+	mux.HandleFunc("GET /.well-known/zitadel-identity-schema", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/v1/schemas/$meta", http.StatusPermanentRedirect)
+	})
 }
 
 // --- Identity types ---
