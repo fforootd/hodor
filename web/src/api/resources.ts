@@ -24,6 +24,9 @@ export interface Schema {
   org_id: number
   schema: Record<string, unknown>
   version: number
+  is_default: boolean
+  message: string
+  created_by: string
   created_at: string
 }
 
@@ -66,9 +69,18 @@ export const identityApi = {
 
 export const schemaApi = {
   list: () => api.get<ListResponse<Schema>>('/v1/schemas').then(r => r.items || []),
+  listByType: (type: string) => api.get<ListResponse<Schema>>(`/v1/schemas?type=${encodeURIComponent(type)}`).then(r => r.items || []),
   get: (id: string) => api.get<Schema>(`/v1/schemas/${id}`),
-  update: (id: string, schema: Record<string, unknown>) =>
-    api.patch<Schema>(`/v1/schemas/${id}`, { schema }),
+  update: (id: string, schema: Record<string, unknown>, message?: string) =>
+    api.patch<Schema>(`/v1/schemas/${id}`, { schema, message: message || '' }),
+  promote: (id: string) =>
+    api.post<{ status: string; version: number; affected_entities: number }>(`/v1/schemas/${id}/promote`, {}),
+  diff: (id: string, compareId: string) =>
+    api.get<{ left: any; right: any; changes: any[] }>(`/v1/schemas/${id}/diff?compare=${compareId}`),
+  preview: (id: string, entityId: string) =>
+    api.post<{ entity: string; current_claims: Record<string, any>; draft_claims: Record<string, any>; changes: any[] }>(
+      `/v1/schemas/${id}/preview`, { entity_id: entityId }
+    ),
   identityCount: (id: string) =>
     api.get<{ count: number }>(`/v1/schemas/${id}/identity-count`).then(r => r.count),
 }

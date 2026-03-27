@@ -13,6 +13,12 @@
         <div class="field-row">
           <span class="field-label">Version</span>
           <span class="version-badge">v{{ schema.version }}</span>
+          <span v-if="schema.is_default" class="default-tag">default</span>
+          <span v-else class="draft-tag">draft</span>
+        </div>
+        <div v-if="schema.message" class="field-row">
+          <span class="field-label">Message</span>
+          <span class="field-value">{{ schema.message }}</span>
         </div>
         <div v-if="identityCount >= 0" class="field-row">
           <span class="field-label">Identities</span>
@@ -20,6 +26,30 @@
             {{ identityCount.toLocaleString() }} {{ identityCount === 1 ? 'user' : 'users' }}
           </span>
         </div>
+        <!-- Version history -->
+        <div v-if="versionHistory.length > 1" class="version-list">
+          <h5 class="version-list-title">Version History</h5>
+          <div
+            v-for="v in versionHistory" :key="v.id"
+            class="version-item"
+            :class="{ active: v.id === schema.id }"
+          >
+            <router-link :to="'/schemas/' + v.id" class="version-item-link">
+              <span class="version-badge-sm">v{{ v.version }}</span>
+              <span v-if="v.is_default" class="default-dot">★</span>
+              <span class="version-item-msg">{{ v.message || 'No message' }}</span>
+            </router-link>
+          </div>
+        </div>
+        <!-- Promote button -->
+        <button
+          v-if="!schema.is_default"
+          class="btn-promote"
+          @click="promoteThis"
+          :disabled="promoteLoading"
+        >
+          {{ promoteLoading ? 'Promoting…' : '★ Promote to Default' }}
+        </button>
       </div>
 
       <div class="sidebar-section">
@@ -106,13 +136,21 @@
       </div>
 
       <div class="sidebar-actions">
+        <div v-if="dirty" class="commit-msg-row">
+          <input
+            type="text"
+            v-model="commitMessage"
+            placeholder="What changed? (optional)"
+            class="commit-input"
+          />
+        </div>
         <button class="btn-save" :disabled="!dirty || saving" @click="saveSchema">
-          {{ saving ? 'Saving…' : 'Save changes' }}
+          {{ saving ? 'Saving…' : 'Save as new version' }}
         </button>
         <button v-if="dirty" class="btn-diff" @click="showDiff = !showDiff">
           {{ showDiff ? '← Editor' : 'Review changes' }}
         </button>
-        <span v-if="saveSuccess" class="save-msg success">✓ Saved</span>
+        <span v-if="saveSuccess" class="save-msg success">✓ Created v{{ newVersionNum }}</span>
         <span v-if="saveError" class="save-msg error">{{ saveError }}</span>
       </div>
     </aside>
@@ -208,6 +246,10 @@ const saveSuccess = ref(false)
 const saveError = ref('')
 const identityCount = ref(-1)
 const showDiff = ref(false)
+const commitMessage = ref('')
+const newVersionNum = ref(0)
+const versionHistory = ref<Schema[]>([])
+const promoteLoading = ref(false)
 
 // Refs for scroll sync
 const scrollEl = ref<HTMLElement | null>(null)
@@ -434,6 +476,8 @@ onMounted(async () => {
     syncSidebarFromJson(json)
 
     schemaApi.identityCount(id).then(c => { identityCount.value = c }).catch(() => {})
+    // Load version history for this type
+    schemaApi.listByType(s.type).then(versions => { versionHistory.value = versions }).catch(() => {})
   } catch {
     schema.value = null
   } finally {
@@ -518,17 +562,33 @@ async function saveSchema() {
   saveError.value = ''
   try {
     const parsed = JSON.parse(editorContent.value)
-    const updated = await schemaApi.update(schema.value.id, parsed)
-    schema.value = updated
-    originalContent.value = editorContent.value
-    showDiff.value = false
+    const updated = await schemaApi.update(schema.value.id, parsed, commitMessage.value)
+    // New version created — navigate to it
+    newVersionNum.value = updated.version
     saveSuccess.value = true
-    setTimeout(() => { saveSuccess.value = false }, 3000)
+    commitMessage.value = ''
+    showDiff.value = false
+    // Navigate to new version after brief delay
+    setTimeout(() => {
+      router.push('/schemas/' + updated.id)
+    }, 1500)
   } catch (e: any) {
     saveError.value = e.message || 'Save failed'
   } finally {
     saving.value = false
   }
+}
+
+async function promoteThis() {
+  if (!schema.value) return
+  promoteLoading.value = true
+  try {
+    await schemaApi.promote(schema.value.id)
+    const s = await schemaApi.get(schema.value.id)
+    schema.value = s
+    versionHistory.value = await schemaApi.listByType(s.type)
+  } catch {}
+  promoteLoading.value = false
 }
 
 function formatJson() {
@@ -581,6 +641,51 @@ function copyToClipboard() {
   background: #f3f4f6; color: #6b7280; border-radius: 4px;
 }
 .impact-badge.warn { background: #fef3c7; color: #92400e; }
+
+.default-tag {
+  font-size: 0.5625rem; font-weight: 700; padding: 0.0625rem 0.375rem;
+  background: #ecfdf5; color: #059669; border-radius: 3px; text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.draft-tag {
+  font-size: 0.5625rem; font-weight: 700; padding: 0.0625rem 0.375rem;
+  background: #fef3c7; color: #92400e; border-radius: 3px; text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.version-list { margin-top: 0.75rem; }
+.version-list-title {
+  font-size: 0.6875rem; font-weight: 600; color: #9ca3af; text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 0.375rem;
+}
+.version-item { padding: 0.25rem 0; }
+.version-item.active { background: #f0f2ff; border-radius: 4px; padding: 0.25rem 0.375rem; margin: 0 -0.375rem; }
+.version-item-link {
+  display: flex; align-items: center; gap: 0.375rem;
+  text-decoration: none; color: inherit; font-size: 0.8125rem;
+}
+.version-badge-sm {
+  font-size: 0.625rem; font-weight: 700; padding: 0 0.25rem;
+  background: #f0f2ff; color: #6366f1; border-radius: 3px;
+  font-family: 'SF Mono', monospace;
+}
+.default-dot { color: #059669; font-size: 0.625rem; }
+.version-item-msg { color: #6b7280; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.btn-promote {
+  width: 100%; margin-top: 0.75rem; padding: 0.375rem; border: 1px solid #c7d2fe;
+  border-radius: 6px; background: #f0f2ff; color: #6366f1; font-size: 0.8125rem;
+  font-weight: 600; font-family: inherit; cursor: pointer; transition: all 0.15s;
+}
+.btn-promote:hover { background: #e0e2ff; border-color: #6366f1; }
+.btn-promote:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.commit-msg-row { margin-bottom: 0.5rem; }
+.commit-input {
+  width: 100%; padding: 0.375rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px;
+  font-size: 0.8125rem; font-family: inherit; box-sizing: border-box;
+}
+.commit-input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
 
 .select-input {
   flex: 1; max-width: 160px; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;
