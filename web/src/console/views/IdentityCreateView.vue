@@ -5,6 +5,12 @@
       <h2>Create {{ currentLabel }}</h2>
     </div>
 
+    <!-- Tab toggle -->
+    <div class="mode-tabs">
+      <button :class="{ active: mode === 'form' }" @click="mode = 'form'">📝 Form</button>
+      <button :class="{ active: mode === 'json' }" @click="switchToJson">{ } JSON</button>
+    </div>
+
     <form @submit.prevent="submit" class="form">
       <!-- Version picker (only if multiple versions exist) -->
       <div class="form-section" v-if="versions.length > 1">
@@ -22,60 +28,83 @@
         </div>
       </div>
 
-      <!-- Core fields -->
-      <div class="form-section">
-        <h3>Account</h3>
-        <div class="field-group">
-          <label>Identifier <span class="req">*</span></label>
-          <input v-model="form.identifier" type="text" placeholder="user@example.com" required />
+      <!-- ═══ FORM MODE ═══ -->
+      <template v-if="mode === 'form'">
+        <!-- Core fields: identifier + display_name -->
+        <div class="form-section">
+          <h3>{{ isInteractiveIdentity ? 'Account' : 'Identity' }}</h3>
+          <div class="field-group">
+            <label>Identifier <span class="req">*</span></label>
+            <input v-model="form.identifier" type="text" :placeholder="identifierPlaceholder" required />
+          </div>
+          <div class="field-group">
+            <label>Display Name</label>
+            <input v-model="form.display_name" type="text" placeholder="Display name" />
+          </div>
+          <div class="field-group" v-if="hasPassword">
+            <label>Password</label>
+            <input v-model="form.password" type="password" placeholder="Set initial password" />
+          </div>
         </div>
-        <div class="field-group">
-          <label>Display Name</label>
-          <input v-model="form.display_name" type="text" placeholder="Jane Doe" />
-        </div>
-        <div class="field-group" v-if="hasPassword">
-          <label>Password</label>
-          <input v-model="form.password" type="password" placeholder="Set initial password" />
-        </div>
-      </div>
 
-      <!-- Dynamic schema fields -->
-      <div class="form-section" v-if="schemaFields.length">
-        <h3>Profile</h3>
-        <div class="field-group" v-for="field in schemaFields" :key="field.name">
-          <label>{{ field.label }}</label>
-          <input
-            v-model="profileData[field.name]"
-            :type="field.inputType"
-            :placeholder="field.description || ''"
-          />
+        <!-- Dynamic schema fields (auto-generated from properties) -->
+        <div class="form-section" v-if="schemaFields.length">
+          <h3>Properties</h3>
+          <div class="field-group" v-for="field in schemaFields" :key="field.name">
+            <label>{{ field.label }}</label>
+            <select v-if="field.type === 'boolean'" v-model="profileData[field.name]">
+              <option value="">—</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+            <select v-else-if="field.enum" v-model="profileData[field.name]">
+              <option value="">—</option>
+              <option v-for="opt in field.enum" :key="opt" :value="opt">{{ opt }}</option>
+            </select>
+            <input
+              v-else
+              v-model="profileData[field.name]"
+              :type="field.inputType"
+              :placeholder="field.description || ''"
+            />
+            <span class="field-hint" v-if="field.description">{{ field.description }}</span>
+          </div>
         </div>
-      </div>
 
-      <!-- Capabilities -->
-      <div class="form-section">
-        <h3>Capabilities</h3>
-        <div class="cap-checkboxes">
-          <label class="cap-check" v-for="cap in availableCaps" :key="cap">
-            <input type="checkbox" :value="cap" v-model="form.capabilities" />
-            <span class="cap-label">{{ cap }}</span>
+        <!-- Capabilities (only for identity-type entities) -->
+        <div class="form-section" v-if="isInteractiveIdentity">
+          <h3>Capabilities</h3>
+          <div class="cap-checkboxes">
+            <label class="cap-check" v-for="cap in availableCaps" :key="cap">
+              <input type="checkbox" :value="cap" v-model="form.capabilities" />
+              <span class="cap-label">{{ cap }}</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Invite (only for interactive schemas) -->
+        <div class="form-section" v-if="isInteractiveIdentity && hasLogin">
+          <label class="invite-check">
+            <input type="checkbox" v-model="sendInvite" />
+            <span>Send invite link after creation</span>
           </label>
+          <p class="invite-hint" v-if="sendInvite">A magic link will be sent to the identifier email.</p>
         </div>
-      </div>
+      </template>
 
-      <!-- Invite (only for interactive schemas with x-login) -->
-      <div class="form-section" v-if="hasLogin">
-        <label class="invite-check">
-          <input type="checkbox" v-model="sendInvite" />
-          <span>Send invite link after creation</span>
-        </label>
-        <p class="invite-hint" v-if="sendInvite">A magic link will be sent to the identifier email. Check server logs in dev mode.</p>
-      </div>
+      <!-- ═══ JSON MODE ═══ -->
+      <template v-if="mode === 'json'">
+        <div class="form-section">
+          <h3>Entity JSON</h3>
+          <p class="json-hint">Edit the full entity payload. Schema validation is live.</p>
+          <JsonEditor v-model="jsonContent" label="Entity Data" :schema="currentSchema?.schema" @valid="onJsonValid" @error="onJsonError" />
+        </div>
+      </template>
 
       <!-- Actions -->
       <div class="form-actions">
         <router-link :to="`/s/${schemaType}`" class="btn-cancel">Cancel</router-link>
-        <button type="submit" class="btn-create" :disabled="submitting">
+        <button type="submit" class="btn-create" :disabled="submitting || (mode === 'json' && !!jsonError)">
           {{ submitting ? 'Creating…' : `Create ${currentLabel}` }}
         </button>
       </div>
@@ -91,6 +120,7 @@ import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { entityApi, magicLinkApi, schemaApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
+import JsonEditor from '@/console/components/JsonEditor.vue'
 
 const props = defineProps<{ schemaType: string }>()
 
@@ -102,6 +132,10 @@ const error = ref('')
 const success = ref(false)
 const sendInvite = ref(true)
 const displayMeta = ref<any>({})
+const mode = ref<'form' | 'json'>('form')
+const jsonContent = ref('{\n  \n}')
+const jsonError = ref('')
+const jsonParsed = ref<any>({})
 
 const form = reactive({
   identifier: '',
@@ -115,10 +149,23 @@ const availableCaps = ['password', 'magic_link', 'admin', 'api_key']
 
 const currentSchema = computed(() => versions.value.find(s => s.id === selectedSchema.value))
 const currentLabel = computed(() => displayMeta.value.singular || props.schemaType.replace(/_/g, ' '))
+
+// Detect interactive identity types by checking for x-identifier or x-auth-methods
+const isInteractiveIdentity = computed(() => {
+  const s = currentSchema.value?.schema as any
+  if (!s) return false
+  return !!(s['x-identifier'] || s['x-auth-methods'])
+})
+
 const hasLogin = computed(() => !!(currentSchema.value?.schema as any)?.['x-login'])
 const hasPassword = computed(() => {
   const methods = (currentSchema.value?.schema as any)?.['x-auth-methods'] || {}
-  return methods.password?.enabled ?? true
+  return methods.password?.enabled ?? false
+})
+
+const identifierPlaceholder = computed(() => {
+  if (isInteractiveIdentity.value) return 'user@example.com'
+  return `${currentLabel.value.toLowerCase()}-name`
 })
 
 interface SchemaField {
@@ -126,6 +173,8 @@ interface SchemaField {
   label: string
   description: string
   inputType: string
+  type: string
+  enum?: string[]
 }
 
 const schemaFields = computed<SchemaField[]>(() => {
@@ -138,7 +187,12 @@ const schemaFields = computed<SchemaField[]>(() => {
       name,
       label: name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
       description: def?.description || '',
-      inputType: def?.format === 'email' ? 'email' : def?.format === 'uri' ? 'url' : 'text',
+      type: def?.type || 'string',
+      enum: def?.enum,
+      inputType: def?.type === 'integer' || def?.type === 'number' ? 'number'
+        : def?.format === 'email' ? 'email'
+        : def?.format === 'uri' ? 'url'
+        : 'text',
     }))
 })
 
@@ -147,10 +201,32 @@ function selectSchema(id: string) {
   Object.keys(profileData).forEach(k => delete profileData[k])
 }
 
+function switchToJson() {
+  // Sync form data into JSON before switching
+  const data: any = {
+    identifier: form.identifier || undefined,
+    display_name: form.display_name || undefined,
+  }
+  // Add profile fields
+  for (const [k, v] of Object.entries(profileData)) {
+    if (v) data[k] = v
+  }
+  jsonContent.value = JSON.stringify(data, null, 2)
+  mode.value = 'json'
+}
+
+function onJsonValid(parsed: any) {
+  jsonError.value = ''
+  jsonParsed.value = parsed
+}
+
+function onJsonError(msg: string) {
+  jsonError.value = msg
+}
+
 onMounted(async () => {
   try {
     const allSchemas = await schemaApi.list()
-    // Filter to only versions of this exact schema type
     versions.value = allSchemas
       .filter((s: Schema) => s.type === props.schemaType)
       .sort((a: Schema, b: Schema) => b.version - a.version)
@@ -178,26 +254,50 @@ onMounted(async () => {
 })
 
 async function submit() {
-  if (!form.identifier.trim()) { error.value = 'Identifier is required'; return }
   submitting.value = true
   error.value = ''
 
   try {
-    const profile: Record<string, string> = {}
-    if (form.display_name) profile.display_name = form.display_name
-    for (const [k, v] of Object.entries(profileData)) {
-      if (v) profile[k] = v
+    let payload: any
+
+    if (mode.value === 'json') {
+      // JSON mode: use parsed JSON directly
+      const data = jsonParsed.value
+      payload = {
+        identifier: data.identifier || form.identifier || props.schemaType + '-' + Date.now(),
+        display_name: data.display_name || data.identifier || '',
+        profile: {},
+        data: data,
+        schema_id: selectedSchema.value,
+      }
+    } else {
+      // Form mode: build from form fields
+      if (!form.identifier.trim()) { error.value = 'Identifier is required'; submitting.value = false; return }
+      const profile: Record<string, any> = {}
+      if (form.display_name) profile.display_name = form.display_name
+      for (const [k, v] of Object.entries(profileData)) {
+        if (v !== '') {
+          // Convert types
+          const fieldDef = schemaFields.value.find(f => f.name === k)
+          if (fieldDef?.type === 'boolean') profile[k] = v === 'true'
+          else if (fieldDef?.type === 'integer') profile[k] = parseInt(v) || 0
+          else if (fieldDef?.type === 'number') profile[k] = parseFloat(v) || 0
+          else profile[k] = v
+        }
+      }
+
+      payload = {
+        identifier: form.identifier.trim(),
+        display_name: form.display_name.trim() || form.identifier.trim(),
+        profile,
+        capabilities: isInteractiveIdentity.value ? form.capabilities : [],
+        schema_id: selectedSchema.value,
+      }
     }
 
-    const created = await entityApi.create({
-      identifier: form.identifier.trim(),
-      display_name: form.display_name.trim() || form.identifier.trim(),
-      profile,
-      capabilities: form.capabilities,
-      schema_id: selectedSchema.value,
-    } as any)
+    const created = await entityApi.create(payload)
 
-    if (form.password && created.id) {
+    if (form.password && created.id && isInteractiveIdentity.value) {
       await api.post(`/v1/entities/${created.id}/password`, { password: form.password })
         .catch(() => {})
     }
@@ -207,7 +307,7 @@ async function submit() {
     }
 
     success.value = true
-    setTimeout(() => router.push(`/identities/${created.id}`), 800)
+    setTimeout(() => router.push(`/s/${props.schemaType}`), 800)
   } catch (e: any) {
     error.value = e?.message || 'Failed to create'
   } finally {
@@ -217,12 +317,22 @@ async function submit() {
 </script>
 
 <style scoped>
-.form-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+.form-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
 .form-header h2 { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
 .back-link { font-size: 0.8125rem; color: #6b7280; text-decoration: none; }
 .back-link:hover { color: #6366f1; }
 
-.form { max-width: 640px; }
+.mode-tabs {
+  display: flex; gap: 0; margin-bottom: 1.25rem; background: #f3f4f6; border-radius: 8px;
+  padding: 0.25rem; width: fit-content;
+}
+.mode-tabs button {
+  padding: 0.375rem 1rem; border: none; border-radius: 6px; background: transparent;
+  font-size: 0.8125rem; font-weight: 500; color: #6b7280; cursor: pointer; transition: all 0.15s;
+}
+.mode-tabs button.active { background: #fff; color: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+.form { max-width: 720px; }
 .form-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
 .form-section h3 { font-size: 0.8125rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
 
@@ -239,16 +349,19 @@ async function submit() {
 .field-group { margin-bottom: 0.75rem; }
 .field-group label { display: block; font-size: 0.8125rem; font-weight: 500; color: #4b5563; margin-bottom: 0.25rem; }
 .req { color: #ef4444; }
-.field-group input {
+.field-group input, .field-group select {
   width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
   font-size: 0.875rem; font-family: inherit; transition: border-color 0.15s;
 }
-.field-group input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+.field-group input:focus, .field-group select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+.field-hint { display: block; font-size: 0.6875rem; color: #9ca3af; margin-top: 0.25rem; }
 
 .cap-checkboxes { display: flex; flex-wrap: wrap; gap: 0.75rem; }
 .cap-check { display: flex; align-items: center; gap: 0.375rem; cursor: pointer; }
 .cap-check input { accent-color: #6366f1; }
 .cap-label { font-size: 0.875rem; color: #4b5563; }
+
+.json-hint { font-size: 0.8125rem; color: #6b7280; margin-bottom: 0.75rem; }
 
 .form-actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; }
 .btn-cancel {

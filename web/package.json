@@ -15,6 +15,8 @@
     "format": "prettier --write 'src/**/*.{ts,vue,css,json}'"
   },
   "dependencies": {
+    "@guolao/vue-monaco-editor": "^1.6.0",
+    "monaco-editor": "^0.55.1",
     "pinia": "^3.0.0",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"

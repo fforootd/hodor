@@ -7,7 +7,7 @@
         <p class="meta">{{ identity.identifier }} · <span class="badge" :class="identity.state">{{ identity.state }}</span></p>
       </div>
       <div class="header-actions">
-        <button v-if="!editing" class="btn-invite" @click="sendInvite" :disabled="inviting">
+        <button v-if="!editing && isInteractiveIdentity" class="btn-invite" @click="sendInviteLink" :disabled="inviting">
           {{ inviting ? 'Sending…' : '✉ Invite' }}
         </button>
         <button v-if="!editing" class="btn-edit" @click="startEdit">✎ Edit</button>
@@ -22,7 +22,7 @@
     <!-- Delete confirmation -->
     <div v-if="showDeleteConfirm" class="confirm-overlay" @click.self="showDeleteConfirm = false">
       <div class="confirm-dialog">
-        <h3>Delete Identity</h3>
+        <h3>Delete {{ displayMeta.singular || 'Entity' }}</h3>
         <p>Are you sure you want to delete <strong>{{ identity.identifier }}</strong>? This action cannot be undone.</p>
         <div class="confirm-actions">
           <button class="btn-cancel" @click="showDeleteConfirm = false">Cancel</button>
@@ -35,20 +35,26 @@
 
     <div v-if="message" class="message" :class="messageType">{{ message }}</div>
 
-    <!-- View mode -->
-    <template v-if="!editing">
+    <!-- View/Edit mode tabs -->
+    <div class="mode-tabs">
+      <button :class="{ active: viewMode === 'form' }" @click="viewMode = 'form'">📝 Form</button>
+      <button :class="{ active: viewMode === 'json' }" @click="switchToJson">{ } JSON</button>
+    </div>
+
+    <!-- ═══ FORM VIEW ═══ -->
+    <template v-if="viewMode === 'form' && !editing">
       <div class="cards">
         <div class="card">
           <h4>Profile</h4>
           <div class="fields">
             <div class="field" v-for="(val, key) in profileFields" :key="key">
-              <span class="field-key">{{ key }}</span>
-              <span class="field-val">{{ val }}</span>
+              <span class="field-key">{{ formatKey(key as string) }}</span>
+              <span class="field-val">{{ formatValue(val) }}</span>
             </div>
             <div v-if="!Object.keys(profileFields).length" class="empty">No profile data</div>
           </div>
         </div>
-        <div class="card">
+        <div class="card" v-if="isInteractiveIdentity">
           <h4>Capabilities</h4>
           <div class="cap-list" v-if="identity.capabilities?.length">
             <span v-for="cap in identity.capabilities" :key="cap" class="cap-tag" :class="cap">{{ cap }}</span>
@@ -61,7 +67,7 @@
           <h4>Metadata</h4>
           <div class="fields" v-if="Object.keys(metaFields).length">
             <div class="field" v-for="(val, key) in metaFields" :key="key">
-              <span class="field-key">{{ key }}</span>
+              <span class="field-key">{{ formatKey(key as string) }}</span>
               <span class="field-val">{{ val }}</span>
             </div>
           </div>
@@ -72,6 +78,7 @@
           <dl class="detail-grid">
             <dt>ID</dt><dd class="mono">{{ identity.id }}</dd>
             <dt>Org ID</dt><dd>{{ identity.org_id }}</dd>
+            <dt>Schema</dt><dd>{{ identity.schema_type || '—' }}</dd>
             <dt>Created</dt><dd>{{ formatTime(identity.created_at) }}</dd>
             <dt>Updated</dt><dd>{{ formatTime(identity.updated_at) }}</dd>
           </dl>
@@ -79,8 +86,21 @@
       </div>
     </template>
 
-    <!-- Edit mode -->
-    <template v-if="editing">
+    <!-- ═══ JSON VIEW ═══ -->
+    <template v-if="viewMode === 'json' && !editing">
+      <div class="json-view-section">
+        <JsonEditor
+          :modelValue="entityJsonReadonly"
+          label="Stored Entity (read-only)"
+          :schema="entitySchema"
+          height="480px"
+        />
+        <p class="json-view-hint">This is the raw entity data as stored. Click <strong>Edit</strong> to modify.</p>
+      </div>
+    </template>
+
+    <!-- ═══ FORM EDIT ═══ -->
+    <template v-if="editing && viewMode === 'form'">
       <div class="edit-form">
         <div class="form-section">
           <h4>Account</h4>
@@ -102,7 +122,7 @@
           <h4>Profile</h4>
           <div class="field-group" v-for="(val, key) in editForm.profile" :key="key">
             <label>
-              {{ key }}
+              {{ formatKey(key as string) }}
               <button type="button" class="remove-field" @click="removeProfileField(key as string)">×</button>
             </label>
             <input v-model="editForm.profile[key as string]" type="text" />
@@ -115,7 +135,22 @@
       </div>
     </template>
 
-    <router-link to="/identities" class="back-link">← Back to identities</router-link>
+    <!-- ═══ JSON EDIT ═══ -->
+    <template v-if="editing && viewMode === 'json'">
+      <div class="json-edit-section">
+        <JsonEditor
+          v-model="editJsonContent"
+          label="Edit Entity JSON"
+          :schema="entitySchema"
+          height="480px"
+          @valid="onEditJsonValid"
+          @error="onEditJsonError"
+        />
+        <div v-if="editJsonError" class="json-edit-error">{{ editJsonError }}</div>
+      </div>
+    </template>
+
+    <router-link :to="backRoute" class="back-link">← Back to {{ displayMeta.alias || 'list' }}</router-link>
   </div>
   <div v-else class="loading">Loading...</div>
 </template>
@@ -123,7 +158,8 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { entityApi, magicLinkApi, type Identity } from '@/api/resources'
+import { entityApi, magicLinkApi, schemaApi, type Identity } from '@/api/resources'
+import JsonEditor from '@/console/components/JsonEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -136,6 +172,23 @@ const inviting = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error' | 'invite'>('success')
 const newFieldName = ref('')
+const viewMode = ref<'form' | 'json'>('form')
+const editJsonContent = ref('{}')
+const editJsonError = ref('')
+const editJsonParsed = ref<any>({})
+const displayMeta = ref<any>({})
+const entitySchema = ref<any>(null)
+
+// Detect schema type from route params or identity data
+const schemaType = computed(() => (route.params as any).schemaType || identity.value?.schema_type || '')
+
+// Detect interactive identity types
+const isInteractiveIdentity = computed(() => {
+  if (!entitySchema.value) return true // default to showing full UI
+  return !!(entitySchema.value['x-identifier'] || entitySchema.value['x-auth-methods'])
+})
+
+const backRoute = computed(() => schemaType.value ? `/s/${schemaType.value}` : '/')
 
 const editForm = reactive({
   display_name: '',
@@ -153,20 +206,48 @@ const metaFields = computed(() => {
   return (m && typeof m === 'object') ? m as Record<string, unknown> : {}
 })
 
+const entityJsonReadonly = computed(() => {
+  if (!identity.value) return '{}'
+  return JSON.stringify(identity.value, null, 2)
+})
+
+function formatKey(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function formatValue(val: unknown): string {
+  if (val === null || val === undefined) return '—'
+  if (typeof val === 'object') return JSON.stringify(val)
+  return String(val)
+}
+
 function formatTime(ts: string) {
   return new Date(ts).toLocaleString()
+}
+
+function switchToJson() {
+  if (editing.value) {
+    // Sync form data to JSON
+    const data: any = { ...identity.value }
+    data.display_name = editForm.display_name
+    data.state = editForm.state
+    data.profile = { ...editForm.profile }
+    editJsonContent.value = JSON.stringify(data, null, 2)
+  }
+  viewMode.value = 'json'
 }
 
 function startEdit() {
   if (!identity.value) return
   editForm.display_name = identity.value.display_name || ''
   editForm.state = identity.value.state
-  // Deep copy profile fields as strings
   const p = identity.value.profile || {}
   editForm.profile = {}
   for (const [k, v] of Object.entries(p)) {
     editForm.profile[k] = String(v ?? '')
   }
+  // Also prepare JSON edit
+  editJsonContent.value = JSON.stringify(identity.value, null, 2)
   editing.value = true
   message.value = ''
 }
@@ -188,27 +269,47 @@ function removeProfileField(key: string) {
   delete editForm.profile[key]
 }
 
+function onEditJsonValid(parsed: any) {
+  editJsonError.value = ''
+  editJsonParsed.value = parsed
+}
+
+function onEditJsonError(msg: string) {
+  editJsonError.value = msg
+}
+
 async function save() {
   if (!identity.value) return
   saving.value = true
   message.value = ''
   try {
-    // Build profile — strip empty values
-    const profile: Record<string, string> = {}
-    for (const [k, v] of Object.entries(editForm.profile)) {
-      if (v.trim()) profile[k] = v.trim()
+    let payload: any
+
+    if (viewMode.value === 'json') {
+      // JSON mode: send parsed JSON
+      const data = editJsonParsed.value
+      payload = {
+        display_name: data.display_name || editForm.display_name,
+        state: data.state || editForm.state,
+        profile: data.profile || {},
+      }
+    } else {
+      // Form mode
+      const profile: Record<string, string> = {}
+      for (const [k, v] of Object.entries(editForm.profile)) {
+        if (v.trim()) profile[k] = v.trim()
+      }
+      payload = {
+        display_name: editForm.display_name.trim(),
+        state: editForm.state,
+        profile,
+      }
     }
 
-    await entityApi.update(identity.value.id, {
-      display_name: editForm.display_name.trim(),
-      state: editForm.state,
-      profile,
-    } as any)
-
-    // Reload
+    await entityApi.update(identity.value.id, payload as any)
     identity.value = await entityApi.get(route.params.id as string)
     editing.value = false
-    message.value = 'Identity updated successfully'
+    message.value = 'Updated successfully'
     messageType.value = 'success'
   } catch (e: any) {
     message.value = e?.message || 'Update failed'
@@ -218,16 +319,15 @@ async function save() {
   }
 }
 
-async function sendInvite() {
+async function sendInviteLink() {
   if (!identity.value) return
   inviting.value = true
   message.value = ''
   try {
     const resp = await magicLinkApi.send(identity.value.identifier)
-    const purposeMsg = resp.purpose === 'register'
-      ? 'Registration invite sent — check server logs for the magic link.'
-      : 'Login link sent — check server logs for the magic link.'
-    message.value = purposeMsg
+    message.value = resp.purpose === 'register'
+      ? 'Registration invite sent — check server logs.'
+      : 'Login link sent — check server logs.'
     messageType.value = 'invite'
   } catch (e: any) {
     message.value = e?.message || 'Failed to send invite'
@@ -242,7 +342,7 @@ async function deleteIdentity() {
   deleting.value = true
   try {
     await entityApi.delete(identity.value.id)
-    router.push('/identities')
+    router.push(backRoute.value)
   } catch (e: any) {
     showDeleteConfirm.value = false
     message.value = e?.message || 'Delete failed'
@@ -254,12 +354,35 @@ async function deleteIdentity() {
 onMounted(async () => {
   try {
     identity.value = await entityApi.get(route.params.id as string)
+
+    // Fetch schema for this entity type
+    if (identity.value?.schema_type) {
+      const allSchemas = await schemaApi.list()
+      const match = allSchemas.find((s: any) => s.type === identity.value!.schema_type && s.is_default)
+        || allSchemas.find((s: any) => s.type === identity.value!.schema_type)
+      if (match) {
+        entitySchema.value = match.schema
+      }
+    }
+
+    // Fetch display metadata from catalog
+    try {
+      const metaRes = await fetch('/v1/schemas/$meta')
+      const metaData = await metaRes.json()
+      const st = identity.value?.schema_type
+      if (st) {
+        const entry = (metaData['x-catalog'] || {})[st]
+        if (entry) {
+          displayMeta.value = { singular: entry.singular, alias: entry.alias, path: entry.path, icon: entry.icon }
+        }
+      }
+    } catch { /* ignore */ }
   } catch {}
 })
 </script>
 
 <style scoped>
-.detail-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+.detail-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
 .header-info { flex: 1; }
 .header-actions { display: flex; gap: 0.5rem; }
 .avatar {
@@ -272,6 +395,16 @@ h2 { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
 .badge.active { background: #ecfdf5; color: #059669; }
 .badge.deactivated { background: #fef2f2; color: #dc2626; }
 .badge.locked { background: #fef3c7; color: #92400e; }
+
+.mode-tabs {
+  display: flex; gap: 0; margin-bottom: 1.25rem; background: #f3f4f6; border-radius: 8px;
+  padding: 0.25rem; width: fit-content;
+}
+.mode-tabs button {
+  padding: 0.375rem 1rem; border: none; border-radius: 6px; background: transparent;
+  font-size: 0.8125rem; font-weight: 500; color: #6b7280; cursor: pointer; transition: all 0.15s;
+}
+.mode-tabs button.active { background: #fff; color: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
 .btn-edit, .btn-save, .btn-cancel, .btn-delete, .btn-invite {
   padding: 0.375rem 0.875rem; border-radius: 8px; font-size: 0.8125rem; font-weight: 500;
@@ -317,6 +450,12 @@ h2 { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
 dt { font-size: 0.8125rem; font-weight: 500; color: #6b7280; }
 dd { font-size: 0.875rem; color: #1a1a2e; }
 .mono { font-family: monospace; font-size: 0.8125rem; }
+
+/* JSON view */
+.json-view-section { margin-bottom: 1rem; }
+.json-view-hint { font-size: 0.75rem; color: #9ca3af; margin-top: 0.5rem; }
+.json-edit-section { margin-bottom: 1rem; }
+.json-edit-error { margin-top: 0.5rem; padding: 0.375rem 0.75rem; background: #fef2f2; color: #dc2626; font-size: 0.75rem; border-radius: 6px; }
 
 /* Edit form */
 .edit-form { max-width: 640px; }
