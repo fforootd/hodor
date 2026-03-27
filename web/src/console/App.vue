@@ -201,6 +201,10 @@ onMounted(async () => {
       display_name: o.display_name || o.identifier,
       identifier: o.identifier,
     }))
+    // Validate saved org_id still exists in current DB; clear if stale.
+    if (selectedOrgId.value && !orgs.value.find(o => o.id === selectedOrgId.value)) {
+      selectOrg(null)
+    }
     // Auto-select if only one org and nothing saved.
     if (!selectedOrgId.value && orgs.value.length === 1) {
       selectOrg(orgs.value[0])
