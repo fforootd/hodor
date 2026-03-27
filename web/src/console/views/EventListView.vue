@@ -10,7 +10,7 @@
           <SelectValue placeholder="All events" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All events</SelectItem>
+          <SelectItem value="__all__">All events</SelectItem>
           <SelectItem v-for="t in eventTypes" :key="t" :value="t">{{ t }}</SelectItem>
         </SelectContent>
       </Select>
@@ -50,12 +50,12 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const events = ref<Event[]>([])
-const typeFilter = ref('')
+const typeFilter = ref('__all__')
 const eventTypes = ref<string[]>([])
 
 async function load() {
   try {
-    events.value = await eventApi.list({ type: typeFilter.value || undefined, limit: 50 })
+    events.value = await eventApi.list({ type: typeFilter.value === '__all__' ? undefined : typeFilter.value, limit: 50 })
   } catch {}
 }
 

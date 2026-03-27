@@ -154,23 +154,63 @@
 
       <!-- Command Palette Dialog -->
       <CommandDialog v-model:open="showCommandPalette">
-        <CommandInput placeholder="Search identities, schemas, events…" @input="onCommandSearch" />
+        <CommandInput placeholder="Search or jump to…" @input="onCommandSearch" />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
-          <CommandGroup v-if="searchResults.length" heading="Results">
+
+          <!-- API search results (shown when user has typed a query) -->
+          <CommandGroup v-if="searchResults.length" heading="Search Results">
             <CommandItem
               v-for="r in searchResults"
               :key="r.resource_type + r.id"
-              :value="r.title"
+              :value="`result-${r.resource_type}-${r.id}`"
               @select="goToResult(r)"
             >
-              <component :is="getResultIcon(r.resource_type)" class="mr-2 size-4" />
-              <div>
-                <div class="text-sm font-medium">{{ r.title }}</div>
-                <div class="text-xs text-muted-foreground">{{ r.subtitle }}</div>
+              <component :is="getResultIcon(r.resource_type)" class="mr-2 size-4 shrink-0" />
+              <div class="flex flex-col">
+                <span class="text-sm font-medium">{{ r.title }}</span>
+                <span class="text-xs text-muted-foreground">{{ r.subtitle }}</span>
               </div>
             </CommandItem>
           </CommandGroup>
+
+          <!-- Navigation shortcuts (shown when palette opens without query) -->
+          <template v-if="!commandQuery">
+            <CommandGroup heading="Navigation">
+              <CommandItem value="nav-dashboard" @select="navigateTo('/')">
+                <LayoutDashboard class="mr-2 size-4 shrink-0" />
+                <span>Dashboard</span>
+              </CommandItem>
+              <CommandItem
+                v-for="item in allNavItems"
+                :key="item.type"
+                :value="`nav-${item.type}`"
+                @select="navigateTo(item.route)"
+              >
+                <component :is="getIcon(item.type)" class="mr-2 size-4 shrink-0" />
+                <span>{{ item.label }}</span>
+              </CommandItem>
+            </CommandGroup>
+
+            <CommandGroup heading="Quick Actions">
+              <CommandItem value="action-create-user" @select="navigateTo('/s/human_user/new')">
+                <Users class="mr-2 size-4 shrink-0" />
+                <span>Create User</span>
+              </CommandItem>
+              <CommandItem value="action-schemas" @select="navigateTo('/schemas')">
+                <FileJson class="mr-2 size-4 shrink-0" />
+                <span>View Schemas</span>
+              </CommandItem>
+              <CommandItem value="action-events" @select="navigateTo('/events')">
+                <Activity class="mr-2 size-4 shrink-0" />
+                <span>View Audit Log</span>
+              </CommandItem>
+              <CommandItem value="action-providers" @select="navigateTo('/providers')">
+                <Globe class="mr-2 size-4 shrink-0" />
+                <span>Manage Providers</span>
+              </CommandItem>
+            </CommandGroup>
+          </template>
         </CommandList>
       </CommandDialog>
 
@@ -237,10 +277,17 @@ function selectOrg(org: OrgEntry | null) {
 // ─── Command Palette ───
 const showCommandPalette = ref(false)
 const searchResults = ref<SearchResult[]>([])
+const commandQuery = ref('')
 let debounceTimer: ReturnType<typeof setTimeout>
+
+// Flat list of all nav items for the palette
+const allNavItems = computed(() =>
+  navGroups.value.flatMap(g => g.items)
+)
 
 function onCommandSearch(e: Event) {
   const query = (e.target as HTMLInputElement).value
+  commandQuery.value = query
   clearTimeout(debounceTimer)
   if (!query.trim()) {
     searchResults.value = []
@@ -259,8 +306,24 @@ function onCommandSearch(e: Event) {
 function goToResult(r: SearchResult) {
   showCommandPalette.value = false
   searchResults.value = []
+  commandQuery.value = ''
   const path = r.link.replace(/^\/console/, '') || '/'
   router.push(path)
+}
+
+function navigateTo(path: string) {
+  showCommandPalette.value = false
+  searchResults.value = []
+  commandQuery.value = ''
+  router.push(path)
+}
+
+function getResultIcon(resourceType: string) {
+  if (resourceType === 'identity') return Users
+  if (resourceType === 'schema') return FileJson
+  if (resourceType === 'event') return Activity
+  if (resourceType === 'provider') return Globe
+  return Database
 }
 
 // ⌘K shortcut
@@ -292,13 +355,6 @@ const iconMap: Record<string, any> = {
 
 function getIcon(type: string) {
   return iconMap[type] || Boxes
-}
-
-function getResultIcon(resourceType: string) {
-  if (resourceType === 'identity') return Users
-  if (resourceType === 'schema') return FileJson
-  if (resourceType === 'event') return Activity
-  return Database
 }
 
 onMounted(async () => {

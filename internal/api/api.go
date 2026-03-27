@@ -1129,9 +1129,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 
 	// Search entity_indexes (profile fields like email, display_name, etc.)
 	eiRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT DISTINCT ei.entity_id, i.identifier, i.display_name, ei.field, ei.value
+		`SELECT DISTINCT ei.entity_id, e.identifier, e.display_name, ei.field, ei.value
 		 FROM entity_indexes ei
-		 JOIN entities e ON ei.entity_id = i.id AND ei.entity_type = 'identity'
+		 JOIN entities e ON ei.entity_id = e.id
 		 WHERE ei.value LIKE ?
 		 LIMIT ?`,
 		pattern, limit)

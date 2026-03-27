@@ -17,7 +17,7 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/zitadel/passwap/argon2"
 	"gopkg.in/yaml.v3"
 
 	"github.com/zitadel/zitadel/internal/id"
@@ -234,13 +234,16 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		return err
 	}
 
-	// Hash password if provided.
+	// Hash password and store as entity_credential.
 	if ident.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(ident.Password), bcrypt.DefaultCost)
+		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
+		hash, err := hasher.Hash(ident.Password)
 		if err == nil {
+			credID, _ := id.New()
+			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
 			tx.ExecContext(ctx,
-				`INSERT INTO passwords (entity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
-				newID, string(hash))
+				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				credID, newID, credJSON)
 		}
 	}
 
@@ -264,13 +267,16 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID int64, ident SeedIdentity) error {
 	// Update password if provided.
 	if ident.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(ident.Password), bcrypt.DefaultCost)
+		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
+		hash, err := hasher.Hash(ident.Password)
 		if err == nil {
 			// Delete existing + re-insert.
-			tx.ExecContext(ctx, `DELETE FROM passwords WHERE entity_id = ?`, entityID)
+			tx.ExecContext(ctx, `DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`, entityID)
+			credID, _ := id.New()
+			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
 			tx.ExecContext(ctx,
-				`INSERT INTO passwords (entity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
-				entityID, string(hash))
+				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				credID, entityID, credJSON)
 			log.Printf("[seed]   updated password for %q", ident.Identifier)
 		}
 	}

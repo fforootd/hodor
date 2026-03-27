@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zitadel/passwap/argon2"
+
 	"github.com/zitadel/zitadel/internal/id"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ImportRequest is the body for POST /v1/import.
@@ -266,13 +267,16 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}
 
-	// Hash password if provided.
+	// Hash password and store as entity_credential.
 	if ident.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(ident.Password), bcrypt.DefaultCost)
+		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
+		hash, err := hasher.Hash(ident.Password)
 		if err == nil {
+			credID, _ := id.New()
+			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
 			tx.ExecContext(r.Context(),
-				`INSERT INTO passwords (entity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
-				newID, string(hash))
+				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				credID, newID, credJSON)
 		}
 	}
 
