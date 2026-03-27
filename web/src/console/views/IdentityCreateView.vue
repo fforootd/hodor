@@ -6,18 +6,18 @@
     </div>
 
     <form @submit.prevent="submit" class="form">
-      <!-- Schema picker (filtered by group) -->
-      <div class="form-section" v-if="schemas.length > 1">
-        <h3>Type</h3>
+      <!-- Version picker (only if multiple versions exist) -->
+      <div class="form-section" v-if="versions.length > 1">
+        <h3>Schema Version</h3>
         <div class="schema-picker">
           <button
-            v-for="s in schemas" :key="s.id" type="button"
-            class="schema-option" :class="{ active: selectedSchema === s.id }"
-            @click="selectSchema(s.id)"
+            v-for="v in versions" :key="v.id" type="button"
+            class="schema-option" :class="{ active: selectedSchema === v.id }"
+            @click="selectSchema(v.id)"
           >
-            <span class="schema-icon">{{ s._icon }}</span>
-            <span class="schema-type">{{ s._label }}</span>
-            <span class="schema-desc">{{ fieldCount(s) }} fields</span>
+            <span class="schema-type">v{{ v.version }}</span>
+            <span class="schema-desc" v-if="v.is_default">default</span>
+            <span class="schema-desc" v-else>{{ v.message || 'draft' }}</span>
           </button>
         </div>
       </div>
@@ -95,12 +95,13 @@ import { api } from '@/api/client'
 const props = defineProps<{ schemaType: string }>()
 
 const router = useRouter()
-const schemas = ref<(Schema & { _icon: string; _label: string; _singular: string; _path: string; _group: string })[]>([])
+const versions = ref<Schema[]>([])
 const selectedSchema = ref('')
 const submitting = ref(false)
 const error = ref('')
 const success = ref(false)
 const sendInvite = ref(true)
+const displayMeta = ref<any>({})
 
 const form = reactive({
   identifier: '',
@@ -112,9 +113,8 @@ const form = reactive({
 const profileData = reactive<Record<string, string>>({})
 const availableCaps = ['password', 'magic_link', 'admin', 'api_key']
 
-// Current schema's display metadata
-const currentSchema = computed(() => schemas.value.find(s => s.id === selectedSchema.value))
-const currentLabel = computed(() => currentSchema.value?._singular || props.schemaType.replace(/_/g, ' '))
+const currentSchema = computed(() => versions.value.find(s => s.id === selectedSchema.value))
+const currentLabel = computed(() => displayMeta.value.singular || props.schemaType.replace(/_/g, ' '))
 const hasLogin = computed(() => !!(currentSchema.value?.schema as any)?.['x-login'])
 const hasPassword = computed(() => {
   const methods = (currentSchema.value?.schema as any)?.['x-auth-methods'] || {}
@@ -131,8 +131,8 @@ interface SchemaField {
 const schemaFields = computed<SchemaField[]>(() => {
   const s = currentSchema.value
   if (!s) return []
-  const props = (s.schema as any)?.properties || {}
-  return Object.entries(props)
+  const schemaProps = (s.schema as any)?.properties || {}
+  return Object.entries(schemaProps)
     .filter(([, def]: [string, any]) => !def?.['x-hidden'])
     .map(([name, def]: [string, any]) => ({
       name,
@@ -147,39 +147,20 @@ function selectSchema(id: string) {
   Object.keys(profileData).forEach(k => delete profileData[k])
 }
 
-function fieldCount(s: Schema) {
-  return Object.keys((s.schema as any)?.properties || {}).length
-}
-
 onMounted(async () => {
   try {
     const allSchemas = await schemaApi.list()
-    // Find the x-display.group of the current schemaType
-    const current = allSchemas.find((s: Schema) => s.type === props.schemaType)
-    const currentGroup = (current?.schema as any)?.['x-display']?.group || 'identities'
+    // Filter to only versions of this exact schema type
+    versions.value = allSchemas
+      .filter((s: Schema) => s.type === props.schemaType)
+      .sort((a: Schema, b: Schema) => b.version - a.version)
 
-    // Filter: only show schemas from the same group
-    schemas.value = allSchemas
-      .filter((s: Schema) => {
-        const display = (s.schema as any)?.['x-display'] || {}
-        return (display.group || 'identities') === currentGroup
-      })
-      .map((s: Schema) => {
-        const display = (s.schema as any)?.['x-display'] || {}
-        return {
-          ...s,
-          _icon: display.icon || '◇',
-          _label: display.alias || s.type,
-          _singular: display.singular || s.type,
-          _path: display.path || s.type,
-          _group: display.group || 'identities',
-        }
-      })
-
-    // Pre-select the matching schema type
-    const match = schemas.value.find(s => s.type === props.schemaType)
-    if (match) selectSchema(match.id)
-    else if (schemas.value.length) selectSchema(schemas.value[0].id)
+    // Extract x-display from the default version
+    const defaultVersion = versions.value.find(s => s.is_default) || versions.value[0]
+    if (defaultVersion) {
+      displayMeta.value = (defaultVersion.schema as any)?.['x-display'] || {}
+      selectSchema(defaultVersion.id)
+    }
   } catch {}
 })
 
@@ -203,13 +184,11 @@ async function submit() {
       schema_id: selectedSchema.value,
     } as any)
 
-    // Set password if provided
     if (form.password && created.id) {
       await api.post(`/v1/entities/${created.id}/password`, { password: form.password })
         .catch(() => {})
     }
 
-    // Send invite if checked
     if (sendInvite.value && hasLogin.value && created.id) {
       await magicLinkApi.send(form.identifier.trim()).catch(() => {})
     }
