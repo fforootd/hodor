@@ -83,11 +83,9 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	}
 
 	// Extract per-field auth annotations (flat: x-identifier, x-verify, x-recover, x-mfa).
-	// Also supports legacy x-auth nested format for backward compatibility.
 	for name, def := range raw.Properties {
 		var fc AuthFieldConfig
 
-		// New flat format.
 		if v, ok := def["x-identifier"].(bool); ok {
 			fc.Identifier = v
 		}
@@ -101,12 +99,6 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 			fc.MFA = v
 		}
 
-		// Legacy x-auth nested format (backward compat).
-		if xAuth, ok := def["x-auth"]; ok && !fc.Identifier {
-			b, _ := json.Marshal(xAuth)
-			_ = json.Unmarshal(b, &fc)
-		}
-
 		if fc.Identifier || fc.Verification != "" || fc.Recovery != "" || fc.MFA != "" {
 			config.Fields[name] = fc
 			if fc.Identifier {
@@ -115,23 +107,11 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 		}
 	}
 
-	// Extract x-auth-methods (new format).
+	// Extract x-auth-methods.
 	if len(raw.XAuthMethods) > 0 {
 		var methods map[string]*AuthMethodEntry
 		if json.Unmarshal(raw.XAuthMethods, &methods) == nil && len(methods) > 0 {
 			config.AuthMethods = methods
-		}
-	} else if len(raw.XLogin) > 0 {
-		// Backward compatibility: read from x-login.auth_methods
-		var legacy struct {
-			AuthMethods map[string]*AuthMethodEntry `json:"auth_methods"`
-		}
-		if json.Unmarshal(raw.XLogin, &legacy) == nil && len(legacy.AuthMethods) > 0 {
-			// Mark legacy methods as interactive (they all were)
-			for _, m := range legacy.AuthMethods {
-				m.Interactive = true
-			}
-			config.AuthMethods = legacy.AuthMethods
 		}
 	}
 

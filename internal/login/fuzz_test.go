@@ -19,7 +19,7 @@ func FuzzParseIDTokenClaims(f *testing.F) {
 }
 
 func FuzzMapClaims(f *testing.F) {
-	f.Add(`{"type":"object","properties":{"email":{"x-claim-mapping":"claims.email"}}}`)
+	f.Add(`{"type":"object","properties":{"email":{"x-claim":"claims.email"}}}`)
 	f.Add(`{}`)
 	f.Add(`{"type":"object","properties":{}}`)
 	f.Add(`not json`)

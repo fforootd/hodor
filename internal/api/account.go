@@ -165,7 +165,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// FGA Layer 2: Check field-level permissions.
-	// Owner can only edit x-user-editable fields.
+	// Owner can only edit x-editable fields.
 	// (Layer 1 is handled by requireSession — if they have a valid session, they own the identity.)
 	defaultEditable := schemaType == "human_user"
 	editableFields := redact.UserEditableFields(schemaJSON, defaultEditable)

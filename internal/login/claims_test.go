@@ -8,8 +8,8 @@ func TestClaimMappings_ExtractsFromSchema(t *testing.T) {
 	schema := `{
 		"type": "object",
 		"properties": {
-			"email": {"type": "string", "x-claim-mapping": "claims.email"},
-			"name":  {"type": "string", "x-claim-mapping": "claims.name ?? claims.preferred_username"},
+			"email": {"type": "string", "x-claim": "claims.email"},
+			"name":  {"type": "string", "x-claim": "claims.name ?? claims.preferred_username"},
 			"phone": {"type": "string"}
 		}
 	}`
@@ -50,8 +50,8 @@ func TestMapClaims_SchemaDefaultsOnly(t *testing.T) {
 	schema := `{
 		"type": "object",
 		"properties": {
-			"email": {"type": "string", "x-claim-mapping": "claims.email"},
-			"name":  {"type": "string", "x-claim-mapping": "claims.name"}
+			"email": {"type": "string", "x-claim": "claims.email"},
+			"name":  {"type": "string", "x-claim": "claims.name"}
 		}
 	}`
 
@@ -76,7 +76,7 @@ func TestMapClaims_ProviderOverridesWin(t *testing.T) {
 	schema := `{
 		"type": "object",
 		"properties": {
-			"email": {"type": "string", "x-claim-mapping": "claims.email"}
+			"email": {"type": "string", "x-claim": "claims.email"}
 		}
 	}`
 
@@ -102,7 +102,7 @@ func TestMapClaims_FallbackOperator(t *testing.T) {
 	schema := `{
 		"type": "object",
 		"properties": {
-			"name": {"type": "string", "x-claim-mapping": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"}
+			"name": {"type": "string", "x-claim": "claims.name ?? (claims.given_name + ' ' + claims.family_name)"}
 		}
 	}`
 
@@ -126,8 +126,8 @@ func TestMapClaims_FailingExprSkipped(t *testing.T) {
 	schema := `{
 		"type": "object",
 		"properties": {
-			"email": {"type": "string", "x-claim-mapping": "claims.email"},
-			"bad":   {"type": "string", "x-claim-mapping": "claims.nonexistent.nested.deep"}
+			"email": {"type": "string", "x-claim": "claims.email"},
+			"bad":   {"type": "string", "x-claim": "claims.nonexistent.nested.deep"}
 		}
 	}`
 
@@ -147,7 +147,7 @@ func TestMapClaims_EmptyClaims(t *testing.T) {
 	schema := `{
 		"type": "object",
 		"properties": {
-			"email": {"type": "string", "x-claim-mapping": "claims.email ?? ''"}
+			"email": {"type": "string", "x-claim": "claims.email ?? ''"}
 		}
 	}`
 

@@ -830,14 +830,7 @@ func schemaClaims(schemaJSON string, data map[string]any) map[string]any {
 			continue
 		}
 		claimName := ""
-		// Prefer x-claim (new), fall back to x-claim-mapping (legacy).
-		mapping := ""
-		if m, ok := def["x-claim"].(string); ok {
-			mapping = m
-		} else if m, ok := def["x-claim-mapping"].(string); ok {
-			mapping = m
-		}
-		if mapping != "" && strings.HasPrefix(mapping, "claims.") {
+		if mapping, ok := def["x-claim"].(string); ok && strings.HasPrefix(mapping, "claims.") {
 			// Extract "claims.email" → "email"
 			rest := mapping[7:]
 			end := 0

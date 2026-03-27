@@ -5,11 +5,11 @@ import "testing"
 const testSchema = `{
   "type": "object",
   "properties": {
-    "email":        {"type": "string", "x-user-editable": true},
-    "phone":        {"type": "string", "x-sensitive": true, "x-user-editable": true},
+    "email":        {"type": "string", "x-editable": true},
+    "phone":        {"type": "string", "x-sensitive": true, "x-editable": true},
     "ssn":          {"type": "string", "x-sensitive": true, "x-hidden": true},
-    "display_name": {"type": "string", "x-user-editable": true},
-    "metadata":     {"type": "object", "x-user-editable": false, "x-source": "admin"}
+    "display_name": {"type": "string", "x-editable": true},
+    "metadata":     {"type": "object", "x-editable": false, "x-source": "admin"}
   }
 }`
 
@@ -60,7 +60,7 @@ func TestUserEditableFields(t *testing.T) {
 }
 
 func TestUserEditableFields_DefaultTrue(t *testing.T) {
-	// Schema with no x-user-editable annotation — default should be true.
+	// Schema with no x-editable annotation — default should be true.
 	schema := `{"type":"object","properties":{"name":{"type":"string"}}}`
 	fields := UserEditableFields(schema, true)
 	if !fields["name"] {

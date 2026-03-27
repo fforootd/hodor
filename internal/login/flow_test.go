@@ -6,14 +6,14 @@ import (
 
 const testSchema = `{
   "type": "object",
+  "x-auth-methods": {
+    "password": {"enabled": true, "interactive": true, "position": 1},
+    "passkey": {"enabled": true, "interactive": true, "position": 0, "preferred": true},
+    "magic_link": {"enabled": true, "interactive": true, "position": 2},
+    "sso": {"enabled": true, "interactive": true, "position": 3}
+  },
   "x-login": {
     "preset": "identifier_first",
-    "auth_methods": {
-      "password": {"enabled": true, "position": 1},
-      "passkey": {"enabled": true, "position": 0, "preferred": true},
-      "magic_link": {"enabled": true, "position": 2},
-      "sso": {"enabled": true, "position": 3}
-    },
     "mfa_required": false,
     "registration_allowed": true
   },
@@ -28,11 +28,14 @@ const testSchema = `{
     "email": {
       "type": "string",
       "format": "email",
-      "x-auth": {"identifier": true, "verification": "email", "recovery": "email"}
+      "x-identifier": true,
+      "x-verify": "email",
+      "x-recover": "email"
     },
     "phone": {
       "type": "string",
-      "x-auth": {"identifier": true, "mfa": "sms"}
+      "x-identifier": true,
+      "x-mfa": "sms"
     },
     "display_name": {
       "type": "string"
@@ -74,7 +77,7 @@ func TestExtractAuthConfig_IdentifierFields(t *testing.T) {
 		t.Errorf("phone mfa = %q, want %q", phoneCfg.MFA, "sms")
 	}
 
-	// display_name should NOT be in Fields (no x-auth).
+	// display_name should NOT be in Fields (no x-identifier).
 	if _, ok := cfg.Fields["display_name"]; ok {
 		t.Error("display_name should not have auth config")
 	}
