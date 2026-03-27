@@ -121,6 +121,49 @@ var builtinSchemas = []struct {
   "required": ["display_name", "model", "trust_level"]
 }`,
 	},
+	{
+		ID:   "org_v1",
+		Type: "org",
+		Schema: `{
+  "type": "object",
+  "properties": {
+    "display_name":  {"type": "string", "description": "Organization display name"},
+    "description":   {"type": "string"},
+    "branding": {
+      "type": "object",
+      "properties": {
+        "primary_color":  {"type": "string", "description": "Primary brand color"},
+        "logo_url":       {"type": "string", "format": "uri"},
+        "logo_dark_url":  {"type": "string", "format": "uri"},
+        "font_family":    {"type": "string"},
+        "favicon_url":    {"type": "string", "format": "uri"}
+      }
+    },
+    "login_policy": {
+      "type": "object",
+      "properties": {
+        "mfa_required":         {"type": "boolean"},
+        "passwordless_enabled": {"type": "boolean"},
+        "registration_allowed": {"type": "boolean"},
+        "external_idp_only":    {"type": "boolean"}
+      }
+    },
+    "notification_channels": {
+      "type": "object",
+      "properties": {
+        "email_from":    {"type": "string", "format": "email"},
+        "smtp_host":     {"type": "string"},
+        "smtp_port":     {"type": "integer"},
+        "smtp_user":     {"type": "string"},
+        "sms_provider":  {"type": "string", "enum": ["twilio", "custom"]},
+        "webhook_url":   {"type": "string", "format": "uri"}
+      }
+    },
+    "metadata": {"type": "object"}
+  },
+  "required": ["display_name"]
+}`,
+	},
 }
 
 // EnsureAdmin checks if any identities exist. If not, it creates a default
@@ -204,11 +247,49 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	fmt.Println("  └──────────────────────────────────────────────────┘")
 	fmt.Println()
 
+	// Seed the default org.
+	if err := seedDefaultOrg(ctx, db); err != nil {
+		log.Printf("WARN: seed default org: %v", err)
+	}
+
 	// Seed the default console OIDC client (public SPA, no secret).
 	if err := seedConsoleClient(ctx, db); err != nil {
 		log.Printf("WARN: seed console client: %v", err)
 	}
 
+	return nil
+}
+
+// seedDefaultOrg creates the default organization if it doesn't exist.
+func seedDefaultOrg(ctx context.Context, db *database.DB) error {
+	var exists int
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM identities WHERE identifier = 'default' AND schema_id = 'org_v1'`).Scan(&exists)
+	if err != nil || exists > 0 {
+		return nil
+	}
+
+	orgID, err := id.New()
+	if err != nil {
+		return fmt.Errorf("gen org id: %w", err)
+	}
+
+	orgData := `{
+		"display_name": "Default",
+		"branding": {
+			"primary_color": "#1a1a2e"
+		}
+	}`
+
+	_, err = db.SQL().ExecContext(ctx,
+		`INSERT INTO identities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
+		 VALUES (?, 0, 'default', 'Default', 'active', 'org_v1', ?, datetime('now'), datetime('now'))`,
+		orgID, orgData,
+	)
+	if err != nil {
+		return fmt.Errorf("insert default org: %w", err)
+	}
+
+	log.Println("seeded default organization (identifier=default)")
 	return nil
 }
 

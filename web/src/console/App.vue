@@ -59,7 +59,29 @@
     </aside>
     <main class="content">
       <header class="topbar">
-        <h2 class="page-title">{{ pageTitle }}</h2>
+        <div class="topbar-left">
+          <div class="org-switcher" ref="orgSwitcherRef">
+            <button class="org-switcher-btn" @click="showOrgDropdown = !showOrgDropdown">
+              <span class="org-icon">⬡</span>
+              <span class="org-name">{{ selectedOrg?.display_name || 'All Orgs' }}</span>
+              <span class="org-chevron">▾</span>
+            </button>
+            <div v-if="showOrgDropdown" class="org-dropdown">
+              <div class="org-dropdown-item" :class="{ selected: !selectedOrgId }" @click="selectOrg(null)">
+                <span class="org-icon">◈</span> All Organizations
+              </div>
+              <div
+                v-for="org in orgs" :key="org.id"
+                class="org-dropdown-item"
+                :class="{ selected: selectedOrgId === org.id }"
+                @click="selectOrg(org)"
+              >
+                <span class="org-icon">⬡</span> {{ org.display_name }}
+              </div>
+            </div>
+          </div>
+          <h2 class="page-title">{{ pageTitle }}</h2>
+        </div>
         <div class="topbar-right">
           <div class="search-wrap" ref="searchWrap">
             <input
@@ -106,7 +128,29 @@ const searchQuery = ref('')
 const searchResults = ref<SearchResult[]>([])
 const showResults = ref(false)
 const searchWrap = ref<HTMLElement | null>(null)
+const orgSwitcherRef = ref<HTMLElement | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout>
+
+// Org context switcher state
+interface OrgEntry { id: number; display_name: string; identifier: string }
+const orgs = ref<OrgEntry[]>([])
+const showOrgDropdown = ref(false)
+const selectedOrgId = ref<number | null>(null)
+const selectedOrg = computed(() => orgs.value.find(o => o.id === selectedOrgId.value) || null)
+
+function selectOrg(org: OrgEntry | null) {
+  selectedOrgId.value = org?.id ?? null
+  showOrgDropdown.value = false
+  if (org) {
+    localStorage.setItem('zitadel_org', String(org.id))
+  } else {
+    localStorage.removeItem('zitadel_org')
+  }
+}
+
+// Restore from localStorage on load
+const savedOrg = localStorage.getItem('zitadel_org')
+if (savedOrg) selectedOrgId.value = Number(savedOrg)
 
 // Pretty labels for known schema types; unknown types get auto-formatted.
 const typeLabels: Record<string, string> = {
@@ -129,6 +173,8 @@ const typeOrder: Record<string, number> = {
 // Which nav section a schema type belongs to.
 // Types not listed here go into IDENTITIES by default.
 const appSchemaTypes = new Set(['app', 'app_saml', 'app_oauth_api'])
+// Types excluded from nav entirely (org = topbar switcher).
+const hiddenSchemaTypes = new Set(['org'])
 
 interface SchemaTypeEntry { type: string; label: string }
 const identityTypes = ref<SchemaTypeEntry[]>([])
@@ -157,6 +203,7 @@ onMounted(async () => {
     const ids: SchemaTypeEntry[] = []
     const apps: SchemaTypeEntry[] = []
     for (const t of types) {
+      if (hiddenSchemaTypes.has(t)) continue
       if (appSchemaTypes.has(t)) {
         apps.push(buildEntry(t))
       } else {
@@ -166,9 +213,33 @@ onMounted(async () => {
     identityTypes.value = sortEntries(ids)
     appTypes.value = sortEntries(apps)
   } catch { /* ignore */ }
+
+  // Fetch orgs for context switcher.
+  try {
+    const res = await fetch('/v1/identities?schema_type=org')
+    const data = await res.json()
+    orgs.value = (data.items || []).map((o: any) => ({
+      id: o.id,
+      display_name: o.display_name || o.identifier,
+      identifier: o.identifier,
+    }))
+    // Auto-select if only one org and nothing saved.
+    if (!selectedOrgId.value && orgs.value.length === 1) {
+      selectOrg(orgs.value[0])
+    }
+  } catch { /* ignore */ }
 })
 
 onUnmounted(() => document.removeEventListener('click', handleClickOutside))
+
+function handleClickOutside(e: MouseEvent) {
+  if (searchWrap.value && !searchWrap.value.contains(e.target as Node)) {
+    showResults.value = false
+  }
+  if (orgSwitcherRef.value && !orgSwitcherRef.value.contains(e.target as Node)) {
+    showOrgDropdown.value = false
+  }
+}
 
 const pageTitle = computed(() => {
   // Dynamic schema-type pages: /s/:schemaType
@@ -216,11 +287,6 @@ function goToResult(r: SearchResult) {
   router.push(path)
 }
 
-function handleClickOutside(e: MouseEvent) {
-  if (searchWrap.value && !searchWrap.value.contains(e.target as Node)) {
-    showResults.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -258,10 +324,39 @@ function handleClickOutside(e: MouseEvent) {
   display: flex; justify-content: space-between; align-items: center;
   padding: 1rem 2rem; background: #fff; border-bottom: 1px solid #e5e7eb;
 }
+.topbar-left { display: flex; align-items: center; gap: 1rem; }
 .topbar-right { display: flex; align-items: center; gap: 1rem; }
 .page-title { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
 .sign-out { color: #6b7280; font-size: 0.875rem; text-decoration: none; }
 .sign-out:hover { color: #ef4444; }
+
+/* Org Switcher */
+.org-switcher { position: relative; }
+.org-switcher-btn {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
+  background: #f9fafb; cursor: pointer; font-family: inherit;
+  font-size: 0.8125rem; color: #1a1a2e; font-weight: 600;
+  transition: all 0.15s;
+}
+.org-switcher-btn:hover { border-color: #6366f1; background: #fff; }
+.org-icon { font-size: 0.875rem; color: #6366f1; }
+.org-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-chevron { font-size: 0.625rem; color: #9ca3af; margin-left: 0.25rem; }
+
+.org-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08); z-index: 100;
+  padding: 0.25rem 0; max-height: 300px; overflow-y: auto;
+}
+.org-dropdown-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; font-size: 0.8125rem; color: #4b5563;
+  cursor: pointer; transition: background 0.1s;
+}
+.org-dropdown-item:hover { background: #f3f4f6; }
+.org-dropdown-item.selected { background: #f0f2ff; color: #4f46e5; font-weight: 600; }
 
 /* Search */
 .search-wrap { position: relative; }
