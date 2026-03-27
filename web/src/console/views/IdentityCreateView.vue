@@ -1,116 +1,158 @@
 <template>
-  <div>
-    <div class="form-header">
-      <router-link :to="`/s/${schemaType}`" class="back-link">← Back</router-link>
-      <h2>Create {{ currentLabel }}</h2>
+  <div class="space-y-6 max-w-2xl">
+    <div class="flex items-center gap-3">
+      <Button variant="ghost" size="icon" as-child>
+        <router-link :to="`/s/${schemaType}`"><ArrowLeft class="size-4" /></router-link>
+      </Button>
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">Create {{ currentLabel }}</h1>
+        <p class="text-muted-foreground text-sm">Fill in the details below or switch to JSON mode.</p>
+      </div>
     </div>
 
     <!-- Tab toggle -->
-    <div class="mode-tabs">
-      <button :class="{ active: mode === 'form' }" @click="mode = 'form'">📝 Form</button>
-      <button :class="{ active: mode === 'json' }" @click="switchToJson">{ } JSON</button>
+    <div class="inline-flex items-center rounded-lg bg-muted p-1">
+      <button
+        :class="['px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+          mode === 'form' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+        @click="mode = 'form'"
+      >📝 Form</button>
+      <button
+        :class="['px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+          mode === 'json' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+        @click="switchToJson"
+      >{ } JSON</button>
     </div>
 
-    <form @submit.prevent="submit" class="form">
-      <!-- Version picker (only if multiple versions exist) -->
-      <div class="form-section" v-if="versions.length > 1">
-        <h3>Schema Version</h3>
-        <div class="schema-picker">
-          <button
-            v-for="v in versions" :key="v.id" type="button"
-            class="schema-option" :class="{ active: selectedSchema === v.id }"
-            @click="selectSchema(v.id)"
-          >
-            <span class="schema-type">v{{ v.version }}</span>
-            <span class="schema-desc" v-if="v.is_default">default</span>
-            <span class="schema-desc" v-else>{{ v.message || 'draft' }}</span>
-          </button>
-        </div>
-      </div>
+    <form @submit.prevent="submit" class="space-y-4">
+      <!-- Version picker -->
+      <Card v-if="versions.length > 1">
+        <CardHeader class="pb-3">
+          <CardTitle class="text-sm">Schema Version</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="v in versions" :key="v.id" type="button"
+              :class="['rounded-lg border px-3 py-2 text-left transition-colors',
+                selectedSchema === v.id ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/30']"
+              @click="selectSchema(v.id)"
+            >
+              <span class="block text-sm font-semibold">v{{ v.version }}</span>
+              <span class="text-xs text-muted-foreground">{{ v.is_default ? 'default' : (v.message || 'draft') }}</span>
+            </button>
+          </div>
+        </CardContent>
+      </Card>
 
       <!-- ═══ FORM MODE ═══ -->
       <template v-if="mode === 'form'">
-        <!-- Core fields: identifier + display_name -->
-        <div class="form-section">
-          <h3>{{ isInteractiveIdentity ? 'Account' : 'Identity' }}</h3>
-          <div class="field-group">
-            <label>Identifier <span class="req">*</span></label>
-            <input v-model="form.identifier" type="text" :placeholder="identifierPlaceholder" required />
-          </div>
-          <div class="field-group">
-            <label>Display Name</label>
-            <input v-model="form.display_name" type="text" placeholder="Display name" />
-          </div>
-          <div class="field-group" v-if="hasPassword">
-            <label>Password</label>
-            <input v-model="form.password" type="password" placeholder="Set initial password" />
-          </div>
-        </div>
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">{{ isInteractiveIdentity ? 'Account' : 'Identity' }}</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="space-y-2">
+              <Label for="create-id">Identifier <span class="text-destructive">*</span></Label>
+              <Input id="create-id" v-model="form.identifier" :placeholder="identifierPlaceholder" required />
+            </div>
+            <div class="space-y-2">
+              <Label for="create-name">Display Name</Label>
+              <Input id="create-name" v-model="form.display_name" placeholder="Display name" />
+            </div>
+            <div class="space-y-2" v-if="hasPassword">
+              <Label for="create-pw">Password</Label>
+              <Input id="create-pw" v-model="form.password" type="password" placeholder="Set initial password" />
+            </div>
+          </CardContent>
+        </Card>
 
-        <!-- Dynamic schema fields (auto-generated from properties) -->
-        <div class="form-section" v-if="schemaFields.length">
-          <h3>Properties</h3>
-          <div class="field-group" v-for="field in schemaFields" :key="field.name">
-            <label>{{ field.label }}</label>
-            <select v-if="field.type === 'boolean'" v-model="profileData[field.name]">
-              <option value="">—</option>
-              <option value="true">true</option>
-              <option value="false">false</option>
-            </select>
-            <select v-else-if="field.enum" v-model="profileData[field.name]">
-              <option value="">—</option>
-              <option v-for="opt in field.enum" :key="opt" :value="opt">{{ opt }}</option>
-            </select>
-            <input
-              v-else
-              v-model="profileData[field.name]"
-              :type="field.inputType"
-              :placeholder="field.description || ''"
-            />
-            <span class="field-hint" v-if="field.description">{{ field.description }}</span>
-          </div>
-        </div>
+        <Card v-if="schemaFields.length">
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Properties</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="space-y-2" v-for="field in schemaFields" :key="field.name">
+              <Label :for="`field-${field.name}`">{{ field.label }}</Label>
+              <Select v-if="field.type === 'boolean'" v-model="profileData[field.name]">
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">—</SelectItem>
+                  <SelectItem value="true">true</SelectItem>
+                  <SelectItem value="false">false</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select v-else-if="field.enum" v-model="profileData[field.name]">
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">—</SelectItem>
+                  <SelectItem v-for="opt in field.enum" :key="opt" :value="opt">{{ opt }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                v-else
+                :id="`field-${field.name}`"
+                v-model="profileData[field.name]"
+                :type="field.inputType"
+                :placeholder="field.description || ''"
+              />
+              <p class="text-xs text-muted-foreground" v-if="field.description">{{ field.description }}</p>
+            </div>
+          </CardContent>
+        </Card>
 
-        <!-- Capabilities (only for identity-type entities) -->
-        <div class="form-section" v-if="isInteractiveIdentity">
-          <h3>Capabilities</h3>
-          <div class="cap-checkboxes">
-            <label class="cap-check" v-for="cap in availableCaps" :key="cap">
-              <input type="checkbox" :value="cap" v-model="form.capabilities" />
-              <span class="cap-label">{{ cap }}</span>
+        <Card v-if="isInteractiveIdentity">
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Capabilities</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="flex flex-wrap gap-4">
+              <label class="flex items-center gap-2 cursor-pointer" v-for="cap in availableCaps" :key="cap">
+                <input type="checkbox" :value="cap" v-model="form.capabilities" class="accent-primary" />
+                <span class="text-sm">{{ cap }}</span>
+              </label>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card v-if="isInteractiveIdentity && hasLogin" class="bg-muted/30">
+          <CardContent class="py-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="sendInvite" class="accent-primary" />
+              <span class="text-sm">Send invite link after creation</span>
             </label>
-          </div>
-        </div>
-
-        <!-- Invite (only for interactive schemas) -->
-        <div class="form-section" v-if="isInteractiveIdentity && hasLogin">
-          <label class="invite-check">
-            <input type="checkbox" v-model="sendInvite" />
-            <span>Send invite link after creation</span>
-          </label>
-          <p class="invite-hint" v-if="sendInvite">A magic link will be sent to the identifier email.</p>
-        </div>
+            <p v-if="sendInvite" class="mt-2 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              A magic link will be sent to the identifier email.
+            </p>
+          </CardContent>
+        </Card>
       </template>
 
       <!-- ═══ JSON MODE ═══ -->
       <template v-if="mode === 'json'">
-        <div class="form-section">
-          <h3>Entity JSON</h3>
-          <p class="json-hint">Edit the full entity payload. Schema validation is live.</p>
-          <JsonEditor v-model="jsonContent" label="Entity Data" :schema="currentSchema?.schema" @valid="onJsonValid" @error="onJsonError" />
-        </div>
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Entity JSON</CardTitle>
+            <p class="text-xs text-muted-foreground">Edit the full entity payload. Schema validation is live.</p>
+          </CardHeader>
+          <CardContent>
+            <JsonEditor v-model="jsonContent" label="Entity Data" :schema="currentSchema?.schema" @valid="onJsonValid" @error="onJsonError" />
+          </CardContent>
+        </Card>
       </template>
 
       <!-- Actions -->
-      <div class="form-actions">
-        <router-link :to="`/s/${schemaType}`" class="btn-cancel">Cancel</router-link>
-        <button type="submit" class="btn-create" :disabled="submitting || (mode === 'json' && !!jsonError)">
+      <div class="flex justify-end gap-3 pt-2">
+        <Button variant="outline" as-child>
+          <router-link :to="`/s/${schemaType}`">Cancel</router-link>
+        </Button>
+        <Button type="submit" :disabled="submitting || (mode === 'json' && !!jsonError)">
           {{ submitting ? 'Creating…' : `Create ${currentLabel}` }}
-        </button>
+        </Button>
       </div>
 
-      <div v-if="error" class="error-banner">{{ error }}</div>
-      <div v-if="success" class="success-banner">Created! Redirecting…</div>
+      <div v-if="error" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{{ error }}</div>
+      <div v-if="success" class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">Created! Redirecting…</div>
     </form>
   </div>
 </template>
@@ -121,6 +163,12 @@ import { useRouter } from 'vue-router'
 import { entityApi, magicLinkApi, schemaApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
 import JsonEditor from '@/console/components/JsonEditor.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ArrowLeft } from 'lucide-vue-next'
 
 const props = defineProps<{ schemaType: string }>()
 
@@ -150,7 +198,6 @@ const availableCaps = ['password', 'magic_link', 'admin', 'api_key']
 const currentSchema = computed(() => versions.value.find(s => s.id === selectedSchema.value))
 const currentLabel = computed(() => displayMeta.value.singular || props.schemaType.replace(/_/g, ' '))
 
-// Detect interactive identity types by checking for x-identifier or x-auth-methods
 const isInteractiveIdentity = computed(() => {
   const s = currentSchema.value?.schema as any
   if (!s) return false
@@ -169,12 +216,7 @@ const identifierPlaceholder = computed(() => {
 })
 
 interface SchemaField {
-  name: string
-  label: string
-  description: string
-  inputType: string
-  type: string
-  enum?: string[]
+  name: string; label: string; description: string; inputType: string; type: string; enum?: string[]
 }
 
 const schemaFields = computed<SchemaField[]>(() => {
@@ -202,27 +244,14 @@ function selectSchema(id: string) {
 }
 
 function switchToJson() {
-  // Sync form data into JSON before switching
-  const data: any = {
-    identifier: form.identifier || undefined,
-    display_name: form.display_name || undefined,
-  }
-  // Add profile fields
-  for (const [k, v] of Object.entries(profileData)) {
-    if (v) data[k] = v
-  }
+  const data: any = { identifier: form.identifier || undefined, display_name: form.display_name || undefined }
+  for (const [k, v] of Object.entries(profileData)) { if (v) data[k] = v }
   jsonContent.value = JSON.stringify(data, null, 2)
   mode.value = 'json'
 }
 
-function onJsonValid(parsed: any) {
-  jsonError.value = ''
-  jsonParsed.value = parsed
-}
-
-function onJsonError(msg: string) {
-  jsonError.value = msg
-}
+function onJsonValid(parsed: any) { jsonError.value = ''; jsonParsed.value = parsed }
+function onJsonError(msg: string) { jsonError.value = msg }
 
 onMounted(async () => {
   try {
@@ -231,53 +260,38 @@ onMounted(async () => {
       .filter((s: Schema) => s.type === props.schemaType)
       .sort((a: Schema, b: Schema) => b.version - a.version)
 
-    // Extract display metadata from catalog
     try {
       const metaRes = await fetch('/v1/schemas/$meta')
       const metaData = await metaRes.json()
       const entry = (metaData['x-catalog'] || {})[props.schemaType]
       if (entry) {
-        displayMeta.value = {
-          singular: entry.singular,
-          alias: entry.alias,
-          path: entry.path,
-          icon: entry.icon,
-        }
+        displayMeta.value = { singular: entry.singular, alias: entry.alias, path: entry.path, icon: entry.icon }
       }
     } catch { /* ignore */ }
 
     const defaultVersion = versions.value.find(s => s.is_default) || versions.value[0]
-    if (defaultVersion) {
-      selectSchema(defaultVersion.id)
-    }
+    if (defaultVersion) selectSchema(defaultVersion.id)
   } catch {}
 })
 
 async function submit() {
   submitting.value = true
   error.value = ''
-
   try {
     let payload: any
-
     if (mode.value === 'json') {
-      // JSON mode: use parsed JSON directly
       const data = jsonParsed.value
       payload = {
         identifier: data.identifier || form.identifier || props.schemaType + '-' + Date.now(),
         display_name: data.display_name || data.identifier || '',
-        profile: {},
-        data: data,
-        schema_id: selectedSchema.value,
+        profile: {}, data: data, schema_id: selectedSchema.value,
       }
     } else {
-      // Form mode: build from form fields
       if (!form.identifier.trim()) { error.value = 'Identifier is required'; submitting.value = false; return }
       const profile: Record<string, any> = {}
       if (form.display_name) profile.display_name = form.display_name
       for (const [k, v] of Object.entries(profileData)) {
         if (v !== '') {
-          // Convert types
           const fieldDef = schemaFields.value.find(f => f.name === k)
           if (fieldDef?.type === 'boolean') profile[k] = v === 'true'
           else if (fieldDef?.type === 'integer') profile[k] = parseInt(v) || 0
@@ -285,27 +299,20 @@ async function submit() {
           else profile[k] = v
         }
       }
-
       payload = {
         identifier: form.identifier.trim(),
         display_name: form.display_name.trim() || form.identifier.trim(),
-        profile,
-        capabilities: isInteractiveIdentity.value ? form.capabilities : [],
+        profile, capabilities: isInteractiveIdentity.value ? form.capabilities : [],
         schema_id: selectedSchema.value,
       }
     }
-
     const created = await entityApi.create(payload)
-
     if (form.password && created.id && isInteractiveIdentity.value) {
-      await api.post(`/v1/entities/${created.id}/password`, { password: form.password })
-        .catch(() => {})
+      await api.post(`/v1/entities/${created.id}/password`, { password: form.password }).catch(() => {})
     }
-
     if (sendInvite.value && hasLogin.value && created.id) {
       await magicLinkApi.send(form.identifier.trim()).catch(() => {})
     }
-
     success.value = true
     setTimeout(() => router.push(`/s/${props.schemaType}`), 800)
   } catch (e: any) {
@@ -315,71 +322,3 @@ async function submit() {
   }
 }
 </script>
-
-<style scoped>
-.form-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
-.form-header h2 { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
-.back-link { font-size: 0.8125rem; color: #6b7280; text-decoration: none; }
-.back-link:hover { color: #6366f1; }
-
-.mode-tabs {
-  display: flex; gap: 0; margin-bottom: 1.25rem; background: #f3f4f6; border-radius: 8px;
-  padding: 0.25rem; width: fit-content;
-}
-.mode-tabs button {
-  padding: 0.375rem 1rem; border: none; border-radius: 6px; background: transparent;
-  font-size: 0.8125rem; font-weight: 500; color: #6b7280; cursor: pointer; transition: all 0.15s;
-}
-.mode-tabs button.active { background: #fff; color: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-
-.form { max-width: 720px; }
-.form-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
-.form-section h3 { font-size: 0.8125rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
-
-.schema-picker { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.schema-option {
-  padding: 0.5rem 1rem; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff;
-  cursor: pointer; transition: all 0.15s; text-align: left;
-}
-.schema-option:hover { border-color: #a5b4fc; }
-.schema-option.active { border-color: #6366f1; background: #f0f2ff; }
-.schema-type { display: block; font-size: 0.875rem; font-weight: 600; color: #1a1a2e; }
-.schema-desc { font-size: 0.75rem; color: #9ca3af; }
-
-.field-group { margin-bottom: 0.75rem; }
-.field-group label { display: block; font-size: 0.8125rem; font-weight: 500; color: #4b5563; margin-bottom: 0.25rem; }
-.req { color: #ef4444; }
-.field-group input, .field-group select {
-  width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
-  font-size: 0.875rem; font-family: inherit; transition: border-color 0.15s;
-}
-.field-group input:focus, .field-group select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
-.field-hint { display: block; font-size: 0.6875rem; color: #9ca3af; margin-top: 0.25rem; }
-
-.cap-checkboxes { display: flex; flex-wrap: wrap; gap: 0.75rem; }
-.cap-check { display: flex; align-items: center; gap: 0.375rem; cursor: pointer; }
-.cap-check input { accent-color: #6366f1; }
-.cap-label { font-size: 0.875rem; color: #4b5563; }
-
-.json-hint { font-size: 0.8125rem; color: #6b7280; margin-bottom: 0.75rem; }
-
-.form-actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; }
-.btn-cancel {
-  padding: 0.5rem 1.25rem; border: 1px solid #d1d5db; border-radius: 8px; background: #fff;
-  color: #4b5563; font-size: 0.875rem; text-decoration: none; font-weight: 500;
-}
-.btn-cancel:hover { background: #f9fafb; }
-.btn-create {
-  padding: 0.5rem 1.25rem; border: none; border-radius: 8px; background: #1a1a2e;
-  color: #fff; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
-}
-.btn-create:hover { opacity: 0.9; }
-.btn-create:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.error-banner { margin-top: 1rem; padding: 0.75rem 1rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #dc2626; font-size: 0.875rem; }
-.success-banner { margin-top: 1rem; padding: 0.75rem 1rem; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; color: #059669; font-size: 0.875rem; }
-
-.invite-check { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; color: #4b5563; }
-.invite-check input { accent-color: #6366f1; }
-.invite-hint { margin-top: 0.5rem; font-size: 0.75rem; color: #6b7280; padding: 0.5rem 0.75rem; background: #eff6ff; border-radius: 6px; }
-</style>

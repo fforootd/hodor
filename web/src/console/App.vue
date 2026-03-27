@@ -53,30 +53,6 @@
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <!-- Observability -->
-        <SidebarGroup>
-          <SidebarGroupLabel>Observability</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton as-child :data-active="$route.name === 'obs-overview'">
-                  <router-link to="/observability">
-                    <BarChart3 class="size-4" />
-                    <span>Overview</span>
-                  </router-link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton as-child :data-active="$route.name === 'obs-query'">
-                  <router-link to="/observability/query">
-                    <Search class="size-4" />
-                    <span>Query</span>
-                  </router-link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>

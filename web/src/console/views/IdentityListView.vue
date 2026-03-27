@@ -1,54 +1,98 @@
 <template>
-  <div>
-    <div class="toolbar">
-      <h3>{{ identities.length }} {{ label.toLowerCase() }}</h3>
-      <router-link :to="`/s/${schemaType}/new`" class="btn-primary">+ New {{ singularLabel }}</router-link>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">{{ label }}</h1>
+        <p class="text-muted-foreground">{{ identities.length }} {{ label.toLowerCase() }} total</p>
+      </div>
+      <Button as-child>
+        <router-link :to="`/s/${schemaType}/new`">
+          <Plus class="mr-2 size-4" />
+          New {{ singularLabel }}
+        </router-link>
+      </Button>
     </div>
 
-    <!-- Use ApplicationListView-style for 'app' type -->
-    <div v-if="schemaType === 'app'" class="app-discovery">
-      <h4>OIDC Discovery</h4>
-      <div class="discovery-row">
-        <span>Issuer</span>
-        <code @click="copy(issuer)">{{ issuer }}</code>
-      </div>
-      <div class="discovery-row">
-        <span>Discovery</span>
-        <code @click="copy(issuer + '/.well-known/openid-configuration')">{{ issuer }}/.well-known/openid-configuration</code>
-      </div>
-    </div>
+    <!-- OIDC Discovery panel (shown for app type) -->
+    <Card v-if="schemaType === 'app'" class="bg-muted/50">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-sm font-medium">OIDC Discovery</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-2">
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-muted-foreground w-20">Issuer</span>
+          <code
+            class="cursor-pointer rounded bg-primary/10 px-2 py-0.5 text-sm font-mono text-primary hover:bg-primary/20 transition-colors"
+            @click="copy(issuer)"
+          >{{ issuer }}</code>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-muted-foreground w-20">Discovery</span>
+          <code
+            class="cursor-pointer rounded bg-primary/10 px-2 py-0.5 text-sm font-mono text-primary hover:bg-primary/20 transition-colors"
+            @click="copy(issuer + '/.well-known/openid-configuration')"
+          >{{ issuer }}/.well-known/openid-configuration</code>
+        </div>
+      </CardContent>
+    </Card>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Identifier</th>
-            <th>Display Name</th>
-            <th v-if="schemaType === 'app'">Type</th>
-            <th v-if="schemaType === 'app'">Redirect URIs</th>
-            <th>State</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="i in identities" :key="i.id" @click="$router.push(`/identities/${i.id}`)" class="clickable">
-            <td :class="schemaType === 'app' ? 'client-id' : 'identifier'">{{ i.identifier }}</td>
-            <td>{{ getField(i, 'client_name') || getField(i, 'display_name') || i.display_name || '—' }}</td>
-            <td v-if="schemaType === 'app'"><span class="app-type-badge">{{ getField(i, 'app_type') || '—' }}</span></td>
-            <td v-if="schemaType === 'app'" class="uris">{{ formatUris(i) }}</td>
-            <td><span class="badge" :class="i.state">{{ i.state }}</span></td>
-            <td class="time">{{ formatTime(i.created_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="!identities.length" class="empty">No {{ label.toLowerCase() }} found</div>
-    </div>
+    <Card>
+      <CardContent class="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Identifier</TableHead>
+              <TableHead>Display Name</TableHead>
+              <TableHead v-if="schemaType === 'app'">Type</TableHead>
+              <TableHead v-if="schemaType === 'app'">Redirect URIs</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead>Created</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow
+              v-for="i in identities" :key="i.id"
+              class="cursor-pointer"
+              @click="$router.push(`/identities/${i.id}`)"
+            >
+              <TableCell :class="schemaType === 'app' ? 'font-mono text-sm text-primary' : 'font-medium'">
+                {{ i.identifier }}
+              </TableCell>
+              <TableCell>{{ getField(i, 'client_name') || getField(i, 'display_name') || i.display_name || '—' }}</TableCell>
+              <TableCell v-if="schemaType === 'app'">
+                <Badge variant="outline" class="text-xs uppercase">{{ getField(i, 'app_type') || '—' }}</Badge>
+              </TableCell>
+              <TableCell v-if="schemaType === 'app'" class="max-w-[300px] truncate text-sm text-muted-foreground">
+                {{ formatUris(i) }}
+              </TableCell>
+              <TableCell>
+                <Badge
+                  :variant="i.state === 'active' ? 'default' : 'destructive'"
+                  class="text-xs"
+                >{{ i.state }}</Badge>
+              </TableCell>
+              <TableCell class="text-muted-foreground text-sm">{{ formatTime(i.created_at) }}</TableCell>
+            </TableRow>
+            <TableRow v-if="!identities.length">
+              <TableCell :colspan="schemaType === 'app' ? 6 : 4" class="h-24 text-center text-muted-foreground">
+                No {{ label.toLowerCase() }} found
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { type Identity } from '@/api/resources'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { Plus } from 'lucide-vue-next'
 
 const props = defineProps<{ schemaType: string }>()
 
@@ -60,7 +104,6 @@ const issuer = window.location.origin
 const identities = ref<Identity[]>([])
 
 onMounted(async () => {
-  // Resolve the API path from the meta schema catalog
   let apiPath = props.schemaType
   try {
     const metaRes = await fetch('/v1/schemas/$meta')
@@ -68,17 +111,11 @@ onMounted(async () => {
     const catalog = metaData['x-catalog'] || {}
     const entry = catalog[props.schemaType]
     if (entry) {
-      schemaDisplay.value = {
-        alias: entry.alias,
-        singular: entry.singular,
-        path: entry.path,
-        icon: entry.icon,
-      }
+      schemaDisplay.value = { alias: entry.alias, singular: entry.singular, path: entry.path, icon: entry.icon }
       apiPath = entry.path || props.schemaType
     }
   } catch { /* ignore */ }
 
-  // Use the alias route: /v1/users, /v1/apps, etc.
   try {
     let url = `/v1/${apiPath}`
     const orgId = localStorage.getItem('zitadel_org')
@@ -109,41 +146,3 @@ function formatUris(item: Identity): string {
 function copy(text: string) { navigator.clipboard.writeText(text) }
 function formatTime(ts: string) { return new Date(ts).toLocaleDateString() }
 </script>
-
-<style scoped>
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-.toolbar h3 { font-size: 0.875rem; font-weight: 500; color: #6b7280; }
-.btn-primary {
-  padding: 0.5rem 1rem; background: #1a1a2e; color: #fff; border-radius: 8px;
-  font-size: 0.8125rem; font-weight: 600; text-decoration: none;
-}
-.table-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
-table { width: 100%; border-collapse: collapse; }
-th { text-align: left; padding: 0.75rem 1.25rem; font-size: 0.75rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e5e7eb; }
-td { padding: 0.75rem 1.25rem; font-size: 0.875rem; color: #1a1a2e; border-bottom: 1px solid #f3f4f6; }
-.clickable { cursor: pointer; }
-.clickable:hover { background: #f9fafb; }
-.identifier { font-weight: 500; }
-.client-id { font-family: 'SF Mono', 'Fira Code', monospace; font-weight: 500; font-size: 0.8125rem; color: #4f46e5; }
-.uris { font-size: 0.8125rem; color: #6b7280; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-type-badge {
-  display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px;
-  font-size: 0.75rem; font-weight: 500; background: #eff6ff; color: #2563eb;
-  text-transform: uppercase; letter-spacing: 0.03em;
-}
-.time { color: #9ca3af; font-size: 0.8125rem; }
-.badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }
-.badge.active { background: #ecfdf5; color: #059669; }
-.badge.deactivated { background: #fef2f2; color: #dc2626; }
-.empty { padding: 3rem; text-align: center; color: #9ca3af; }
-
-/* OIDC discovery panel (shown for app type) */
-.app-discovery {
-  margin-bottom: 1rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem 1.25rem;
-}
-.app-discovery h4 { margin: 0 0 0.5rem; font-size: 0.875rem; font-weight: 600; color: #1a1a2e; }
-.discovery-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.25rem; }
-.discovery-row span { font-size: 0.8125rem; color: #6b7280; min-width: 80px; }
-.discovery-row code { font-size: 0.8125rem; color: #4f46e5; cursor: pointer; padding: 0.125rem 0.375rem; border-radius: 4px; background: #eef2ff; }
-.discovery-row code:hover { background: #e0e7ff; }
-</style>

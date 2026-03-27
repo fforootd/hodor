@@ -1,158 +1,237 @@
 <template>
-  <div v-if="identity">
-    <div class="detail-header">
-      <div class="avatar">{{ (identity.display_name || identity.identifier)[0]?.toUpperCase() }}</div>
-      <div class="header-info">
-        <h2>{{ identity.display_name || identity.identifier }}</h2>
-        <p class="meta">{{ identity.identifier }} · <span class="badge" :class="identity.state">{{ identity.state }}</span></p>
+  <div v-if="identity" class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center gap-4">
+      <Avatar class="size-12 rounded-xl">
+        <AvatarFallback class="rounded-xl bg-primary text-primary-foreground text-lg font-bold">
+          {{ (identity.display_name || identity.identifier)[0]?.toUpperCase() }}
+        </AvatarFallback>
+      </Avatar>
+      <div class="flex-1">
+        <h1 class="text-2xl font-bold tracking-tight">{{ identity.display_name || identity.identifier }}</h1>
+        <p class="text-sm text-muted-foreground">
+          {{ identity.identifier }} ·
+          <Badge
+            :variant="identity.state === 'active' ? 'default' : identity.state === 'locked' ? 'secondary' : 'destructive'"
+            class="text-xs ml-1"
+          >{{ identity.state }}</Badge>
+        </p>
       </div>
-      <div class="header-actions">
-        <button v-if="!editing && isInteractiveIdentity" class="btn-invite" @click="sendInviteLink" :disabled="inviting">
-          {{ inviting ? 'Sending…' : '✉ Invite' }}
-        </button>
-        <button v-if="!editing" class="btn-edit" @click="startEdit">✎ Edit</button>
-        <button v-if="!editing" class="btn-delete" @click="showDeleteConfirm = true">✕ Delete</button>
+      <div class="flex gap-2">
+        <Button v-if="!editing && isInteractiveIdentity" variant="outline" size="sm" @click="sendInviteLink" :disabled="inviting">
+          <Mail class="mr-2 size-4" />
+          {{ inviting ? 'Sending…' : 'Invite' }}
+        </Button>
+        <Button v-if="!editing" variant="outline" size="sm" @click="startEdit">
+          <Pencil class="mr-2 size-4" />
+          Edit
+        </Button>
+        <Button v-if="!editing" variant="destructive" size="sm" @click="showDeleteConfirm = true">
+          <Trash2 class="mr-2 size-4" />
+          Delete
+        </Button>
         <template v-if="editing">
-          <button class="btn-save" @click="save" :disabled="saving">{{ saving ? 'Saving…' : '✓ Save' }}</button>
-          <button class="btn-cancel" @click="cancelEdit">Cancel</button>
+          <Button size="sm" @click="save" :disabled="saving">
+            {{ saving ? 'Saving…' : '✓ Save' }}
+          </Button>
+          <Button variant="outline" size="sm" @click="cancelEdit">Cancel</Button>
         </template>
       </div>
     </div>
 
-    <!-- Delete confirmation -->
-    <div v-if="showDeleteConfirm" class="confirm-overlay" @click.self="showDeleteConfirm = false">
-      <div class="confirm-dialog">
-        <h3>Delete {{ displayMeta.singular || 'Entity' }}</h3>
-        <p>Are you sure you want to delete <strong>{{ identity.identifier }}</strong>? This action cannot be undone.</p>
-        <div class="confirm-actions">
-          <button class="btn-cancel" @click="showDeleteConfirm = false">Cancel</button>
-          <button class="btn-danger" @click="deleteIdentity" :disabled="deleting">
+    <!-- Delete Confirmation Dialog -->
+    <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete {{ displayMeta.singular || 'Entity' }}</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete <strong>{{ identity.identifier }}</strong>? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showDeleteConfirm = false">Cancel</Button>
+          <Button variant="destructive" @click="deleteIdentity" :disabled="deleting">
             {{ deleting ? 'Deleting…' : 'Delete' }}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <div v-if="message" class="message" :class="messageType">{{ message }}</div>
+    <!-- Message banner -->
+    <div v-if="message" :class="[
+      'rounded-lg border px-4 py-3 text-sm',
+      messageType === 'success' ? 'border-green-200 bg-green-50 text-green-700' :
+      messageType === 'invite' ? 'border-blue-200 bg-blue-50 text-blue-700' :
+      'border-destructive/50 bg-destructive/10 text-destructive'
+    ]">{{ message }}</div>
 
-    <!-- View/Edit mode tabs -->
-    <div class="mode-tabs">
-      <button :class="{ active: viewMode === 'form' }" @click="viewMode = 'form'">📝 Form</button>
-      <button :class="{ active: viewMode === 'json' }" @click="switchToJson">{ } JSON</button>
+    <!-- Mode tabs -->
+    <div class="inline-flex items-center rounded-lg bg-muted p-1">
+      <button
+        :class="['px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+          viewMode === 'form' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+        @click="viewMode = 'form'"
+      >📝 Form</button>
+      <button
+        :class="['px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+          viewMode === 'json' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+        @click="switchToJson"
+      >{ } JSON</button>
     </div>
 
     <!-- ═══ FORM VIEW ═══ -->
     <template v-if="viewMode === 'form' && !editing">
-      <div class="cards">
-        <div class="card">
-          <h4>Profile</h4>
-          <div class="fields">
-            <div class="field" v-for="(val, key) in profileFields" :key="key">
-              <span class="field-key">{{ formatKey(key as string) }}</span>
-              <span class="field-val">{{ formatValue(val) }}</span>
+      <div class="grid grid-cols-2 gap-4">
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Profile</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="space-y-3" v-if="Object.keys(profileFields).length">
+              <div class="flex gap-4" v-for="(val, key) in profileFields" :key="key">
+                <span class="text-sm font-medium text-muted-foreground w-28 shrink-0">{{ formatKey(key as string) }}</span>
+                <span class="text-sm break-all">{{ formatValue(val) }}</span>
+              </div>
             </div>
-            <div v-if="!Object.keys(profileFields).length" class="empty">No profile data</div>
-          </div>
-        </div>
-        <div class="card" v-if="isInteractiveIdentity">
-          <h4>Capabilities</h4>
-          <div class="cap-list" v-if="identity.capabilities?.length">
-            <span v-for="cap in identity.capabilities" :key="cap" class="cap-tag" :class="cap">{{ cap }}</span>
-          </div>
-          <div v-else class="empty">No capabilities</div>
-        </div>
+            <p v-else class="text-sm text-muted-foreground">No profile data</p>
+          </CardContent>
+        </Card>
+        <Card v-if="isInteractiveIdentity">
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Capabilities</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="flex flex-wrap gap-2" v-if="identity.capabilities?.length">
+              <Badge v-for="cap in identity.capabilities" :key="cap" variant="outline" class="text-xs">{{ cap }}</Badge>
+            </div>
+            <p v-else class="text-sm text-muted-foreground">No capabilities</p>
+          </CardContent>
+        </Card>
       </div>
-      <div class="cards">
-        <div class="card">
-          <h4>Metadata</h4>
-          <div class="fields" v-if="Object.keys(metaFields).length">
-            <div class="field" v-for="(val, key) in metaFields" :key="key">
-              <span class="field-key">{{ formatKey(key as string) }}</span>
-              <span class="field-val">{{ val }}</span>
+      <div class="grid grid-cols-2 gap-4">
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Metadata</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="space-y-3" v-if="Object.keys(metaFields).length">
+              <div class="flex gap-4" v-for="(val, key) in metaFields" :key="key">
+                <span class="text-sm font-medium text-muted-foreground w-28 shrink-0">{{ formatKey(key as string) }}</span>
+                <span class="text-sm">{{ val }}</span>
+              </div>
             </div>
-          </div>
-          <div v-else class="empty">No metadata</div>
-        </div>
-        <div class="card">
-          <h4>Details</h4>
-          <dl class="detail-grid">
-            <dt>ID</dt><dd class="mono">{{ identity.id }}</dd>
-            <dt>Org ID</dt><dd>{{ identity.org_id }}</dd>
-            <dt>Schema</dt><dd>{{ identity.schema_type || '—' }}</dd>
-            <dt>Created</dt><dd>{{ formatTime(identity.created_at) }}</dd>
-            <dt>Updated</dt><dd>{{ formatTime(identity.updated_at) }}</dd>
-          </dl>
-        </div>
+            <p v-else class="text-sm text-muted-foreground">No metadata</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Details</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl class="grid grid-cols-[80px_1fr] gap-y-2 gap-x-4 text-sm">
+              <dt class="font-medium text-muted-foreground">ID</dt>
+              <dd class="font-mono text-xs break-all">{{ identity.id }}</dd>
+              <dt class="font-medium text-muted-foreground">Org ID</dt>
+              <dd>{{ identity.org_id }}</dd>
+              <dt class="font-medium text-muted-foreground">Schema</dt>
+              <dd>{{ identity.schema_name || '—' }}</dd>
+              <dt class="font-medium text-muted-foreground">Created</dt>
+              <dd>{{ formatTime(identity.created_at) }}</dd>
+              <dt class="font-medium text-muted-foreground">Updated</dt>
+              <dd>{{ formatTime(identity.updated_at) }}</dd>
+            </dl>
+          </CardContent>
+        </Card>
       </div>
     </template>
 
     <!-- ═══ JSON VIEW ═══ -->
     <template v-if="viewMode === 'json' && !editing">
-      <div class="json-view-section">
-        <JsonEditor
-          :modelValue="entityJsonReadonly"
-          label="Stored Entity (read-only)"
-          :schema="entitySchema"
-          height="480px"
-        />
-        <p class="json-view-hint">This is the raw entity data as stored. Click <strong>Edit</strong> to modify.</p>
-      </div>
+      <Card>
+        <CardContent class="pt-6">
+          <JsonEditor
+            :modelValue="entityJsonReadonly"
+            label="Stored Entity (read-only)"
+            :schema="entitySchema"
+            height="480px"
+          />
+          <p class="text-xs text-muted-foreground mt-2">This is the raw entity data as stored. Click <strong>Edit</strong> to modify.</p>
+        </CardContent>
+      </Card>
     </template>
 
     <!-- ═══ FORM EDIT ═══ -->
     <template v-if="editing && viewMode === 'form'">
-      <div class="edit-form">
-        <div class="form-section">
-          <h4>Account</h4>
-          <div class="field-group">
-            <label>Display Name</label>
-            <input v-model="editForm.display_name" type="text" />
-          </div>
-          <div class="field-group">
-            <label>State</label>
-            <select v-model="editForm.state">
-              <option value="active">Active</option>
-              <option value="deactivated">Deactivated</option>
-              <option value="locked">Locked</option>
-            </select>
-          </div>
-        </div>
+      <div class="max-w-xl space-y-4">
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Account</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="space-y-2">
+              <Label for="edit-name">Display Name</Label>
+              <Input id="edit-name" v-model="editForm.display_name" />
+            </div>
+            <div class="space-y-2">
+              <Label for="edit-state">State</Label>
+              <Select v-model="editForm.state">
+                <SelectTrigger id="edit-state"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="deactivated">Deactivated</SelectItem>
+                  <SelectItem value="locked">Locked</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div class="form-section">
-          <h4>Profile</h4>
-          <div class="field-group" v-for="(val, key) in editForm.profile" :key="key">
-            <label>
-              {{ formatKey(key as string) }}
-              <button type="button" class="remove-field" @click="removeProfileField(key as string)">×</button>
-            </label>
-            <input v-model="editForm.profile[key as string]" type="text" />
-          </div>
-          <div class="add-field-row">
-            <input v-model="newFieldName" type="text" placeholder="New field name" class="add-field-input" />
-            <button type="button" class="btn-add-field" @click="addProfileField">+ Add</button>
-          </div>
-        </div>
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-sm">Profile</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="space-y-2" v-for="(val, key) in editForm.profile" :key="key">
+              <div class="flex items-center justify-between">
+                <Label>{{ formatKey(key as string) }}</Label>
+                <Button variant="ghost" size="icon" class="size-6 text-destructive" @click="removeProfileField(key as string)">
+                  <X class="size-3" />
+                </Button>
+              </div>
+              <Input v-model="editForm.profile[key as string]" />
+            </div>
+            <Separator />
+            <div class="flex gap-2">
+              <Input v-model="newFieldName" placeholder="New field name" class="flex-1" />
+              <Button variant="outline" size="sm" @click="addProfileField">+ Add</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </template>
 
     <!-- ═══ JSON EDIT ═══ -->
     <template v-if="editing && viewMode === 'json'">
-      <div class="json-edit-section">
-        <JsonEditor
-          v-model="editJsonContent"
-          label="Edit Entity JSON"
-          :schema="entitySchema"
-          height="480px"
-          @valid="onEditJsonValid"
-          @error="onEditJsonError"
-        />
-        <div v-if="editJsonError" class="json-edit-error">{{ editJsonError }}</div>
-      </div>
+      <Card>
+        <CardContent class="pt-6">
+          <JsonEditor
+            v-model="editJsonContent"
+            label="Edit Entity JSON"
+            :schema="entitySchema"
+            height="480px"
+            @valid="onEditJsonValid"
+            @error="onEditJsonError"
+          />
+          <div v-if="editJsonError" class="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ editJsonError }}</div>
+        </CardContent>
+      </Card>
     </template>
 
-    <router-link :to="backRoute" class="back-link">← Back to {{ displayMeta.alias || 'list' }}</router-link>
+    <Button variant="link" as-child class="px-0 text-muted-foreground">
+      <router-link :to="backRoute">← Back to {{ displayMeta.alias || 'list' }}</router-link>
+    </Button>
   </div>
-  <div v-else class="loading">Loading...</div>
+  <div v-else class="flex h-48 items-center justify-center text-muted-foreground">Loading...</div>
 </template>
 
 <script setup lang="ts">
@@ -160,6 +239,18 @@ import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { entityApi, magicLinkApi, schemaApi, type Identity } from '@/api/resources'
 import JsonEditor from '@/console/components/JsonEditor.vue'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import { ArrowLeft, Mail, Pencil, Trash2, X } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -179,15 +270,11 @@ const editJsonParsed = ref<any>({})
 const displayMeta = ref<any>({})
 const entitySchema = ref<any>(null)
 
-// Detect schema type from route params or identity data
-const schemaType = computed(() => (route.params as any).schemaType || identity.value?.schema_type || '')
-
-// Detect interactive identity types
+const schemaType = computed(() => (route.params as any).schemaType || identity.value?.schema_name || '')
 const isInteractiveIdentity = computed(() => {
-  if (!entitySchema.value) return true // default to showing full UI
+  if (!entitySchema.value) return true
   return !!(entitySchema.value['x-identifier'] || entitySchema.value['x-auth-methods'])
 })
-
 const backRoute = computed(() => schemaType.value ? `/s/${schemaType.value}` : '/')
 
 const editForm = reactive({
@@ -214,20 +301,15 @@ const entityJsonReadonly = computed(() => {
 function formatKey(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
-
 function formatValue(val: unknown): string {
   if (val === null || val === undefined) return '—'
   if (typeof val === 'object') return JSON.stringify(val)
   return String(val)
 }
-
-function formatTime(ts: string) {
-  return new Date(ts).toLocaleString()
-}
+function formatTime(ts: string) { return new Date(ts).toLocaleString() }
 
 function switchToJson() {
   if (editing.value) {
-    // Sync form data to JSON
     const data: any = { ...identity.value }
     data.display_name = editForm.display_name
     data.state = editForm.state
@@ -243,98 +325,53 @@ function startEdit() {
   editForm.state = identity.value.state
   const p = identity.value.profile || {}
   editForm.profile = {}
-  for (const [k, v] of Object.entries(p)) {
-    editForm.profile[k] = String(v ?? '')
-  }
-  // Also prepare JSON edit
+  for (const [k, v] of Object.entries(p)) editForm.profile[k] = String(v ?? '')
   editJsonContent.value = JSON.stringify(identity.value, null, 2)
   editing.value = true
   message.value = ''
 }
 
-function cancelEdit() {
-  editing.value = false
-  message.value = ''
-}
-
+function cancelEdit() { editing.value = false; message.value = '' }
 function addProfileField() {
   const name = newFieldName.value.trim()
-  if (name && !(name in editForm.profile)) {
-    editForm.profile[name] = ''
-    newFieldName.value = ''
-  }
+  if (name && !(name in editForm.profile)) { editForm.profile[name] = ''; newFieldName.value = '' }
 }
-
-function removeProfileField(key: string) {
-  delete editForm.profile[key]
-}
-
-function onEditJsonValid(parsed: any) {
-  editJsonError.value = ''
-  editJsonParsed.value = parsed
-}
-
-function onEditJsonError(msg: string) {
-  editJsonError.value = msg
-}
+function removeProfileField(key: string) { delete editForm.profile[key] }
+function onEditJsonValid(parsed: any) { editJsonError.value = ''; editJsonParsed.value = parsed }
+function onEditJsonError(msg: string) { editJsonError.value = msg }
 
 async function save() {
   if (!identity.value) return
-  saving.value = true
-  message.value = ''
+  saving.value = true; message.value = ''
   try {
     let payload: any
-
     if (viewMode.value === 'json') {
-      // JSON mode: send parsed JSON
       const data = editJsonParsed.value
-      payload = {
-        display_name: data.display_name || editForm.display_name,
-        state: data.state || editForm.state,
-        profile: data.profile || {},
-      }
+      payload = { display_name: data.display_name || editForm.display_name, state: data.state || editForm.state, profile: data.profile || {} }
     } else {
-      // Form mode
       const profile: Record<string, string> = {}
-      for (const [k, v] of Object.entries(editForm.profile)) {
-        if (v.trim()) profile[k] = v.trim()
-      }
-      payload = {
-        display_name: editForm.display_name.trim(),
-        state: editForm.state,
-        profile,
-      }
+      for (const [k, v] of Object.entries(editForm.profile)) { if (v.trim()) profile[k] = v.trim() }
+      payload = { display_name: editForm.display_name.trim(), state: editForm.state, profile }
     }
-
     await entityApi.update(identity.value.id, payload as any)
     identity.value = await entityApi.get(route.params.id as string)
     editing.value = false
-    message.value = 'Updated successfully'
-    messageType.value = 'success'
+    message.value = 'Updated successfully'; messageType.value = 'success'
   } catch (e: any) {
-    message.value = e?.message || 'Update failed'
-    messageType.value = 'error'
-  } finally {
-    saving.value = false
-  }
+    message.value = e?.message || 'Update failed'; messageType.value = 'error'
+  } finally { saving.value = false }
 }
 
 async function sendInviteLink() {
   if (!identity.value) return
-  inviting.value = true
-  message.value = ''
+  inviting.value = true; message.value = ''
   try {
     const resp = await magicLinkApi.send(identity.value.identifier)
-    message.value = resp.purpose === 'register'
-      ? 'Registration invite sent — check server logs.'
-      : 'Login link sent — check server logs.'
+    message.value = resp.purpose === 'register' ? 'Registration invite sent — check server logs.' : 'Login link sent — check server logs.'
     messageType.value = 'invite'
   } catch (e: any) {
-    message.value = e?.message || 'Failed to send invite'
-    messageType.value = 'error'
-  } finally {
-    inviting.value = false
-  }
+    message.value = e?.message || 'Failed to send invite'; messageType.value = 'error'
+  } finally { inviting.value = false }
 }
 
 async function deleteIdentity() {
@@ -345,8 +382,7 @@ async function deleteIdentity() {
     router.push(backRoute.value)
   } catch (e: any) {
     showDeleteConfirm.value = false
-    message.value = e?.message || 'Delete failed'
-    messageType.value = 'error'
+    message.value = e?.message || 'Delete failed'; messageType.value = 'error'
     deleting.value = false
   }
 }
@@ -354,141 +390,21 @@ async function deleteIdentity() {
 onMounted(async () => {
   try {
     identity.value = await entityApi.get(route.params.id as string)
-
-    // Fetch schema for this entity type
-    if (identity.value?.schema_type) {
+    if (identity.value?.schema_name) {
       const allSchemas = await schemaApi.list()
-      const match = allSchemas.find((s: any) => s.type === identity.value!.schema_type && s.is_default)
-        || allSchemas.find((s: any) => s.type === identity.value!.schema_type)
-      if (match) {
-        entitySchema.value = match.schema
-      }
+      const match = allSchemas.find((s: any) => s.type === identity.value!.schema_name && s.is_default)
+        || allSchemas.find((s: any) => s.type === identity.value!.schema_name)
+      if (match) entitySchema.value = match.schema
     }
-
-    // Fetch display metadata from catalog
     try {
       const metaRes = await fetch('/v1/schemas/$meta')
       const metaData = await metaRes.json()
-      const st = identity.value?.schema_type
+      const st = identity.value?.schema_name
       if (st) {
         const entry = (metaData['x-catalog'] || {})[st]
-        if (entry) {
-          displayMeta.value = { singular: entry.singular, alias: entry.alias, path: entry.path, icon: entry.icon }
-        }
+        if (entry) displayMeta.value = { singular: entry.singular, alias: entry.alias, path: entry.path, icon: entry.icon }
       }
     } catch { /* ignore */ }
   } catch {}
 })
 </script>
-
-<style scoped>
-.detail-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
-.header-info { flex: 1; }
-.header-actions { display: flex; gap: 0.5rem; }
-.avatar {
-  width: 48px; height: 48px; border-radius: 12px; background: #6366f1; color: #fff;
-  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.25rem;
-}
-h2 { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
-.meta { font-size: 0.8125rem; color: #6b7280; margin-top: 0.125rem; }
-.badge { padding: 0.125rem 0.375rem; border-radius: 4px; font-size: 0.75rem; }
-.badge.active { background: #ecfdf5; color: #059669; }
-.badge.deactivated { background: #fef2f2; color: #dc2626; }
-.badge.locked { background: #fef3c7; color: #92400e; }
-
-.mode-tabs {
-  display: flex; gap: 0; margin-bottom: 1.25rem; background: #f3f4f6; border-radius: 8px;
-  padding: 0.25rem; width: fit-content;
-}
-.mode-tabs button {
-  padding: 0.375rem 1rem; border: none; border-radius: 6px; background: transparent;
-  font-size: 0.8125rem; font-weight: 500; color: #6b7280; cursor: pointer; transition: all 0.15s;
-}
-.mode-tabs button.active { background: #fff; color: #1a1a2e; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-
-.btn-edit, .btn-save, .btn-cancel, .btn-delete, .btn-invite {
-  padding: 0.375rem 0.875rem; border-radius: 8px; font-size: 0.8125rem; font-weight: 500;
-  cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #4b5563; transition: all 0.15s;
-}
-.btn-invite { color: #1d4ed8; border-color: #bfdbfe; }
-.btn-invite:hover { background: #eff6ff; }
-.btn-invite:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-edit:hover { border-color: #6366f1; color: #6366f1; }
-.btn-save { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
-.btn-save:hover { opacity: 0.9; }
-.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-delete { color: #dc2626; border-color: #fecaca; }
-.btn-delete:hover { background: #fef2f2; }
-.btn-cancel:hover { background: #f9fafb; }
-.btn-danger {
-  padding: 0.375rem 0.875rem; border-radius: 8px; font-size: 0.8125rem; font-weight: 600;
-  cursor: pointer; border: none; background: #dc2626; color: #fff;
-}
-.btn-danger:hover { background: #b91c1c; }
-.btn-danger:disabled { opacity: 0.5; }
-
-.message { padding: 0.625rem 1rem; border-radius: 8px; font-size: 0.8125rem; margin-bottom: 1rem; }
-.message.success { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
-.message.error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.message.invite { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-
-.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
-.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem; }
-.card h4, .form-section h4 { font-size: 0.8125rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
-
-.fields { display: flex; flex-direction: column; gap: 0.5rem; }
-.field { display: flex; gap: 1rem; }
-.field-key { font-size: 0.8125rem; font-weight: 500; color: #6b7280; min-width: 100px; }
-.field-val { font-size: 0.875rem; color: #1a1a2e; word-break: break-all; }
-
-.cap-list { display: flex; flex-wrap: wrap; gap: 0.375rem; }
-.cap-tag { font-size: 0.75rem; padding: 0.25rem 0.625rem; border-radius: 6px; font-weight: 500; background: #f3f4f6; color: #4b5563; }
-.cap-tag.admin { background: #fef3c7; color: #92400e; }
-.cap-tag.password { background: #eff6ff; color: #2563eb; }
-
-.detail-grid { display: grid; grid-template-columns: 80px 1fr; gap: 0.5rem; }
-dt { font-size: 0.8125rem; font-weight: 500; color: #6b7280; }
-dd { font-size: 0.875rem; color: #1a1a2e; }
-.mono { font-family: monospace; font-size: 0.8125rem; }
-
-/* JSON view */
-.json-view-section { margin-bottom: 1rem; }
-.json-view-hint { font-size: 0.75rem; color: #9ca3af; margin-top: 0.5rem; }
-.json-edit-section { margin-bottom: 1rem; }
-.json-edit-error { margin-top: 0.5rem; padding: 0.375rem 0.75rem; background: #fef2f2; color: #dc2626; font-size: 0.75rem; border-radius: 6px; }
-
-/* Edit form */
-.edit-form { max-width: 640px; }
-.form-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
-.field-group { margin-bottom: 0.75rem; }
-.field-group label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; font-weight: 500; color: #4b5563; margin-bottom: 0.25rem; }
-.field-group input, .field-group select {
-  width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
-  font-size: 0.875rem; font-family: inherit;
-}
-.field-group input:focus, .field-group select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
-.remove-field { background: none; border: none; color: #dc2626; cursor: pointer; font-size: 1rem; padding: 0; line-height: 1; }
-.add-field-row { display: flex; gap: 0.5rem; }
-.add-field-input { flex: 1; padding: 0.375rem 0.625rem; border: 1px dashed #d1d5db; border-radius: 8px; font-size: 0.8125rem; }
-.add-field-input:focus { outline: none; border-color: #6366f1; }
-.btn-add-field { padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #6b7280; font-size: 0.8125rem; cursor: pointer; }
-.btn-add-field:hover { border-color: #6366f1; color: #6366f1; }
-
-/* Delete confirmation overlay */
-.confirm-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex;
-  align-items: center; justify-content: center; z-index: 100;
-}
-.confirm-dialog {
-  background: #fff; border-radius: 12px; padding: 1.5rem; max-width: 400px; width: 90%;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-}
-.confirm-dialog h3 { font-size: 1.125rem; font-weight: 700; color: #1a1a2e; margin-bottom: 0.5rem; }
-.confirm-dialog p { font-size: 0.875rem; color: #6b7280; margin-bottom: 1.25rem; }
-.confirm-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
-
-.back-link { display: inline-block; margin-top: 1.5rem; font-size: 0.8125rem; color: #6b7280; text-decoration: none; }
-.back-link:hover { color: #6366f1; }
-.loading { padding: 3rem; text-align: center; color: #9ca3af; }
-.empty { color: #9ca3af; font-size: 0.875rem; }
-</style>

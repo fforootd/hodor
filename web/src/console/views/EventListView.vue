@@ -1,27 +1,53 @@
 <template>
-  <div>
-    <div class="filters">
-      <select v-model="typeFilter" @change="load">
-        <option value="">All events</option>
-        <option v-for="t in eventTypes" :key="t" :value="t">{{ t }}</option>
-      </select>
-    </div>
-    <div class="event-list">
-      <div v-for="event in events" :key="event.id" class="event-row">
-        <div class="event-left">
-          <span class="event-type" :class="eventClass(event.event_type)">{{ event.event_type }}</span>
-          <span class="event-detail">{{ event.aggregate_type }}:{{ event.aggregate_id }}</span>
-        </div>
-        <span class="event-time">{{ formatTime(event.created_at) }}</span>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">Events</h1>
+        <p class="text-muted-foreground">Audit log of all system events.</p>
       </div>
-      <div v-if="!events.length" class="empty">No events</div>
+      <Select v-model="typeFilter" @update:modelValue="load">
+        <SelectTrigger class="w-[200px]">
+          <SelectValue placeholder="All events" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">All events</SelectItem>
+          <SelectItem v-for="t in eventTypes" :key="t" :value="t">{{ t }}</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
+
+    <Card>
+      <CardContent class="p-0">
+        <div class="divide-y">
+          <div
+            v-for="event in events" :key="event.id"
+            class="flex items-center justify-between px-6 py-3"
+          >
+            <div class="flex items-center gap-3">
+              <Badge :variant="eventVariant(event.event_type)" class="text-xs">
+                {{ event.event_type }}
+              </Badge>
+              <span class="text-sm text-muted-foreground font-mono">
+                {{ event.aggregate_type }}:{{ event.aggregate_id }}
+              </span>
+            </div>
+            <span class="text-xs text-muted-foreground">{{ formatTime(event.created_at) }}</span>
+          </div>
+          <div v-if="!events.length" class="flex h-24 items-center justify-center text-muted-foreground">
+            No events
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { eventApi, type Event } from '@/api/resources'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const events = ref<Event[]>([])
 const typeFilter = ref('')
@@ -38,36 +64,10 @@ onMounted(async () => {
   eventTypes.value = [...new Set(events.value.map(e => e.event_type))]
 })
 
-function eventClass(type: string) {
-  if (type.includes('created')) return 'created'
-  if (type.includes('deleted') || type.includes('revoked')) return 'deleted'
-  if (type.includes('login')) return 'auth'
-  return ''
+function eventVariant(type: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (type.includes('created')) return 'default'
+  if (type.includes('deleted') || type.includes('revoked')) return 'destructive'
+  return 'secondary'
 }
 function formatTime(ts: string) { return new Date(ts).toLocaleString() }
 </script>
-
-<style scoped>
-.filters { margin-bottom: 1rem; }
-select {
-  padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px;
-  font-size: 0.875rem; font-family: inherit; background: #fff;
-}
-.event-list { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
-.event-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.75rem 1.25rem; border-bottom: 1px solid #f3f4f6;
-}
-.event-row:last-child { border-bottom: none; }
-.event-left { display: flex; align-items: center; gap: 0.75rem; }
-.event-type {
-  font-size: 0.8125rem; font-weight: 500; padding: 0.125rem 0.5rem;
-  border-radius: 4px; background: #f3f4f6; color: #4b5563;
-}
-.event-type.created { background: #ecfdf5; color: #059669; }
-.event-type.deleted { background: #fef2f2; color: #dc2626; }
-.event-type.auth { background: #eff6ff; color: #2563eb; }
-.event-detail { font-size: 0.8125rem; color: #9ca3af; }
-.event-time { font-size: 0.75rem; color: #9ca3af; }
-.empty { padding: 3rem; text-align: center; color: #9ca3af; }
-</style>
