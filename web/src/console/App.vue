@@ -115,9 +115,7 @@ function selectOrg(org: OrgEntry | null) {
   }
 }
 
-// Restore from localStorage on load
-const savedOrg = localStorage.getItem('zitadel_org')
-if (savedOrg) selectedOrgId.value = Number(savedOrg)
+// No default org filter — show "All Orgs" by default
 
 // Nav items built from the meta schema catalog
 interface NavItem { type: string; label: string; icon: string; route: string; sortOrder: number; storage: string }
