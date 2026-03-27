@@ -9,10 +9,16 @@
         <router-link to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
           <span class="nav-icon">◆</span> Dashboard
         </router-link>
-        <router-link to="/identities" class="nav-item" :class="{ active: $route.name?.toString().startsWith('identit') }">
-          <span class="nav-icon">◇</span> Identities
+        <router-link to="/users" class="nav-item" :class="{ active: $route.path.startsWith('/users') }">
+          <span class="nav-icon">◇</span> Users
         </router-link>
-        <router-link to="/applications" class="nav-item" :class="{ active: $route.name === 'applications' }">
+        <router-link to="/service-accounts" class="nav-item" :class="{ active: $route.path.startsWith('/service-accounts') }">
+          <span class="nav-icon">◇</span> Service Accounts
+        </router-link>
+        <router-link to="/ai-agents" class="nav-item" :class="{ active: $route.path.startsWith('/ai-agents') }">
+          <span class="nav-icon">◇</span> AI Agents
+        </router-link>
+        <router-link to="/applications" class="nav-item" :class="{ active: $route.path.startsWith('/applications') }">
           <span class="nav-icon">◇</span> Applications
         </router-link>
         <router-link to="/schemas" class="nav-item" :class="{ active: $route.name?.toString().startsWith('schema') }">
@@ -83,10 +89,12 @@ let debounceTimer: ReturnType<typeof setTimeout>
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',
-    identities: 'Identities',
+    users: 'Users',
+    'service-accounts': 'Service Accounts',
+    'ai-agents': 'AI Agents',
+    applications: 'Applications',
     'identity-detail': 'Identity Detail',
     'identity-create': 'New Identity',
-    applications: 'Applications',
     schemas: 'Schemas',
     'schema-detail': 'Schema Editor',
     sessions: 'Sessions',

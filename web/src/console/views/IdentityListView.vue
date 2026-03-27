@@ -1,8 +1,8 @@
 <template>
   <div>
     <div class="toolbar">
-      <h3>{{ identities.length }} identities</h3>
-      <router-link to="/identities/new" class="btn-primary">+ New Identity</router-link>
+      <h3>{{ identities.length }} {{ title.toLowerCase() }}</h3>
+      <router-link to="/identities/new" class="btn-primary">+ New {{ singularTitle }}</router-link>
     </div>
     <div class="table-wrap">
       <table>
@@ -11,7 +11,6 @@
             <th>Identifier</th>
             <th>Display Name</th>
             <th>State</th>
-            <th>Schema</th>
             <th>Created</th>
           </tr>
         </thead>
@@ -20,24 +19,38 @@
             <td class="identifier">{{ i.identifier }}</td>
             <td>{{ i.display_name || '—' }}</td>
             <td><span class="badge" :class="i.state">{{ i.state }}</span></td>
-            <td class="schema">{{ i.schema_name || '—' }}</td>
             <td class="time">{{ formatTime(i.created_at) }}</td>
           </tr>
         </tbody>
       </table>
-      <div v-if="!identities.length" class="empty">No identities found</div>
+      <div v-if="!identities.length" class="empty">No {{ title.toLowerCase() }} found</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { identityApi, type Identity } from '@/api/resources'
+import { type Identity } from '@/api/resources'
+
+const props = withDefaults(defineProps<{
+  schemaType?: string
+  title?: string
+}>(), {
+  schemaType: '',
+  title: 'Identities',
+})
+
+const singularTitle = props.title.replace(/s$/, '').replace(/ie$/, 'y').replace(/ount$/, 'ount')
 
 const identities = ref<Identity[]>([])
 
 onMounted(async () => {
-  try { identities.value = await identityApi.list() } catch {}
+  try {
+    const params = props.schemaType ? `?schema_type=${props.schemaType}` : ''
+    const res = await fetch(`/v1/identities${params}`)
+    const data = await res.json()
+    identities.value = data.items || []
+  } catch { /* ignore */ }
 })
 
 function formatTime(ts: string) { return new Date(ts).toLocaleDateString() }
@@ -57,7 +70,6 @@ td { padding: 0.75rem 1.25rem; font-size: 0.875rem; color: #1a1a2e; border-botto
 .clickable { cursor: pointer; }
 .clickable:hover { background: #f9fafb; }
 .identifier { font-weight: 500; }
-.schema { color: #6b7280; }
 .time { color: #9ca3af; font-size: 0.8125rem; }
 .badge {
   display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px;
