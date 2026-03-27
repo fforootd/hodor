@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/session"
 )
 
 // --- Flow API Handlers ---
@@ -224,15 +225,8 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		return
 	}
 
-	// Set session cookie.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sessResp.Token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
-	})
+	// Set session cookie (HMAC-signed).
+	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 
 	flow.CurrentStep = StepComplete
 	h.flows.Put(flow)

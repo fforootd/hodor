@@ -23,6 +23,7 @@ import (
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/lake"
 	"github.com/zitadel/zitadel/internal/login"
+	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/ui"
 )
 
@@ -59,13 +60,16 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		_, _ = w.Write([]byte("ready"))
 	})
 
+	// Create hardened cookie config.
+	cookieCfg := session.NewCookieConfig(cfg.Server.CookieSecrets, cfg.Server.ExternalDomain)
+
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
-	restAPI := api.New(db, bus)
+	restAPI := api.New(db, bus, cookieCfg)
 	restAPI.RegisterRoutes(mux)
 
 	// Mount login flow API (serves <zitadel-login> web component).
 	passwords := auth.NewPasswords(db)
-	loginAPI := login.New(db, passwords, restAPI)
+	loginAPI := login.New(db, passwords, restAPI, cookieCfg)
 	loginAPI.Register(mux)
 
 	// Serve web assets (JS/CSS) from go:embed.
@@ -125,7 +129,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	})
 
 	// Mount UI routes — login, logout, admin console.
-	uiHandlers := ui.New(db, bus, restAPI)
+	uiHandlers := ui.New(db, bus, restAPI, cookieCfg)
 	uiHandlers.RegisterRoutes(mux)
 
 	// Wrap the mux with OTel middleware for trace_id injection.

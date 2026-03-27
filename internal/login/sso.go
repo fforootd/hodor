@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/session"
 )
 
 // oidcConfig holds parsed OIDC provider configuration.
@@ -237,14 +238,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Set cookie and redirect.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sessResp.Token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
-	})
+	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 	http.Redirect(w, r, "/console", http.StatusFound)
 }
 

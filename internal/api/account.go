@@ -29,7 +29,7 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 // It injects the caller's identity ID into the request header.
 func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := extractToken(r)
+		token := a.extractToken(r)
 		if token == "" {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return

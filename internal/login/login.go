@@ -18,9 +18,8 @@ import (
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/notify"
+	"github.com/zitadel/zitadel/internal/session"
 )
-
-const sessionCookieName = "__zitadel_session"
 
 // Handler provides login-flow API endpoints.
 type Handler struct {
@@ -30,10 +29,11 @@ type Handler struct {
 	notify    notify.Channel
 	baseURL   string
 	flows     *FlowStore
+	cookies   *session.CookieConfig
 }
 
 // New creates a new login API handler.
-func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API) *Handler {
+func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API, cookies *session.CookieConfig) *Handler {
 	return &Handler{
 		db:        db,
 		passwords: passwords,
@@ -41,6 +41,7 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API) *Handler 
 		notify:    notify.NewStdout(),
 		baseURL:   "http://localhost:8080",
 		flows:     NewFlowStore(),
+		cookies:   cookies,
 	}
 }
 
@@ -279,15 +280,8 @@ func (h *Handler) handleLoginComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set the same cookie as the old login flow.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sessResp.Token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
-	})
+	// Set the session cookie (HMAC-signed).
+	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 
 	delete(loginSessions, req.LoginSessionID)
 	log.Printf("[login] completed for %s (identity=%d, session=%d)", sess.Identifier, sess.IdentityID, sessResp.Session.ID)
@@ -468,15 +462,8 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	_, _ = h.db.SQL().ExecContext(r.Context(),
 		`UPDATE magic_tokens SET session_id = ? WHERE token = ?`, sessResp.Session.ID, token)
 
-	// Set session cookie.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sessResp.Token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
-	})
+	// Set session cookie (HMAC-signed).
+	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 
 	log.Printf("[magic-link] verified for %s (identity=%d, session=%d)", identifier, identityID, sessResp.Session.ID)
 

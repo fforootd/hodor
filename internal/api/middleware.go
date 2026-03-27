@@ -6,15 +6,17 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/session"
 )
 
 // requireAdmin is middleware that checks for a valid session with the "admin" capability.
 // It supports both:
-//   - Cookie-based auth (browser UI): __zitadel_session cookie
+//   - Cookie-based auth (browser UI): HMAC-signed session cookie
 //   - Bearer token auth (API clients): Authorization: Bearer <token>
 func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := extractToken(r)
+		token := a.extractToken(r)
 		if token == "" {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -55,14 +57,21 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // extractToken gets the session token from either the Authorization header or cookie.
-func extractToken(r *http.Request) string {
+// Bearer tokens are used as-is. Cookie tokens are HMAC-verified first.
+func (a *API) extractToken(r *http.Request) string {
 	// Try Authorization: Bearer <token> first (API clients).
 	if auth := r.Header.Get("Authorization"); auth != "" {
 		if strings.HasPrefix(auth, "Bearer ") {
 			return strings.TrimPrefix(auth, "Bearer ")
 		}
 	}
-	// Fall back to session cookie (browser).
+	// Fall back to HMAC-signed session cookie (browser).
+	if a.cookies != nil {
+		if token, ok := session.ReadSessionCookie(r, a.cookies); ok {
+			return token
+		}
+	}
+	// Legacy fallback: raw cookie value.
 	if cookie, err := r.Cookie("__zitadel_session"); err == nil && cookie.Value != "" {
 		return cookie.Value
 	}

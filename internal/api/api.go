@@ -20,17 +20,19 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/schema"
+	"github.com/zitadel/zitadel/internal/session"
 )
 
 // API holds the REST handlers and their dependencies.
 type API struct {
-	db  *database.DB
-	bus *eventbus.Bus
+	db      *database.DB
+	bus     *eventbus.Bus
+	cookies *session.CookieConfig
 }
 
-// New creates a new API instance.
-func New(db *database.DB, bus *eventbus.Bus) *API {
-	return &API{db: db, bus: bus}
+// New creates a new API handler.
+func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API {
+	return &API{db: db, bus: bus, cookies: cookies}
 }
 
 // RegisterRoutes mounts all REST API routes on the given mux.

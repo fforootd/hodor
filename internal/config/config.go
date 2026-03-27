@@ -24,10 +24,11 @@ type Config struct {
 
 // ServerConfig controls HTTP server behavior.
 type ServerConfig struct {
-	Port           int    `toml:"port"`
-	ExternalDomain string `toml:"external_domain"`
-	TLSCert        string `toml:"tls_cert"`
-	TLSKey         string `toml:"tls_key"`
+	Port           int      `toml:"port"`
+	ExternalDomain string   `toml:"external_domain"`
+	TLSCert        string   `toml:"tls_cert"`
+	TLSKey         string   `toml:"tls_key"`
+	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
 }
 
 // DatabaseConfig controls the primary database connection.

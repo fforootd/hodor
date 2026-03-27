@@ -10,18 +10,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/session"
 )
 
-const (
-	sessionCookieName = "__zitadel_session"
-	sessionMaxAge     = 24 * time.Hour
-)
+
 
 // IdentityContext holds the authenticated identity info on the request context.
 type IdentityContext struct {
@@ -37,15 +34,17 @@ type UI struct {
 	bus       *eventbus.Bus
 	passwords *auth.Passwords
 	api       *api.API
+	cookies   *session.CookieConfig
 }
 
 // New creates a new UI handler set.
-func New(db *database.DB, bus *eventbus.Bus, restAPI *api.API) *UI {
+func New(db *database.DB, bus *eventbus.Bus, restAPI *api.API, cookies *session.CookieConfig) *UI {
 	return &UI{
 		db:        db,
 		bus:       bus,
 		passwords: auth.NewPasswords(db),
 		api:       restAPI,
+		cookies:   cookies,
 	}
 }
 
@@ -143,14 +142,8 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Set session cookie.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sessResp.Token,
-		Path:     "/",
-		MaxAge:   int(sessionMaxAge.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	// Set session cookie (HMAC-signed).
+	session.SetSessionCookie(w, sessResp.Token, u.cookies)
 
 	target := "/admin"
 	if redirectTo != "" {
@@ -160,9 +153,16 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(u.cookies.CookieName())
 	if err == nil && cookie.Value != "" {
-		h := sha256.Sum256([]byte(cookie.Value))
+		// Try HMAC-verified read first, fall back to raw.
+		var rawToken string
+		if token, ok := session.ReadSessionCookie(r, u.cookies); ok {
+			rawToken = token
+		} else {
+			rawToken = cookie.Value
+		}
+		h := sha256.Sum256([]byte(rawToken))
 		tokenHash := hex.EncodeToString(h[:])
 
 		var sessionID int64
@@ -174,14 +174,7 @@ func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	session.ClearSessionCookie(w, u.cookies)
 
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -605,18 +598,18 @@ func (u *UI) handleAdminIdentityDelete(w http.ResponseWriter, r *http.Request) {
 // --- Session helpers ---
 
 func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil || cookie.Value == "" {
+	rawToken, ok := session.ReadSessionCookie(r, u.cookies)
+	if !ok {
 		return nil, false
 	}
 
-	h := sha256.Sum256([]byte(cookie.Value))
+	h := sha256.Sum256([]byte(rawToken))
 	tokenHash := hex.EncodeToString(h[:])
 
 	var identityID int64
 	var identifier string
 	var dataJSON sql.NullString
-	err = u.db.SQL().QueryRowContext(r.Context(),
+	err := u.db.SQL().QueryRowContext(r.Context(),
 		`SELECT s.identity_id, i.identifier, i.data
 		 FROM sessions s JOIN identities i ON s.identity_id = i.id
 		 WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
