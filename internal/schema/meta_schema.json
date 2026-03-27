@@ -9,8 +9,7 @@
     "applications":  { "label": "Applications",  "icon": "📱", "sort_order": 2 },
     "configure":     { "label": "Configure",     "icon": "⚙️", "sort_order": 3 },
     "observability": { "label": "Observability", "icon": "📊", "sort_order": 4 },
-    "settings":      { "label": "Settings",      "icon": "🔧", "sort_order": 5, "nav": "hidden" },
-    "system":        { "label": "System",        "icon": "🔧", "sort_order": 6, "nav": "hidden" }
+    "system":        { "label": "System",        "icon": "🔧", "sort_order": 5, "nav": "hidden" }
   },
 
   "x-catalog": {
@@ -136,7 +135,7 @@
     "password_policy": {
       "$ref": "schemas/password_policy.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Password Policy",
       "singular": "Password Policy",
       "path": "settings/password-policy",
@@ -148,7 +147,7 @@
     "identifier_policy": {
       "$ref": "schemas/identifier_policy.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Identifier Policy",
       "singular": "Identifier Policy",
       "path": "settings/identifier-policy",
@@ -160,7 +159,7 @@
     "login_policy": {
       "$ref": "schemas/login_policy.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Login Policy",
       "singular": "Login Policy",
       "path": "settings/login-policy",
@@ -172,7 +171,7 @@
     "lockout_policy": {
       "$ref": "schemas/lockout_policy.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Lockout Policy",
       "singular": "Lockout Policy",
       "path": "settings/lockout-policy",
@@ -184,7 +183,7 @@
     "rate_limit": {
       "$ref": "schemas/rate_limit.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Rate Limit",
       "singular": "Rate Limit",
       "path": "settings/rate-limit",
@@ -196,7 +195,7 @@
     "session_policy": {
       "$ref": "schemas/session_policy.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Session Policy",
       "singular": "Session Policy",
       "path": "settings/session-policy",
@@ -208,7 +207,7 @@
     "notification": {
       "$ref": "schemas/notification.json",
       "version": "1.0",
-      "group": "settings",
+      "group": "configure",
       "alias": "Notification",
       "singular": "Notification Settings",
       "path": "settings/notification",
@@ -218,12 +217,12 @@
       "nav": "hidden"
     },
     "schema": {
-      "group": "system",
+      "group": "configure",
       "alias": "Schemas",
       "singular": "Schema",
       "path": "schemas",
       "icon": "📐",
-      "sort_order": 1,
+      "sort_order": 3,
       "storage": "dedicated",
       "route": "/schemas",
       "nav": "visible"

@@ -52,7 +52,7 @@ func TestGroups(t *testing.T) {
 		t.Fatal("groups is empty")
 	}
 	// Should have at least identities, applications, configure, observability, settings, system
-	expected := []string{"identities", "applications", "configure", "observability", "settings", "system"}
+	expected := []string{"identities", "applications", "configure", "observability", "system"}
 	for _, g := range expected {
 		if _, ok := groups[g]; !ok {
 			t.Errorf("missing group %q", g)
