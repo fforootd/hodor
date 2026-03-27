@@ -23,7 +23,7 @@
 
         <!-- System section -->
         <div class="nav-section">System</div>
-        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name?.toString().startsWith('schema') }">
+        <router-link to="/schemas" class="nav-item" :class="{ active: $route.name === 'schemas' || $route.name === 'schema-detail' }">
           <span class="nav-icon">◇</span> Schemas
         </router-link>
         <router-link to="/providers" class="nav-item" :class="{ active: $route.name === 'providers' }">
