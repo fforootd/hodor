@@ -13,7 +13,7 @@ import (
 // ImportRequest is the body for POST /v1/import.
 type ImportRequest struct {
 	Providers      []ImportProvider      `json:"providers,omitempty"`
-	Entities       []ImportEntity      `json:"identities,omitempty"`
+	Entities       []ImportEntity      `json:"entities,omitempty"`
 	LinkedAccounts []ImportLinkedAccount `json:"linked_accounts,omitempty"`
 	OnConflict     string                `json:"on_conflict"` // skip (default), fail, update
 }

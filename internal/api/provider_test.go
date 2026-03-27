@@ -12,7 +12,7 @@ func TestProvider_CRUD(t *testing.T) {
 	adminToken := srv.LoginAdmin()
 
 	// 1. Create a provider
-	code, body := srv.PostJSONWithCookie("/v1/providers", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/providers", map[string]any{
 		"name":     "Test Provider",
 		"protocol": "oidc",
 		"config": map[string]any{
@@ -28,7 +28,7 @@ func TestProvider_CRUD(t *testing.T) {
 	providerID := fmt.Sprintf("%v", body["id"])
 
 	// 2. List providers
-	code, body = srv.GetWithCookie("/v1/providers", adminToken)
+	code, body = srv.GetWithBearer("/v1/providers", adminToken)
 	if code != 200 {
 		t.Fatalf("expected 200 listing providers, got %d", code)
 	}
@@ -38,7 +38,7 @@ func TestProvider_CRUD(t *testing.T) {
 	}
 
 	// 3. Update provider
-	code, body = srv.PatchJSONWithCookie("/v1/providers/"+providerID, map[string]any{
+	code, body = srv.PatchJSONWithBearer("/v1/providers/"+providerID, map[string]any{
 		"name": "Updated Provider",
 	}, adminToken)
 	if code != 200 {
@@ -49,13 +49,13 @@ func TestProvider_CRUD(t *testing.T) {
 	}
 
 	// 4. Delete provider
-	code, _ = srv.DeleteWithCookie("/v1/providers/"+providerID, adminToken)
+	code, _ = srv.DeleteWithBearer("/v1/providers/"+providerID, adminToken)
 	if code != 200 {
 		t.Fatalf("expected 200 deleting provider, got %d", code)
 	}
 
 	// 5. Verify deleted
-	code, _ = srv.GetWithCookie("/v1/providers/"+providerID, adminToken)
+	code, _ = srv.GetWithBearer("/v1/providers/"+providerID, adminToken)
 	if code != 404 {
 		t.Fatalf("expected 404 after delete, got %d", code)
 	}
@@ -66,7 +66,7 @@ func TestProvider_NonAdminForbidden(t *testing.T) {
 	identityID := srv.CreateIdentity("user3@test.com", "User 3")
 	userToken := srv.CreateSession(identityID)
 
-	code, _ := srv.PostJSONWithCookie("/v1/providers", map[string]any{
+	code, _ := srv.PostJSONWithBearer("/v1/providers", map[string]any{
 		"name": "Hacker Provider",
 	}, userToken)
 	if code != 403 {

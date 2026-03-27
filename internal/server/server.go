@@ -161,8 +161,9 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		log.Printf("OIDC Provider ready (issuer=%s)", issues)
 	}
 
-	// Wrap the mux with OTel middleware for trace_id injection.
-	wrappedHandler := OTelMiddleware(mux)
+	// Wrap the mux with AuthGate (default-deny) then OTel for trace_id injection.
+	authedHandler := api.AuthGate(cookieCfg, db.SQL())(mux)
+	wrappedHandler := OTelMiddleware(authedHandler)
 
 	httpSrv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

@@ -1,0 +1,17 @@
+# Dev config — deterministic secrets for reproducible local dev.
+# Usage: make dev-hot  (or: go run ./cmd/zitadel serve -c fixtures/zitadel.dev.toml)
+#
+# Admin: admin / admin123
+# Dev PAT: zit_pat_zitadel-dev-pat-do-not-use-in-production
+
+[server]
+port = 8080
+external_domain = "localhost"
+cookie_secrets = ["zitadel-dev-cookie-secret-do-not-use-in-production"]
+
+[database]
+url = "sqlite://./zitadel.db"
+
+[dev]
+mock_oidc = true
+seed_file = "fixtures/dev-seed.yaml"

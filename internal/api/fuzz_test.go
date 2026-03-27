@@ -40,7 +40,7 @@ func FuzzAPIJSON(f *testing.F) {
 		for _, ep := range endpoints {
 			req, _ := http.NewRequest(ep.method, srv.URL()+ep.path, bytes.NewReader([]byte(body)))
 			req.Header.Set("Content-Type", "application/json")
-			req.AddCookie(&http.Cookie{Name: "__zitadel_session", Value: token})
+			req.Header.Set("Authorization", "Bearer "+token)
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -56,7 +56,7 @@ func FuzzAPIJSON(f *testing.F) {
 	})
 }
 
-// FuzzSessionToken tests the session validation middleware with fuzzed cookie values.
+// FuzzSessionToken tests the session validation middleware with fuzzed Bearer values.
 func FuzzSessionToken(f *testing.F) {
 	f.Add("")
 	f.Add("valid-looking-hex-token-0123456789abcdef")
@@ -65,12 +65,14 @@ func FuzzSessionToken(f *testing.F) {
 	f.Add("DROP TABLE sessions;")
 	f.Add("' OR 1=1 --")
 	f.Add("../../../etc/passwd")
+	f.Add("zit_ses_" + string(make([]byte, 64)))
+	f.Add("zit_pat_" + string(make([]byte, 64)))
 
 	f.Fuzz(func(t *testing.T, token string) {
 		srv := testutil.NewTestServer(t)
 
 		req, _ := http.NewRequest("GET", srv.URL()+"/v1/sessions", nil)
-		req.AddCookie(&http.Cookie{Name: "__zitadel_session", Value: token})
+		req.Header.Set("Authorization", "Bearer "+token)
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

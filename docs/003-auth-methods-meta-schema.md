@@ -2,7 +2,7 @@
 
 **Status**: Accepted  
 **Date**: 2026-03-26  
-**Amends**: ADR-002 (Schema-Driven Login) — extracts `x-auth-methods` to root level
+**Amends**: [ADR-002](002-schema-driven-login.md) (Schema-Driven Login) — extracts `x-auth-methods` to root level
 
 ## Problem
 
@@ -101,9 +101,8 @@ The meta-schema defines the allowed `x-auth-methods` keys, the structure of `x-l
 
 | File | Change |
 |---|---|
-| `internal/login/flow.go` | `SchemaAuthConfig` gains `AuthMethods map[string]*AuthMethodEntry`; `LoginConfig.AuthMethods` removed; extraction reads `x-auth-methods` |
-| `internal/login/flow.go` | New `AuthMethodEntry` struct with `Interactive bool`; node builder reads interactive methods from `AuthMethods` |
-| `internal/bootstrap/bootstrap.go` | All 4 built-in schemas updated with `x-auth-methods` |
+| `internal/login/` pkg | Flow state machine configuration, node builder reads interactive methods |
+| `internal/bootstrap/` pkg | Built-in schemas updated with `x-auth-methods` |
 
 ### Frontend
 

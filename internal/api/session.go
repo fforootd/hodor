@@ -70,7 +70,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 		return nil, fmt.Errorf("generate id: %w", err)
 	}
 
-	rawToken, tokenHash, err := generateToken()
+	rawToken, tokenHash, err := generatePrefixedToken(PrefixSession)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +94,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 		return nil, fmt.Errorf("check identity: %w", err)
 	}
 
+	// Insert session (metadata record).
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, 1, ?, ?, ?, '{}', ?, ?)`,
@@ -105,10 +106,25 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 		return nil, fmt.Errorf("insert session: %w", err)
 	}
 
+	// Insert into unified tokens table.
+	tokenID, err := id.New()
+	if err != nil {
+		return nil, fmt.Errorf("generate token id: %w", err)
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
+		tokenID, tokenHash, identityID, sessionID,
+		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert token: %w", err)
+	}
+
 	emitEvent(ctx, tx, "session.created", identityID, sessionID, "session", map[string]any{
-		"entity_id": identityID,
-		"user_agent":  userAgent,
-		"ip_address":  ipAddress,
+		"entity_id":  identityID,
+		"user_agent": userAgent,
+		"ip_address": ipAddress,
 	})
 
 	if err := tx.Commit(); err != nil {
@@ -216,12 +232,17 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error 
 		return fmt.Errorf("session %d not found or already revoked", sessionID)
 	}
 
+	// Also revoke all tokens associated with this session.
+	tx.ExecContext(ctx,
+		`UPDATE tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`,
+		now, sessionID)
+
 	var revokedIdentityID int64
 	tx.QueryRowContext(ctx, `SELECT entity_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIdentityID)
 
 	emitEvent(ctx, tx, "session.revoked", revokedIdentityID, sessionID, "session", map[string]any{
 		"entity_id": revokedIdentityID,
-		"reason":      "api_revoke",
+		"reason":    "api_revoke",
 	})
 
 	if err := tx.Commit(); err != nil {

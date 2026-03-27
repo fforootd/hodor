@@ -22,25 +22,25 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 	ctx := context.Background()
 
 	// First call should bootstrap the admin.
-	if err := EnsureAdmin(ctx, db); err != nil {
+	if err := EnsureAdmin(ctx, db, ""); err != nil {
 		t.Fatalf("first EnsureAdmin: %v", err)
 	}
 
 	var count1 int
 	db.SQL().QueryRow("SELECT COUNT(*) FROM entities").Scan(&count1)
-	if count1 != 2 {
-		t.Fatalf("expected 2 identities after first bootstrap (admin + console), got %d", count1)
+	if count1 != 3 {
+		t.Fatalf("expected 3 identities after first bootstrap (admin + console + default org), got %d", count1)
 	}
 
 	// Second call should be a no-op (idempotent).
-	if err := EnsureAdmin(ctx, db); err != nil {
+	if err := EnsureAdmin(ctx, db, ""); err != nil {
 		t.Fatalf("second EnsureAdmin: %v", err)
 	}
 
 	var count2 int
 	db.SQL().QueryRow("SELECT COUNT(*) FROM entities").Scan(&count2)
-	if count2 != 2 {
-		t.Fatalf("expected 2 identities after second bootstrap (idempotent), got %d", count2)
+	if count2 != 3 {
+		t.Fatalf("expected 3 identities after second bootstrap (idempotent), got %d", count2)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestEnsureAdmin_SeedsSchemas(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := EnsureAdmin(ctx, db); err != nil {
+	if err := EnsureAdmin(ctx, db, ""); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestEnsureAdmin_AdminHasCapabilities(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := EnsureAdmin(ctx, db); err != nil {
+	if err := EnsureAdmin(ctx, db, ""); err != nil {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
 

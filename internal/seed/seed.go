@@ -7,12 +7,15 @@ package seed
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"regexp"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -45,7 +48,17 @@ type SeedIdentity struct {
 	State          string              `yaml:"state"`
 	Password       string              `yaml:"password"`
 	Profile        map[string]any      `yaml:"profile"`
+	Capabilities   []string            `yaml:"capabilities"`    // NEW: ["admin", "password"]
+	PATs           []SeedPAT           `yaml:"pats"`            // NEW: personal access tokens
+	OnConflict     string              `yaml:"on_conflict"`     // NEW: "skip" (default), "warn", "update"
 	LinkedAccounts []SeedLinkedAccount `yaml:"linked_accounts"`
+}
+
+// SeedPAT defines a personal access token to seed for an identity.
+type SeedPAT struct {
+	Name   string   `yaml:"name"`
+	Token  string   `yaml:"token"`   // raw token (will be prefixed + hashed)
+	Scopes []string `yaml:"scopes"`
 }
 
 // SeedLinkedAccount links an identity to a provider in the seed.
@@ -72,7 +85,7 @@ func substituteEnvVars(input []byte) []byte {
 }
 
 // LoadAndApply reads a seed YAML file and applies it to the database.
-// It is idempotent — existing records are skipped.
+// It is idempotent — existing records are handled per on_conflict setting.
 func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -101,7 +114,7 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 		}
 	}
 
-	// Phase 2: Identities (with inline linked accounts).
+	// Phase 2: Identities (with inline linked accounts, capabilities, PATs).
 	for _, ident := range seed.Identities {
 		if err := seedIdentity(ctx, tx, ident); err != nil {
 			return fmt.Errorf("seed identity %q: %w", ident.Identifier, err)
@@ -164,16 +177,34 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 }
 
 func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
-	// Skip if exists by identifier.
+	onConflict := ident.OnConflict
+	if onConflict == "" {
+		onConflict = "skip"
+	}
+
+	// Check if exists by identifier.
 	var existingID int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
-		log.Printf("[seed] identity %q already exists, skipping", ident.Identifier)
-		// Still process linked accounts for this existing identity.
-		for _, la := range ident.LinkedAccounts {
-			seedLinkedAccount(ctx, tx, existingID, la)
+		// Entity already exists — handle according to on_conflict.
+		switch onConflict {
+		case "update":
+			log.Printf("[seed] identity %q already exists, updating (on_conflict: update)", ident.Identifier)
+			return updateExistingIdentity(ctx, tx, existingID, ident)
+		case "warn":
+			log.Printf("[seed] WARN: identity %q already exists, skipping (on_conflict: warn)", ident.Identifier)
+			return nil
+		default: // "skip"
+			log.Printf("[seed] identity %q already exists, skipping", ident.Identifier)
+			// Still process linked accounts for this existing identity.
+			for _, la := range ident.LinkedAccounts {
+				seedLinkedAccount(ctx, tx, existingID, la)
+			}
+			// Ensure capabilities and PATs exist even on skip.
+			seedCapabilities(ctx, tx, existingID, ident.Capabilities)
+			seedPATs(ctx, tx, existingID, ident.PATs)
+			return nil
 		}
-		return nil
 	}
 
 	newID, err := id.New()
@@ -213,6 +244,12 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		}
 	}
 
+	// Seed capabilities.
+	seedCapabilities(ctx, tx, newID, ident.Capabilities)
+
+	// Seed PATs.
+	seedPATs(ctx, tx, newID, ident.PATs)
+
 	log.Printf("[seed] created identity %q (id: %d)", ident.Identifier, newID)
 
 	// Process linked accounts.
@@ -221,6 +258,92 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	}
 
 	return nil
+}
+
+// updateExistingIdentity handles the on_conflict: update case.
+func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID int64, ident SeedIdentity) error {
+	// Update password if provided.
+	if ident.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(ident.Password), bcrypt.DefaultCost)
+		if err == nil {
+			// Delete existing + re-insert.
+			tx.ExecContext(ctx, `DELETE FROM passwords WHERE entity_id = ?`, entityID)
+			tx.ExecContext(ctx,
+				`INSERT INTO passwords (entity_id, password_hash, created_at) VALUES (?, ?, datetime('now'))`,
+				entityID, string(hash))
+			log.Printf("[seed]   updated password for %q", ident.Identifier)
+		}
+	}
+
+	// Upsert capabilities.
+	seedCapabilities(ctx, tx, entityID, ident.Capabilities)
+
+	// Upsert PATs.
+	seedPATs(ctx, tx, entityID, ident.PATs)
+
+	// Process linked accounts.
+	for _, la := range ident.LinkedAccounts {
+		seedLinkedAccount(ctx, tx, entityID, la)
+	}
+
+	return nil
+}
+
+// seedCapabilities inserts capabilities for an entity (idempotent via INSERT OR IGNORE).
+func seedCapabilities(ctx context.Context, tx *sql.Tx, entityID int64, caps []string) {
+	for _, cap := range caps {
+		tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
+			entityID, cap)
+	}
+}
+
+// seedPATs creates PAT tokens for an entity (idempotent via name check).
+func seedPATs(ctx context.Context, tx *sql.Tx, entityID int64, pats []SeedPAT) {
+	for _, pat := range pats {
+		// Skip if a PAT with this name already exists for this entity.
+		var existingID int64
+		err := tx.QueryRowContext(ctx,
+			`SELECT id FROM tokens WHERE entity_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL`,
+			entityID, pat.Name).Scan(&existingID)
+		if err == nil {
+			log.Printf("[seed]   PAT %q already exists for entity %d, skipping", pat.Name, entityID)
+			continue
+		}
+
+		// Prefix the token if not already prefixed.
+		rawToken := pat.Token
+		if !strings.HasPrefix(rawToken, "zit_pat_") {
+			rawToken = "zit_pat_" + rawToken
+		}
+
+		// Hash the token.
+		h := sha256.Sum256([]byte(rawToken))
+		tokenHash := hex.EncodeToString(h[:])
+
+		tokenID, err := id.New()
+		if err != nil {
+			log.Printf("[seed]   failed to generate PAT id: %v", err)
+			continue
+		}
+
+		scopes := pat.Scopes
+		if len(scopes) == 0 {
+			scopes = []string{"admin"}
+		}
+		scopesJSON, _ := json.Marshal(scopes)
+
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO tokens (id, type, token_hash, entity_id, name, scopes, created_at)
+			 VALUES (?, 'pat', ?, ?, ?, ?, datetime('now'))`,
+			tokenID, tokenHash, entityID, pat.Name, string(scopesJSON))
+		if err != nil {
+			log.Printf("[seed]   failed to create PAT %q: %v", pat.Name, err)
+			continue
+		}
+
+		log.Printf("[seed]   created PAT %q for entity %d", pat.Name, entityID)
+	}
 }
 
 func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID int64, la SeedLinkedAccount) {

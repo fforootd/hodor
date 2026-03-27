@@ -18,7 +18,7 @@ func TestSchema_CRUD(t *testing.T) {
 		},
 	}
 
-	code, body := srv.PostJSONWithCookie("/v1/schemas", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/schemas", map[string]any{
 		"id":     "custom_test_schema_v1",
 		"type":   "custom_schema",
 		"schema": schemaDef,
@@ -53,7 +53,7 @@ func TestSchema_NonAdminForbiddenWrite(t *testing.T) {
 	identityID := srv.CreateIdentity("user4@test.com", "User 4")
 	userToken := srv.CreateSession(identityID)
 
-	code, _ := srv.PostJSONWithCookie("/v1/schemas", map[string]any{
+	code, _ := srv.PostJSONWithBearer("/v1/schemas", map[string]any{
 		"id": "hack_schema_v1",
 	}, userToken)
 	if code != 403 {

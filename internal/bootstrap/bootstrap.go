@@ -3,9 +3,15 @@
 package bootstrap
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
+	"testing"
+
+	"golang.org/x/term"
 
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
@@ -14,8 +20,11 @@ import (
 )
 
 // EnsureAdmin checks if any entities exist. If not, it creates a default
-// admin identity with a random password and prints the credentials to stdout.
-func EnsureAdmin(ctx context.Context, db *database.DB) error {
+// admin identity. The behavior depends on the seedFile parameter:
+//   - If seedFile is set: skip admin creation (the seed file handles it).
+//   - If no seedFile and interactive terminal: run the first-run wizard.
+//   - If no seedFile and non-interactive: create admin with random password.
+func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 	// Always seed built-in schemas (idempotent).
 	if err := seedSchemas(ctx, db); err != nil {
 		return fmt.Errorf("seed schemas: %w", err)
@@ -30,17 +39,133 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 		return nil // Already bootstrapped.
 	}
 
+	// If a seed file is configured, it will handle admin creation.
+	if seedFile != "" {
+		log.Println("Seed file configured — skipping bootstrap admin creation.")
+		return nil
+	}
+
 	log.Println("No entities found — bootstrapping admin account...")
 
+	// Determine if we're running in an interactive terminal.
+	if isInteractiveTerminal() {
+		return runFirstRunWizard(ctx, db)
+	}
+
+	// Non-interactive fallback (CI/Docker): random password to stdout.
+	return createRandomAdmin(ctx, db)
+}
+
+// isInteractiveTerminal checks if stdin is a terminal.
+func isInteractiveTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// runFirstRunWizard prompts the user for admin credentials.
+func runFirstRunWizard(ctx context.Context, db *database.DB) error {
+	fmt.Println()
+	fmt.Println("  ┌──────────────────────────────────────────────────┐")
+	fmt.Println("  │  Welcome to Zitadel!                             │")
+	fmt.Println("  │  Let's set up your first admin account.          │")
+	fmt.Println("  └──────────────────────────────────────────────────┘")
+	fmt.Println()
+
+	reader := bufio.NewReader(os.Stdin)
+
+	// Username.
+	fmt.Print("  Admin username [admin]: ")
+	username, _ := reader.ReadString('\n')
+	username = strings.TrimSpace(username)
+	if username == "" {
+		username = "admin"
+	}
+
+	// Email.
+	fmt.Print("  Admin email [admin@zitadel.local]: ")
+	email, _ := reader.ReadString('\n')
+	email = strings.TrimSpace(email)
+	if email == "" {
+		email = "admin@zitadel.local"
+	}
+
+	// Password.
+	fmt.Print("  Admin password: ")
+	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println() // newline after hidden input
+	if err != nil || len(passwordBytes) == 0 {
+		// Fallback to visible input if terminal password reading fails.
+		fmt.Print("  Admin password (visible): ")
+		passwordStr, _ := reader.ReadString('\n')
+		passwordBytes = []byte(strings.TrimSpace(passwordStr))
+	}
+	password := string(passwordBytes)
+	if len(password) < 6 {
+		return fmt.Errorf("password must be at least 6 characters")
+	}
+
+	// Confirm.
+	fmt.Print("  Confirm password: ")
+	confirmBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		fmt.Print("  Confirm password (visible): ")
+		confirmStr, _ := reader.ReadString('\n')
+		confirmBytes = []byte(strings.TrimSpace(confirmStr))
+	}
+	if string(confirmBytes) != password {
+		return fmt.Errorf("passwords do not match")
+	}
+
+	if err := createAdmin(ctx, db, username, email, password); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Printf("  ✓ Admin account created: %s\n", username)
+	fmt.Println()
+
+	return nil
+}
+
+// createRandomAdmin creates an admin with a random password and prints it.
+func createRandomAdmin(ctx context.Context, db *database.DB) error {
 	password, err := auth.GenerateRandomPassword(16)
 	if err != nil {
 		return fmt.Errorf("generate password: %w", err)
 	}
 
+	if err := createAdmin(ctx, db, "admin", "admin@zitadel.local", password); err != nil {
+		return err
+	}
+
+	// Suppress banner during test runs — tests get the password
+	// via DB query, not stdout.
+	if testing.Testing() {
+		log.Printf("bootstrapped admin (password=%s)", password)
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("  ┌──────────────────────────────────────────────────┐")
+	fmt.Println("  │  Zitadel bootstrapped!                          │")
+	fmt.Printf("   │  Username: admin                 \t\t\t\t │\n")
+	fmt.Printf("   │  Password: %-36s  │\n", password)
+	fmt.Println("  │                                                  │")
+	fmt.Println("  │  Change this password on first login.            │")
+	fmt.Println("  └──────────────────────────────────────────────────┘")
+	fmt.Println()
+
+	return nil
+}
+
+// createAdmin inserts the admin identity with capabilities and password.
+func createAdmin(ctx context.Context, db *database.DB, username, email, password string) error {
 	identityID, err := id.New()
 	if err != nil {
 		return fmt.Errorf("generate identity id: %w", err)
 	}
+
+	profileJSON := fmt.Sprintf(`{"email":%q}`, email)
 
 	tx, err := db.SQL().BeginTx(ctx, nil)
 	if err != nil {
@@ -51,8 +176,8 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	// Create the admin identity using the human_user schema.
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, 'admin', 'Admin', 'active', 'human_user_v1', '{"email":"admin@zitadel.local"}', '{}', datetime('now'), datetime('now'))`,
-		identityID,
+		 VALUES (?, 1, ?, 'Admin', 'active', 'human_user_v1', ?, '{}', datetime('now'), datetime('now'))`,
+		identityID, username, profileJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert admin identity: %w", err)
@@ -83,16 +208,6 @@ func EnsureAdmin(ctx context.Context, db *database.DB) error {
 	if err := pw.SetPassword(ctx, identityID, password); err != nil {
 		return fmt.Errorf("set admin password: %w", err)
 	}
-
-	fmt.Println()
-	fmt.Println("  ┌──────────────────────────────────────────────────┐")
-	fmt.Println("  │  Zitadel bootstrapped!                          │")
-	fmt.Printf("   │  Username: admin                 \t\t\t\t │\n")
-	fmt.Printf("   │  Password: %-36s  │\n", password)
-	fmt.Println("  │                                                  │")
-	fmt.Println("  │  Change this password on first login.            │")
-	fmt.Println("  └──────────────────────────────────────────────────┘")
-	fmt.Println()
 
 	// Seed the default org.
 	if err := seedDefaultOrg(ctx, db); err != nil {
@@ -194,17 +309,17 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 
 		schemaID := typeName + "_v1"
 
-		// Try with is_default column first; fall back without it for older schemas.
+		// Try with visibility column first; fall back without it for older schemas.
 		_, err = db.SQL().ExecContext(ctx,
-			`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
-			 VALUES (?, ?, 0, ?, 1, true, datetime('now'))`,
+			`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, visibility, created_at)
+			 VALUES (?, ?, 0, ?, 1, true, 'public', datetime('now'))`,
 			schemaID, typeName, schemaJSON,
 		)
 		if err != nil {
 			// Column may not exist in fuzz worker subprocess or old DB.
 			_, err = db.SQL().ExecContext(ctx,
-				`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, created_at)
-				 VALUES (?, ?, 0, ?, 1, datetime('now'))`,
+				`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
+				 VALUES (?, ?, 0, ?, 1, true, datetime('now'))`,
 				schemaID, typeName, schemaJSON,
 			)
 		}

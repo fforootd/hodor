@@ -70,7 +70,7 @@ func serveCmd() *cobra.Command {
 			}
 
 			// Bootstrap admin identity on first start.
-			if err := bootstrap.EnsureAdmin(context.Background(), db); err != nil {
+			if err := bootstrap.EnsureAdmin(context.Background(), db, cfg.Dev.SeedFile); err != nil {
 				return fmt.Errorf("bootstrap: %w", err)
 			}
 

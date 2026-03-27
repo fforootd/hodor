@@ -5,10 +5,7 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -38,12 +35,12 @@ func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API
 
 // RegisterRoutes mounts all REST API routes on the given mux.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
-	// Identity CRUD
-	mux.HandleFunc("POST /v1/entities", a.createIdentity)
+	// Identity CRUD — write routes require admin.
+	mux.HandleFunc("POST /v1/entities", a.requireAdmin(a.createIdentity))
 	mux.HandleFunc("GET /v1/entities", a.listIdentities)
 	mux.HandleFunc("GET /v1/entities/{id}", a.getIdentity)
-	mux.HandleFunc("PATCH /v1/entities/{id}", a.updateIdentity)
-	mux.HandleFunc("DELETE /v1/entities/{id}", a.deleteIdentity)
+	mux.HandleFunc("PATCH /v1/entities/{id}", a.requireAdmin(a.updateIdentity))
+	mux.HandleFunc("DELETE /v1/entities/{id}", a.requireAdmin(a.deleteIdentity))
 
 	// Schema CRUD (write = admin-only, read = public)
 	mux.HandleFunc("POST /v1/schemas", a.requireAdmin(a.createSchema))
@@ -58,6 +55,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Session CRUD
 	a.RegisterSessionRoutes(mux, a.requireAdmin)
+
+	// PAT (Personal Access Token) management
+	a.RegisterPATRoutes(mux)
 
 	// Event read + streaming
 	a.RegisterEventRoutes(mux)
@@ -104,10 +104,10 @@ func (a *API) registerAliasRoutes(mux *http.ServeMux) {
 		prefix := "/v1/" + entry.Path
 
 		mux.HandleFunc("GET "+prefix, a.aliasHandler(st, a.listIdentities))
-		mux.HandleFunc("POST "+prefix, a.aliasHandler(st, a.createIdentity))
+		mux.HandleFunc("POST "+prefix, a.requireAdmin(a.aliasHandler(st, a.createIdentity)))
 		mux.HandleFunc("GET "+prefix+"/{id}", a.getIdentity)
-		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
-		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
+		mux.HandleFunc("PATCH "+prefix+"/{id}", a.requireAdmin(a.updateIdentity))
+		mux.HandleFunc("DELETE "+prefix+"/{id}", a.requireAdmin(a.deleteIdentity))
 
 		log.Printf("[alias] registered /v1/%s → entities (type=%s)", entry.Path, st)
 	}
@@ -1292,17 +1292,6 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
 		 VALUES (?, ?, 0, ?, '', ?, ?, ?, '{}', '', 0, datetime('now'))`,
 		eventID, eventType, actorID, aggregateID, aggregateType, payloadJSON)
-}
-
-func generateToken() (raw string, hash string, err error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", "", fmt.Errorf("generate token: %w", err)
-	}
-	raw = hex.EncodeToString(b)
-	h := sha256.Sum256([]byte(raw))
-	hash = hex.EncodeToString(h[:])
-	return raw, hash, nil
 }
 
 // EmitAuthEvent is an exported helper for the UI to emit auth-related events.

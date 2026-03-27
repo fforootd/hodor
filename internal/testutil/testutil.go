@@ -38,6 +38,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
+	t.Logf("TestServer dbPath: %s", dbPath)
 
 	cfg := config.Defaults()
 	cfg.Database.URL = "sqlite://" + dbPath
@@ -51,7 +52,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	}
 
 	// Bootstrap creates admin user and captures the password.
-	if err := bootstrap.EnsureAdmin(t.Context(), db); err != nil {
+	if err := bootstrap.EnsureAdmin(t.Context(), db, ""); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
@@ -67,6 +68,9 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	t.Cleanup(func() {
 		ts.Close()
+		// Checkpoint WAL before closing to prevent dangling -wal/-shm files
+		// that cause t.TempDir() cleanup failures.
+		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		db.Close()
 	})
 
@@ -120,6 +124,7 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) int64 {
 }
 
 // CreateSession inserts a valid session directly into the DB and returns the raw token.
+// The token is prefixed with zit_ses_ and inserted into both sessions and tokens tables.
 func (ts *TestServer) CreateSession(identityID int64) string {
 	ts.t.Helper()
 
@@ -127,11 +132,12 @@ func (ts *TestServer) CreateSession(identityID int64) string {
 	if _, err := rand.Read(b); err != nil {
 		ts.t.Fatalf("rand.Read: %v", err)
 	}
-	raw := hex.EncodeToString(b)
+	raw := "zit_ses_" + hex.EncodeToString(b)
 	h := sha256.Sum256([]byte(raw))
 	hash := hex.EncodeToString(h[:])
 
 	sessionID := time.Now().UnixNano()
+	tokenID := sessionID + 1
 	now := time.Now().UTC().Format(time.RFC3339)
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
 
@@ -142,6 +148,16 @@ func (ts *TestServer) CreateSession(identityID int64) string {
 	if err != nil {
 		ts.t.Fatalf("insert session: %v", err)
 	}
+
+	// Also insert into the unified tokens table.
+	_, err = ts.DB.SQL().Exec(
+		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
+		tokenID, hash, identityID, sessionID, expiresAt, now)
+	if err != nil {
+		ts.t.Fatalf("insert token: %v", err)
+	}
+
 	return raw
 }
 
@@ -239,4 +255,60 @@ func (ts *TestServer) decodeJSON(r io.Reader) map[string]any {
 	var result map[string]any
 	json.NewDecoder(r).Decode(&result)
 	return result
+}
+
+// GetWithBearer makes a GET with an Authorization: Bearer header.
+func (ts *TestServer) GetWithBearer(path string, token string) (int, map[string]any) {
+	ts.t.Helper()
+	req, _ := http.NewRequest("GET", ts.URL()+path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ts.t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ts.decodeJSON(resp.Body)
+}
+
+// PostJSONWithBearer makes a POST with a Bearer token.
+func (ts *TestServer) PostJSONWithBearer(path string, body map[string]any, token string) (int, map[string]any) {
+	ts.t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", ts.URL()+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ts.t.Fatalf("POST %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ts.decodeJSON(resp.Body)
+}
+
+// PatchJSONWithBearer makes a PATCH with a Bearer token.
+func (ts *TestServer) PatchJSONWithBearer(path string, body map[string]any, token string) (int, map[string]any) {
+	ts.t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("PATCH", ts.URL()+path, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ts.t.Fatalf("PATCH %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ts.decodeJSON(resp.Body)
+}
+
+// DeleteWithBearer makes a DELETE with a Bearer token.
+func (ts *TestServer) DeleteWithBearer(path string, token string) (int, map[string]any) {
+	ts.t.Helper()
+	req, _ := http.NewRequest("DELETE", ts.URL()+path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ts.t.Fatalf("DELETE %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ts.decodeJSON(resp.Body)
 }

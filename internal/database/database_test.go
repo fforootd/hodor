@@ -66,9 +66,9 @@ func TestMigrate(t *testing.T) {
 
 	// Verify a core table exists.
 	var name string
-	err = db.SQL().QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='identities'").Scan(&name)
+	err = db.SQL().QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='entities'").Scan(&name)
 	if err != nil {
-		t.Fatalf("identities table not found: %v", err)
+		t.Fatalf("entities table not found: %v", err)
 	}
 
 	// Verify capabilities table exists.

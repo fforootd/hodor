@@ -80,7 +80,7 @@ Magic links are a capability on the identity, not a special flow.
     (Console, go:embed)           (@zitadel/elements, npm)
 ```
 
-**Layer A** — Console UI ships in the binary. Same server, same session, FGA-gated.
+**Layer A** — Console UI and Login UI ship in the binary. This is a Vue SPA built with `shadcn-vue` and Tailwind for its component system. Same server, same session, FGA-gated.
 
 **Layer B** — Web Components published as `@zitadel/elements` on npm (~30KB, Lit). Work in React, Vue, Svelte, Angular, vanilla HTML.
 

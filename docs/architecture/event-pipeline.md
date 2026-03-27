@@ -2,13 +2,16 @@
 
 ## Core Principle: The Events Table IS the Queue
 
-```
-Write Request → BEGIN TX → INSERT entity → INSERT event → COMMIT
-                                                    ↓
-                                          Events table (durable)
-                                          ↓              ↓
-                                     Notifier      Threat Engine
-                                     (cursor: 845)  (cursor: 846)
+```mermaid
+graph TD
+    WR["Write Request"] --> TX["BEGIN TX"]
+    TX --> IE["INSERT entity"]
+    IE --> IV["INSERT event"]
+    IV --> CO["COMMIT"]
+    
+    IV -.-> ET[("Events table (durable)")]
+    ET -.-> |cursor: 845| N["Notifier"]
+    ET -.-> |cursor: 846| T["Threat Engine"]
 ```
 
 Events are persisted in the same SQL transaction as the entity write. Each async consumer maintains a **cursor** (last processed event ID) in the database. If Zitadel crashes, consumers resume from their cursor on restart. Zero event loss.
@@ -41,8 +44,11 @@ If the signal is lost (crash), consumers poll on an interval as fallback. This g
 
 ### 1. Notification Workers (SMTP + Webhooks)
 
-```
-Events Table → Match rules → Render template → Deliver (SMTP/HTTP)
+```mermaid
+graph LR
+    E[("Events Table")] -.-> M["Match rules"]
+    M --> R["Render template"]
+    R --> D["Deliver (SMTP/HTTP)"]
 ```
 
 - Configurable worker pool (1-16 goroutines)
@@ -52,16 +58,22 @@ Events Table → Match rules → Render template → Deliver (SMTP/HTTP)
 
 ### 2. OTEL Exporter (Fire-and-Forget)
 
-```
-Events Table → OTEL SDK → Customer's collector → ???
+```mermaid
+graph LR
+    E[("Events Table")] -.-> S["OTEL SDK"]
+    S --> C["Customer's collector"]
+    C --> U["???"]
 ```
 
 Zitadel emits events as OpenTelemetry log records. The customer's OTEL collector routes them wherever they want (Splunk, Grafana, ClickHouse, S3). Zitadel never reads from this path. See [ADR-010](../010-analytics-two-tier.md).
 
 ### 3. Threat Workers (Future — expr Rules + SLM)
 
-```
-Events Table → Evaluate expr rules → [optional: SLM classification] → Action
+```mermaid
+graph LR
+    E[("Events Table")] -.-> R["Evaluate expr rules"]
+    R --> S["[optional: SLM classification]"]
+    S --> A["Action"]
 ```
 
 - Threat workers run in a separate pool from notifications

@@ -37,7 +37,4 @@ Removed ConnectRPC (protobuf) entirely. All API endpoints now use plain REST+JSO
 
 | New file | Purpose |
 |---|---|
-| `internal/api/api.go` | REST identity + schema CRUD, helpers |
-| `internal/api/session.go` | REST session CRUD + Internal exports for UI |
-| `internal/api/event.go` | REST event list/aggregate + SSE streaming |
-| `internal/api/openapi.go` | Dynamic OpenAPI 3.1 from schema registry |
+| `internal/api/` pkg | REST CRUD (identity, schema, session, event), Dynamic OpenAPI 3.1 |

@@ -62,6 +62,27 @@ CREATE INDEX IF NOT EXISTS idx_sessions_identity ON sessions(entity_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 
 -- ============================================================================
+-- TOKENS — unified credential store (session, PAT, opaque)
+-- Stripe-style prefixed tokens: zit_ses_, zit_pat_, zit_opq_
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS tokens (
+    id          INTEGER PRIMARY KEY,
+    type        TEXT NOT NULL,              -- 'session', 'pat', 'opaque'
+    token_hash  TEXT NOT NULL UNIQUE,       -- SHA-256 of the full prefixed token
+    entity_id   INTEGER REFERENCES entities(id) ON DELETE CASCADE,  -- nullable: service tokens, pre-auth
+    session_id  INTEGER REFERENCES sessions(id) ON DELETE CASCADE,  -- nullable: only for session tokens
+    name        TEXT,                       -- human label for PATs: "CI token", "dev-admin"
+    scopes      TEXT NOT NULL DEFAULT '[]', -- JSON array: ["admin", "read"]
+    expires_at  TEXT,                       -- NULL = never expires
+    last_used   TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    revoked_at  TEXT                        -- NULL = active
+);
+CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_tokens_entity ON tokens(entity_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
+
+-- ============================================================================
 -- EVENTS — append-only event log (the queue IS the table)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
@@ -210,6 +231,7 @@ CREATE TABLE IF NOT EXISTS schemas (
     schema     TEXT NOT NULL,
     version    INTEGER DEFAULT 1,
     is_default BOOLEAN DEFAULT false,
+    visibility TEXT NOT NULL DEFAULT 'private', -- 'private', 'public', 'authenticated'
     message    TEXT DEFAULT '',
     created_by TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))

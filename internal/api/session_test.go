@@ -15,7 +15,7 @@ func TestSession_AdminCanListAndRevoke(t *testing.T) {
 	adminToken := srv.LoginAdmin()
 
 	// 1. List sessions
-	code, body := srv.GetWithCookie("/v1/sessions", adminToken)
+	code, body := srv.GetWithBearer("/v1/sessions", adminToken)
 	if code != 200 {
 		t.Fatalf("expected 200 listing sessions, got %d", code)
 	}
@@ -28,13 +28,13 @@ func TestSession_AdminCanListAndRevoke(t *testing.T) {
 	firstSession, _ := items[0].(map[string]any)
 	sessionID := fmt.Sprintf("%v", firstSession["id"])
 
-	code, _ = srv.PostJSONWithCookie("/v1/sessions/"+sessionID+"/revoke", nil, adminToken)
+	code, _ = srv.PostJSONWithBearer("/v1/sessions/"+sessionID+"/revoke", nil, adminToken)
 	if code != 204 {
 		t.Fatalf("expected 204 revoking session, got %d", code)
 	}
 
 	// 3. Verify it's revoked
-	code, _ = srv.GetWithCookie("/v1/sessions/"+sessionID, adminToken)
+	code, _ = srv.GetWithBearer("/v1/sessions/"+sessionID, adminToken)
 	if code == 200 {
 		t.Fatalf("expected session to be revoked (not found/inactive), got 200")
 	}
@@ -45,7 +45,7 @@ func TestSession_NonAdminCannotManage(t *testing.T) {
 	identityID := srv.CreateIdentity("user2@test.com", "User 2")
 	userToken := srv.CreateSession(identityID)
 
-	code, _ := srv.GetWithCookie("/v1/sessions", userToken)
+	code, _ := srv.GetWithBearer("/v1/sessions", userToken)
 	if code != 403 {
 		t.Fatalf("expected 403 non-admin listing sessions, got %d", code)
 	}

@@ -21,13 +21,13 @@ func TestUnauthenticated_Returns401(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 
 	// Admin-only endpoints without auth.
-	code, body := srv.PostJSONWithCookie("/v1/schemas", map[string]any{"type": "test"}, "")
+	code, body := srv.PostJSONWithBearer("/v1/schemas", map[string]any{"type": "test"}, "")
 	if code != 401 {
 		t.Fatalf("expected 401, got %d: %v", code, body)
 	}
 
 	// Account endpoints without auth.
-	code, _ = srv.GetWithCookie("/v1/account/profile", "")
+	code, _ = srv.GetWithBearer("/v1/account/profile", "")
 	if code != 401 {
 		t.Fatalf("expected 401 for profile, got %d", code)
 	}
@@ -36,7 +36,7 @@ func TestUnauthenticated_Returns401(t *testing.T) {
 func TestInvalidToken_Returns401(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 
-	code, _ := srv.GetWithCookie("/v1/account/profile", "invalid-token-123")
+	code, _ := srv.GetWithBearer("/v1/account/profile", "invalid-token-123")
 	if code != 401 {
 		t.Fatalf("expected 401, got %d", code)
 	}
@@ -46,7 +46,7 @@ func TestValidAdminToken_Returns200(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.GetWithCookie("/v1/account/profile", token)
+	code, body := srv.GetWithBearer("/v1/account/profile", token)
 	if code != 200 {
 		t.Fatalf("expected 200, got %d: %v", code, body)
 	}
@@ -65,7 +65,7 @@ func TestExpiredSession_Returns401(t *testing.T) {
 	// Manually expire the session.
 	_, _ = srv.DB.SQL().Exec(`UPDATE sessions SET expires_at = datetime('now', '-1 hour')`)
 
-	code, _ := srv.GetWithCookie("/v1/account/profile", token)
+	code, _ := srv.GetWithBearer("/v1/account/profile", token)
 	if code != 401 {
 		t.Fatalf("expected 401 for expired session, got %d", code)
 	}
@@ -78,7 +78,7 @@ func TestRevokedSession_Returns401(t *testing.T) {
 	// Revoke the session.
 	_, _ = srv.DB.SQL().Exec(`UPDATE sessions SET revoked_at = datetime('now')`)
 
-	code, _ := srv.GetWithCookie("/v1/account/profile", token)
+	code, _ := srv.GetWithBearer("/v1/account/profile", token)
 	if code != 401 {
 		t.Fatalf("expected 401 for revoked session, got %d", code)
 	}
@@ -92,7 +92,7 @@ func TestNonAdmin_CannotAccessAdminEndpoints(t *testing.T) {
 	userToken := srv.CreateSession(identityID)
 
 	// Non-admin should not be able to create schemas.
-	code, _ := srv.PostJSONWithCookie("/v1/schemas", map[string]any{
+	code, _ := srv.PostJSONWithBearer("/v1/schemas", map[string]any{
 		"type":   "test_schema",
 		"schema": "{}",
 	}, userToken)
@@ -106,7 +106,7 @@ func TestNonAdmin_CanAccessOwnProfile(t *testing.T) {
 	identityID := srv.CreateIdentity("user@test.com", "Test User")
 	userToken := srv.CreateSession(identityID)
 
-	code, body := srv.GetWithCookie("/v1/account/profile", userToken)
+	code, body := srv.GetWithBearer("/v1/account/profile", userToken)
 	if code != 200 {
 		t.Fatalf("expected 200, got %d", code)
 	}
@@ -121,7 +121,7 @@ func TestAdmin_CanCreateIdentity(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithCookie("/v1/entities", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/entities", map[string]any{
 		"identifier":   "new@test.com",
 		"display_name": "New User",
 		"schema_id":    "human_user_v1",
@@ -139,7 +139,7 @@ func TestBulkImport_CreatesIdentities(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithCookie("/v1/import", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/import", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "bulk1@test.com", "display_name": "Bulk One", "password": "pass123"},
 			{"identifier": "bulk2@test.com", "display_name": "Bulk Two", "password": "pass456"},
@@ -162,14 +162,14 @@ func TestBulkImport_SkipsDuplicates(t *testing.T) {
 	token := srv.LoginAdmin()
 
 	// Import once.
-	srv.PostJSONWithCookie("/v1/import", map[string]any{
+	srv.PostJSONWithBearer("/v1/import", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "dup@test.com", "display_name": "Dup User"},
 		},
 	}, token)
 
 	// Import again with same identifier.
-	code, body := srv.PostJSONWithCookie("/v1/import", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/import", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "dup@test.com", "display_name": "Dup User Updated"},
 		},
@@ -190,7 +190,7 @@ func TestBulkImport_WithProviders(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithCookie("/v1/import", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/import", map[string]any{
 		"providers": []map[string]any{
 			{"name": "Test OIDC", "protocol": "oidc", "config": map[string]any{"issuer": "https://test.example.com"}},
 		},
@@ -217,7 +217,7 @@ func TestIdentitiesBulk_Creates(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithCookie("/v1/entities/bulk", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/entities/bulk", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "batch1@test.com", "display_name": "Batch 1"},
 			{"identifier": "batch2@test.com", "display_name": "Batch 2"},
@@ -244,7 +244,7 @@ func TestBulkImport_Unauthorized(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 
 	// No token — should be 401.
-	code, _ := srv.PostJSONWithCookie("/v1/import", map[string]any{
+	code, _ := srv.PostJSONWithBearer("/v1/import", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "unauth@test.com"},
 		},
@@ -260,7 +260,7 @@ func TestBulkImport_NonAdminForbidden(t *testing.T) {
 	identityID := srv.CreateIdentity("regularuser@test.com", "Regular")
 	userToken := srv.CreateSession(identityID)
 
-	code, _ := srv.PostJSONWithCookie("/v1/import", map[string]any{
+	code, _ := srv.PostJSONWithBearer("/v1/import", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "hack@test.com"},
 		},
@@ -275,9 +275,10 @@ func TestBulkImport_NonAdminForbidden(t *testing.T) {
 
 func TestIdentity_CRUD(t *testing.T) {
 	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
 
 	// List should have at least admin.
-	code, body := srv.GetRaw("/v1/entities")
+	code, body := srv.GetWithBearer("/v1/entities", token)
 	if code != 200 {
 		t.Fatalf("list: expected 200, got %d", code)
 	}
@@ -290,7 +291,7 @@ func TestIdentity_CRUD(t *testing.T) {
 	firstItem, _ := items[0].(map[string]any)
 	adminID := fmt.Sprintf("%v", firstItem["id"])
 
-	code, body = srv.GetRaw("/v1/entities/" + adminID)
+	code, body = srv.GetWithBearer("/v1/entities/"+adminID, token)
 	if code != 200 {
 		t.Fatalf("get: expected 200, got %d", code)
 	}

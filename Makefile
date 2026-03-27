@@ -1,4 +1,4 @@
-.PHONY: dev dev-hot dev-full test fuzz lint generate build clean web web-install webdist ci-test fmt vet release-snapshot
+.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt vet release-snapshot
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
@@ -43,7 +43,7 @@ dev: webdist
 
 # Development with mock OIDC + seed data.
 dev-full: webdist
-	go run ./cmd/zitadel serve --mock-oidc --seed fixtures/dev-seed.yaml
+	go run ./cmd/zitadel serve -c fixtures/zitadel.dev.toml
 
 # Hot reload development — Vite HMR on :5173 proxying to Go on :8080.
 # Access the app at http://localhost:5173 for instant CSS/JS reloads.
@@ -57,7 +57,12 @@ dev-hot: node_modules
 	@sleep 0.5
 	@trap 'kill 0' EXIT; \
 	npm run dev & \
-	go run ./cmd/zitadel serve
+	go run ./cmd/zitadel serve -c fixtures/zitadel.dev.toml
+
+# Clean start — wipe DB and restart with dev config.
+dev-clean:
+	rm -f zitadel.db zitadel.db-shm zitadel.db-wal zitadel.db-journal
+	$(MAKE) dev-hot
 
 # Run all tests (requires webdist for embed).
 test: webdist

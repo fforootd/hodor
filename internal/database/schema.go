@@ -10,11 +10,17 @@ import (
 //go:embed schema.sql
 var schemaDDL string
 
-// EnsureSchema executes the consolidated schema DDL against the database.
-// All statements use IF NOT EXISTS / OR IGNORE for idempotent re-runs.
-// This replaces the previous goose-based migration system for the POC.
+// EnsureSchema executes all DDL statements from schema.sql to initialise or
+// update the database schema. Every statement uses IF NOT EXISTS so the
+// function is safe to call on every startup.
+//
+// NOTE: schema.sql is currently SQLite-only (uses datetime(), TEXT types).
+// Postgres support will require a separate DDL file.
 func EnsureSchema(db *DB) error {
-	// Split on semicolons and execute each statement.
+	if db.dialect == "postgres" {
+		return fmt.Errorf("schema.sql is SQLite-only; Postgres DDL not yet implemented")
+	}
+
 	stmts := strings.Split(schemaDDL, ";")
 	for _, stmt := range stmts {
 		stmt = strings.TrimSpace(stmt)
@@ -22,17 +28,9 @@ func EnsureSchema(db *DB) error {
 			continue
 		}
 		if _, err := db.sql.Exec(stmt); err != nil {
-			return fmt.Errorf("schema exec: %w\nSQL: %s", err, truncate(stmt, 200))
+			return fmt.Errorf("schema exec: %w", err)
 		}
 	}
-
 	log.Printf("schema ready (dialect=%s)", db.dialect)
 	return nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }

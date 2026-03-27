@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,26 +63,17 @@ func TestPostgresMigrations(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test migration
-	if err := database.EnsureSchema(db); err != nil {
-		t.Fatalf("failed to run migrations: %v", err)
+	if db.Dialect() != "postgres" {
+		t.Fatalf("expected postgres dialect, got %s", db.Dialect())
 	}
 
-	// Verify tables exist
-	var tableName string
-	err = db.SQL().QueryRowContext(ctx, "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name='identities'").Scan(&tableName)
-	if err != nil {
-		t.Fatalf("identities table not found after migrations: %v", err)
+	// schema.sql is SQLite-only — EnsureSchema should return a clear error.
+	err = database.EnsureSchema(db)
+	if err == nil {
+		t.Fatal("expected error running SQLite DDL against Postgres")
 	}
-	if tableName != "entities" {
-		t.Errorf("expected identities table, got %v", tableName)
+	if !strings.Contains(err.Error(), "SQLite-only") {
+		t.Fatalf("expected SQLite-only error, got: %v", err)
 	}
-
-	err = db.SQL().QueryRowContext(ctx, "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name='events'").Scan(&tableName)
-	if err != nil {
-		t.Fatalf("events table not found after migrations: %v", err)
-	}
-	if tableName != "events" {
-		t.Errorf("expected events table, got %v", tableName)
-	}
+	t.Logf("correctly rejected Postgres migration: %v", err)
 }

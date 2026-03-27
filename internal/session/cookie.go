@@ -93,7 +93,6 @@ func ClearSessionCookie(w http.ResponseWriter, cfg *CookieConfig) {
 
 // ReadSessionCookie extracts and verifies the session token from the request.
 // Returns the raw token (for DB lookup) and true if valid, or ("", false).
-// For backward compatibility, also accepts unsigned tokens (legacy cookies).
 func ReadSessionCookie(r *http.Request, cfg *CookieConfig) (string, bool) {
 	// Try both cookie names (secure and dev) for transition periods.
 	for _, name := range []string{secureCookieName, devCookieName} {
@@ -102,15 +101,9 @@ func ReadSessionCookie(r *http.Request, cfg *CookieConfig) (string, bool) {
 			continue
 		}
 
-		// Try HMAC-signed format first.
+		// Only accept HMAC-signed tokens.
 		if token, ok := verify(cookie.Value, cfg.Secrets); ok {
 			return token, true
-		}
-
-		// Backward compatibility: accept raw (unsigned) tokens.
-		// This allows existing sessions to continue working after upgrade.
-		if !strings.Contains(cookie.Value, ".") && len(cookie.Value) > 0 {
-			return cookie.Value, true
 		}
 	}
 

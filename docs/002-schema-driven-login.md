@@ -2,7 +2,7 @@
 
 **Status**: Accepted  
 **Date**: 2026-03-26  
-**Amended by**: ADR-003 (Unified Auth Methods)
+**Amended by**: [ADR-003](003-auth-methods-meta-schema.md) (Unified Auth Methods)
 
 ## Decision
 
@@ -180,16 +180,14 @@ This enables gradual rollout:
 
 | File | Purpose |
 |---|---|
-| `internal/login/flow.go` | Schema annotation extraction, flow state machine, UI node builder |
-| `internal/login/flow_handlers.go` | HTTP handlers for flow API (create, submit, get) |
-| `internal/login/flow_test.go` | Tests for annotation extraction, node builder, flow store |
+| `internal/login/` pkg | Schema annotation extraction, flow state machine, UI node builder, flow HTTP handlers, tests |
 
 ## What was modified
 
 | File | Change |
 |---|---|
-| `internal/login/login.go` | Branding + auth settings now schema-driven; flow API routes registered |
-| `internal/bootstrap/bootstrap.go` | Default human_user schema now includes `x-auth` and `x-login` annotations |
+| `internal/login/` pkg | Branding + auth settings now schema-driven; flow API routes registered |
+| `internal/bootstrap/` pkg | Default schemas updated with annotations (`x-auth`, `x-login`) |
 
 ## Alternatives considered
 

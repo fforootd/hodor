@@ -1,7 +1,9 @@
 # Architecture & Design Thinking
 
+> **Note:** This is an R&D prototype. APIs, schemas, and architectures are experimental and subject to breaking changes.
+>
 > These are living documents — architecture decisions, design thinking, and vision. Not customer documentation.
-> Start with [ARCHITECTURE.md](contributing/ARCHITECTURE.md) for an overview of everything here.
+> Start with [ARCHITECTURE.md](architecture/overview.md) for an overview of everything here. Check [GLOSSARY.md](GLOSSARY.md) for terminology.
 
 ## Architecture Decision Records
 

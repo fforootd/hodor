@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,40 +21,6 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/account/activity", a.requireSession(a.listOwnActivity))
 }
 
-// --- Session middleware (non-admin) ---
-
-// requireSession is middleware that ensures a valid session exists.
-// It injects the caller's identity ID into the request header.
-func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		token := a.extractToken(r)
-		if token == "" {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-
-		h := sha256.Sum256([]byte(token))
-		tokenHash := hex.EncodeToString(h[:])
-
-		var identityID, sessionID int64
-		err := a.db.SQL().QueryRowContext(r.Context(),
-			`SELECT entity_id, id FROM sessions
-			 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > datetime('now')`,
-			tokenHash,
-		).Scan(&identityID, &sessionID)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid or expired session")
-			return
-		}
-
-		// Inject caller info via headers (internal only).
-		r.Header.Set("X-Identity-Id", fmt.Sprintf("%d", identityID))
-		r.Header.Set("X-Session-Id", fmt.Sprintf("%d", sessionID))
-		r.Header.Set("X-Token-Hash", tokenHash)
-
-		next(w, r)
-	}
-}
 
 func callerIdentityID(r *http.Request) int64 {
 	var id int64

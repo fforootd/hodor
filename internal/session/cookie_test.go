@@ -124,18 +124,15 @@ func TestReadSessionCookie_Signed(t *testing.T) {
 	}
 }
 
-func TestReadSessionCookie_LegacyUnsigned(t *testing.T) {
+func TestReadSessionCookie_LegacyUnsigned_Rejected(t *testing.T) {
 	cfg := NewCookieConfig([]string{"my-secret"}, "localhost")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: devCookieName, Value: "raw-legacy-token"})
 
-	token, ok := ReadSessionCookie(req, cfg)
-	if !ok {
-		t.Fatal("expected legacy cookie to be accepted")
-	}
-	if token != "raw-legacy-token" {
-		t.Errorf("expected raw-legacy-token, got %q", token)
+	_, ok := ReadSessionCookie(req, cfg)
+	if ok {
+		t.Fatal("expected unsigned cookie to be REJECTED — raw cookies are no longer accepted")
 	}
 }
 

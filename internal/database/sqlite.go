@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	_ "modernc.org/sqlite" // Pure Go SQLite driver.
@@ -15,9 +16,16 @@ func openSQLite(connStr string) (*DB, error) {
 		path = "./zitadel.db"
 	}
 
+	// URL-encode the path to handle special characters (e.g., '#' in
+	// Go test temp dir names like "FuzzAPIJSON/seed#0") that would
+	// otherwise be interpreted as URI fragment delimiters.
+	escapedPath := url.PathEscape(path)
+	// PathEscape encodes '/' too, but SQLite file: URIs need literal slashes.
+	escapedPath = strings.ReplaceAll(escapedPath, "%2F", "/")
+
 	// WAL mode for concurrent reads, busy timeout for write contention,
 	// foreign keys enforcement, immediate txlock to prevent SQLITE_BUSY deadlocks.
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_pragma=foreign_keys(ON)&_txlock=immediate", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_pragma=foreign_keys(ON)&_txlock=immediate", escapedPath)
 
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {

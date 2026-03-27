@@ -1,9 +1,9 @@
 # ADR-005: Unified Data Model — Schemas, Orgs, and Config Cascade
 
-**Status**: Accepted (amended by ADR-006)  
+**Status**: Accepted (amended by [ADR-006](006-entity-naming-model.md))  
 **Date**: 2026-03-27  
-**Builds on**: ADR-004 (Apps as Identities)  
-**Amended by**: ADR-006 (Entity Naming Model)
+**Builds on**: [ADR-004](004-apps-as-identities-oidc.md) (Apps as Identities)  
+**Amended by**: [ADR-006](006-entity-naming-model.md) (Entity Naming Model)
 
 ## Context
 
@@ -15,16 +15,18 @@ Old Zitadel had separate tables and models for each concept (projects, actions, 
 
 ### 1. Four-Layer Architecture
 
-```
-Layer 1: Entities (schema-defined)        — what things ARE
-Layer 2: Relationships (FGA graph edges)  — how things CONNECT
-Layer 3: Configuration (cascading)        — how things BEHAVE
-Layer 4: Runtime (ephemeral state)        — what's HAPPENING NOW
+```mermaid
+graph TD
+    L1["Layer 1: Entities<br>(schema-defined)"] -.-> |"what things ARE"| L2["Layer 2: Relationships<br>(FGA graph edges)"]
+    L2 -.-> |"how things CONNECT"| L3["Layer 3: Configuration<br>(cascading)"]
+    L3 -.-> |"how things BEHAVE"| L4["Layer 4: Runtime<br>(ephemeral state)"]
+    L4 -.-> |"what's HAPPENING NOW"| END((" "))
+    style END display:none
 ```
 
 ### 2. Layer 1: Everything is a Schema Entity
 
-All persistent domain objects are **entities** with schemas. The term "entity" replaces "identity" as the universal noun — see ADR-006 for full naming model.
+All persistent domain objects are **entities** with schemas. The term "entity" replaces "identity" as the universal noun — see [ADR-006](006-entity-naming-model.md) for full naming model.
 
 | Entity | Schema Type | Key Properties |
 |---|---|---|
@@ -57,10 +59,10 @@ Relationships are graph edges, not tables:
 
 Configuration follows CSS-like specificity:
 
-```
-Instance defaults
-  └── Org overrides
-      └── App overrides
+```mermaid
+graph TD
+    I["Instance defaults"] --> O["Org overrides"]
+    O --> A["App overrides"]
 ```
 
 Resolution: `app.config ?? org.config ?? instance.config`
@@ -73,7 +75,7 @@ Ephemeral, high-write state stays in dedicated tables (not the `entities` table)
 
 Sessions, tokens, auth requests, events, jobs.
 
-**These still have schemas** that describe their shape (see ADR-006 `x-storage: "dedicated"`), but data lives in optimized storage.
+**These still have schemas** that describe their shape (see [ADR-006](006-entity-naming-model.md) `x-storage: "dedicated"`), but data lives in optimized storage.
 
 ### 6. Organizations as Scope/Context
 
@@ -87,7 +89,7 @@ Orgs are the **top-level scope** (like Vercel's project switcher):
 
 ### 7. Console Nav Structure
 
-Nav sections are **dynamically generated** from schema `x-display` metadata (see ADR-006):
+Nav sections are **dynamically generated** from schema `x-display` metadata (see [ADR-006](006-entity-naming-model.md)):
 
 ```
 [🔽 Org Switcher] [⚙ Settings]
