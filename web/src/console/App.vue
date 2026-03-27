@@ -9,20 +9,25 @@
         <router-link to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
           <span class="nav-icon">◆</span> Dashboard
         </router-link>
-        <router-link to="/users" class="nav-item" :class="{ active: $route.path.startsWith('/users') }">
-          <span class="nav-icon">◇</span> Users
+
+        <!-- Dynamic identity sections from schemas -->
+        <div v-if="schemaTypes.length" class="nav-section">Identities</div>
+        <router-link
+          v-for="st in schemaTypes" :key="st.type"
+          :to="`/s/${st.type}`"
+          class="nav-item"
+          :class="{ active: $route.params.schemaType === st.type }"
+        >
+          <span class="nav-icon">◇</span> {{ st.label }}
         </router-link>
-        <router-link to="/service-accounts" class="nav-item" :class="{ active: $route.path.startsWith('/service-accounts') }">
-          <span class="nav-icon">◇</span> Service Accounts
-        </router-link>
-        <router-link to="/ai-agents" class="nav-item" :class="{ active: $route.path.startsWith('/ai-agents') }">
-          <span class="nav-icon">◇</span> AI Agents
-        </router-link>
-        <router-link to="/applications" class="nav-item" :class="{ active: $route.path.startsWith('/applications') }">
-          <span class="nav-icon">◇</span> Applications
-        </router-link>
+
+        <!-- System section -->
+        <div class="nav-section">System</div>
         <router-link to="/schemas" class="nav-item" :class="{ active: $route.name?.toString().startsWith('schema') }">
           <span class="nav-icon">◇</span> Schemas
+        </router-link>
+        <router-link to="/providers" class="nav-item" :class="{ active: $route.name === 'providers' }">
+          <span class="nav-icon">◇</span> Providers
         </router-link>
         <router-link to="/sessions" class="nav-item" :class="{ active: $route.name === 'sessions' }">
           <span class="nav-icon">◇</span> Sessions
@@ -67,7 +72,7 @@
         </div>
       </header>
       <div class="page-body">
-        <router-view />
+        <router-view :key="$route.fullPath" />
       </div>
     </main>
   </div>
@@ -86,17 +91,49 @@ const showResults = ref(false)
 const searchWrap = ref<HTMLElement | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout>
 
+// Pretty labels for known schema types; unknown types get auto-formatted.
+const typeLabels: Record<string, string> = {
+  human_user: 'Users',
+  service_user: 'Service Accounts',
+  ai_agent: 'AI Agents',
+  app: 'Applications',
+}
+
+interface SchemaTypeEntry { type: string; label: string }
+const schemaTypes = ref<SchemaTypeEntry[]>([])
+
+onMounted(async () => {
+  document.addEventListener('click', handleClickOutside)
+  // Fetch schema types for dynamic nav.
+  try {
+    const res = await fetch('/v1/schemas')
+    const data = await res.json()
+    const types = new Set<string>()
+    for (const s of (data.items || [])) {
+      types.add(s.type)
+    }
+    schemaTypes.value = [...types].map(t => ({
+      type: t,
+      label: typeLabels[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's',
+    }))
+  } catch { /* ignore — nav will be empty */ }
+})
+
+onUnmounted(() => document.removeEventListener('click', handleClickOutside))
+
 const pageTitle = computed(() => {
+  // Dynamic schema-type pages: /s/:schemaType
+  if (route.params.schemaType) {
+    const st = route.params.schemaType as string
+    return typeLabels[st] || st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's'
+  }
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',
-    users: 'Users',
-    'service-accounts': 'Service Accounts',
-    'ai-agents': 'AI Agents',
-    applications: 'Applications',
     'identity-detail': 'Identity Detail',
     'identity-create': 'New Identity',
     schemas: 'Schemas',
     'schema-detail': 'Schema Editor',
+    providers: 'Providers',
     sessions: 'Sessions',
     events: 'Events',
     jobs: 'Jobs',
@@ -126,8 +163,6 @@ function goToResult(r: SearchResult) {
   showResults.value = false
   searchQuery.value = ''
   searchResults.value = []
-  // API returns absolute links like /console/identities/123, but Vue Router
-  // base is already /console, so strip the prefix to avoid /console/console/...
   const path = r.link.replace(/^\/console/, '') || '/'
   router.push(path)
 }
@@ -137,9 +172,6 @@ function handleClickOutside(e: MouseEvent) {
     showResults.value = false
   }
 }
-
-onMounted(() => document.addEventListener('click', handleClickOutside))
-onUnmounted(() => document.removeEventListener('click', handleClickOutside))
 </script>
 
 <style scoped>
@@ -158,6 +190,10 @@ onUnmounted(() => document.removeEventListener('click', handleClickOutside))
 .brand-text { font-weight: 800; font-size: 1rem; color: #1a1a2e; letter-spacing: -0.02em; }
 
 .sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 0.75rem; }
+.nav-section {
+  font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #9ca3af; padding: 0.75rem 0.75rem 0.25rem; margin-top: 0.5rem;
+}
 .nav-item {
   display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem;
   border-radius: 6px; color: #4b5563; font-size: 0.875rem; text-decoration: none;
