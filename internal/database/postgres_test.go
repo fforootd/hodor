@@ -63,7 +63,7 @@ func TestPostgresMigrations(t *testing.T) {
 	defer db.Close()
 
 	// Test migration
-	if err := database.Migrate(db); err != nil {
+	if err := database.EnsureSchema(db); err != nil {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 

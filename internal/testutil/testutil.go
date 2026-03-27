@@ -46,7 +46,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := database.Migrate(db); err != nil {
+	if err := database.EnsureSchema(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

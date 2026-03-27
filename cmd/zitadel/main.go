@@ -64,7 +64,7 @@ func serveCmd() *cobra.Command {
 			}
 			defer db.Close()
 
-			if err := database.Migrate(db); err != nil {
+			if err := database.EnsureSchema(db); err != nil {
 				return fmt.Errorf("run migrations: %w", err)
 			}
 

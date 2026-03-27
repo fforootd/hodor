@@ -9,7 +9,6 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/openfga/api/proto v0.0.0-20260319214821-f153694bfc20
 	github.com/openfga/openfga v1.13.1
-	github.com/pressly/goose/v3 v3.27.0
 	github.com/sony/sonyflake v1.2.1
 	github.com/spf13/cobra v1.10.2
 	github.com/testcontainers/testcontainers-go v0.41.0
@@ -98,6 +97,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
+	github.com/pressly/goose/v3 v3.27.0 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect

@@ -60,8 +60,8 @@ func TestMigrate(t *testing.T) {
 	}
 	defer db.Close()
 
-	if err := Migrate(db); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
 	}
 
 	// Verify a core table exists.
