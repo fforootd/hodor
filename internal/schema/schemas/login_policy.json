@@ -1,13 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/settings",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Login Policy",
-    "singular": "Login Policy",
-    "group": "settings",
-    "path": "settings/login-policy",
-    "icon": "🚪"
-  },
   "x-settings": {
     "hierarchy": [
       "instance",

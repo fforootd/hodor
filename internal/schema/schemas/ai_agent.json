@@ -1,34 +1,13 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "AI Agents",
-    "singular": "AI Agent",
-    "group": "identities",
-    "group_label": "Identities",
-    "path": "ai-agents",
-    "icon": "🧠",
-    "sort_order": 3
-  },
-  "x-storage": "entities",
-  "x-engine-authorization": {
-    "engine": "fga",
-    "relations": [
-      "owner",
-      "viewer"
-    ]
-  },
+
   "x-auth-methods": {
-    "pat": {
-      "enabled": true,
-      "interactive": false,
-      "max_tokens": 5
-    },
-    "client_cert": {
-      "enabled": false,
-      "interactive": false
-    }
+    "pat":         { "enabled": true,  "interactive": false, "max_tokens": 5 },
+    "client_cert": { "enabled": false, "interactive": false }
   },
+
   "properties": {
     "display_name": {
       "type": "string",
@@ -48,9 +27,7 @@
     },
     "tool_access": {
       "type": "array",
-      "items": {
-        "type": "string"
-      },
+      "items": { "type": "string" },
       "description": "Tools/APIs this agent can invoke"
     },
     "max_tokens": {
@@ -63,20 +40,12 @@
     },
     "trust_level": {
       "type": "string",
-      "enum": [
-        "sandboxed",
-        "supervised",
-        "autonomous"
-      ],
+      "enum": ["sandboxed", "supervised", "autonomous"],
       "description": "Level of autonomous action allowed"
     },
     "metadata": {
       "type": "object"
     }
   },
-  "required": [
-    "display_name",
-    "model",
-    "trust_level"
-  ]
+  "required": ["display_name", "model", "trust_level"]
 }

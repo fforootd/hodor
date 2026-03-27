@@ -1,13 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/settings",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Notification",
-    "singular": "Notification Settings",
-    "group": "settings",
-    "path": "settings/notification",
-    "icon": "🔔"
-  },
   "x-settings": {
     "hierarchy": [
       "instance",

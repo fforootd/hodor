@@ -1,14 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Rules",
-    "singular": "Rule",
-    "group": "configure",
-    "path": "rules",
-    "icon": "⚡"
-  },
-  "x-storage": "entities",
   "description": "Engine pipeline rule — an expr program bound to a pipeline stage.",
   "properties": {
     "display_name": {

@@ -806,8 +806,8 @@ func extractProperties(schema map[string]any) (map[string]any, bool) {
 }
 
 // schemaClaims maps identity data fields to standard OIDC claim names using
-// x-claim-mapping annotations from the schema. Inline version to avoid
-// import cycle with login package.
+// x-claim (or legacy x-claim-mapping) annotations from the schema.
+// Inline version to avoid import cycle with login package.
 func schemaClaims(schemaJSON string, data map[string]any) map[string]any {
 	var s struct {
 		Properties map[string]map[string]any `json:"properties"`
@@ -830,7 +830,14 @@ func schemaClaims(schemaJSON string, data map[string]any) map[string]any {
 			continue
 		}
 		claimName := ""
-		if mapping, ok := def["x-claim-mapping"].(string); ok && strings.HasPrefix(mapping, "claims.") {
+		// Prefer x-claim (new), fall back to x-claim-mapping (legacy).
+		mapping := ""
+		if m, ok := def["x-claim"].(string); ok {
+			mapping = m
+		} else if m, ok := def["x-claim-mapping"].(string); ok {
+			mapping = m
+		}
+		if mapping != "" && strings.HasPrefix(mapping, "claims.") {
 			// Extract "claims.email" → "email"
 			rest := mapping[7:]
 			end := 0

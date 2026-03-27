@@ -17,20 +17,28 @@ var MetaSchema string
 //go:embed schemas/*.json
 var SchemaFiles embed.FS
 
+// EngineBinding describes how an engine processes entities of this type.
+type EngineBinding struct {
+	Model     string   `json:"model"`
+	Relations []string `json:"relations,omitempty"`
+	Direction string   `json:"direction,omitempty"`
+}
+
 // CatalogEntry represents a single entry in the x-catalog of the meta schema.
 type CatalogEntry struct {
-	SchemaFile string   `json:"schema_file,omitempty"`
-	Group      string   `json:"group"`
-	Alias      string   `json:"alias"`
-	Singular   string   `json:"singular"`
-	Path       string   `json:"path"`
-	Icon       string   `json:"icon"`
-	SortOrder  int      `json:"sort_order"`
-	Required   bool     `json:"required,omitempty"`
-	Storage    string   `json:"storage"`
-	Route      string   `json:"route,omitempty"`
-	Nav        string   `json:"nav,omitempty"`
-	Components []string `json:"components,omitempty"`
+	Ref       string                   `json:"$ref,omitempty"`
+	Version   string                   `json:"version,omitempty"`
+	Group     string                   `json:"group"`
+	Alias     string                   `json:"alias"`
+	Singular  string                   `json:"singular"`
+	Path      string                   `json:"path"`
+	Icon      string                   `json:"icon"`
+	SortOrder int                      `json:"sort_order"`
+	Required  bool                     `json:"required,omitempty"`
+	Storage   string                   `json:"storage"`
+	Route     string                   `json:"route,omitempty"`
+	Nav       string                   `json:"nav,omitempty"`
+	Engines   map[string]EngineBinding `json:"engines,omitempty"`
 }
 
 // GroupEntry represents a nav group definition from x-groups.
@@ -71,3 +79,103 @@ func LoadSchemaFile(path string) (string, error) {
 	}
 	return string(data), nil
 }
+
+// LintError represents a single schema lint issue.
+type LintError struct {
+	Type    string `json:"type"`    // catalog type name
+	File    string `json:"file"`    // schema file path
+	Level   string `json:"level"`   // "error" or "warning"
+	Message string `json:"message"` // description of the issue
+}
+
+func (e LintError) Error() string {
+	return fmt.Sprintf("[%s] %s: %s (%s)", e.Level, e.Type, e.Message, e.File)
+}
+
+// ValidateCatalog lints all catalog entries and their referenced schema files.
+// Checks:
+//   - Every $ref resolves to a real embedded file
+//   - Every schema has a $version that matches the catalog version
+//   - Every schema has a $schema reference
+//   - Entity-storage schemas have required fields
+func ValidateCatalog() []LintError {
+	catalog, err := Catalog()
+	if err != nil {
+		return []LintError{{Level: "error", Message: fmt.Sprintf("cannot parse catalog: %v", err)}}
+	}
+
+	var errs []LintError
+
+	for typeName, entry := range catalog {
+		// Skip entries without $ref (system views like "schema").
+		if entry.Ref == "" {
+			continue
+		}
+
+		// 1. Check $ref resolves.
+		schemaJSON, err := LoadSchemaFile(entry.Ref)
+		if err != nil {
+			errs = append(errs, LintError{
+				Type: typeName, File: entry.Ref, Level: "error",
+				Message: fmt.Sprintf("$ref does not resolve: %v", err),
+			})
+			continue
+		}
+
+		// 2. Parse schema.
+		var schema map[string]any
+		if err := json.Unmarshal([]byte(schemaJSON), &schema); err != nil {
+			errs = append(errs, LintError{
+				Type: typeName, File: entry.Ref, Level: "error",
+				Message: fmt.Sprintf("invalid JSON: %v", err),
+			})
+			continue
+		}
+
+		// 3. Check $schema reference.
+		if _, ok := schema["$schema"]; !ok {
+			errs = append(errs, LintError{
+				Type: typeName, File: entry.Ref, Level: "warning",
+				Message: "missing $schema reference",
+			})
+		}
+
+		// 4. Check $version matches catalog.
+		fileVersion, _ := schema["$version"].(string)
+		if fileVersion == "" {
+			errs = append(errs, LintError{
+				Type: typeName, File: entry.Ref, Level: "warning",
+				Message: "missing $version",
+			})
+		} else if entry.Version != "" && fileVersion != entry.Version {
+			errs = append(errs, LintError{
+				Type: typeName, File: entry.Ref, Level: "error",
+				Message: fmt.Sprintf("version mismatch: file=%s catalog=%s", fileVersion, entry.Version),
+			})
+		}
+
+		// 5. Entity schemas should have "properties".
+		if entry.Storage == "entities" {
+			if _, ok := schema["properties"]; !ok {
+				errs = append(errs, LintError{
+					Type: typeName, File: entry.Ref, Level: "warning",
+					Message: "entity schema missing 'properties'",
+				})
+			}
+		}
+
+		// 6. Check group is valid.
+		groups, _ := Groups()
+		if groups != nil {
+			if _, ok := groups[entry.Group]; !ok {
+				errs = append(errs, LintError{
+					Type: typeName, File: entry.Ref, Level: "error",
+					Message: fmt.Sprintf("group %q not defined in x-groups", entry.Group),
+				})
+			}
+		}
+	}
+
+	return errs
+}
+

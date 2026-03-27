@@ -1,14 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Sessions",
-    "singular": "Session",
-    "group": "observability",
-    "path": "sessions",
-    "icon": "🔑"
-  },
-  "x-storage": "dedicated",
   "description": "Active user session. Ephemeral, high-write.",
   "properties": {
     "id": {

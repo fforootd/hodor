@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://zitadel.com/schemas/identity-meta-schema",
+  "$id": "https://zitadel.com/schemas/v1/entity-meta-schema",
   "title": "ZITADEL Entity Meta-Schema",
   "description": "Catalog of entity types, nav groups, and annotation validation.",
 
@@ -9,13 +9,14 @@
     "applications":  { "label": "Applications",  "icon": "📱", "sort_order": 2 },
     "configure":     { "label": "Configure",     "icon": "⚙️", "sort_order": 3 },
     "observability": { "label": "Observability", "icon": "📊", "sort_order": 4 },
-    "system":        { "label": "System",        "icon": "🔧", "sort_order": 5, "nav": "hidden" }
+    "settings":      { "label": "Settings",      "icon": "🔧", "sort_order": 5, "nav": "hidden" },
+    "system":        { "label": "System",        "icon": "🔧", "sort_order": 6, "nav": "hidden" }
   },
 
   "x-catalog": {
     "human_user": {
-      "schema_file": "schemas/human_user.json",
-      "default_version": "1.0",
+      "$ref": "schemas/human_user.json",
+      "version": "1.0",
       "group": "identities",
       "alias": "Users",
       "singular": "User",
@@ -24,11 +25,15 @@
       "sort_order": 1,
       "required": true,
       "storage": "entities",
-      "components": ["x-login", "x-branding", "x-auth-methods", "x-engine-claim-mapping", "x-engine-authorization"]
+      "engines": {
+        "authorization": { "model": "fga", "relations": ["member", "owner", "viewer"] },
+        "claims":        { "model": "expr", "direction": "outbound" },
+        "login":         { "model": "built-in" }
+      }
     },
     "service_user": {
-      "schema_file": "schemas/service_user.json",
-      "default_version": "1.0",
+      "$ref": "schemas/service_user.json",
+      "version": "1.0",
       "group": "identities",
       "alias": "Service Accounts",
       "singular": "Service Account",
@@ -36,11 +41,13 @@
       "icon": "🤖",
       "sort_order": 2,
       "storage": "entities",
-      "components": ["x-auth-methods", "x-engine-authorization"]
+      "engines": {
+        "authorization": { "model": "fga", "relations": ["member", "owner"] }
+      }
     },
     "ai_agent": {
-      "schema_file": "schemas/ai_agent.json",
-      "default_version": "1.0",
+      "$ref": "schemas/ai_agent.json",
+      "version": "1.0",
       "group": "identities",
       "alias": "AI Agents",
       "singular": "AI Agent",
@@ -48,11 +55,13 @@
       "icon": "🧠",
       "sort_order": 3,
       "storage": "entities",
-      "components": ["x-auth-methods", "x-engine-authorization"]
+      "engines": {
+        "authorization": { "model": "fga", "relations": ["owner", "viewer"] }
+      }
     },
     "app": {
-      "schema_file": "schemas/app.json",
-      "default_version": "1.0",
+      "$ref": "schemas/app.json",
+      "version": "1.0",
       "group": "applications",
       "alias": "OIDC Clients",
       "singular": "OIDC Client",
@@ -60,23 +69,25 @@
       "icon": "📱",
       "sort_order": 1,
       "storage": "entities",
-      "components": ["x-oidc", "x-engine-claim-mapping", "x-engine-authorization"]
+      "engines": {
+        "authorization": { "model": "fga", "relations": ["owner", "viewer"] },
+        "claims":        { "model": "expr", "direction": "outbound" }
+      }
     },
     "rule": {
-      "schema_file": "schemas/rule.json",
-      "default_version": "1.0",
+      "$ref": "schemas/rule.json",
+      "version": "1.0",
       "group": "configure",
       "alias": "Rules",
       "singular": "Rule",
       "path": "rules",
       "icon": "⚡",
       "sort_order": 2,
-      "storage": "entities",
-      "components": ["x-rule"]
+      "storage": "entities"
     },
     "provider": {
-      "schema_file": "schemas/provider.json",
-      "default_version": "1.0",
+      "$ref": "schemas/provider.json",
+      "version": "1.0",
       "group": "configure",
       "alias": "Providers",
       "singular": "Provider",
@@ -87,8 +98,8 @@
       "route": "/providers"
     },
     "session": {
-      "schema_file": "schemas/session.json",
-      "default_version": "1.0",
+      "$ref": "schemas/session.json",
+      "version": "1.0",
       "group": "observability",
       "alias": "Sessions",
       "singular": "Session",
@@ -99,8 +110,8 @@
       "route": "/sessions"
     },
     "event": {
-      "schema_file": "schemas/event.json",
-      "default_version": "1.0",
+      "$ref": "schemas/event.json",
+      "version": "1.0",
       "group": "observability",
       "alias": "Events",
       "singular": "Event",
@@ -111,8 +122,8 @@
       "route": "/events"
     },
     "job": {
-      "schema_file": "schemas/job.json",
-      "default_version": "1.0",
+      "$ref": "schemas/job.json",
+      "version": "1.0",
       "group": "observability",
       "alias": "Jobs",
       "singular": "Job",
@@ -123,8 +134,8 @@
       "route": "/jobs"
     },
     "password_policy": {
-      "schema_file": "schemas/password_policy.json",
-      "default_version": "1.0",
+      "$ref": "schemas/password_policy.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Password Policy",
       "singular": "Password Policy",
@@ -135,8 +146,8 @@
       "nav": "hidden"
     },
     "identifier_policy": {
-      "schema_file": "schemas/identifier_policy.json",
-      "default_version": "1.0",
+      "$ref": "schemas/identifier_policy.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Identifier Policy",
       "singular": "Identifier Policy",
@@ -147,8 +158,8 @@
       "nav": "hidden"
     },
     "login_policy": {
-      "schema_file": "schemas/login_policy.json",
-      "default_version": "1.0",
+      "$ref": "schemas/login_policy.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Login Policy",
       "singular": "Login Policy",
@@ -159,8 +170,8 @@
       "nav": "hidden"
     },
     "lockout_policy": {
-      "schema_file": "schemas/lockout_policy.json",
-      "default_version": "1.0",
+      "$ref": "schemas/lockout_policy.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Lockout Policy",
       "singular": "Lockout Policy",
@@ -171,8 +182,8 @@
       "nav": "hidden"
     },
     "rate_limit": {
-      "schema_file": "schemas/rate_limit.json",
-      "default_version": "1.0",
+      "$ref": "schemas/rate_limit.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Rate Limit",
       "singular": "Rate Limit",
@@ -183,8 +194,8 @@
       "nav": "hidden"
     },
     "session_policy": {
-      "schema_file": "schemas/session_policy.json",
-      "default_version": "1.0",
+      "$ref": "schemas/session_policy.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Session Policy",
       "singular": "Session Policy",
@@ -195,8 +206,8 @@
       "nav": "hidden"
     },
     "notification": {
-      "schema_file": "schemas/notification.json",
-      "default_version": "1.0",
+      "$ref": "schemas/notification.json",
+      "version": "1.0",
       "group": "settings",
       "alias": "Notification",
       "singular": "Notification Settings",
@@ -218,8 +229,8 @@
       "nav": "visible"
     },
     "org": {
-      "schema_file": "schemas/org.json",
-      "default_version": "1.0",
+      "$ref": "schemas/org.json",
+      "version": "1.0",
       "group": "system",
       "alias": "Organizations",
       "singular": "Organization",
@@ -228,7 +239,9 @@
       "sort_order": 2,
       "storage": "entities",
       "nav": "hidden",
-      "components": ["x-branding", "x-login", "x-engine-authorization"]
+      "engines": {
+        "authorization": { "model": "fga", "relations": ["member", "owner", "admin"] }
+      }
     }
   },
 
@@ -246,27 +259,17 @@
     },
     "x-login": {
       "type": "object",
-      "description": "Interactive login flow configuration.",
+      "description": "Interactive login flow configuration (default, overridable via settings).",
       "properties": {
-        "preset": {
-          "type": "string",
-          "enum": ["identifier_first", "passkey_first", "sso_only", "custom"],
-          "default": "identifier_first"
-        },
-        "mfa_required": {
-          "type": "boolean",
-          "default": false
-        },
-        "registration_allowed": {
-          "type": "boolean",
-          "default": true
-        }
+        "preset":                { "type": "string", "enum": ["identifier_first", "passkey_first", "sso_only", "custom"], "default": "identifier_first" },
+        "mfa_required":          { "type": "boolean", "default": false },
+        "registration_allowed":  { "type": "boolean", "default": true }
       },
       "additionalProperties": false
     },
     "x-branding": {
       "type": "object",
-      "description": "Visual customization for the login UI.",
+      "description": "Visual customization for the login UI (default, overridable via settings).",
       "properties": {
         "heading":              { "type": "string" },
         "description":          { "type": "string" },
@@ -296,12 +299,15 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "x-auth": { "$ref": "#/$defs/AuthFieldConfig" },
-          "x-claim-mapping":  { "type": "string" },
-          "x-sensitive":      { "type": "boolean" },
-          "x-hidden":         { "type": "boolean" },
-          "x-user-editable":  { "type": "boolean" },
-          "x-source":         { "type": "string", "enum": ["admin", "user", "system", "sso"] }
+          "x-identifier":  { "type": "boolean", "description": "Field can be used as a login identifier" },
+          "x-verify":      { "type": "string", "enum": ["email", "sms"], "description": "Verification channel" },
+          "x-recover":     { "type": "string", "enum": ["email", "sms"], "description": "Recovery channel" },
+          "x-mfa":         { "type": "string", "enum": ["sms", "totp"], "description": "MFA method via this field" },
+          "x-claim":       { "type": "string", "description": "Expr mapping to OIDC claims" },
+          "x-sensitive":   { "type": "boolean" },
+          "x-hidden":      { "type": "boolean" },
+          "x-editable":    { "type": "boolean" },
+          "x-source":      { "type": "string", "enum": ["admin", "user", "system", "sso"] }
         }
       }
     }
@@ -318,16 +324,6 @@
         "max_tokens":  { "type": "integer", "minimum": 1, "description": "Max tokens for PAT/API key methods" }
       },
       "required": ["enabled", "interactive"]
-    },
-    "AuthFieldConfig": {
-      "type": "object",
-      "description": "Per-field auth configuration from x-auth annotation.",
-      "properties": {
-        "identifier":   { "type": "boolean", "description": "Field can be used as a login identifier" },
-        "verification": { "type": "string", "enum": ["email", "sms"], "description": "Verification channel" },
-        "recovery":     { "type": "string", "enum": ["email", "sms"], "description": "Account recovery channel" },
-        "mfa":          { "type": "string", "enum": ["sms", "totp"], "description": "MFA method via this field" }
-      }
     }
   }
 }

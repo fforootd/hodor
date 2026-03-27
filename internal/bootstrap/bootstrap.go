@@ -174,7 +174,7 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 }
 
 // seedSchemas reads the x-catalog from the meta schema and seeds each entity
-// schema that has a schema_file into the database.
+// schema that has a $ref into the database.
 func seedSchemas(ctx context.Context, db *database.DB) error {
 	catalog, err := schema.Catalog()
 	if err != nil {
@@ -183,11 +183,11 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 
 	seeded := 0
 	for typeName, entry := range catalog {
-		if entry.SchemaFile == "" {
-			continue // System views (sessions, events, jobs) have no schema file.
+		if entry.Ref == "" {
+			continue // System views (sessions, events, jobs, schema) have no $ref.
 		}
 
-		schemaJSON, err := schema.LoadSchemaFile(entry.SchemaFile)
+		schemaJSON, err := schema.LoadSchemaFile(entry.Ref)
 		if err != nil {
 			return fmt.Errorf("load schema file for %s: %w", typeName, err)
 		}

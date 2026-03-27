@@ -2,7 +2,7 @@
 // and identity profile fields using expr expressions.
 //
 // Mapping resolution order:
-//  1. Schema x-claim-mapping annotations (defaults)
+//  1. Schema x-claim annotations (defaults; legacy: x-claim-mapping)
 //  2. Provider claim_overrides (takes priority)
 package login
 
@@ -15,7 +15,8 @@ import (
 	"github.com/expr-lang/expr"
 )
 
-// ClaimMappings extracts x-claim-mapping annotations from a JSON schema string.
+// ClaimMappings extracts x-claim annotations from a JSON schema string.
+// Falls back to x-claim-mapping for backward compatibility.
 // Returns a map of field_name → expr_expression.
 func ClaimMappings(schemaJSON string) map[string]string {
 	var schema struct {
@@ -27,7 +28,10 @@ func ClaimMappings(schemaJSON string) map[string]string {
 
 	result := make(map[string]string)
 	for field, def := range schema.Properties {
-		if mapping, ok := def["x-claim-mapping"].(string); ok && mapping != "" {
+		// Prefer x-claim (new), fall back to x-claim-mapping (legacy).
+		if mapping, ok := def["x-claim"].(string); ok && mapping != "" {
+			result[field] = mapping
+		} else if mapping, ok := def["x-claim-mapping"].(string); ok && mapping != "" {
 			result[field] = mapping
 		}
 	}
@@ -35,7 +39,7 @@ func ClaimMappings(schemaJSON string) map[string]string {
 }
 
 // MapClaims evaluates claim mapping expressions against raw OIDC claims.
-// Schema-level x-claim-mapping provides defaults; provider-level overrides take priority.
+// Schema-level x-claim (or legacy x-claim-mapping) provides defaults; provider-level overrides take priority.
 // Returns a profile map suitable for storing in the identity.
 func MapClaims(schemaJSON string, providerOverrides map[string]string, rawClaims map[string]any) (map[string]any, error) {
 	// 1. Extract default mappings from schema.
@@ -104,7 +108,7 @@ func DefaultEntraIDOverrides() map[string]string {
 // ---------- Outbound: Identity → OIDC Userinfo Claims ----------
 
 // standardOIDCClaims maps schema field names to their standard OIDC claim names.
-// This provides a fallback when x-claim-mapping is not present.
+// This provides a fallback when x-claim is not present.
 var standardOIDCClaims = map[string]string{
 	"email":        "email",
 	"phone":        "phone_number",
@@ -117,13 +121,12 @@ var standardOIDCClaims = map[string]string{
 	"nickname":     "nickname",
 }
 
-// UserinfoClaims reads x-claim-mapping annotations from a JSON schema and
-// maps identity data fields to standard OIDC claims. This is the outbound
-// counterpart to MapClaims (which handles inbound IDP claims).
+// UserinfoClaims reads x-claim (or legacy x-claim-mapping) annotations from
+// a JSON schema and maps identity data fields to standard OIDC claims.
+// This is the outbound counterpart to MapClaims (inbound IDP claims).
 //
-// Resolution: for each schema property with x-claim-mapping, extract the
-// target OIDC claim name from the expression, then emit data[field] under
-// that claim name.
+// Resolution: for each schema property with x-claim, extract the target
+// OIDC claim name from the expression, then emit data[field] under that claim name.
 func UserinfoClaims(schemaJSON string, data map[string]any) map[string]any {
 	var schema struct {
 		Properties map[string]map[string]any `json:"properties"`
@@ -142,7 +145,10 @@ func UserinfoClaims(schemaJSON string, data map[string]any) map[string]any {
 
 		// Determine the OIDC claim name.
 		var claimName string
-		if mapping, ok := def["x-claim-mapping"].(string); ok && mapping != "" {
+		// Prefer x-claim (new), fall back to x-claim-mapping (legacy).
+		if mapping, ok := def["x-claim"].(string); ok && mapping != "" {
+			claimName = OIDCClaimName(mapping)
+		} else if mapping, ok := def["x-claim-mapping"].(string); ok && mapping != "" {
 			claimName = OIDCClaimName(mapping)
 		}
 		if claimName == "" {
@@ -160,7 +166,7 @@ func UserinfoClaims(schemaJSON string, data map[string]any) map[string]any {
 	return result
 }
 
-// OIDCClaimName extracts the standard OIDC claim name from an x-claim-mapping
+// OIDCClaimName extracts the standard OIDC claim name from an x-claim
 // expression. It handles common patterns:
 //
 //	"claims.email"                                    → "email"

@@ -35,7 +35,8 @@ func SensitiveFields(schemaJSON string) map[string]bool {
 	return result
 }
 
-// UserEditableFields returns the set of field names marked x-user-editable: true.
+// UserEditableFields returns the set of field names marked x-editable: true.
+// Falls back to x-user-editable for backward compatibility.
 // If the annotation is absent, defaultEditable determines the default.
 func UserEditableFields(schemaJSON string, defaultEditable bool) map[string]bool {
 	props := SchemaProperties(schemaJSON)
@@ -44,6 +45,13 @@ func UserEditableFields(schemaJSON string, defaultEditable bool) map[string]bool
 	}
 	result := make(map[string]bool)
 	for name, def := range props {
+		// Prefer x-editable (new), fall back to x-user-editable (legacy).
+		if editable, ok := def["x-editable"]; ok {
+			if b, ok := editable.(bool); ok {
+				result[name] = b
+				continue
+			}
+		}
 		if editable, ok := def["x-user-editable"]; ok {
 			if b, ok := editable.(bool); ok {
 				result[name] = b

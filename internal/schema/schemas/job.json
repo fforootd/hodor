@@ -1,14 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Jobs",
-    "singular": "Job",
-    "group": "observability",
-    "path": "jobs",
-    "icon": "⚡"
-  },
-  "x-storage": "dedicated",
   "description": "Background job execution state.",
   "properties": {
     "id": {

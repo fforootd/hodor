@@ -1,6 +1,7 @@
 // Package login Flow Engine — schema-driven login flow state machine.
 //
-// Reads x-auth (per-field), x-login (schema-level), and x-branding
+// Reads per-field annotations (x-identifier, x-verify, x-recover, x-mfa),
+// x-auth-methods, x-login (schema-level), and x-branding
 // annotations from entity schemas to determine step ordering
 // and generate UI node trees.
 package login
@@ -13,7 +14,7 @@ import (
 
 // ─── Schema Annotation Types ────────────────────────────────
 
-// AuthFieldConfig represents the x-auth annotation on a schema property.
+// AuthFieldConfig represents the per-field auth annotations (x-identifier, x-verify, x-recover, x-mfa).
 type AuthFieldConfig struct {
 	Identifier   bool   `json:"identifier"`
 	Verification string `json:"verification,omitempty"` // "email", "sms"
@@ -62,7 +63,7 @@ type SchemaAuthConfig struct {
 
 // ─── Annotation Extraction ──────────────────────────────────
 
-// ExtractAuthConfig parses x-auth, x-auth-methods, x-login, and x-branding from a JSON schema string.
+// ExtractAuthConfig parses per-field auth annotations, x-auth-methods, x-login, and x-branding from a JSON schema string.
 func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	var raw struct {
 		Properties  map[string]map[string]any `json:"properties"`
@@ -81,19 +82,32 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 		Branding:    defaultBrandingConfig(),
 	}
 
-	// Extract per-field x-auth annotations.
+	// Extract per-field auth annotations (flat: x-identifier, x-verify, x-recover, x-mfa).
+	// Also supports legacy x-auth nested format for backward compatibility.
 	for name, def := range raw.Properties {
-		xAuth, ok := def["x-auth"]
-		if !ok {
-			continue
-		}
-		// x-auth can be a map[string]any from JSON unmarshalling.
-		b, err := json.Marshal(xAuth)
-		if err != nil {
-			continue
-		}
 		var fc AuthFieldConfig
-		if json.Unmarshal(b, &fc) == nil {
+
+		// New flat format.
+		if v, ok := def["x-identifier"].(bool); ok {
+			fc.Identifier = v
+		}
+		if v, ok := def["x-verify"].(string); ok {
+			fc.Verification = v
+		}
+		if v, ok := def["x-recover"].(string); ok {
+			fc.Recovery = v
+		}
+		if v, ok := def["x-mfa"].(string); ok {
+			fc.MFA = v
+		}
+
+		// Legacy x-auth nested format (backward compat).
+		if xAuth, ok := def["x-auth"]; ok && !fc.Identifier {
+			b, _ := json.Marshal(xAuth)
+			_ = json.Unmarshal(b, &fc)
+		}
+
+		if fc.Identifier || fc.Verification != "" || fc.Recovery != "" || fc.MFA != "" {
 			config.Fields[name] = fc
 			if fc.Identifier {
 				config.Identifiers = append(config.Identifiers, name)

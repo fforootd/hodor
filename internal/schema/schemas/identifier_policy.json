@@ -1,13 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/settings",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Identifier Policy",
-    "singular": "Identifier Policy",
-    "group": "settings",
-    "path": "settings/identifier-policy",
-    "icon": "🆔"
-  },
   "x-settings": {
     "hierarchy": [
       "instance",

@@ -1,14 +1,7 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Events",
-    "singular": "Event",
-    "group": "observability",
-    "path": "events",
-    "icon": "📋"
-  },
-  "x-storage": "dedicated",
   "description": "Audit event recorded in the event stream. Read-only.",
   "properties": {
     "id": {

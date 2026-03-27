@@ -1,39 +1,14 @@
 {
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "x-display": {
-    "alias": "Service Accounts",
-    "singular": "Service Account",
-    "group": "identities",
-    "group_label": "Identities",
-    "path": "service-accounts",
-    "icon": "🤖",
-    "sort_order": 2
-  },
-  "x-storage": "entities",
-  "x-engine-authorization": {
-    "engine": "fga",
-    "relations": [
-      "member",
-      "owner"
-    ]
-  },
+
   "x-auth-methods": {
-    "pat": {
-      "enabled": true,
-      "interactive": false,
-      "max_tokens": 10
-    },
-    "api_key": {
-      "enabled": true,
-      "interactive": false
-    },
-    "password": {
-      "enabled": true,
-      "interactive": true,
-      "position": 1
-    }
+    "pat":      { "enabled": true,  "interactive": false, "max_tokens": 10 },
+    "api_key":  { "enabled": true,  "interactive": false },
+    "password": { "enabled": true,  "interactive": true,  "position": 1 }
   },
+
   "properties": {
     "display_name": {
       "type": "string",
@@ -49,9 +24,7 @@
     },
     "api_scopes": {
       "type": "array",
-      "items": {
-        "type": "string"
-      },
+      "items": { "type": "string" },
       "description": "Allowed API scopes"
     },
     "rate_limit": {
@@ -67,7 +40,5 @@
       "type": "object"
     }
   },
-  "required": [
-    "display_name"
-  ]
+  "required": ["display_name"]
 }
