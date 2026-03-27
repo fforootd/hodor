@@ -187,10 +187,7 @@ onMounted(async () => {
     if (selectedOrgId.value && !orgs.value.find(o => o.id === selectedOrgId.value)) {
       selectOrg(null)
     }
-    // Auto-select if only one org and nothing saved.
-    if (!selectedOrgId.value && orgs.value.length === 1) {
-      selectOrg(orgs.value[0])
-    }
+    // No auto-select — always start with "All Orgs"
   } catch { /* ignore */ }
 })
 
