@@ -234,22 +234,34 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 
 	// Optional schema_type filter (e.g. ?schema_type=app for OIDC clients).
 	schemaType := r.URL.Query().Get("schema_type")
+	// Optional org_id filter for org context scoping.
+	orgIDFilter := r.URL.Query().Get("org_id")
 
 	var rows *sql.Rows
 	var err error
+
+	// Build query dynamically based on filters.
+	var where []string
+	var args []any
+	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.state, i.profile, i.metadata, i.data, i.created_at, i.updated_at
+		 FROM identities i`
 	if schemaType != "" {
-		rows, err = a.db.SQL().QueryContext(r.Context(),
-			`SELECT i.id, i.org_id, i.identifier, i.display_name, i.state, i.profile, i.metadata, i.data, i.created_at, i.updated_at
-			 FROM identities i
-			 JOIN schemas s ON i.schema_id = s.id
-			 WHERE s.type = ? AND i.id > ? ORDER BY i.id ASC LIMIT ?`,
-			schemaType, cursor, limit+1)
-	} else {
-		rows, err = a.db.SQL().QueryContext(r.Context(),
-			`SELECT id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at
-			 FROM identities WHERE id > ? ORDER BY id ASC LIMIT ?`,
-			cursor, limit+1)
+		baseSelect += ` JOIN schemas s ON i.schema_id = s.id`
+		where = append(where, `s.type = ?`)
+		args = append(args, schemaType)
 	}
+	if orgIDFilter != "" {
+		if oid, e := strconv.ParseInt(orgIDFilter, 10, 64); e == nil {
+			where = append(where, `i.org_id = ?`)
+			args = append(args, oid)
+		}
+	}
+	where = append(where, `i.id > ?`)
+	args = append(args, cursor)
+
+	query := baseSelect + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY i.id ASC LIMIT ?`
+	args = append(args, limit+1)
+	rows, err = a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return

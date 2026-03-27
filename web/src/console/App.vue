@@ -111,7 +111,7 @@
         </div>
       </header>
       <div class="page-body">
-        <router-view :key="$route.fullPath" />
+        <router-view :key="`${$route.fullPath}__org_${selectedOrgId || 'all'}`" />
       </div>
     </main>
   </div>

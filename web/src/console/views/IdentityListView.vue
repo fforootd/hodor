@@ -68,7 +68,10 @@ const identities = ref<Identity[]>([])
 
 onMounted(async () => {
   try {
-    const res = await fetch(`/v1/identities?schema_type=${props.schemaType}`)
+    let url = `/v1/identities?schema_type=${props.schemaType}`
+    const orgId = localStorage.getItem('zitadel_org')
+    if (orgId) url += `&org_id=${orgId}`
+    const res = await fetch(url)
     const data = await res.json()
     identities.value = data.items || []
   } catch { /* ignore */ }
