@@ -9,7 +9,7 @@ package login
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"strings"
 
 	"github.com/expr-lang/expr"
@@ -62,7 +62,7 @@ func MapClaims(schemaJSON string, providerOverrides map[string]string, rawClaims
 	for field, exprStr := range merged {
 		val, err := evalClaimExpr(exprStr, env)
 		if err != nil {
-			log.Printf("[claims] expr eval error for field %q: %v (expr: %s)", field, err, exprStr)
+			logging.Printf("[claims] expr eval error for field %q: %v (expr: %s)", field, err, exprStr)
 			continue // skip fields that fail to evaluate
 		}
 		if val != nil && val != "" {

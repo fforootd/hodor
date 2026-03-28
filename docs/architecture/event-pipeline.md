@@ -65,7 +65,7 @@ graph LR
     C --> U["???"]
 ```
 
-Zitadel emits events as OpenTelemetry log records. The customer's OTEL collector routes them wherever they want (Splunk, Grafana, ClickHouse, S3). Zitadel never reads from this path. See [ADR-010](../010-analytics-two-tier.md).
+Zitadel emits events as OpenTelemetry log records. The customer's OTEL collector routes them wherever they want (Splunk, Grafana, ClickHouse, S3). Zitadel never reads from this path. See [ADR-010](../adr/010-three-tier-data.md).
 
 ### 3. Threat Workers (Future — expr Rules + SLM)
 
@@ -121,35 +121,35 @@ Every event follows a consistent envelope:
 ```json
 {
   "id": "01JNQWX...",
-  "type": "entity.created",
+  "event_type": "entity.created",
+  "category": "entity",
   "org_id": "org_abc",
   "actor_id": "identity_xyz",
   "aggregate_id": "identity_new123",
   "aggregate_type": "identity",
-  "timestamp": "2026-03-25T20:24:00Z",
+  "created_at": "2026-03-25T20:24:00Z",
   "payload": {
     "identifier": "alice@acme.com",
     "display_name": "Alice"
-  },
-  "metadata": {
-    "ip": "203.0.113.42",
-    "user_agent": "Mozilla/5.0...",
-    "geo": "US-CA"
   }
 }
 ```
 
 ## Event Types
 
-| Category | Event Types |
-|---|---|
-| **Auth** | `auth.session.created`, `auth.session.revoked`, `auth.password.succeeded`, `auth.password.failed`, `auth.passkey.succeeded`, `auth.magic_link.sent` |
-| **Entity** | `entity.created`, `entity.updated`, `entity.deleted` |
-| **Token** | `token.issued`, `token.refreshed`, `token.revoked`, `token.introspected` |
-| **Schema** | `schema.created`, `schema.updated`, `schema.deleted` |
-| **Org** | `org.created`, `org.updated`, `org.domain.added`, `org.domain.verified` |
-| **Notification** | `notification.sent`, `notification.failed`, `notification.retried` |
-| **Threat** | `threat.detected`, `threat.classified`, `threat.action.executed` |
+| Category | Event Types | Source |
+|---|---|---|
+| **Auth** | `auth.session.created`, `auth.session.revoked`, `auth.password.succeeded`, `auth.password.failed`, `auth.passkey.succeeded`, `auth.magic_link.sent`, `auth.login_completed` | `emitEvent()` in TX |
+| **Entity** | `entity.created`, `entity.updated`, `entity.deleted` | `emitEvent()` in TX |
+| **Session** | `session.created`, `session.revoked` | `emitEvent()` in TX |
+| **Token** | `token.issued`, `token.refreshed`, `token.revoked`, `token.introspected` | `emitEvent()` in TX |
+| **Schema** | `schema.created`, `schema.updated`, `schema.deleted` | `emitEvent()` in TX |
+| **Org** | `org.created`, `org.updated`, `org.domain.added`, `org.domain.verified` | `emitEvent()` in TX |
+| **Notification** | `notification.sent`, `notification.failed`, `notification.retried` | `emitEvent()` in TX |
+| **Request** | `request.api`, `request.oidc`, `request.login` | Logger → cache → drain (sampled) |
+| **Log** | `log.error`, `log.warn`, `log.info` | Logger → cache → drain (buffered) |
+| **Signal** | `signal.ui.rendered` *(future)* | OTLP ingestion |
+| **Threat** | `threat.detected`, `threat.classified`, `threat.action.executed` | Intelligence engine |
 
 ## Configuration
 

@@ -91,16 +91,102 @@ type SecurityHeadersConfig struct {
 	CrossOriginOpener   string `toml:"cross_origin_opener"`    // default: "same-origin"
 }
 
-// DatabaseConfig controls the primary database connection.
+// DatabaseConfig controls the primary database connection and startup lifecycle.
 type DatabaseConfig struct {
 	URL string `toml:"url"`
+
+	// Migrate controls schema migration behavior on 'zitadel start'.
+	//   "auto"  — run migrations before serving (default for all dialects)
+	//   "check" — verify version only, fail if behind (opt-in for production PG)
+	//   "skip"  — no version check, no migration (fastest cold-start)
+	//   ""      — same as "auto" (consistent default)
+	Migrate string `toml:"migrate"`
+
+	// Bootstrap controls admin/schema bootstrapping on 'zitadel start'.
+	//   "auto"  — run bootstrap if no entities exist (default)
+	//   "skip"  — never bootstrap (production: admin created via 'zitadel migrate --bootstrap')
+	//   ""      — same as "auto"
+	Bootstrap string `toml:"bootstrap"`
+
+	// Connection pool settings (Postgres only; ignored for SQLite).
+	MaxOpenConns    int    `toml:"max_open_conns"`    // default: 25
+	MaxIdleConns    int    `toml:"max_idle_conns"`    // default: 5
+	ConnMaxLifetime string `toml:"conn_max_lifetime"` // default: "1h" (duration string)
 }
 
-// ObservabilityConfig controls logging and telemetry.
+// ResolveMigrateMode returns the effective migration mode.
+// Empty string defaults to "auto" (consistent for all dialects).
+func (c *DatabaseConfig) ResolveMigrateMode() string {
+	switch c.Migrate {
+	case "auto", "check", "skip":
+		return c.Migrate
+	default:
+		return "auto"
+	}
+}
+
+// ResolveBootstrapMode returns the effective bootstrap mode.
+// Empty string defaults to "auto".
+func (c *DatabaseConfig) ResolveBootstrapMode() string {
+	switch c.Bootstrap {
+	case "auto", "skip":
+		return c.Bootstrap
+	default:
+		return "auto"
+	}
+}
+
+// ObservabilityConfig controls logging, telemetry, and log routing.
 type ObservabilityConfig struct {
-	OTLPEndpoint string `toml:"otlp_endpoint"`
-	LogLevel     string `toml:"log_level"`
-	LogFormat    string `toml:"log_format"`
+	LogLevel  string              `toml:"log_level"`
+	LogFormat string              `toml:"log_format"`
+	CachePath string              `toml:"cache_path"` // local SQLite cache file (default: "zitadel-cache.db")
+	CacheMax  int                 `toml:"cache_max"`  // ring buffer max rows (default: 50000, 0 = unlimited)
+	Streams   StreamRoutingConfig `toml:"streams"`
+	Sinks     SinksConfig         `toml:"sinks"`
+	Redaction RedactionConfig     `toml:"redaction"`
+}
+
+// StreamConfig configures a single log stream.
+type StreamConfig struct {
+	Sinks      []string `toml:"sinks"`       // ["stdout", "otel", "analytics"]
+	Mode       string   `toml:"mode"`        // "buffered" | "sampled" | "off"
+	SampleRate float64  `toml:"sample_rate"` // for "sampled" mode (e.g., 0.01 = 1%)
+}
+
+// StreamRoutingConfig maps each log stream to its configuration.
+// Omitted streams inherit sensible defaults.
+type StreamRoutingConfig struct {
+	Runtime     StreamConfig `toml:"runtime"`
+	Request     StreamConfig `toml:"request"`
+	Jobs        StreamConfig `toml:"jobs"`
+	EventPusher StreamConfig `toml:"event_pusher"`
+}
+
+// SinksConfig holds per-sink configuration.
+type SinksConfig struct {
+	OTEL      OTELSinkConfig      `toml:"otel"`
+	Analytics AnalyticsSinkConfig `toml:"analytics"`
+}
+
+// OTELSinkConfig configures the OTEL log exporter.
+type OTELSinkConfig struct {
+	Endpoint string `toml:"endpoint"` // OTLP endpoint (empty = disabled)
+	Protocol string `toml:"protocol"` // "grpc" | "http"
+}
+
+// AnalyticsSinkConfig configures the analytics log sink.
+type AnalyticsSinkConfig struct {
+	Enabled       bool   `toml:"enabled"`        // writes log events to cache → events table
+	DrainInterval string `toml:"drain_interval"` // how often to flush cache (default: "5s")
+	DrainBatch    int    `toml:"drain_batch"`    // rows per flush (default: 500)
+}
+
+// RedactionConfig controls masking of sensitive fields in log output.
+type RedactionConfig struct {
+	Keys   []string `toml:"keys"`    // field key fragments to mask (case-insensitive)
+	Mask   string   `toml:"mask"`    // replacement string (default: "***REDACTED***")
+	IPMode string   `toml:"ip_mode"` // IP address handling: "keep" | "redact" | "hash" | "mask"
 }
 
 // WorkersConfig controls async background worker counts.
@@ -161,11 +247,48 @@ func Defaults() *Config {
 			},
 		},
 		Database: DatabaseConfig{
-			URL: "sqlite://./zitadel.db",
+			URL:             "sqlite://./zitadel.db",
+			Migrate:         "", // auto-detect: "auto" for all dialects
+			Bootstrap:       "", // auto-detect: "auto" for all dialects
+			MaxOpenConns:    25,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: "1h",
 		},
 		Observability: ObservabilityConfig{
 			LogLevel:  "info",
 			LogFormat: "text",
+			CachePath: "zitadel-cache.db",
+			CacheMax:  50000,
+			Streams: StreamRoutingConfig{
+				Runtime: StreamConfig{
+					Sinks: []string{"stdout", "analytics"},
+					Mode:  "buffered",
+				},
+				Request: StreamConfig{
+					Sinks:      []string{"stdout", "otel", "analytics"},
+					Mode:       "sampled",
+					SampleRate: 0.01,
+				},
+				Jobs: StreamConfig{
+					Sinks: []string{"stdout", "analytics"},
+					Mode:  "buffered",
+				},
+				EventPusher: StreamConfig{
+					Mode: "off",
+				},
+			},
+			Sinks: SinksConfig{
+				Analytics: AnalyticsSinkConfig{
+					Enabled:       true,
+					DrainInterval: "5s",
+					DrainBatch:    500,
+				},
+			},
+			Redaction: RedactionConfig{
+				Keys:   []string{"password", "secret", "token", "client_secret", "private_key"},
+				Mask:   "***REDACTED***",
+				IPMode: "keep",
+			},
 		},
 		Workers: WorkersConfig{
 			NotificationWorkers: 1,
@@ -198,6 +321,14 @@ func Load(path string) (*Config, error) {
 }
 
 func applyEnv(cfg *Config) {
+	applyServerEnv(cfg)
+	applyDatabaseEnv(cfg)
+	applyObservabilityEnv(cfg)
+	applyDevEnv(cfg)
+	applyRateLimitEnv(cfg)
+}
+
+func applyServerEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
@@ -212,11 +343,48 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_TLS_KEY"); v != "" {
 		cfg.Server.TLSKey = v
 	}
+	if v := os.Getenv("ZITADEL_BASE_PATH"); v != "" {
+		cfg.Server.BasePath = v
+	}
+	if v := os.Getenv("ZITADEL_TRUSTED_PROXIES"); v != "" {
+		cfg.Server.TrustedProxies = splitCSV(v)
+	}
+	if v := os.Getenv("ZITADEL_PROXY_HEADER_MODE"); v != "" {
+		cfg.Server.ProxyHeaderMode = v
+	}
+	if v := os.Getenv("ZITADEL_REAL_IP_HEADER"); v != "" {
+		cfg.Server.RealIPHeader = v
+	}
+}
+
+func applyDatabaseEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_DATABASE_URL"); v != "" {
 		cfg.Database.URL = v
 	}
+	if v := os.Getenv("ZITADEL_DATABASE_MIGRATE"); v != "" {
+		cfg.Database.Migrate = v
+	}
+	if v := os.Getenv("ZITADEL_DATABASE_BOOTSTRAP"); v != "" {
+		cfg.Database.Bootstrap = v
+	}
+	if v := os.Getenv("ZITADEL_DATABASE_MAX_OPEN_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Database.MaxOpenConns = n
+		}
+	}
+	if v := os.Getenv("ZITADEL_DATABASE_MAX_IDLE_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Database.MaxIdleConns = n
+		}
+	}
+	if v := os.Getenv("ZITADEL_DATABASE_CONN_MAX_LIFETIME"); v != "" {
+		cfg.Database.ConnMaxLifetime = v
+	}
+}
+
+func applyObservabilityEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_OTLP_ENDPOINT"); v != "" {
-		cfg.Observability.OTLPEndpoint = v
+		cfg.Observability.Sinks.OTEL.Endpoint = v
 	}
 	if v := os.Getenv("ZITADEL_LOG_LEVEL"); v != "" {
 		cfg.Observability.LogLevel = v
@@ -224,7 +392,24 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_LOG_FORMAT"); v != "" {
 		cfg.Observability.LogFormat = v
 	}
-	// Dev / feature flags
+	if v := os.Getenv("ZITADEL_LOG_STREAMS_RUNTIME"); v != "" {
+		cfg.Observability.Streams.Runtime.Sinks = splitCSV(v)
+	}
+	if v := os.Getenv("ZITADEL_LOG_STREAMS_REQUEST"); v != "" {
+		cfg.Observability.Streams.Request.Sinks = splitCSV(v)
+	}
+	if v := os.Getenv("ZITADEL_LOG_STREAMS_JOBS"); v != "" {
+		cfg.Observability.Streams.Jobs.Sinks = splitCSV(v)
+	}
+	if v := os.Getenv("ZITADEL_LOG_STREAMS_EVENT_PUSHER"); v != "" {
+		cfg.Observability.Streams.EventPusher.Sinks = splitCSV(v)
+	}
+	if v := os.Getenv("ZITADEL_LOG_REDACT_KEYS"); v != "" {
+		cfg.Observability.Redaction.Keys = splitCSV(v)
+	}
+}
+
+func applyDevEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_MOCK_OIDC"); v == "true" || v == "1" {
 		cfg.Dev.MockOIDC = true
 	}
@@ -236,24 +421,9 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_SEED_FILE"); v != "" {
 		cfg.Dev.SeedFile = v
 	}
+}
 
-	// Path-based deployment
-	if v := os.Getenv("ZITADEL_BASE_PATH"); v != "" {
-		cfg.Server.BasePath = v
-	}
-
-	// Proxy trust
-	if v := os.Getenv("ZITADEL_TRUSTED_PROXIES"); v != "" {
-		cfg.Server.TrustedProxies = splitCSV(v)
-	}
-	if v := os.Getenv("ZITADEL_PROXY_HEADER_MODE"); v != "" {
-		cfg.Server.ProxyHeaderMode = v
-	}
-	if v := os.Getenv("ZITADEL_REAL_IP_HEADER"); v != "" {
-		cfg.Server.RealIPHeader = v
-	}
-
-	// Rate limit backend
+func applyRateLimitEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_RATE_LIMIT_BACKEND"); v != "" {
 		cfg.RateLimit.Backend = v
 	}

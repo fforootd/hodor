@@ -8,7 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
 	"github.com/openfga/openfga/pkg/server"
@@ -59,7 +59,7 @@ func New(ctx context.Context, db *sql.DB, dialect string) (*Service, error) {
 		return nil, fmt.Errorf("fga: ensure system store: %w", err)
 	}
 
-	log.Printf("[fga] embedded OpenFGA ready (store=%s)", svc.storeID)
+	logging.Printf("[fga] embedded OpenFGA ready (store=%s)", svc.storeID)
 
 	// 5. Load the authorization model (idempotent).
 	if err := svc.ensureAuthModel(ctx); err != nil {
@@ -362,6 +362,6 @@ func (s *Service) ensureAuthModel(ctx context.Context) error {
 	}
 
 	s.modelID = resp.GetAuthorizationModelId()
-	log.Printf("[fga] authorization model loaded (user, instance, org, entity, app, group, settings, session)")
+	logging.Printf("[fga] authorization model loaded (user, instance, org, entity, app, group, settings, session)")
 	return nil
 }

@@ -615,7 +615,7 @@ const waterfallSpans = computed(() => {
     let payload: any = {}
     try { payload = JSON.parse(raw.payload || '{}') } catch {}
 
-    const isApiRequest = raw.event_type === 'api.request'
+    const isApiRequest = raw.event_type === 'request.api'
     let icon = Activity
     let iconColor = 'text-blue-500'
     let iconBg = 'bg-blue-500/10'

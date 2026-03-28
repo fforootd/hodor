@@ -8,7 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strconv"
 	"strings"
@@ -105,7 +105,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 func (a *API) registerAliasRoutes(mux *http.ServeMux) {
 	catalog, err := schema.Catalog()
 	if err != nil {
-		log.Printf("[alias] failed to load catalog: %v", err)
+		logging.Printf("[alias] failed to load catalog: %v", err)
 		return
 	}
 
@@ -123,7 +123,7 @@ func (a *API) registerAliasRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
 		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
 
-		log.Printf("[alias] registered /v1/%s → entities (type=%s)", entry.Path, st)
+		logging.Printf("[alias] registered /v1/%s → entities (type=%s)", entry.Path, st)
 	}
 }
 
@@ -276,7 +276,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 			orgID = "1" // default org
 		}
 		if err := svc.OnEntityCreated(r.Context(), identityID, creatorID, orgID); err != nil {
-			log.Printf("[fga] warn: failed to write entity tuples: %v", err)
+			logging.Printf("[fga] warn: failed to write entity tuples: %v", err)
 		}
 	}
 
@@ -488,7 +488,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	// Wire FGA: clean up all tuples for deleted entity.
 	if svc := FGAService; svc != nil {
 		if err := svc.OnEntityDeleted(r.Context(), identityID); err != nil {
-			log.Printf("[fga] warn: failed to delete entity tuples: %v", err)
+			logging.Printf("[fga] warn: failed to delete entity tuples: %v", err)
 		}
 	}
 
@@ -1404,12 +1404,11 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
 	tx.ExecContext(ctx,
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
-		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
 }
 
-// EmitAuthEvent is an exported helper for the UI to emit auth-related events.
 func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
 	eventID := id.New()
 	payloadJSON := "{}"
@@ -1422,9 +1421,9 @@ func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID strin
 	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
 	a.db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
-		 VALUES (?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, actorID, actorID, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, eventCategory(eventType), actorID, actorID, payloadJSON, traceID, spanID, parentSpanID, sessionID)
 	a.bus.Signal()
 }
 
@@ -1443,9 +1442,40 @@ func emitEventSimple(ctx context.Context, db interface {
 	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
 	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
-		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
-		eventIDVal, eventType, actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
+		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+}
+
+// eventCategory derives the event category from the event_type prefix.
+func eventCategory(eventType string) string {
+	for i := 0; i < len(eventType); i++ {
+		if eventType[i] == '.' {
+			prefix := eventType[:i]
+			switch prefix {
+			case "entity", "identity", "provider", "settings", "schema":
+				return "entity"
+			case "auth":
+				return "auth"
+			case "session":
+				return "session"
+			case "token":
+				return "token"
+			case "request", "api":
+				return "request"
+			case "log":
+				return "log"
+			case "signal":
+				return "signal"
+			case "threat":
+				return "threat"
+			case "notification":
+				return "system"
+			}
+			return prefix
+		}
+	}
+	return "system"
 }
 
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
 )
@@ -64,9 +65,12 @@ func (rw *responseWriterWrapper) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// EventStreamMiddleware logs authenticated API requests into the event stream.
-// It expects to be wrapped inside AuthGate so that the user identity is resolved.
-func EventStreamMiddleware(db *sql.DB) func(http.Handler) http.Handler {
+// RequestLogMiddleware logs authenticated API requests via the structured
+// logging system. Request records flow through the cache sink (Tier 2) and
+// are batch-drained to the analytics backend. This replaces the old
+// EventStreamMiddleware that wrote directly to the events table.
+func RequestLogMiddleware() func(http.Handler) http.Handler {
+	logger := logging.New(logging.StreamRequest)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -78,19 +82,17 @@ func EventStreamMiddleware(db *sql.DB) func(http.Handler) http.Handler {
 
 			actorID := r.Header.Get("X-Identity-Id")
 			if actorID == "" {
-				// Don't log unauthenticated requests to the event stream
+				// Don't log unauthenticated requests.
 				return
 			}
 
-			payload := map[string]any{
-				"method":      r.Method,
-				"path":        r.URL.Path,
-				"status":      rw.statusCode,
-				"duration_ms": duration,
-			}
-
-			// Context already has trace_id, span_id (from OTelMiddleware) and session_id (from AuthGate)
-			emitEventSimple(r.Context(), db, "api.request", actorID, "", "api", payload)
+			logger.InfoContext(r.Context(), "request.api",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", rw.statusCode,
+				"duration_ms", duration,
+				"actor_id", actorID,
+			)
 		})
 	}
 }

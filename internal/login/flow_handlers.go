@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
 
@@ -41,7 +41,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.flows.Put(flow)
-	log.Printf("[flow] created %s (preset=%s, step=%s)", flowID, cfg.Login.Preset, flow.CurrentStep)
+	logging.Printf("[flow] created %s (preset=%s, step=%s)", flowID, cfg.Login.Preset, flow.CurrentStep)
 
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
@@ -140,7 +140,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	flow.CurrentStep = StepAuthSelect
 	h.flows.Put(flow)
 
-	log.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.EntityID)
+	logging.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.EntityID)
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
@@ -156,7 +156,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 		flow.IdentityID,
 	).Scan(&credData)
 	if err != nil {
-		log.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IdentityID, err)
+		logging.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IdentityID, err)
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -164,7 +164,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	// Extract hash from credential_data JSON: {"hash":"..."}
 	hash := auth.DecodeCredentialJSON(credData)
 	if hash == "" {
-		log.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
+		logging.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -200,7 +200,7 @@ func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, fl
 	}
 
 	// Delegate to existing magic link infrastructure.
-	log.Printf("[flow] %s sending magic link to %s", flow.ID, flow.Identifier)
+	logging.Printf("[flow] %s sending magic link to %s", flow.ID, flow.Identifier)
 	flow.CurrentStep = StepMagicLink
 	h.flows.Put(flow)
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
@@ -234,7 +234,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 	flow.CurrentStep = StepComplete
 	h.flows.Put(flow)
 
-	log.Printf("[flow] %s completed (identity=%s, session=%s)", flow.ID, flow.IdentityID, sessResp.Session.ID)
+	logging.Printf("[flow] %s completed (identity=%s, session=%s)", flow.ID, flow.IdentityID, sessResp.Session.ID)
 
 	h.api.EmitAuthEvent(r.Context(), "auth.login_completed", flow.IdentityID, map[string]any{
 		"session_id": sessResp.Session.ID,

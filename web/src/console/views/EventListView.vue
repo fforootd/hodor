@@ -9,7 +9,7 @@
     <div class="flex items-center gap-6 p-4 rounded-lg border text-sm bg-card text-muted-foreground">
       <div class="flex items-center space-x-2 text-primary">
         <Activity class="w-4 h-4" />
-        <span class="font-medium">{{ countApi }} API events</span>
+        <span class="font-medium">{{ countApi }} Request events</span>
       </div>
       <div class="w-px h-4 bg-border"></div>
       <div class="flex items-center space-x-2 text-blue-600">
@@ -262,7 +262,7 @@ function formatDateOnly(ts?: string) {
 }
 
 const totalCount = computed(() => events.value.length)
-const countApi = computed(() => events.value.filter(s => s.event_type.includes('api')).length)
+const countApi = computed(() => events.value.filter(s => s.event_type.includes('request')).length)
 const countAuth = computed(() => events.value.filter(s => s.event_type.includes('auth')).length)
 const countSession = computed(() => events.value.filter(s => s.event_type.includes('session')).length)
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zitadel/zitadel/internal/logging"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,7 +17,7 @@ import (
 // by 10 seconds to avoid competing with boot.
 func (s *Service) StartBackground() {
 	if s.cfg.URL == "" && s.cfg.LocalPath == "" {
-		log.Printf("[catalog] no remote source configured, using embedded only")
+		logging.Printf("[catalog] no remote source configured, using embedded only")
 		return
 	}
 
@@ -42,7 +42,7 @@ func (s *Service) Refresh(ctx context.Context) (int, error) {
 		diff = 0
 	}
 
-	log.Printf("[catalog] refreshed: %d remote templates, %d new", len(idx.Templates), diff)
+	logging.Printf("[catalog] refreshed: %d remote templates, %d new", len(idx.Templates), diff)
 	return diff, nil
 }
 
@@ -97,7 +97,7 @@ func (s *Service) backgroundRefresh() {
 	// Periodic refresh.
 	interval := parseDuration(s.cfg.RefreshInterval, 1*time.Hour)
 	if interval == 0 {
-		log.Printf("[catalog] refresh_interval=0, remote refresh disabled after initial")
+		logging.Printf("[catalog] refresh_interval=0, remote refresh disabled after initial")
 		return
 	}
 
@@ -115,13 +115,13 @@ func (s *Service) backgroundRefresh() {
 func (s *Service) tryRefresh(ctx context.Context) {
 	idx, err := s.fetchRemoteIndex(ctx)
 	if err != nil {
-		log.Printf("[catalog] remote refresh failed (using cached/embedded): %v", err)
+		logging.Printf("[catalog] remote refresh failed (using cached/embedded): %v", err)
 		return
 	}
 
 	s.SetRemote(idx)
 	s.CacheToDB(idx)
-	log.Printf("[catalog] refreshed from remote: %d templates", len(idx.Templates))
+	logging.Printf("[catalog] refreshed from remote: %d templates", len(idx.Templates))
 }
 
 // fetchRemoteIndex fetches the catalog index from the configured source.

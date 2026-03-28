@@ -18,13 +18,15 @@
 | [007](adr/007-schema-engine-interaction.md) | Schema ↔ Engine Interaction Model | Proposed | 2026-03-27 |
 | [008](adr/008-meta-schema-catalog.md) | Meta Schema as Entity Catalog | Proposed | 2026-03-27 |
 | [009](adr/009-settings-engine-pipeline.md) | Hierarchical Settings & Engine Pipeline | Proposed | 2026-03-27 |
-| [010](adr/010-analytics-two-tier.md) | Identity Observability — Three Domains & Two Data Paths | Proposed | 2026-03-27 |
+| [010](adr/010-three-tier-data.md) | Three-Tier Data Architecture | Accepted | 2026-03-28 |
 | [011](adr/011-security-testing-philosophy.md) | Security Testing Philosophy — OWASP-Grounded | Accepted | 2026-03-27 |
 | [012](adr/012-path-based-deployment.md) | Path-Based Deployment Architecture | Accepted | 2026-03-28 |
 | [013](adr/013-id-generation-strategy.md) | ID Generation — Replace Sonyflake with UUIDv7 | Proposed | 2026-03-28 |
 | [014](adr/014-performance-testing.md) | Performance Testing Strategy — vCPU Scaling | Proposed | 2026-03-28 |
 | [015](adr/015-actions-catalog.md) | Actions, Templates & Catalog | Proposed | 2026-03-28 |
 | [016](adr/016-uniqueness-constraints.md) | Schema-Driven Uniqueness & Identifier Resolution | Proposed | 2026-03-28 |
+| [017](adr/017-caching-tiers.md) | Tiered Caching Architecture | Proposed | 2026-03-28 |
+| [018](adr/018-startup-lifecycle.md) | Startup Lifecycle & Schema Migration | Proposed | 2026-03-28 |
 
 ## Architecture
 
@@ -80,4 +82,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 017
+- **Next ADR number**: 019

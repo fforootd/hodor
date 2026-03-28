@@ -16,7 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"net/url"
 	"sync"
@@ -98,11 +98,11 @@ func (s *Server) Start() {
 	mux.HandleFunc("POST /token", s.token)
 
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
-	log.Printf("[mock-oidc] starting on %s (issuer: %s)", addr, s.issuer)
-	log.Printf("[mock-oidc] test user: %s / %s", s.cfg.TestUser.Email, s.cfg.TestUser.Password)
+	logging.Printf("[mock-oidc] starting on %s (issuer: %s)", addr, s.issuer)
+	logging.Printf("[mock-oidc] test user: %s / %s", s.cfg.TestUser.Email, s.cfg.TestUser.Password)
 	go func() {
 		if err := http.ListenAndServe(addr, mux); err != nil {
-			log.Printf("[mock-oidc] server error: %v", err)
+			logging.Printf("[mock-oidc] server error: %v", err)
 		}
 	}()
 }

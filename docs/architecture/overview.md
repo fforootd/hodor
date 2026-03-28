@@ -132,7 +132,7 @@ Zitadel serves three distinct domains, each with different data requirements:
 | **Analytical** | Aggregation, audit, traces | <1s | Login trends, audit trail, "what did user X do?" |
 | **Intelligence** | Detection, alerting, response | Async | Anomaly detection, automated rate limiting |
 
-See [ADR-010](../010-analytics-two-tier.md) for the full data flow across these domains.
+See [ADR-010](../adr/010-three-tier-data.md) for the full data flow across these domains.
 
 ## Request Pipeline
 

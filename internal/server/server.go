@@ -6,8 +6,8 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"github.com/zitadel/zitadel/internal/logging"
 	"io/fs"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -76,7 +76,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Mount template catalog API (ADR-015).
 	catalogSvc := catalog.New(cfg.Catalog, db.SQL())
 	api.RegisterCatalogRoutes(mux, catalogSvc, db.SQL())
-	log.Printf("Catalog ready (%d embedded templates)", catalogSvc.EmbeddedCount())
+	logging.Printf("Catalog ready (%d embedded templates)", catalogSvc.EmbeddedCount())
 
 	// Mount analytics engine (queries OLTP database directly — pure Go, no DuckDB).
 	oltpBackend := analytics.NewOLTPBackend(db.SQL(), db.Dialect())
@@ -158,7 +158,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	}
 	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil, cfg.Server.OIDCEncryptionKey, firstCookieSecret)
 	if err != nil {
-		log.Printf("WARN: OIDC Provider setup failed: %v", err)
+		logging.Printf("WARN: OIDC Provider setup failed: %v", err)
 	} else {
 		// The OP handler is mounted as a fallback: the mux tries registered patterns first,
 		// and if none match, falls through to the OP which handles OIDC-specific paths.
@@ -171,12 +171,12 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		mux.Handle("/devicecode", opHandler)
 		// Discovery endpoint (appended — the existing well-known in api.go is a redirect)
 		mux.Handle("GET /.well-known/openid-configuration", opHandler)
-		log.Printf("OIDC Provider ready (issuer=%s)", issues)
+		logging.Printf("OIDC Provider ready (issuer=%s)", issues)
 	}
 
 	// --- Resolve paths for route prefixing ---
 	paths := cfg.Server.ResolvePaths()
-	log.Printf("Path config: base=%q console=%q api=%q oidc=%q", paths.Base, paths.Console, paths.API, paths.OIDC)
+	logging.Printf("Path config: base=%q console=%q api=%q oidc=%q", paths.Base, paths.Console, paths.API, paths.OIDC)
 
 	// --- Build middleware chain (outermost first) ---
 	// 1. RealIP — resolve true client IP from proxy headers.
@@ -184,14 +184,14 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	if len(cfg.Server.TrustedProxies) > 0 {
 		cidrs, err := ParseTrustedProxies(cfg.Server.TrustedProxies)
 		if err != nil {
-			log.Printf("WARN: failed to parse trusted proxies: %v", err)
+			logging.Printf("WARN: failed to parse trusted proxies: %v", err)
 		} else {
 			realIPCfg = &RealIPConfig{
 				TrustedCIDRs: cidrs,
 				Mode:         cfg.Server.ProxyHeaderMode,
 				CustomHeader: cfg.Server.RealIPHeader,
 			}
-			log.Printf("RealIP middleware: mode=%q trusted_cidrs=%d", realIPCfg.Mode, len(cidrs))
+			logging.Printf("RealIP middleware: mode=%q trusted_cidrs=%d", realIPCfg.Mode, len(cidrs))
 		}
 	}
 
@@ -202,7 +202,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	ctx := context.Background()
 	fgaSvc, err := fga.New(ctx, db.SQL(), db.Dialect())
 	if err != nil {
-		log.Fatalf("fga init: %v", err)
+		logging.Fatalf("fga init: %v", err)
 	}
 
 	// Set the global FGA service reference for the API layer.
@@ -219,9 +219,9 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:default")
 			if len(tuples) == 0 {
 				if err := fgaSvc.OnBootstrap(ctx, adminID, orgID); err != nil {
-					log.Printf("WARN: FGA post-init bootstrap failed: %v", err)
+					logging.Printf("WARN: FGA post-init bootstrap failed: %v", err)
 				} else {
-					log.Printf("[fga] post-init bootstrap: admin=%s org=%s", adminID, orgID)
+					logging.Printf("[fga] post-init bootstrap: admin=%s org=%s", adminID, orgID)
 				}
 			}
 		}
@@ -238,23 +238,23 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	}
 	switch cfg.RateLimit.Backend {
 	case "sql":
-		log.Printf("Rate limiter: sql backend (batch_write=%v) — not yet implemented, using memory", cfg.RateLimit.BatchWrite)
+		logging.Printf("Rate limiter: sql backend (batch_write=%v) — not yet implemented, using memory", cfg.RateLimit.BatchWrite)
 		rlStore = ratelimit.NewMemoryStore(gcInterval)
 	case "redis":
-		log.Printf("Rate limiter: redis backend (%s) — not yet implemented, using memory", cfg.RateLimit.RedisURL)
+		logging.Printf("Rate limiter: redis backend (%s) — not yet implemented, using memory", cfg.RateLimit.RedisURL)
 		rlStore = ratelimit.NewMemoryStore(gcInterval)
 	default: // "memory"
 		rlStore = ratelimit.NewMemoryStore(gcInterval)
-		log.Printf("Rate limiter ready (backend=memory, gc=%s)", gcInterval)
+		logging.Printf("Rate limiter ready (backend=memory, gc=%s)", gcInterval)
 	}
 	rateLimiter := ratelimit.New(rlStore, db.SQL())
 
 	// Start catalog background refresh (after boot, non-blocking).
 	catalogSvc.StartBackground()
 
-	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → RateLimit → AuthGate → FGAGate → EventStream → OTel.
+	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → RateLimit → AuthGate → FGAGate → RequestLog → OTel.
 	var handler http.Handler = mux
-	handler = api.EventStreamMiddleware(db.SQL())(handler)
+	handler = api.RequestLogMiddleware()(handler)
 	handler = fgaMiddleware.Gate(handler)
 	handler = api.AuthGate(cookieCfg, db.SQL())(handler)
 	handler = ratelimit.Middleware(rateLimiter, FromContext)(handler)
@@ -305,7 +305,7 @@ func (s *Server) ListenAndServe() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("listening on %s", s.http.Addr)
+		logging.Printf("listening on %s", s.http.Addr)
 		if s.cfg.Server.TLSCert != "" && s.cfg.Server.TLSKey != "" {
 			errCh <- s.http.ListenAndServeTLS(s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
 		} else {
@@ -319,13 +319,13 @@ func (s *Server) ListenAndServe() error {
 			return fmt.Errorf("server error: %w", err)
 		}
 	case sig := <-sigCh:
-		log.Printf("received %v, shutting down gracefully...", sig)
+		logging.Printf("received %v, shutting down gracefully...", sig)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := s.http.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
-		log.Println("shutdown complete")
+		logging.Println("shutdown complete")
 	}
 
 	return nil

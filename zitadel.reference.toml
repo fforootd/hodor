@@ -105,12 +105,51 @@ permissions_policy = "camera=(), microphone=(), geolocation=(), payment=()"
 cross_origin_opener = "same-origin"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DATABASE — Primary data store
+# DATABASE — Primary data store and startup lifecycle
 # ═══════════════════════════════════════════════════════════════════════════════
 [database]
-# SQLite (default, good for dev/single-node). Prefix with "sqlite://".
-# PostgreSQL: "postgres://user:pass@host:5432/zitadel?sslmode=require"
+# SQLite (default, good for dev/single-node/edge/homelab). Prefix with "sqlite://".
+# PostgreSQL (scale-out): "postgres://user:pass@host:5432/zitadel?sslmode=require"
 url = "sqlite://./zitadel.db"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Schema Migration — controls behavior of 'zitadel start'
+# ─────────────────────────────────────────────────────────────────────────────
+# "auto"  — run migrations before serving (default for all dialects)
+# "check" — verify schema version only, fail if behind (opt-in for production PG)
+# "skip"  — no version check, no migration (fastest cold-start for autoscaling)
+# Env: ZITADEL_DATABASE_MIGRATE
+# migrate = "auto"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap — admin account and schema seeding on first start
+# ─────────────────────────────────────────────────────────────────────────────
+# "auto"  — create admin if no entities exist (default)
+# "skip"  — never bootstrap (production: admin created via 'zitadel migrate --bootstrap')
+# Env: ZITADEL_DATABASE_BOOTSTRAP
+# bootstrap = "auto"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Connection Pool (Postgres only, ignored for SQLite)
+# ─────────────────────────────────────────────────────────────────────────────
+# max_open_conns = 25          # max simultaneous connections
+# max_idle_conns = 5           # idle connections kept warm
+# conn_max_lifetime = "1h"     # recycle connections (important for cert rotation)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Managed PostgreSQL TLS
+# ─────────────────────────────────────────────────────────────────────────────
+# TLS is configured via the DSN sslmode parameter:
+#   sslmode=disable      — no TLS (local dev only)
+#   sslmode=require      — TLS without cert verification
+#   sslmode=verify-ca    — TLS + CA verification
+#   sslmode=verify-full  — TLS + CA + hostname verification (recommended)
+#
+# Examples:
+#   AWS RDS:      "postgres://user:pass@mydb.xxx.rds.amazonaws.com:5432/zitadel?sslmode=verify-full&sslrootcert=/etc/ssl/rds-ca.pem"
+#   Cloud SQL:    "postgres://user:pass@x.x.x.x:5432/zitadel?sslmode=verify-ca&sslrootcert=/etc/ssl/server-ca.pem"
+#   Supabase:     "postgres://postgres.xxx:pass@pooler.supabase.com:6543/postgres?sslmode=verify-full"
+#   Self-hosted:  "postgres://user:pass@pg-primary:5432/zitadel?sslmode=disable"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OBSERVABILITY — Logging and telemetry

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // DB wraps a *sql.DB with dialect awareness.
@@ -39,6 +40,26 @@ func Open(connStr string) (*DB, error) {
 		return openSQLite(connStr)
 	case strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://"):
 		return openPostgres(connStr)
+	default:
+		return nil, fmt.Errorf("unsupported database URL scheme: %s", connStr)
+	}
+}
+
+// PoolConfig holds connection pool settings for Postgres.
+type PoolConfig struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
+// OpenWithConfig connects to a database with explicit pool settings.
+// For SQLite, pool settings are ignored (SQLite manages its own connections).
+func OpenWithConfig(connStr string, pool PoolConfig) (*DB, error) {
+	switch {
+	case connStr == "" || strings.HasPrefix(connStr, "sqlite://"):
+		return openSQLite(connStr)
+	case strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://"):
+		return openPostgresWithPool(connStr, pool.MaxOpenConns, pool.MaxIdleConns, pool.ConnMaxLifetime)
 	default:
 		return nil, fmt.Errorf("unsupported database URL scheme: %s", connStr)
 	}

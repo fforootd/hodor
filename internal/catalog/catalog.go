@@ -11,7 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"strings"
 	"sync"
 
@@ -84,7 +84,7 @@ func New(cfg config.CatalogConfig, db *sql.DB) *Service {
 	// Load embedded catalog (always succeeds — compiled into binary).
 	idx, err := loadEmbeddedIndex()
 	if err != nil {
-		log.Printf("[catalog] failed to load embedded catalog: %v", err)
+		logging.Printf("[catalog] failed to load embedded catalog: %v", err)
 		idx = &Index{Version: "0.0", Templates: nil}
 	}
 	s.embedded = idx
@@ -94,7 +94,7 @@ func New(cfg config.CatalogConfig, db *sql.DB) *Service {
 	if cached := s.loadFromDBCache(); cached != nil {
 		s.remote = cached
 		s.merged = merge(s.embedded, cached)
-		log.Printf("[catalog] loaded %d cached remote templates", len(cached.Templates))
+		logging.Printf("[catalog] loaded %d cached remote templates", len(cached.Templates))
 	}
 
 	return s
@@ -316,7 +316,7 @@ func (s *Service) loadFromDBCache() *Index {
 func (s *Service) CacheToDB(idx *Index) {
 	data, err := json.Marshal(idx)
 	if err != nil {
-		log.Printf("[catalog] failed to marshal index for cache: %v", err)
+		logging.Printf("[catalog] failed to marshal index for cache: %v", err)
 		return
 	}
 	_, err = s.db.Exec(
@@ -324,7 +324,7 @@ func (s *Service) CacheToDB(idx *Index) {
 		string(data),
 	)
 	if err != nil {
-		log.Printf("[catalog] failed to cache index: %v", err)
+		logging.Printf("[catalog] failed to cache index: %v", err)
 	}
 }
 

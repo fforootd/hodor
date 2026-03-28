@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/zitadel/zitadel/internal/config"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/mockoidc"
 	"github.com/zitadel/zitadel/internal/seed"
 	"github.com/zitadel/zitadel/internal/server"
@@ -29,7 +31,8 @@ func main() {
 		Long:  "Zitadel — open-source identity platform with unified auth, fine-grained authorization, and AI agent governance.",
 	}
 
-	root.AddCommand(serveCmd())
+	root.AddCommand(startCmd())
+	root.AddCommand(migrateCmd())
 	root.AddCommand(versionCmd())
 
 	if err := root.Execute(); err != nil {
@@ -37,13 +40,20 @@ func main() {
 	}
 }
 
-func serveCmd() *cobra.Command {
+// startCmd starts the Zitadel identity server.
+// Migration and bootstrap behavior depends on config and flags:
+//   - Default: auto-migrate + auto-bootstrap (consistent for all dialects)
+//   - migrate=check: version check only, fail if behind
+//   - migrate=skip: no check, no migration (fastest cold-start)
+//   - --auto-migrate flag: forces migrate=auto + bootstrap=auto
+func startCmd() *cobra.Command {
 	var configPath string
 	var enableMockOIDC bool
 	var seedFile string
+	var autoMigrate bool
 
 	cmd := &cobra.Command{
-		Use:   "serve",
+		Use:   "start",
 		Short: "Start the Zitadel identity server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configPath)
@@ -58,20 +68,80 @@ func serveCmd() *cobra.Command {
 			if seedFile != "" {
 				cfg.Dev.SeedFile = seedFile
 			}
+			if autoMigrate {
+				cfg.Database.Migrate = "auto"
+				cfg.Database.Bootstrap = "auto"
+			}
 
-			db, err := database.Open(cfg.Database.URL)
+			// Initialize logging — streams, sinks, redaction.
+			// DB is nil here; analytics drainer activates after DB open.
+			logging.Init(logging.Config{
+				Level:     cfg.Observability.LogLevel,
+				Format:    cfg.Observability.LogFormat,
+				CachePath: cfg.Observability.CachePath,
+				CacheMax:  cfg.Observability.CacheMax,
+				Streams: logging.StreamRouting{
+					Runtime:     logging.StreamConfig{Sinks: cfg.Observability.Streams.Runtime.Sinks, Mode: cfg.Observability.Streams.Runtime.Mode, SampleRate: cfg.Observability.Streams.Runtime.SampleRate},
+					Request:     logging.StreamConfig{Sinks: cfg.Observability.Streams.Request.Sinks, Mode: cfg.Observability.Streams.Request.Mode, SampleRate: cfg.Observability.Streams.Request.SampleRate},
+					Jobs:        logging.StreamConfig{Sinks: cfg.Observability.Streams.Jobs.Sinks, Mode: cfg.Observability.Streams.Jobs.Mode, SampleRate: cfg.Observability.Streams.Jobs.SampleRate},
+					EventPusher: logging.StreamConfig{Sinks: cfg.Observability.Streams.EventPusher.Sinks, Mode: cfg.Observability.Streams.EventPusher.Mode, SampleRate: cfg.Observability.Streams.EventPusher.SampleRate},
+				},
+				Sinks: logging.SinksConfig{
+					OTEL: logging.OTELSinkConfig{
+						Endpoint: cfg.Observability.Sinks.OTEL.Endpoint,
+						Protocol: cfg.Observability.Sinks.OTEL.Protocol,
+					},
+					Analytics: logging.AnalyticsSinkConfig{
+						Enabled:       cfg.Observability.Sinks.Analytics.Enabled,
+						DrainInterval: cfg.Observability.Sinks.Analytics.DrainInterval,
+						DrainBatch:    cfg.Observability.Sinks.Analytics.DrainBatch,
+					},
+				},
+				Redaction: logging.RedactionConfig{
+					Keys:   cfg.Observability.Redaction.Keys,
+					Mask:   cfg.Observability.Redaction.Mask,
+					IPMode: cfg.Observability.Redaction.IPMode,
+				},
+			})
+
+			// Open database with pool config.
+			poolLifetime, _ := time.ParseDuration(cfg.Database.ConnMaxLifetime)
+			if poolLifetime == 0 {
+				poolLifetime = time.Hour
+			}
+			db, err := database.OpenWithConfig(cfg.Database.URL, database.PoolConfig{
+				MaxOpenConns:    cfg.Database.MaxOpenConns,
+				MaxIdleConns:    cfg.Database.MaxIdleConns,
+				ConnMaxLifetime: poolLifetime,
+			})
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
 			defer db.Close()
 
-			if err := database.Migrate(db); err != nil {
-				return fmt.Errorf("run migrations: %w", err)
+			// Schema migration — behavior depends on config.
+			migrateMode := cfg.Database.ResolveMigrateMode()
+			switch migrateMode {
+			case "auto":
+				if err := database.Migrate(db); err != nil {
+					return fmt.Errorf("run migrations: %w", err)
+				}
+			case "check":
+				if err := database.CheckVersion(db); err != nil {
+					return fmt.Errorf("schema version check: %w", err)
+				}
+			case "skip":
+				logging.Printf("schema migration skipped (migrate=skip)")
 			}
 
-			// Bootstrap admin identity on first start.
-			if err := bootstrap.EnsureAdmin(context.Background(), db, cfg.Dev.SeedFile); err != nil {
-				return fmt.Errorf("bootstrap: %w", err)
+			// Bootstrap — behavior depends on config.
+			bootstrapMode := cfg.Database.ResolveBootstrapMode()
+			if bootstrapMode == "auto" {
+				if err := bootstrap.EnsureAdmin(context.Background(), db, cfg.Dev.SeedFile); err != nil {
+					return fmt.Errorf("bootstrap: %w", err)
+				}
+			} else {
+				logging.Printf("bootstrap skipped (bootstrap=skip)")
 			}
 
 			bus := eventbus.New()
@@ -95,7 +165,7 @@ func serveCmd() *cobra.Command {
 						fmt.Sprintf(`{"issuer":"%s","client_id":"%s","client_secret":"%s","scopes":"openid email profile"}`,
 							mock.Issuer(), mock.ClientID(), mock.ClientSecret()),
 					)
-					fmt.Printf("[mock-oidc] provider auto-provisioned (id: prov_mock_oidc)\n")
+					logging.Printf("[mock-oidc] provider auto-provisioned (id: prov_mock_oidc)")
 				}
 			}
 
@@ -107,8 +177,9 @@ func serveCmd() *cobra.Command {
 			}
 
 			cli.PrintLogo()
-			fmt.Printf("Zitadel %s starting on :%d\n", version, cfg.Server.Port)
-			fmt.Printf("Database: %s\n", cfg.Database.URL)
+			logging.Printf("Zitadel %s starting on :%d", version, cfg.Server.Port)
+			logging.Printf("Database: %s", cfg.Database.URL)
+			logging.Printf("Migration mode: %s | Bootstrap mode: %s", migrateMode, bootstrapMode)
 
 			srv := server.New(cfg, db, bus)
 			return srv.ListenAndServe()
@@ -118,6 +189,120 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to zitadel.toml config file")
 	cmd.Flags().BoolVar(&enableMockOIDC, "mock-oidc", false, "start an embedded mock OIDC identity provider for testing")
 	cmd.Flags().StringVar(&seedFile, "seed", "", "path to YAML seed file to load on startup")
+	cmd.Flags().BoolVar(&autoMigrate, "auto-migrate", false, "force auto-migrate and auto-bootstrap regardless of config")
+
+	return cmd
+}
+
+// migrateCmd runs schema migrations and exits.
+// Use this as a K8s init container or CI/CD job to prepare the database
+// before starting the server with 'zitadel start'.
+func migrateCmd() *cobra.Command {
+	var configPath string
+	var doBootstrap bool
+	var seedFile string
+
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Run database schema migrations",
+		Long: `Run all pending schema migrations for the configured database dialect.
+Use this as a pre-deployment step (K8s init container, CI/CD job) to
+prepare the database before starting the server with 'zitadel start'.
+
+For Postgres, an advisory lock ensures safe concurrent execution.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			// Minimal logging for migration command.
+			logging.Init(logging.Config{
+				Level:  cfg.Observability.LogLevel,
+				Format: cfg.Observability.LogFormat,
+			})
+
+			db, err := database.Open(cfg.Database.URL)
+			if err != nil {
+				return fmt.Errorf("open database: %w", err)
+			}
+			defer db.Close()
+
+			logging.Printf("running migrations (dialect=%s)...", db.Dialect())
+
+			if err := database.Migrate(db); err != nil {
+				return fmt.Errorf("run migrations: %w", err)
+			}
+
+			// Optional: bootstrap admin after migration.
+			if doBootstrap {
+				sf := seedFile
+				if sf == "" {
+					sf = cfg.Dev.SeedFile
+				}
+				if err := bootstrap.EnsureAdmin(context.Background(), db, sf); err != nil {
+					return fmt.Errorf("bootstrap: %w", err)
+				}
+			}
+
+			logging.Printf("migrations complete")
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to zitadel.toml config file")
+	cmd.Flags().BoolVar(&doBootstrap, "bootstrap", false, "also run admin bootstrap after migrations")
+	cmd.Flags().StringVar(&seedFile, "seed", "", "path to YAML seed file (implies --bootstrap)")
+
+	// Add status subcommand.
+	cmd.AddCommand(migrateStatusCmd())
+
+	return cmd
+}
+
+// migrateStatusCmd prints the current schema version info.
+func migrateStatusCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Print schema migration status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			db, err := database.Open(cfg.Database.URL)
+			if err != nil {
+				return fmt.Errorf("open database: %w", err)
+			}
+			defer db.Close()
+
+			current, target, err := database.VersionInfo(db)
+			if err != nil {
+				return fmt.Errorf("get version info: %w", err)
+			}
+
+			status := "✓ up to date"
+			if current < target {
+				status = fmt.Sprintf("⚠ behind (run 'zitadel migrate' to apply %d pending)", target-current)
+			} else if current > target {
+				status = "⚠ ahead of binary (binary may be outdated)"
+			}
+
+			fmt.Printf("Dialect:  %s\n", db.Dialect())
+			fmt.Printf("Current:  %d\n", current)
+			fmt.Printf("Target:   %d\n", target)
+			fmt.Printf("Status:   %s\n", status)
+			fmt.Println()
+
+			// Also print per-migration status.
+			return database.MigrateStatus(db)
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to zitadel.toml config file")
 
 	return cmd
 }

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"sync"
 	"time"
 
@@ -158,13 +158,13 @@ func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*comp
 	for rows.Next() {
 		var id, dataJSON string
 		if err := rows.Scan(&id, &dataJSON); err != nil {
-			log.Printf("[actions] scan action %s: %v", id, err)
+			logging.Printf("[actions] scan action %s: %v", id, err)
 			continue
 		}
 
 		var data map[string]any
 		if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
-			log.Printf("[actions] unmarshal action %s: %v", id, err)
+			logging.Printf("[actions] unmarshal action %s: %v", id, err)
 			continue
 		}
 
@@ -227,7 +227,7 @@ func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*comp
 
 		program, err := expr.Compile(trigger, expr.Env(env), expr.AsBool())
 		if err != nil {
-			log.Printf("[actions] compile action %s trigger %q: %v", id, trigger, err)
+			logging.Printf("[actions] compile action %s trigger %q: %v", id, trigger, err)
 			continue
 		}
 

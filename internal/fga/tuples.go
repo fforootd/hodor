@@ -3,7 +3,7 @@ package fga
 import (
 	"context"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
 )
@@ -85,7 +85,7 @@ func (s *Service) ListObjects(ctx context.Context, user, relation, objectType st
 //   - org:{orgID} → parent → instance:default
 //   - user:{adminID} → owner → org:{orgID}
 func (s *Service) OnBootstrap(ctx context.Context, adminID, orgID string) error {
-	log.Printf("[fga] bootstrapping tuples: admin=%s org=%s", adminID, orgID)
+	logging.Printf("[fga] bootstrapping tuples: admin=%s org=%s", adminID, orgID)
 	return s.WriteTuples(ctx,
 		[3]string{"user:" + adminID, "owner", "instance:default"},
 		[3]string{"instance:default", "parent", "org:" + orgID},

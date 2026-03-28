@@ -27,6 +27,29 @@ The following terms define the structure and scope of the identity intelligence 
 |---|---|---|
 | **Overview** | Dashboards and aggregations of the current system state (e.g., high-level metrics, login trends). | Dashboards / Graphs |
 | **Explore** | A dual-mode query interface consisting of a Visual Query Builder and a raw SQL Editor for parsing events and telemetry. | Query / Analytics |
-| **Events** | Chronological stream of all discrete state changes, including audit trails, runtime errors, HTTP requests, and job queue processing logs. | Logs / Audits |
+| **Events** | Chronological stream of all discrete observations. Categorized by prefix: `entity.*`, `auth.*`, `request.*`, `log.*`, `signal.*`. | Logs / Audits |
+| **Category** | The top-level classification of an event. Stored as an indexed column, derived from the `event_type` prefix. Values: `entity`, `auth`, `session`, `token`, `request`, `log`, `signal`, `threat`, `system`. | — |
 | **Traces** | Correlated causal chains of events relying on `trace_id` and `span_id`. Provides end-to-end visibility from client SDK interactions to platform actions. | Activity / APM |
 | **Sessions** | Live authenticated state management. Bridges identities and historical events by providing a point of active security enforcement/revocation. | Sessions / Grants |
+| **Cache** | A per-process SQLite database (`zitadel-cache.db`) used as a durable buffer for analytics writes, settings cache, and rate limiter state. Disposable — can be deleted or run on tmpfs. Not a source of truth. | Local WAL / Sidecar cache |
+
+### Event Categories
+
+| Category | Event type pattern | Examples | Written by |
+|---|---|---|---|
+| `entity` | `entity.*` | `entity.created`, `entity.updated` | `emitEvent()` in OLTP TX |
+| `auth` | `auth.*` | `auth.login_completed`, `auth.login_failed` | `emitEvent()` in OLTP TX |
+| `session` | `session.*` | `session.created`, `session.revoked` | `emitEvent()` in OLTP TX |
+| `token` | `token.*` | `token.issued`, `token.revoked` | `emitEvent()` in OLTP TX |
+| `request` | `request.*` | `request.api`, `request.oidc` | Logger → cache → drain |
+| `log` | `log.*` | `log.error`, `log.warn`, `log.info` | Logger → cache → drain |
+| `signal` | `signal.*` | `signal.ui.rendered` *(future)* | OTLP ingestion |
+| `threat` | `threat.*` | `threat.detected` *(future)* | Intelligence engine |
+
+### Three-Tier Data Architecture
+
+| Tier | What | Failure behavior | Example |
+|---|---|---|---|
+| **1. OLTP** | Transactional writes (entities, sessions, domain events) | Operation fails → user gets error | `entity.created` in same TX |
+| **2. OLAP** | Analytics store via local cache buffer | Data accumulates in cache, drains when backend recovers | `request.api`, `log.error` |
+| **3. Fire-and-forget** | stdout, OTEL export | Drop, move on | Operator console, OTEL collector |

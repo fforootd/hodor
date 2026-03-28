@@ -6,7 +6,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"os"
 	"strings"
 	"testing"
@@ -43,11 +43,11 @@ func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 
 	// If a seed file is configured, it will handle admin creation.
 	if seedFile != "" {
-		log.Println("Seed file configured — skipping bootstrap admin creation.")
+		logging.Println("Seed file configured — skipping bootstrap admin creation.")
 		return nil
 	}
 
-	log.Println("No entities found — bootstrapping admin account...")
+	logging.Println("No entities found — bootstrapping admin account...")
 
 	// Determine if we're running in an interactive terminal.
 	if isInteractiveTerminal() {
@@ -143,7 +143,7 @@ func createRandomAdmin(ctx context.Context, db *database.DB) error {
 	// Suppress banner during test runs — tests get the password
 	// via DB query, not stdout.
 	if testing.Testing() {
-		log.Printf("bootstrapped admin (password=%s)", password)
+		logging.Printf("bootstrapped admin (password=%s)", password)
 		return nil
 	}
 
@@ -200,7 +200,7 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 
 	// Enforce uniqueness (ADR-016): register identifier + email in unique_fields.
 	if err := uniqueness.EnforceFromIdentifier(ctx, tx, identityID, "1", username); err != nil {
-		log.Printf("WARN: bootstrap unique identifier: %v", err)
+		logging.Printf("WARN: bootstrap unique identifier: %v", err)
 	}
 	// Also register email at instance scope.
 	_ = uniqueness.Enforce(ctx, tx, identityID, "1",
@@ -220,12 +220,12 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 
 	// Seed the default org.
 	if err := seedDefaultOrg(ctx, db); err != nil {
-		log.Printf("WARN: seed default org: %v", err)
+		logging.Printf("WARN: seed default org: %v", err)
 	}
 
 	// Seed the default console OIDC client (public SPA, no secret).
 	if err := seedConsoleClient(ctx, db); err != nil {
-		log.Printf("WARN: seed console client: %v", err)
+		logging.Printf("WARN: seed console client: %v", err)
 	}
 
 	// Bootstrap FGA tuples: admin → instance:owner, org parent, org owner.
@@ -237,12 +237,12 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 			username,
 		).Scan(&orgID)
 		if err != nil || orgID == "" {
-			log.Printf("WARN: could not find org_id for FGA bootstrap: %v", err)
+			logging.Printf("WARN: could not find org_id for FGA bootstrap: %v", err)
 		} else {
 			if err := fgaSvc.OnBootstrap(ctx, identityID, orgID); err != nil {
-				log.Printf("WARN: FGA bootstrap tuples failed: %v", err)
+				logging.Printf("WARN: FGA bootstrap tuples failed: %v", err)
 			} else {
-				log.Printf("[fga] bootstrap tuples written: admin=%s org=%s", identityID, orgID)
+				logging.Printf("[fga] bootstrap tuples written: admin=%s org=%s", identityID, orgID)
 			}
 		}
 	}
@@ -279,7 +279,7 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 		return fmt.Errorf("insert default org: %w", err)
 	}
 
-	log.Println("seeded default organization (identifier=default)")
+	logging.Println("seeded default organization (identifier=default)")
 	return nil
 }
 
@@ -312,7 +312,7 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 		return fmt.Errorf("insert console entity: %w", err)
 	}
 
-	log.Println("seeded default console OIDC client (client_id=console)")
+	logging.Println("seeded default console OIDC client (client_id=console)")
 	return nil
 }
 
@@ -357,6 +357,6 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 		seeded++
 	}
 
-	log.Printf("seeded %d built-in entity schemas from catalog", seeded)
+	logging.Printf("seeded %d built-in entity schemas from catalog", seeded)
 	return nil
 }

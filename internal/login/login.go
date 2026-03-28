@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
 	"time"
@@ -292,7 +292,7 @@ func (h *Handler) handleLoginComplete(w http.ResponseWriter, r *http.Request) {
 	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 
 	delete(loginSessions, req.LoginSessionID)
-	log.Printf("[login] completed for %s (identity=%s, session=%s)", sess.Identifier, sess.IdentityID, sessResp.Session.ID)
+	logging.Printf("[login] completed for %s (identity=%s, session=%s)", sess.Identifier, sess.IdentityID, sessResp.Session.ID)
 
 	// Emit auth event.
 	h.api.EmitAuthEvent(r.Context(), "auth.login_success", sess.IdentityID, map[string]any{
@@ -344,7 +344,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		identityID = newID
-		log.Printf("[magic-link] created pending identity %s for %s", identityID, email)
+		logging.Printf("[magic-link] created pending identity %s for %s", identityID, email)
 	} else if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -377,7 +377,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	}
 	body := notify.FormatMagicLink(h.baseURL, token, expiresAt)
 	if err := h.notify.Send(email, subject, body); err != nil {
-		log.Printf("[magic-link] notification send error: %v", err)
+		logging.Printf("[magic-link] notification send error: %v", err)
 	}
 
 	// Emit event.
@@ -427,7 +427,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	// Check expiry.
 	expiry, _ := time.Parse(time.RFC3339, expiresAt)
 	if time.Now().After(expiry) {
-		log.Printf("[magic-link] expired token used for %s (identity=%s)", identifier, identityID)
+		logging.Printf("[magic-link] expired token used for %s (identity=%s)", identifier, identityID)
 		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", identityID, map[string]any{
 			"reason":     "expired",
 			"identifier": identifier,
@@ -439,7 +439,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Check single-use.
 	if usedAt.Valid {
-		log.Printf("[magic-link] already-used token for %s (identity=%s, used_at=%s)", identifier, identityID, usedAt.String)
+		logging.Printf("[magic-link] already-used token for %s (identity=%s, used_at=%s)", identifier, identityID, usedAt.String)
 		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", identityID, map[string]any{
 			"reason":     "already_used",
 			"identifier": identifier,
@@ -472,7 +472,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	// Set session cookie (HMAC-signed).
 	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 
-	log.Printf("[magic-link] verified for %s (identity=%s, session=%s)", identifier, identityID, sessResp.Session.ID)
+	logging.Printf("[magic-link] verified for %s (identity=%s, session=%s)", identifier, identityID, sessResp.Session.ID)
 
 	h.api.EmitAuthEvent(r.Context(), "auth.magic_link_verified", identityID, map[string]any{
 		"session_id": sessResp.Session.ID,

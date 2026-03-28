@@ -27,7 +27,6 @@ linters:
     - nestif
 
     # Too strict for POC stage.
-    - depguard       # No import restrictions.
     - exhaustruct    # Not all struct fields need init.
     - exhaustive     # Exhaustive switch not needed.
     - wrapcheck      # Error wrapping comes later.
@@ -56,6 +55,14 @@ linters:
     - errorlint      # Error wrapping style — comes later with err113.
 
   settings:
+    depguard:
+      rules:
+        no-stdlib-log:
+          files:
+            - "!**/internal/logging/**"
+          deny:
+            - pkg: "log$"
+              desc: "Use github.com/zitadel/zitadel/internal/logging instead of stdlib log."
     errcheck:
       exclude-functions:
         # Deferred rollback — no-op after successful commit.

@@ -2,7 +2,7 @@ package ratelimit
 
 import (
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net"
 	"net/http"
 	"strconv"
@@ -57,7 +57,7 @@ func Middleware(limiter *Limiter, clientIP ClientIPFunc) func(http.Handler) http
 
 			results, err := limiter.actions.EvaluateHook(r.Context(), "on_request", env)
 			if err != nil {
-				log.Printf("[actions] evaluation error: %v", err)
+				logging.Printf("[actions] evaluation error: %v", err)
 				// Fail open for action errors — don't block traffic.
 			}
 
@@ -77,7 +77,7 @@ func Middleware(limiter *Limiter, clientIP ClientIPFunc) func(http.Handler) http
 
 						decision, err := limiter.store.Allow(r.Context(), "rule:"+key, limitVal, burst, time.Minute)
 						if err != nil {
-							log.Printf("[actions] store error: %v", err)
+							logging.Printf("[actions] store error: %v", err)
 							continue
 						}
 
@@ -92,7 +92,7 @@ func Middleware(limiter *Limiter, clientIP ClientIPFunc) func(http.Handler) http
 			// Standard settings-based rate limit check.
 			decision, err := limiter.Check(r.Context(), ip, orgID, "")
 			if err != nil {
-				log.Printf("[ratelimit] check error: %v", err)
+				logging.Printf("[ratelimit] check error: %v", err)
 				// Fail open.
 				next.ServeHTTP(w, r)
 				return

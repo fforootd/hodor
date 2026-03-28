@@ -5,7 +5,7 @@ package notify
 
 import (
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"time"
 )
 
@@ -18,11 +18,11 @@ type Channel interface {
 type StdoutChannel struct{}
 
 func (s *StdoutChannel) Send(to, subject, body string) error {
-	log.Printf("[notify] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	log.Printf("[notify]  To:      %s", to)
-	log.Printf("[notify]  Subject: %s", subject)
-	log.Printf("[notify]  Body:    %s", body)
-	log.Printf("[notify] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	logging.Printf("[notify] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	logging.Printf("[notify]  To:      %s", to)
+	logging.Printf("[notify]  Subject: %s", subject)
+	logging.Printf("[notify]  Body:    %s", body)
+	logging.Printf("[notify] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	return nil
 }
 

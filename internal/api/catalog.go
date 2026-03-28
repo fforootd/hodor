@@ -3,7 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strconv"
 
@@ -73,7 +73,7 @@ func installFromCatalog(svc *catalog.Service) http.HandlerFunc {
 
 		entityID, err := svc.Install(r.Context(), templateID, req.Variables)
 		if err != nil {
-			log.Printf("[catalog] install %s failed: %v", templateID, err)
+			logging.Printf("[catalog] install %s failed: %v", templateID, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -94,7 +94,7 @@ func refreshCatalog(svc *catalog.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		count, err := svc.Refresh(r.Context())
 		if err != nil {
-			log.Printf("[catalog] refresh failed: %v", err)
+			logging.Printf("[catalog] refresh failed: %v", err)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -132,7 +132,7 @@ func previewSchemaUpgrade(db *sql.DB) http.HandlerFunc {
 
 		report, err := catalog.PreviewUpgrade(r.Context(), db, schemaType, req.NewSchema, sampleSize)
 		if err != nil {
-			log.Printf("[catalog] preview-upgrade %s failed: %v", schemaType, err)
+			logging.Printf("[catalog] preview-upgrade %s failed: %v", schemaType, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

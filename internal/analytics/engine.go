@@ -16,7 +16,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
 	"time"
@@ -75,7 +75,7 @@ type OLTPBackend struct {
 
 // NewOLTPBackend creates an analytics backend that queries the OLTP database.
 func NewOLTPBackend(db *sql.DB, dialect string) *OLTPBackend {
-	log.Printf("[analytics] OLTP backend ready (dialect=%s)", dialect)
+	logging.Printf("[analytics] OLTP backend ready (dialect=%s)", dialect)
 	return &OLTPBackend{db: db, dialect: dialect}
 }
 

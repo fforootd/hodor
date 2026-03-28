@@ -10,7 +10,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"os"
 	"regexp"
 	"strings"
@@ -125,7 +125,7 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 	}
 
 	totalItems := len(seed.Providers) + len(seed.Identities)
-	log.Printf("[seed] applied %d items from %s", totalItems, path)
+	logging.Printf("[seed] applied %d items from %s", totalItems, path)
 	return nil
 }
 
@@ -134,7 +134,7 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 	var existing string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM providers WHERE name = ?`, p.Name).Scan(&existing)
 	if err == nil {
-		log.Printf("[seed] provider %q already exists, skipping", p.Name)
+		logging.Printf("[seed] provider %q already exists, skipping", p.Name)
 		return nil
 	}
 
@@ -171,7 +171,7 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 		return err
 	}
 
-	log.Printf("[seed] created provider %q (id: %s)", p.Name, provID)
+	logging.Printf("[seed] created provider %q (id: %s)", p.Name, provID)
 	return nil
 }
 
@@ -188,13 +188,13 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		// Entity already exists — handle according to on_conflict.
 		switch onConflict {
 		case "update":
-			log.Printf("[seed] identity %q already exists, updating (on_conflict: update)", ident.Identifier)
+			logging.Printf("[seed] identity %q already exists, updating (on_conflict: update)", ident.Identifier)
 			return updateExistingIdentity(ctx, tx, existingID, ident)
 		case "warn":
-			log.Printf("[seed] WARN: identity %q already exists, skipping (on_conflict: warn)", ident.Identifier)
+			logging.Printf("[seed] WARN: identity %q already exists, skipping (on_conflict: warn)", ident.Identifier)
 			return nil
 		default: // "skip"
-			log.Printf("[seed] identity %q already exists, skipping", ident.Identifier)
+			logging.Printf("[seed] identity %q already exists, skipping", ident.Identifier)
 			// Still process linked accounts for this existing identity.
 			for _, la := range ident.LinkedAccounts {
 				seedLinkedAccount(ctx, tx, existingID, la)
@@ -249,7 +249,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	// Seed PATs.
 	seedPATs(ctx, tx, newID, ident.PATs)
 
-	log.Printf("[seed] created identity %q (id: %s)", ident.Identifier, newID)
+	logging.Printf("[seed] created identity %q (id: %s)", ident.Identifier, newID)
 
 	// Process linked accounts.
 	for _, la := range ident.LinkedAccounts {
@@ -273,7 +273,7 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID string, id
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, entityID, credJSON)
-			log.Printf("[seed]   updated password for %q", ident.Identifier)
+			logging.Printf("[seed]   updated password for %q", ident.Identifier)
 		}
 	}
 
@@ -309,7 +309,7 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID string, pats []SeedPAT) 
 			`SELECT id FROM tokens WHERE entity_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL`,
 			entityID, pat.Name).Scan(&existingID)
 		if err == nil {
-			log.Printf("[seed]   PAT %q already exists for entity %s, skipping", pat.Name, entityID)
+			logging.Printf("[seed]   PAT %q already exists for entity %s, skipping", pat.Name, entityID)
 			continue
 		}
 
@@ -335,11 +335,11 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID string, pats []SeedPAT) 
 			 VALUES (?, 'pat', ?, ?, ?, ?, datetime('now'))`,
 			tokenID, tokenHash, entityID, pat.Name, string(scopesJSON))
 		if err != nil {
-			log.Printf("[seed]   failed to create PAT %q: %v", pat.Name, err)
+			logging.Printf("[seed]   failed to create PAT %q: %v", pat.Name, err)
 			continue
 		}
 
-		log.Printf("[seed]   created PAT %q for entity %s", pat.Name, entityID)
+		logging.Printf("[seed]   created PAT %q for entity %s", pat.Name, entityID)
 	}
 }
 
@@ -348,7 +348,7 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID string, la Se
 	var providerID string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM providers WHERE name = ? OR id = ?`, la.Provider, la.Provider).Scan(&providerID)
 	if err != nil {
-		log.Printf("[seed] linked_account: provider %q not found, skipping", la.Provider)
+		logging.Printf("[seed] linked_account: provider %q not found, skipping", la.Provider)
 		return
 	}
 
@@ -367,7 +367,7 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID string, la Se
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
 		linkID, identityID, providerID, la.ExternalSub, la.ExternalEmail)
 
-	log.Printf("[seed] linked identity %s → provider %s (sub: %s)", identityID, providerID, la.ExternalSub)
+	logging.Printf("[seed] linked identity %s → provider %s (sub: %s)", identityID, providerID, la.ExternalSub)
 }
 
 func generateShortID() string {

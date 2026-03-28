@@ -7,7 +7,10 @@
 ### 1. Zero-Config First Run
 
 ```bash
-zitadel serve --db sqlite://./zitadel.db
+zitadel start
+# → SQLite at ./zitadel.db (auto-created)
+# → Schema auto-migrated
+# → Admin bootstrapped
 # → Running on http://localhost:8080
 # → Admin console at http://localhost:8080/console
 # → OIDC ready at http://localhost:8080/.well-known/openid-configuration
@@ -16,10 +19,21 @@ zitadel serve --db sqlite://./zitadel.db
 No YAML files. No Docker Compose. No database setup. One command, working in 60 seconds.
 
 **What "zero-config" means in practice:**
+- SQLite is the default database — no Postgres required for dev/homelab/edge
 - Sensible defaults for everything (session TTL, token lifetime, rate limits)
-- Database auto-migrates on startup
+- Database auto-migrates on startup (configurable: `check` or `skip` for production)
 - Bootstrap creates default org, admin user, and default schema
 - Development TLS auto-provisions if needed
+
+**Startup lifecycle** (see [ADR-018](../adr/018-startup-lifecycle.md)):
+
+| `database.migrate` | Behavior |
+|---|---|
+| `"auto"` (default) | Run `goose up` before serving — consistent for all dialects |
+| `"check"` | Version check only, fail if behind — opt-in for production PG |
+| `"skip"` | No check — fastest cold-start for autoscaler pods |
+
+For production Postgres: run `zitadel migrate` as a K8s Job, then `zitadel start` with `migrate=check`.
 
 ### 2. Pure Go Single Binary
 

@@ -1,7 +1,7 @@
 package fga
 
 import (
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
 
@@ -75,14 +75,14 @@ func (m *Middleware) Gate(next http.Handler) http.Handler {
 		// Run the check.
 		allowed, err := m.svc.Check(r.Context(), "user:"+userID, permission, object)
 		if err != nil {
-			log.Printf("[fga] check error: user=%s perm=%s obj=%s err=%v", userID, permission, object, err)
+			logging.Printf("[fga] check error: user=%s perm=%s obj=%s err=%v", userID, permission, object, err)
 			// On FGA errors, deny by default (secure fail-closed).
 			httputil.WriteError(w, http.StatusForbidden, "authorization check failed")
 			return
 		}
 
 		if !allowed {
-			log.Printf("[fga] denied: user=%s perm=%s obj=%s", userID, permission, object)
+			logging.Printf("[fga] denied: user=%s perm=%s obj=%s", userID, permission, object)
 			httputil.WriteError(w, http.StatusForbidden, "insufficient permissions")
 			return
 		}

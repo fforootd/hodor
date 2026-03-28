@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 
 	"strings"
@@ -124,7 +124,7 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	// Create session via api package (emits session.created).
 	sessResp, err := u.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
-		log.Printf("create session failed: %v", err)
+		logging.Printf("create session failed: %v", err)
 		renderLoginPage(w, "Failed to create session", redirectTo)
 		return
 	}

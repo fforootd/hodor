@@ -11,8 +11,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/zitadel/zitadel/internal/logging"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -130,7 +130,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 
 	if errParam != "" {
 		errDesc := r.URL.Query().Get("error_description")
-		log.Printf("[sso] IDP returned error: %s — %s", url.QueryEscape(errParam), url.QueryEscape(errDesc))
+		logging.Printf("[sso] IDP returned error: %s — %s", url.QueryEscape(errParam), url.QueryEscape(errDesc))
 		http.Redirect(w, r, "/login?error=sso_failed", http.StatusFound)
 		return
 	}
@@ -145,7 +145,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		`SELECT provider_id, pkce_verifier, nonce FROM sso_states WHERE state = ?`, state,
 	).Scan(&providerID, &pkceVerifier, &nonce)
 	if err != nil {
-		log.Printf("[sso] state lookup failed: %v", err)
+		logging.Printf("[sso] state lookup failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_expired", http.StatusFound)
 		return
 	}
@@ -160,7 +160,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		`SELECT config, claim_overrides, template, auto_register FROM providers WHERE id = ?`, providerID,
 	).Scan(&configJSON, &overridesJSON, &template, &autoRegister)
 	if err != nil {
-		log.Printf("[sso] provider lookup failed: %v", err)
+		logging.Printf("[sso] provider lookup failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_config", http.StatusFound)
 		return
 	}
@@ -176,7 +176,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Discover token endpoint.
 	endpoints, err := discoverOIDC(r.Context(), issuer)
 	if err != nil {
-		log.Printf("[sso] discovery failed: %v", err)
+		logging.Printf("[sso] discovery failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_discovery", http.StatusFound)
 		return
 	}
@@ -184,7 +184,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Exchange code for tokens.
 	tokenResp, err := exchangeCode(r.Context(), endpoints.TokenEndpoint, cfg, code, pkceVerifier, h.baseURL+"/v1/auth/sso/callback")
 	if err != nil {
-		log.Printf("[sso] token exchange failed: %v", err)
+		logging.Printf("[sso] token exchange failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_token", http.StatusFound)
 		return
 	}
@@ -192,14 +192,14 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Parse ID token claims (simplified — production would verify signature).
 	claims, err := parseIDTokenClaims(tokenResp.IDToken)
 	if err != nil {
-		log.Printf("[sso] ID token parse failed: %v", err)
+		logging.Printf("[sso] ID token parse failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_token_invalid", http.StatusFound)
 		return
 	}
 
 	// Verify nonce.
 	if claimNonce, _ := claims["nonce"].(string); claimNonce != nonce {
-		log.Printf("[sso] nonce mismatch")
+		logging.Printf("[sso] nonce mismatch")
 		http.Redirect(w, r, "/login?error=sso_nonce", http.StatusFound)
 		return
 	}
@@ -208,7 +208,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	externalSub, _ := claims["sub"].(string)
 	externalEmail, _ := claims["email"].(string)
 	if externalSub == "" {
-		log.Printf("[sso] no sub claim in ID token")
+		logging.Printf("[sso] no sub claim in ID token")
 		http.Redirect(w, r, "/login?error=sso_no_sub", http.StatusFound)
 		return
 	}
@@ -216,7 +216,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Find or create linked account.
 	identityID, err := h.findOrCreateLinkedIdentity(r.Context(), providerID, externalSub, externalEmail, claims, overridesJSON, autoRegister)
 	if err != nil {
-		log.Printf("[sso] link/create failed: %v", err)
+		logging.Printf("[sso] link/create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_link_failed", http.StatusFound)
 		return
 	}
@@ -224,7 +224,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Create session.
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
-		log.Printf("[sso] session create failed: %v", err)
+		logging.Printf("[sso] session create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_session", http.StatusFound)
 		return
 	}

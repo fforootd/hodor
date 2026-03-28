@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/database"
@@ -56,7 +56,7 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 
 		total := revokedCount + expiredCount
 		if total > 0 {
-			log.Printf("[session_gc] deleted %d revoked + %d expired sessions (ttl=%s)",
+			logging.Printf("[session_gc] deleted %d revoked + %d expired sessions (ttl=%s)",
 				revokedCount, expiredCount, FormatDuration(ttl))
 
 			emitGCEvent(ctx, db, bus, "gc.sessions_cleaned", map[string]any{
@@ -107,7 +107,7 @@ func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 				p.EventPattern, cutoff, lakeCursor,
 			)
 			if err != nil {
-				log.Printf("[event_gc] pattern %q error: %v", p.EventPattern, err)
+				logging.Printf("[event_gc] pattern %q error: %v", p.EventPattern, err)
 				continue
 			}
 			n, _ := res.RowsAffected()
@@ -118,7 +118,7 @@ func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 		}
 
 		if totalDeleted > 0 {
-			log.Printf("[event_gc] deleted %d events past retention (cursor=%s)", totalDeleted, lakeCursor)
+			logging.Printf("[event_gc] deleted %d events past retention (cursor=%s)", totalDeleted, lakeCursor)
 
 			emitGCEvent(ctx, db, bus, "gc.events_cleaned", map[string]any{
 				"total_deleted":      totalDeleted,

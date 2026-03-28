@@ -8,7 +8,7 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"log"
+	"github.com/zitadel/zitadel/internal/logging"
 	"strconv"
 	"strings"
 	"time"
@@ -42,7 +42,7 @@ func (s *Scheduler) Register(name string, fn JobFunc) {
 
 // Run starts the scheduler loop. Blocks until ctx is cancelled.
 func (s *Scheduler) Run(ctx context.Context) {
-	log.Printf("[scheduler] started with %d registered jobs", len(s.registry))
+	logging.Printf("[scheduler] started with %d registered jobs", len(s.registry))
 
 	// Initialize next_run_at for any jobs that don't have one.
 	s.initNextRun()
@@ -53,7 +53,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[scheduler] shutting down")
+			logging.Println("[scheduler] shutting down")
 			return
 		case <-ticker.C:
 			s.checkAndRun(ctx)
@@ -68,7 +68,7 @@ func (s *Scheduler) initNextRun() {
 		`SELECT name, cron FROM jobs WHERE enabled = 1 AND (next_run_at IS NULL OR next_run_at = '')`,
 	)
 	if err != nil {
-		log.Printf("[scheduler] init error: %v", err)
+		logging.Printf("[scheduler] init error: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -85,7 +85,7 @@ func (s *Scheduler) initNextRun() {
 		)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[scheduler] init rows error: %v", err)
+		logging.Printf("[scheduler] init rows error: %v", err)
 	}
 }
 
@@ -99,7 +99,7 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		now.Format(time.RFC3339),
 	)
 	if err != nil {
-		log.Printf("[scheduler] check error: %v", err)
+		logging.Printf("[scheduler] check error: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -117,7 +117,7 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		due = append(due, j)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[scheduler] rows error: %v", err)
+		logging.Printf("[scheduler] rows error: %v", err)
 		return
 	}
 	rows.Close()
@@ -143,9 +143,9 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		if err != nil {
 			status = "error"
 			errMsg = err.Error()
-			log.Printf("[scheduler] job %q failed: %v", j.name, err)
+			logging.Printf("[scheduler] job %q failed: %v", j.name, err)
 		} else {
-			log.Printf("[scheduler] job %q completed", j.name)
+			logging.Printf("[scheduler] job %q completed", j.name)
 		}
 
 		next := nextCronTime(time.Now().UTC(), j.cron)
