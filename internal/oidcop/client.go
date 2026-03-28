@@ -117,7 +117,7 @@ func (c *Client) LoginURL(authRequestID string) string      { return "/login?aut
 func (c *Client) AccessTokenType() op.AccessTokenType       { return c.accessTokenType }
 func (c *Client) IDTokenLifetime() time.Duration            { return c.idTokenLifetime }
 func (c *Client) DevMode() bool                             { return c.devMode }
-func (c *Client) RestrictAdditionalIdTokenScopes() func(scopes []string) []string { return func(s []string) []string { return s } } //nolint:staticcheck,revive,stylecheck // interface defined by upstream oidc library
+func (c *Client) RestrictAdditionalIdTokenScopes() func(scopes []string) []string { return func(s []string) []string { return s } } //nolint:staticcheck // method name defined by upstream oidc library
 func (c *Client) RestrictAdditionalAccessTokenScopes() func(scopes []string) []string { return func(s []string) []string { return s } }
 func (c *Client) IsScopeAllowed(scope string) bool          { return strings.HasPrefix(scope, "urn:") || scope == oidc.ScopeOpenID || scope == oidc.ScopeProfile || scope == oidc.ScopeEmail || scope == oidc.ScopePhone || scope == oidc.ScopeOfflineAccess }
 func (c *Client) IDTokenUserinfoClaimsAssertion() bool      { return false }

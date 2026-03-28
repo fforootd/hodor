@@ -1094,7 +1094,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pattern := "%" + q + "%"
-	var results []SearchResult
+	results := make([]SearchResult, 0, limit*5)
 
 	results = append(results, a.searchEntities(r, pattern, limit)...)
 	results = append(results, a.searchEntityIndexes(r, pattern, limit)...)
@@ -1149,6 +1149,9 @@ func (a *API) searchEntities(r *http.Request, pattern string, limit int) []Searc
 			Link:         fmt.Sprintf("/console/identities/%d", id),
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
 	return results
 }
 
@@ -1190,6 +1193,9 @@ func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []
 			Link:         fmt.Sprintf("/console/identities/%d", entityID),
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
 	return results
 }
 
@@ -1214,6 +1220,9 @@ func (a *API) searchSchemas(r *http.Request, pattern string, limit int) []Search
 			Subtitle:     schemaID,
 			Link:         "/console/schemas",
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 	return results
 }
@@ -1241,6 +1250,9 @@ func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchR
 			Link:         "/console/events",
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
 	return results
 }
 
@@ -1267,6 +1279,9 @@ func (a *API) searchProviders(r *http.Request, pattern string, limit int) []Sear
 			Subtitle:     protocol + " · " + tmpl,
 			Link:         "/console/providers",
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 	return results
 }
