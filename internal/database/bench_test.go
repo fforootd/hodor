@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"math/rand/v2"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ func benchDB(b *testing.B) *sql.DB {
 		b.Fatalf("schema: %v", err)
 	}
 	b.Cleanup(func() {
-		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)") //nolint:errcheck
 		db.Close()
 	})
 	return db.SQL()
@@ -41,12 +40,14 @@ func seedIdentities(b *testing.B, db *sql.DB, n int) []string {
 	tx, _ := db.Begin()
 	for i := 0; i < n; i++ {
 		ids[i] = id.New()
-		tx.Exec(
+		tx.Exec( //nolint:errcheck
 			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("user-%d", i), fmt.Sprintf("User %d", i), now, now)
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		b.Fatalf("commit seed: %v", err)
+	}
 	return ids
 }
 
@@ -61,11 +62,11 @@ func seedSessionToken(b *testing.B, db *sql.DB, entityID string) string {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
-	db.Exec(
+	db.Exec( //nolint:errcheck
 		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, '0', ?, 'bench', '127.0.0.1', '{}', ?, ?)`,
 		sessionID, entityID, hash, now, expiresAt)
-	db.Exec(
+	db.Exec( //nolint:errcheck
 		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
 		tokenID, hash, entityID, sessionID, expiresAt, now)
@@ -73,6 +74,12 @@ func seedSessionToken(b *testing.B, db *sql.DB, entityID string) string {
 }
 
 const seedSize = 1000
+
+// benchRandN returns a random index in [0, n) for benchmark workload distribution.
+// Uses math/rand/v2 intentionally — crypto strength is unnecessary for index selection.
+func benchRandN(n int) int {
+	return int(uint(time.Now().UnixNano()) % uint(n)) //nolint:gosec
+}
 
 // ──────────────────────────────────────────────────────────────
 // Layer 1: Single-operation benchmarks
@@ -106,7 +113,7 @@ func BenchmarkDBGetIdentity(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		target := ids[rand.IntN(len(ids))]
+		target := ids[benchRandN(len(ids))]
 		var identifier, displayName string
 		err := db.QueryRow(
 			`SELECT identifier, display_name FROM entities WHERE id = ?`, target,
@@ -126,7 +133,7 @@ func BenchmarkDBListIdentities(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		offset := rand.IntN(seedSize - 50)
+		offset := benchRandN(seedSize - 50)
 		rows, err := db.Query(
 			`SELECT id, identifier, display_name, state, created_at FROM entities
 			 ORDER BY created_at DESC LIMIT 50 OFFSET ?`, offset)
@@ -135,9 +142,12 @@ func BenchmarkDBListIdentities(b *testing.B) {
 		}
 		count := 0
 		for rows.Next() {
-			var id, ident, name, state, created string
-			rows.Scan(&id, &ident, &name, &state, &created)
+			var rowID, ident, name, state, created string
+			_ = rows.Scan(&rowID, &ident, &name, &state, &created)
 			count++
+		}
+		if err := rows.Err(); err != nil {
+			b.Fatalf("rows iteration: %v", err)
 		}
 		rows.Close()
 		if count == 0 {
@@ -155,7 +165,7 @@ func BenchmarkDBUpdateIdentity(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		target := ids[rand.IntN(len(ids))]
+		target := ids[benchRandN(len(ids))]
 		_, err := db.Exec(
 			`UPDATE entities SET display_name = ?, updated_at = datetime('now') WHERE id = ?`,
 			fmt.Sprintf("Updated %d", i), target)
@@ -174,7 +184,7 @@ func BenchmarkDBInsertSession(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		entityID := ids[rand.IntN(len(ids))]
+		entityID := ids[benchRandN(len(ids))]
 		sessionID := id.New()
 		tokenID := id.New()
 		hash := fmt.Sprintf("hash-%s", id.New())
@@ -182,15 +192,17 @@ func BenchmarkDBInsertSession(b *testing.B) {
 		expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
 		tx, _ := db.BeginTx(context.Background(), nil)
-		tx.Exec(
+		tx.Exec( //nolint:errcheck
 			`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 			 VALUES (?, ?, '0', ?, 'bench', '127.0.0.1', '{}', ?, ?)`,
 			sessionID, entityID, hash, now, expiresAt)
-		tx.Exec(
+		tx.Exec( //nolint:errcheck
 			`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
 			 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
 			tokenID, hash, entityID, sessionID, expiresAt, now)
-		tx.Commit()
+		if err := tx.Commit(); err != nil {
+			b.Fatalf("commit session: %v", err)
+		}
 	}
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "sessions/sec")
 }
@@ -202,14 +214,14 @@ func BenchmarkDBResolveToken(b *testing.B) {
 	// Pre-seed tokens to resolve.
 	tokens := make([]string, 200)
 	for i := range tokens {
-		tokens[i] = seedSessionToken(b, db, ids[rand.IntN(len(ids))])
+		tokens[i] = seedSessionToken(b, db, ids[benchRandN(len(ids))])
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		raw := tokens[rand.IntN(len(tokens))]
+		raw := tokens[benchRandN(len(tokens))]
 		h := sha256.Sum256([]byte(raw))
 		hash := hex.EncodeToString(h[:])
 
@@ -240,9 +252,9 @@ func BenchmarkDBConcurrentReads(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			target := ids[rand.IntN(len(ids))]
+			target := ids[benchRandN(len(ids))]
 			var identifier string
-			db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier)
+			db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier) //nolint:errcheck
 		}
 	})
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "reads/sec")
@@ -261,15 +273,15 @@ func BenchmarkDBConcurrentMixed(b *testing.B) {
 			if i%5 == 0 {
 				// 20% writes
 				newID := id.New()
-				db.Exec(
+				db.Exec( //nolint:errcheck
 					`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 					 VALUES (?, '0', ?, 'Bench Mixed', 'active', '{}', '{}', '{}', datetime('now'), datetime('now'))`,
 					newID, fmt.Sprintf("mixed-%s", newID))
 			} else {
 				// 80% reads
-				target := ids[rand.IntN(len(ids))]
+				target := ids[benchRandN(len(ids))]
 				var identifier string
-				db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier)
+				db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier) //nolint:errcheck
 			}
 			i++
 		}

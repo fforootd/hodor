@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -27,6 +26,12 @@ type benchServer struct {
 	db    *database.DB
 	token string   // admin PAT for authenticated requests
 	ids   []string // pre-seeded identity IDs
+}
+
+// benchRandN returns a deterministic-ish index for benchmark workload distribution.
+// Uses time-based entropy — crypto strength is unnecessary for test index selection.
+func benchRandN(n int) int {
+	return int(uint(time.Now().UnixNano()) % uint(n)) //nolint:gosec
 }
 
 func newBenchServer(b *testing.B, seedCount int) *benchServer {
@@ -55,13 +60,13 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 
 	b.Cleanup(func() {
 		ts.Close()
-		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)") //nolint:errcheck
 		db.Close()
 	})
 
 	// Get admin ID and create a PAT.
 	var adminID string
-	db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID)
+	db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID) //nolint:errcheck
 
 	token := createBenchPAT(b, db, adminID)
 
@@ -71,12 +76,14 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 	tx, _ := db.SQL().Begin()
 	for i := 0; i < seedCount; i++ {
 		ids[i] = id.New()
-		tx.Exec(
+		tx.Exec( //nolint:errcheck
 			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("bench-user-%d", i), fmt.Sprintf("Bench User %d", i), now, now)
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		b.Fatalf("commit seed: %v", err)
+	}
 
 	return &benchServer{ts: ts, db: db, token: token, ids: ids}
 }
@@ -99,13 +106,14 @@ func createBenchPAT(b *testing.B, db *database.DB, entityID string) string {
 	return raw
 }
 
-func (bs *benchServer) doJSON(b *testing.B, method, path string, body any) (int, map[string]any) {
+func benchDoJSON(b *testing.B, bs *benchServer, method, path string, body any) (int, map[string]any) {
+	b.Helper()
 	var reqBody io.Reader
 	if body != nil {
-		j, _ := json.Marshal(body)
+		j, _ := json.Marshal(body) //nolint:errcheck
 		reqBody = bytes.NewReader(j)
 	}
-	req, _ := http.NewRequest(method, bs.ts.URL+path, reqBody)
+	req, _ := http.NewRequest(method, bs.ts.URL+path, reqBody) //nolint:errcheck
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bs.token)
 	resp, err := http.DefaultClient.Do(req)
@@ -114,7 +122,7 @@ func (bs *benchServer) doJSON(b *testing.B, method, path string, body any) (int,
 	}
 	defer resp.Body.Close()
 	var result map[string]any
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 	return resp.StatusCode, result
 }
 
@@ -131,7 +139,7 @@ func BenchmarkAPICreateIdentity(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		status, _ := bs.doJSON(b, "POST", "/v1/entities", map[string]any{
+		status, _ := benchDoJSON(b, bs, "POST", "/v1/entities", map[string]any{
 			"identifier":   fmt.Sprintf("api-create-%d", i),
 			"display_name": fmt.Sprintf("API Create %d", i),
 		})
@@ -149,8 +157,8 @@ func BenchmarkAPIGetIdentity(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		target := bs.ids[rand.IntN(len(bs.ids))]
-		status, _ := bs.doJSON(b, "GET", "/v1/entities/"+target, nil)
+		target := bs.ids[benchRandN(len(bs.ids))]
+		status, _ := benchDoJSON(b, bs, "GET", "/v1/entities/"+target, nil)
 		if status != http.StatusOK {
 			b.Fatalf("get: got %d", status)
 		}
@@ -165,7 +173,7 @@ func BenchmarkAPIListIdentities(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		status, _ := bs.doJSON(b, "GET", "/v1/entities?limit=50", nil)
+		status, _ := benchDoJSON(b, bs, "GET", "/v1/entities?limit=50", nil)
 		if status != http.StatusOK {
 			b.Fatalf("list: got %d", status)
 		}
@@ -180,8 +188,8 @@ func BenchmarkAPICreateSession(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		entityID := bs.ids[rand.IntN(len(bs.ids))]
-		status, _ := bs.doJSON(b, "POST", "/v1/sessions", map[string]any{
+		entityID := bs.ids[benchRandN(len(bs.ids))]
+		status, _ := benchDoJSON(b, bs, "POST", "/v1/sessions", map[string]any{
 			"entity_id": entityID,
 		})
 		if status != http.StatusCreated {
@@ -199,7 +207,7 @@ func BenchmarkAPIResolveToken(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		status, _ := bs.doJSON(b, "GET", "/v1/entities?limit=1", nil)
+		status, _ := benchDoJSON(b, bs, "GET", "/v1/entities?limit=1", nil)
 		if status != http.StatusOK {
 			b.Fatalf("resolve: got %d", status)
 		}
@@ -219,14 +227,14 @@ func BenchmarkAPIParallelReads(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			target := bs.ids[rand.IntN(len(bs.ids))]
-			req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil)
+			target := bs.ids[benchRandN(len(bs.ids))]
+			req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil) //nolint:errcheck
 			req.Header.Set("Authorization", "Bearer "+bs.token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				b.Fatalf("parallel get: %v", err)
 			}
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	})
@@ -244,29 +252,29 @@ func BenchmarkAPIParallelMixed(b *testing.B) {
 		for pb.Next() {
 			if i%5 == 0 {
 				// 20% writes — create identity
-				body, _ := json.Marshal(map[string]any{
+				body, _ := json.Marshal(map[string]any{ //nolint:errcheck
 					"identifier":   fmt.Sprintf("par-mixed-%s", id.New()),
 					"display_name": "Parallel Mixed",
 				})
-				req, _ := http.NewRequest("POST", bs.ts.URL+"/v1/entities", bytes.NewReader(body))
+				req, _ := http.NewRequest("POST", bs.ts.URL+"/v1/entities", bytes.NewReader(body)) //nolint:errcheck
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Authorization", "Bearer "+bs.token)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {
 					b.Fatalf("parallel create: %v", err)
 				}
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 			} else {
 				// 80% reads
-				target := bs.ids[rand.IntN(len(bs.ids))]
-				req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil)
+				target := bs.ids[benchRandN(len(bs.ids))]
+				req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil) //nolint:errcheck
 				req.Header.Set("Authorization", "Bearer "+bs.token)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {
 					b.Fatalf("parallel get: %v", err)
 				}
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 			}
 			i++

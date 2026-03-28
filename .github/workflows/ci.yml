@@ -239,7 +239,7 @@ jobs:
           FAILED=$(jq '.numFailedTests' test-results.json)
           SUITES_TOTAL=$(jq '.numTotalTestSuites' test-results.json)
           SUITES_PASSED=$(jq '.numPassedTestSuites' test-results.json)
-          DURATION=$(jq '[.testResults[].perfStats.runtime] | add / 1000 | . * 100 | round / 100' test-results.json)
+          DURATION=$(jq '[.testResults[].perfStats.runtime // 0] | add / 1000 | . * 100 | round / 100' test-results.json)
 
           echo "### Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -256,7 +256,7 @@ jobs:
           jq -r '.testResults[] |
             (.name | split("/") | last) as $file |
             (.assertionResults | length) as $count |
-            ((.perfStats.runtime / 1000 * 100 | round) / 100 | tostring) as $dur |
+            (((.perfStats.runtime // 0) / 1000 * 100 | round) / 100 | tostring) as $dur |
             (if (.numFailingTests // 0) > 0 then "❌ fail" else "✅ pass" end) as $res |
             "| `\($file)` | \($count) | \($dur)s | \($res) |"
           ' test-results.json >> $GITHUB_STEP_SUMMARY
