@@ -97,9 +97,8 @@
     </Card>
   </div>
 </template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
@@ -139,51 +138,93 @@ function formatNumber(n: number): string {
   return String(n)
 }
 
-onMounted(async () => {
+function getThreshold(range: string, multiplier = 1): string {
+  const msPerHr = 3600000;
+  let hrs = 12;
+  if (range === '1h') hrs = 1;
+  else if (range === '24h') hrs = 24;
+  else if (range === '7d') hrs = 24 * 7;
+  else if (range === '30d') hrs = 24 * 30;
+  
+  const d = new Date(Date.now() - (hrs * multiplier * msPerHr));
+  return d.toISOString().replace('T', ' ').slice(0, 19);
+}
+
+async function fetchCount(sql: string): Promise<number> {
   try {
-    // Fetch real event counts
-    const data = await api.post<any>('/v1/analytics/query', { query: "SELECT event_type, COUNT(*) as count FROM events GROUP BY event_type ORDER BY count DESC LIMIT 20" })
-    const rows = (data.rows || []) as any[]
-
-    // Build event breakdown
-    eventRows.value = rows.map((r: any, i: number) => ({
-      event_type: r.event_type || r[0] || 'unknown',
-      count: Number(r.count || r[1] || 0),
-      color: colors[i % colors.length],
-      sparkline: sparkline(),
-    }))
-
-    // Aggregate metric cards
-    const total = rows.reduce((s: number, r: any) => s + Number(r.count || r[1] || 0), 0)
-    const failedRows = rows.filter((r: any) => (r.event_type || r[0] || '').includes('fail'))
-    const sessionRows = rows.filter((r: any) => (r.event_type || r[0] || '').includes('session'))
-    const tokenRows = rows.filter((r: any) => (r.event_type || r[0] || '').includes('token'))
-
-    metrics.value[0].value = total
-    metrics.value[0].change = Math.round(Math.random() * 20 - 5)
-    metrics.value[1].value = sessionRows.reduce((s: number, r: any) => s + Number(r.count || r[1] || 0), 0) || Math.round(total * 0.2)
-    metrics.value[1].change = Math.round(Math.random() * 15 - 3)
-    metrics.value[2].value = tokenRows.reduce((s: number, r: any) => s + Number(r.count || r[1] || 0), 0) || Math.round(total * 0.4)
-    metrics.value[2].change = Math.round(Math.random() * 25)
-    metrics.value[3].value = failedRows.reduce((s: number, r: any) => s + Number(r.count || r[1] || 0), 0) || Math.round(total * 0.05)
-    metrics.value[3].change = -Math.round(Math.random() * 10)
+    const res = await api.post<any>('/v1/analytics/query', { sql });
+    if (res.error || !res.rows || res.rows.length === 0) return 0;
+    const r = res.rows[0];
+    return Number(Object.values(r)[0] || 0);
   } catch {
-    // Use demo data
-    metrics.value = [
-      { label: 'Auth Requests', value: 589_200, change: 12, icon: Activity, sparkline: sparkline() },
-      { label: 'Active Sessions', value: 234, change: 5, icon: Users, sparkline: sparkline() },
-      { label: 'Token Issuances', value: 35_400, change: 18, icon: KeyRound, sparkline: sparkline() },
-      { label: 'Failed Logins', value: 21_300, change: -8, icon: Shield, sparkline: sparkline() },
-    ]
-    eventRows.value = [
-      { event_type: 'auth.login_success', count: 347_200, color: colors[0], sparkline: sparkline() },
-      { event_type: 'auth.login_failed', count: 21_300, color: colors[1], sparkline: sparkline() },
-      { event_type: 'auth.token_issued', count: 35_400, color: colors[2], sparkline: sparkline() },
-      { event_type: 'session.created', count: 12_800, color: colors[3], sparkline: sparkline() },
-      { event_type: 'session.ended', count: 11_200, color: colors[4], sparkline: sparkline() },
-      { event_type: 'identity.created', count: 4_300, color: colors[5], sparkline: sparkline() },
-      { event_type: 'identity.updated', count: 2_100, color: colors[6], sparkline: sparkline() },
-    ]
+    return 0;
   }
-})
+}
+
+async function fetchData() {
+  const curTime = getThreshold(timeRange.value, 1)
+  const prevTime = getThreshold(timeRange.value, 2)
+  
+  try {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    // Fire all big queries concurrently using the actual database schema columns (event_type, created_at, revoked_at)
+    const [
+      authCur, authPrev,
+      sessCur, sessPrev,
+      tokCur, tokPrev,
+      failCur, failPrev,
+      eventBreakdown
+    ] = await Promise.all([
+      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${curTime}'`),
+      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
+      
+      fetchCount(`SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${curTime}'`),
+      fetchCount(`SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
+      
+      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${curTime}'`),
+      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
+      
+      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${curTime}'`),
+      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
+      
+      api.post<any>('/v1/analytics/query', { sql: `SELECT event_type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' GROUP BY event_type ORDER BY count DESC LIMIT 20` })
+    ]);
+
+    const computeChange = (cur: number, prev: number) => {
+      if (prev === 0 && cur === 0) return 0;
+      if (prev === 0) return 100;
+      return Math.round(((cur - prev) / prev) * 100);
+    }
+
+    metrics.value[0].value = authCur
+    metrics.value[0].change = computeChange(authCur, authPrev)
+
+    metrics.value[1].value = sessCur
+    metrics.value[1].change = computeChange(sessCur, sessPrev)
+
+    metrics.value[2].value = tokCur
+    metrics.value[2].change = computeChange(tokCur, tokPrev)
+
+    metrics.value[3].value = failCur
+    metrics.value[3].change = computeChange(failCur, failPrev)
+
+    if (eventBreakdown && eventBreakdown.rows) {
+      eventRows.value = eventBreakdown.rows.map((r: any, i: number) => ({
+        event_type: Object.values(r)[0] || 'unknown',
+        count: Number(Object.values(r)[1] || 0),
+        color: colors[i % colors.length],
+        sparkline: sparkline(), // Visual mock kept due to dialect complexity
+      }))
+    } else {
+      eventRows.value = []
+    }
+  } catch (err) {
+    console.error("Failed to load overview data:", err)
+  }
+}
+
+watch(timeRange, fetchData)
+
+onMounted(fetchData)
 </script>

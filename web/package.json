@@ -18,6 +18,8 @@
     "@guolao/vue-monaco-editor": "^1.6.0",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/vue-table": "^8.21.3",
+    "@unovis/ts": "^1.6.4",
+    "@unovis/vue": "^1.6.4",
     "@vueuse/core": "^10.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

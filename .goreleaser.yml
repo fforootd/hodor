@@ -40,8 +40,6 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.goreleaser
-    build_args:
-      TARGETPLATFORM: "{{ .TargetPlatform }}"
     labels:
       org.opencontainers.image.title: "{{ .ProjectName }}"
       org.opencontainers.image.version: "{{ .Version }}"

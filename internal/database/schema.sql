@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS events (
     payload        TEXT DEFAULT '{}',
     metadata       TEXT DEFAULT '{}',
     trace_id       TEXT DEFAULT '',
+    span_id        TEXT DEFAULT '',
     session_id     TEXT DEFAULT '',
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );

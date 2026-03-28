@@ -13,16 +13,11 @@
       "description": "Authenticated identity"
     },
     "org_id": {
-      "type": "integer"
+      "type": "string"
     },
-    "state": {
+    "token_hash": {
       "type": "string",
-      "enum": [
-        "active",
-        "expired",
-        "revoked"
-      ],
-      "default": "active"
+      "description": "Session token identifier hash"
     },
     "auth_method": {
       "type": "string",
@@ -68,16 +63,17 @@
       "format": "date-time",
       "readOnly": true
     },
-    "last_active": {
+    "expires_at": {
       "type": "string",
       "format": "date-time"
     },
-    "expires_at": {
+    "revoked_at": {
       "type": "string",
       "format": "date-time"
     }
   },
   "required": [
-    "entity_id"
+    "entity_id",
+    "token_hash"
   ]
 }

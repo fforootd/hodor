@@ -356,6 +356,7 @@ const iconMap: Record<string, any> = {
   human_user: Users, service_user: KeyRound, ai_agent: Bot, app: AppWindow,
   org: Building2, rule: Zap, provider: Globe, session: Clock,
   event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
+  overview: BarChart3, explore: Search, trace: Workflow,
 }
 
 function getIcon(type: string) {
@@ -433,8 +434,9 @@ const pageTitle = computed(() => {
     events: 'Events',
     jobs: 'Jobs',
     analytics: 'Analytics',
-    'obs-overview': 'Observability',
-    'obs-query': 'Query',
+    'obs-overview': 'Overview',
+    'obs-explore': 'Explore',
+    traces: 'Traces',
   }
   return titles[route.name as string] || 'Console'
 })

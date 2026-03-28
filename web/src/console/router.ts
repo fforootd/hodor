@@ -19,10 +19,9 @@ const router = createRouter({
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionListView.vue') },
     { path: '/events', name: 'events', component: () => import('./views/EventListView.vue') },
     { path: '/jobs', name: 'jobs', component: () => import('./views/JobsView.vue') },
-    { path: '/analytics', redirect: '/observability/query' },
-    // Observability
     { path: '/observability', name: 'obs-overview', component: () => import('./views/observability/OverviewView.vue') },
-    { path: '/observability/query', name: 'obs-query', component: () => import('./views/observability/QueryView.vue') },
+    { path: '/observability/explore', name: 'obs-explore', component: () => import('./views/observability/ExploreView.vue') },
+    { path: '/traces', name: 'traces', component: () => import('./views/observability/TracesView.vue') },
   ],
 })
 

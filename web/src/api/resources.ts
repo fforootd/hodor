@@ -32,13 +32,24 @@ export interface Schema {
 
 export interface Session {
   id: string
-  identity_id: string
+  entity_id: string
+  identity_id?: string
   identifier?: string
-  user_agent: string
-  ip_address: string
+  user_agent?: string
+  ip_address?: string
   created_at: string
-  expires_at: string
+  last_active?: string
+  expires_at?: string
   revoked_at?: string
+  state?: string
+  auth_method?: string
+  mfa_verified?: boolean
+  geo?: {
+    country?: string
+    city?: string
+    lat?: number
+    lng?: number
+  }
 }
 
 export interface Event {

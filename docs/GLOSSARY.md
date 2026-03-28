@@ -18,3 +18,15 @@ This document defines the core vocabulary and terminology mappings for the Zitad
 1. **Apps are Identities**: Non-human identities (Service Accounts) and Applications (OIDC Clients) use exactly the same underpinnings as human users.
 2. **If it doesn't have a schema, it doesn't exist**: All persistent domain objects must be entities defined by a JSON Schema.
 3. **Relationships via FGA**: Relationships between entities (e.g., membership in a group, ownership of an org) are represented as graph edges in OpenFGA, not relational tables.
+
+## Observability
+
+The following terms define the structure and scope of the identity intelligence layer. Note that background "Jobs" (like queues and scheduling) are managed under "System", though their execution logs are treated as Events.
+
+| Term | Meaning | Legacy / Standard Equivalent |
+|---|---|---|
+| **Overview** | Dashboards and aggregations of the current system state (e.g., high-level metrics, login trends). | Dashboards / Graphs |
+| **Explore** | A dual-mode query interface consisting of a Visual Query Builder and a raw SQL Editor for parsing events and telemetry. | Query / Analytics |
+| **Events** | Chronological stream of all discrete state changes, including audit trails, runtime errors, HTTP requests, and job queue processing logs. | Logs / Audits |
+| **Traces** | Correlated causal chains of events relying on `trace_id` and `span_id`. Provides end-to-end visibility from client SDK interactions to platform actions. | Activity / APM |
+| **Sessions** | Live authenticated state management. Bridges identities and historical events by providing a point of active security enforcement/revocation. | Sessions / Grants |

@@ -8,7 +8,7 @@
       "type": "string",
       "readOnly": true
     },
-    "type": {
+    "event_type": {
       "type": "string",
       "description": "Event type (e.g., entity.created, auth.login)"
     },
@@ -21,7 +21,7 @@
       "description": "ID of the aggregate"
     },
     "org_id": {
-      "type": "integer"
+      "type": "string"
     },
     "actor_id": {
       "type": "string",
@@ -43,14 +43,20 @@
       "type": "object",
       "description": "Contextual metadata (IP, user-agent, geo)"
     },
-    "timestamp": {
+    "trace_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "created_at": {
       "type": "string",
       "format": "date-time",
       "readOnly": true
     }
   },
   "required": [
-    "type",
+    "event_type",
     "aggregate_type",
     "aggregate_id"
   ]

@@ -9,7 +9,7 @@
     "applications":  { "label": "Applications",  "icon": "📱", "sort_order": 2 },
     "configure":     { "label": "Configure",     "icon": "⚙️", "sort_order": 3 },
     "observability": { "label": "Observability", "icon": "📊", "sort_order": 4 },
-    "system":        { "label": "System",        "icon": "🔧", "sort_order": 5, "nav": "hidden" }
+    "system":        { "label": "System",        "icon": "🔧", "sort_order": 5, "nav": "visible" }
   },
 
   "x-catalog": {
@@ -96,17 +96,27 @@
       "storage": "dedicated",
       "route": "/providers"
     },
-    "session": {
-      "$ref": "schemas/session.json",
+    "overview": {
       "version": "1.0",
       "group": "observability",
-      "alias": "Sessions",
-      "singular": "Session",
-      "path": "sessions",
-      "icon": "🔑",
+      "alias": "Overview",
+      "singular": "Overview",
+      "path": "observability",
+      "icon": "📊",
       "sort_order": 1,
-      "storage": "dedicated",
-      "route": "/sessions"
+      "storage": "virtual",
+      "route": "/observability"
+    },
+    "explore": {
+      "version": "1.0",
+      "group": "observability",
+      "alias": "Explore",
+      "singular": "Explore",
+      "path": "explore",
+      "icon": "🔍",
+      "sort_order": 2,
+      "storage": "virtual",
+      "route": "/observability/explore"
     },
     "event": {
       "$ref": "schemas/event.json",
@@ -116,32 +126,44 @@
       "singular": "Event",
       "path": "events",
       "icon": "📋",
-      "sort_order": 2,
+      "sort_order": 3,
       "storage": "dedicated",
       "route": "/events"
+    },
+    "trace": {
+      "version": "1.0",
+      "group": "observability",
+      "alias": "Traces",
+      "singular": "Trace",
+      "path": "traces",
+      "icon": "🔗",
+      "sort_order": 4,
+      "storage": "virtual",
+      "route": "/traces"
+    },
+    "session": {
+      "$ref": "schemas/session.json",
+      "version": "1.0",
+      "group": "observability",
+      "alias": "Sessions",
+      "singular": "Session",
+      "path": "sessions",
+      "icon": "🔑",
+      "sort_order": 5,
+      "storage": "dedicated",
+      "route": "/sessions"
     },
     "job": {
       "$ref": "schemas/job.json",
       "version": "1.0",
-      "group": "observability",
+      "group": "system",
       "alias": "Jobs",
       "singular": "Job",
       "path": "jobs",
       "icon": "⚡",
-      "sort_order": 3,
+      "sort_order": 1,
       "storage": "dedicated",
       "route": "/jobs"
-    },
-    "analytics": {
-      "version": "1.0",
-      "group": "observability",
-      "alias": "Analytics",
-      "singular": "Analytics",
-      "path": "analytics",
-      "icon": "📊",
-      "sort_order": 4,
-      "storage": "virtual",
-      "route": "/analytics"
     },
     "password_policy": {
       "$ref": "schemas/password_policy.json",
