@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/uniqueness"
@@ -41,7 +42,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	h.flows.Put(flow)
 	log.Printf("[flow] created %s (preset=%s, step=%s)", flowID, cfg.Login.Preset, flow.CurrentStep)
 
-	writeJSON(w, flow.ToFlowStep())
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
 // handleFlowSubmit processes a step submission and advances the flow.
@@ -49,13 +50,13 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 	flowID := extractFlowID(r.URL.Path, "submit")
 	if flowID == "" {
-		writeErr(w, http.StatusBadRequest, "missing flow_id")
+		httputil.WriteError(w, http.StatusBadRequest, "missing flow_id")
 		return
 	}
 
 	flow, ok := h.flows.Get(flowID)
 	if !ok {
-		writeErr(w, http.StatusNotFound, "flow not found or expired")
+		httputil.WriteError(w, http.StatusNotFound, "flow not found or expired")
 		return
 	}
 
@@ -66,7 +67,7 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		ProviderID string `json:"provider_id"` // for SSO
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -86,9 +87,9 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		flow.DisplayName = ""
 		flow.Verified = false
 		h.flows.Put(flow)
-		writeJSON(w, flow.ToFlowStep())
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 	default:
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown action: %s", req.Action))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown action: %s", req.Action))
 	}
 }
 
@@ -97,17 +98,17 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 	flowID := extractFlowIDFromPath(r.URL.Path)
 	if flowID == "" {
-		writeErr(w, http.StatusBadRequest, "missing flow_id")
+		httputil.WriteError(w, http.StatusBadRequest, "missing flow_id")
 		return
 	}
 
 	flow, ok := h.flows.Get(flowID)
 	if !ok {
-		writeErr(w, http.StatusNotFound, "flow not found or expired")
+		httputil.WriteError(w, http.StatusNotFound, "flow not found or expired")
 		return
 	}
 
-	writeJSON(w, flow.ToFlowStep())
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
 // --- Flow Step Handlers ---
@@ -115,23 +116,20 @@ func (h *Handler) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, flow *Flow, identifier string) {
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
-		writeErr(w, http.StatusBadRequest, "identifier is required")
+		httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
 		return
 	}
 
 	// Resolve identifier via unique_fields (ADR-016).
-	orgID := r.Header.Get("X-Org-Id")
-	if orgID == "" {
-		orgID = r.URL.Query().Get("org")
-	}
+	orgID := httputil.ResolveOrgID(r, "")
 
 	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if resolved == nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+		httputil.WriteError(w, http.StatusNotFound, "account not found")
 		return
 	}
 
@@ -142,12 +140,12 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	h.flows.Put(flow)
 
 	log.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.EntityID)
-	writeJSON(w, flow.ToFlowStep())
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
 func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flow *Flow, password string) {
 	if password == "" {
-		writeErr(w, http.StatusBadRequest, "password is required")
+		httputil.WriteError(w, http.StatusBadRequest, "password is required")
 		return
 	}
 
@@ -158,7 +156,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	).Scan(&credData)
 	if err != nil {
 		log.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IdentityID, err)
-		writeErr(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -166,7 +164,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	hash := auth.DecodeCredentialJSON(credData)
 	if hash == "" {
 		log.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
-		writeErr(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -176,7 +174,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 			"reason":  "invalid_password",
 			"flow_id": flow.ID,
 		})
-		writeErr(w, http.StatusUnauthorized, "invalid_password")
+		httputil.WriteError(w, http.StatusUnauthorized, "invalid_password")
 		return
 	}
 
@@ -186,7 +184,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	if flow.SchemaConfig.Login.MFARequired {
 		flow.CurrentStep = StepMFA
 		h.flows.Put(flow)
-		writeJSON(w, flow.ToFlowStep())
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
@@ -196,7 +194,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	if flow.Identifier == "" {
-		writeErr(w, http.StatusBadRequest, "no identifier set")
+		httputil.WriteError(w, http.StatusBadRequest, "no identifier set")
 		return
 	}
 
@@ -204,17 +202,17 @@ func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, fl
 	log.Printf("[flow] %s sending magic link to %s", flow.ID, flow.Identifier)
 	flow.CurrentStep = StepMagicLink
 	h.flows.Put(flow)
-	writeJSON(w, flow.ToFlowStep())
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
 func (h *Handler) flowSubmitSSO(w http.ResponseWriter, r *http.Request, flow *Flow, providerID string) {
 	if providerID == "" {
-		writeErr(w, http.StatusBadRequest, "provider_id is required")
+		httputil.WriteError(w, http.StatusBadRequest, "provider_id is required")
 		return
 	}
 
 	// Return redirect URL for SSO.
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"flow_id":      flow.ID,
 		"action":       "redirect",
 		"redirect_url": fmt.Sprintf("/v1/auth/sso/%s/start", providerID),
@@ -225,7 +223,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 	// Create session via the existing API.
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IdentityID, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "session creation failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "session creation failed")
 		return
 	}
 
@@ -243,7 +241,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		"method":     "flow",
 	})
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"flow_id":      flow.ID,
 		"step":         "complete",
 		"session_id":   sessResp.Session.ID,

@@ -3,6 +3,7 @@ package oidcop
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 	"log/slog"
 	"net/http"
 
@@ -37,7 +38,8 @@ func SetupProvider(storage *Storage, issuer string, logger *slog.Logger, encrypt
 		// Derive from the cookie signing key so at least it's not a constant.
 		key = sha256.Sum256([]byte(cookieSecret))
 	} else {
-		// Last resort dev fallback — deterministic but not hardcoded in source.
+		// ⚠️ Dev-only fallback — logged so it's visible in production.
+		log.Println("[WARN] OIDC encryption key: using insecure dev fallback. Set OIDC_ENCRYPTION_KEY in production.")
 		key = sha256.Sum256([]byte("zitadel-dev-oidc-encryption-key"))
 	}
 

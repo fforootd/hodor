@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 	"strconv"
 	"strings"
 
@@ -96,7 +98,7 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -130,7 +132,7 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 		events = append(events, evt)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 
@@ -140,7 +142,7 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 		nextCursor = events[len(events)-1].ID
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Items: events, NextCursor: nextCursor})
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: events, NextCursor: nextCursor})
 }
 
 func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
@@ -155,13 +157,13 @@ func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 		query = `SELECT event_type, COUNT(*) as cnt FROM events WHERE org_id = ? GROUP BY event_type`
 		args = []any{orgID}
 	default:
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown aggregate query: %s", queryName))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown aggregate query: %s", queryName))
 		return
 	}
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "aggregate query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "aggregate query failed")
 		return
 	}
 	defer rows.Close()
@@ -179,18 +181,18 @@ func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Items: result})
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: result})
 }
 
 // streamEvents provides Server-Sent Events (SSE) for real-time event streaming.
 func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		httputil.WriteError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 

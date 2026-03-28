@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/crypto"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
 )
@@ -58,15 +59,15 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 		`SELECT protocol, config, enabled FROM providers WHERE id = ?`, providerID,
 	).Scan(&protocol, &configJSON, &enabled)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "provider not found")
+		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 	if !enabled {
-		writeErr(w, http.StatusForbidden, "provider is disabled")
+		httputil.WriteError(w, http.StatusForbidden, "provider is disabled")
 		return
 	}
 	if protocol != "oidc" {
-		writeErr(w, http.StatusBadRequest, "only OIDC providers are supported")
+		httputil.WriteError(w, http.StatusBadRequest, "only OIDC providers are supported")
 		return
 	}
 
@@ -82,7 +83,7 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	// Discover OIDC endpoints.
 	endpoints, err := discoverOIDC(r.Context(), issuer)
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, "OIDC discovery failed: "+err.Error())
+		httputil.WriteError(w, http.StatusBadGateway, "OIDC discovery failed: "+err.Error())
 		return
 	}
 

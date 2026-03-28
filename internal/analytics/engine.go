@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // Backend is the pluggable analytics query interface.
@@ -237,11 +239,11 @@ func (e *Engine) handleQuery(w http.ResponseWriter, r *http.Request) {
 		Limit int    `json:"limit,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, QueryResult{Error: "invalid JSON body"})
+		httputil.WriteJSON(w, http.StatusBadRequest, QueryResult{Error: "invalid JSON body"})
 		return
 	}
 	if req.SQL == "" {
-		writeJSON(w, http.StatusBadRequest, QueryResult{Error: "sql field is required"})
+		httputil.WriteJSON(w, http.StatusBadRequest, QueryResult{Error: "sql field is required"})
 		return
 	}
 	if req.Limit == 0 {
@@ -250,19 +252,19 @@ func (e *Engine) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	result, err := e.backend.Query(r.Context(), req.SQL, req.Limit)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, QueryResult{Error: err.Error()})
+		httputil.WriteJSON(w, http.StatusBadRequest, QueryResult{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httputil.WriteJSON(w, http.StatusOK, result)
 }
 
 func (e *Engine) handleTables(w http.ResponseWriter, r *http.Request) {
 	tables, err := e.backend.Tables(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"tables": tables})
+	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{"tables": tables})
 }
 
 // schemaRefs defines foreign key relationship metadata per table+column.
@@ -283,7 +285,7 @@ var schemaRefs = map[string]map[string]*RefInfo{
 func (e *Engine) handleSchema(w http.ResponseWriter, r *http.Request) {
 	tables, err := e.backend.Tables(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	schema := make(map[string]interface{})
@@ -304,11 +306,5 @@ func (e *Engine) handleSchema(w http.ResponseWriter, r *http.Request) {
 			"row_count": t.RowCount,
 		}
 	}
-	writeJSON(w, http.StatusOK, schema)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	httputil.WriteJSON(w, http.StatusOK, schema)
 }

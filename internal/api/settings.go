@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/zitadel/zitadel/internal/httputil"
+
 	"github.com/zitadel/zitadel/internal/settings"
 )
 
@@ -21,7 +23,7 @@ func (a *API) RegisterSettingsRoutes(mux *http.ServeMux) {
 func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 	settingsType := r.PathValue("type")
 	if settingsType == "" {
-		writeError(w, http.StatusBadRequest, "settings type is required")
+		httputil.WriteError(w, http.StatusBadRequest, "settings type is required")
 		return
 	}
 
@@ -36,11 +38,11 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		data, err := settings.Get(r.Context(), a.db.SQL(), settingsType, scope, scopeID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to read settings")
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to read settings")
 			return
 		}
 		if data == nil {
-			writeJSON(w, http.StatusOK, map[string]any{
+			httputil.WriteJSON(w, http.StatusOK, map[string]any{
 				"type":      settingsType,
 				"scope":     scope,
 				"scope_id":  scopeID,
@@ -49,7 +51,7 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{
 			"type":     settingsType,
 			"scope":    scope,
 			"scope_id": scopeID,
@@ -70,11 +72,11 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 
 	data, err := settings.Resolve(r.Context(), a.db.SQL(), settingsType, orgID, appID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve settings")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to resolve settings")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"type":      settingsType,
 		"effective": data,
 		"scope":     scope,
@@ -88,7 +90,7 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 	settingsType := r.PathValue("type")
 	if settingsType == "" {
-		writeError(w, http.StatusBadRequest, "settings type is required")
+		httputil.WriteError(w, http.StatusBadRequest, "settings type is required")
 		return
 	}
 
@@ -100,16 +102,16 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if len(data) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one setting field is required")
+		httputil.WriteError(w, http.StatusBadRequest, "at least one setting field is required")
 		return
 	}
 
 	if err := settings.Put(r.Context(), a.db.SQL(), settingsType, scope, scopeID, data); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save settings")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to save settings")
 		return
 	}
 
@@ -124,7 +126,7 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 
 	a.bus.Signal()
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":   "updated",
 		"type":     settingsType,
 		"scope":    scope,
@@ -144,7 +146,7 @@ func (a *API) deleteSettings(w http.ResponseWriter, r *http.Request) {
 	scopeID := r.URL.Query().Get("scope_id")
 
 	if err := settings.Delete(r.Context(), a.db.SQL(), settingsType, scope, scopeID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete settings")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to delete settings")
 		return
 	}
 

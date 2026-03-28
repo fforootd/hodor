@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 	"strings"
 	"time"
 
@@ -83,7 +85,7 @@ func (a *API) RegisterProviderRoutes(mux *http.ServeMux) {
 // --- Templates ---
 
 func (a *API) listProviderTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"templates": providerTemplates})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"templates": providerTemplates})
 }
 
 // --- Create ---
@@ -100,11 +102,11 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		DisplayOrder   int               `json:"display_order"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httputil.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if req.Protocol == "" {
@@ -137,7 +139,7 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		issuer, _ := req.Config["issuer"].(string)
 		clientID, _ := req.Config["client_id"].(string)
 		if issuer == "" || clientID == "" {
-			writeError(w, http.StatusBadRequest, "OIDC providers require issuer and client_id in config")
+			httputil.WriteError(w, http.StatusBadRequest, "OIDC providers require issuer and client_id in config")
 			return
 		}
 	}
@@ -171,7 +173,7 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		now, now,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create provider failed: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "create provider failed: "+err.Error())
 		return
 	}
 
@@ -180,7 +182,7 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 	})
 	a.bus.Signal()
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	httputil.WriteJSON(w, http.StatusCreated, map[string]any{
 		"id":       providerID,
 		"name":     req.Name,
 		"protocol": req.Protocol,
@@ -195,7 +197,7 @@ func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at
 		 FROM providers ORDER BY display_order, name`)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -232,14 +234,14 @@ func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 	if providers == nil {
 		providers = []map[string]any{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"providers": providers, "count": len(providers)})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"providers": providers, "count": len(providers)})
 }
 
 // --- Get ---
@@ -255,7 +257,7 @@ func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
 		 FROM providers WHERE id = ?`, id,
 	).Scan(&name, &protocol, &template, &config, &overrides, &autoReg, &enabled, &displayOrder, &createdAt, &updatedAt)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "provider not found")
+		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
@@ -265,7 +267,7 @@ func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
 	var overridesMap map[string]string
 	json.Unmarshal([]byte(overrides), &overridesMap)
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"id":              id,
 		"name":            name,
 		"protocol":        protocol,
@@ -287,7 +289,7 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 
 	var req map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -326,16 +328,16 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "update failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		writeError(w, http.StatusNotFound, "provider not found")
+		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "updated"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "updated"})
 }
 
 // --- Delete ---
@@ -345,12 +347,12 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM providers WHERE id = ?`, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "delete failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		writeError(w, http.StatusNotFound, "provider not found")
+		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
@@ -360,7 +362,7 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	emitEventSimple(r.Context(), a.db.SQL(), "provider.deleted", "", id, "provider", map[string]any{"provider_id": id})
 	a.bus.Signal()
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
 // --- Helpers ---

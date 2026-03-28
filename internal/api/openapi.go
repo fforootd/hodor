@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // openAPISpec serves a dynamically generated OpenAPI 3.1 spec.
@@ -275,5 +277,5 @@ func (a *API) openAPISpec(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	writeJSON(w, http.StatusOK, spec)
+	httputil.WriteJSON(w, http.StatusOK, spec)
 }

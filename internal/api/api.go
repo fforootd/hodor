@@ -16,6 +16,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
@@ -179,11 +180,11 @@ type ErrorResponse struct {
 func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	var req IdentityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Identifier == "" {
-		writeError(w, http.StatusBadRequest, "identifier is required")
+		httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
 		return
 	}
 
@@ -194,7 +195,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	if req.Profile != nil {
 		b, err := json.Marshal(req.Profile)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid profile field")
+			httputil.WriteError(w, http.StatusBadRequest, "invalid profile field")
 			return
 		}
 		profileJSON = string(b)
@@ -204,7 +205,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "database error")
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 	defer tx.Rollback()
@@ -215,7 +216,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		identityID, req.Identifier, req.DisplayName, profileJSON, now, now,
 	)
 	if err != nil {
-		writeError(w, http.StatusConflict, "identity already exists or database error")
+		httputil.WriteError(w, http.StatusConflict, "identity already exists or database error")
 		return
 	}
 
@@ -226,7 +227,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, identityID, orgID, req.Identifier); err != nil {
 		if v, ok := err.(*uniqueness.Violation); ok {
-			writeJSON(w, http.StatusConflict, map[string]any{
+			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
 				"error": "uniqueness_violation",
 				"field": v.Field,
 				"value": v.Value,
@@ -234,7 +235,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeError(w, http.StatusConflict, "identifier already exists")
+		httputil.WriteError(w, http.StatusConflict, "identifier already exists")
 		return
 	}
 
@@ -244,7 +245,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
 			identityID, cap)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to add capability")
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to add capability")
 			return
 		}
 	}
@@ -258,7 +259,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
 
@@ -290,23 +291,23 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	writeJSON(w, http.StatusCreated, resp)
+	httputil.WriteJSON(w, http.StatusCreated, resp)
 }
 
 func (a *API) getIdentity(w http.ResponseWriter, r *http.Request) {
 	identityID, err := parseID(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	resp, err := a.loadIdentity(r, identityID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "identity not found")
+		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +351,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	args = append(args, limit+1)
 	rows, err = a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -372,7 +373,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 		nextCursor = identities[len(identities)-1].ID
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{
 		Items:      identities,
 		NextCursor: nextCursor,
 	})
@@ -381,13 +382,13 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 	identityID, err := parseID(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	var req IdentityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -395,7 +396,7 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "database error")
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 	defer tx.Rollback()
@@ -423,12 +424,12 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 	query := "UPDATE entities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "update failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		writeError(w, http.StatusNotFound, "identity not found")
+		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
@@ -437,26 +438,26 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
 
 	a.bus.Signal()
 
 	resp, _ := a.loadIdentity(r, identityID)
-	writeJSON(w, http.StatusOK, resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	identityID, err := parseID(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "database error")
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 	defer tx.Rollback()
@@ -466,19 +467,19 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM entities WHERE id = ?`, identityID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "delete failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		writeError(w, http.StatusNotFound, "identity not found")
+		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
 	emitEvent(r.Context(), tx, "identity.deleted", identityID, identityID, "identity", nil)
 
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
 
@@ -519,11 +520,11 @@ type SchemaResponse struct {
 func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 	var req SchemaRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Type == "" || req.Schema == nil {
-		writeError(w, http.StatusBadRequest, "type and schema are required")
+		httputil.WriteError(w, http.StatusBadRequest, "type and schema are required")
 		return
 	}
 	if req.OrgID == "" {
@@ -532,13 +533,13 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 
 	schemaJSON, err := json.Marshal(req.Schema)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid schema")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid schema")
 		return
 	}
 
 	// Validate x-auth-methods keys.
 	if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
-		writeError(w, http.StatusBadRequest, validationErr)
+		httputil.WriteError(w, http.StatusBadRequest, validationErr)
 		return
 	}
 
@@ -573,11 +574,11 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		schemaID, req.Type, req.OrgID, string(schemaJSON), newVersion, isDefault,
 		req.Message, createdBy, now)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save schema: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to save schema: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, SchemaResponse{
+	httputil.WriteJSON(w, http.StatusCreated, SchemaResponse{
 		ID:        schemaID,
 		Type:      req.Type,
 		OrgID:     req.OrgID,
@@ -605,7 +606,7 @@ func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -621,11 +622,11 @@ func (a *API) listSchemas(w http.ResponseWriter, r *http.Request) {
 		schemas = append(schemas, s)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Items: schemas})
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: schemas})
 }
 
 func (a *API) getSchema(w http.ResponseWriter, r *http.Request) {
@@ -637,12 +638,12 @@ func (a *API) getSchema(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, type, org_id, schema, version, COALESCE(is_default, false), COALESCE(message,''), COALESCE(created_by,''), created_at FROM schemas WHERE id = ?`, schemaID,
 	).Scan(&s.ID, &s.Type, &s.OrgID, &schemaStr, &s.Version, &s.IsDefault, &s.Message, &s.CreatedBy, &s.CreatedAt)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "schema not found")
+		httputil.WriteError(w, http.StatusNotFound, "schema not found")
 		return
 	}
 	json.Unmarshal([]byte(schemaStr), &s.Schema)
 
-	writeJSON(w, http.StatusOK, s)
+	httputil.WriteJSON(w, http.StatusOK, s)
 }
 
 // updateSchema creates a NEW version of the schema (append-only).
@@ -655,11 +656,11 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Schema == nil {
-		writeError(w, http.StatusBadRequest, "schema is required")
+		httputil.WriteError(w, http.StatusBadRequest, "schema is required")
 		return
 	}
 
@@ -670,19 +671,19 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		`SELECT type, org_id FROM schemas WHERE id = ?`, schemaID,
 	).Scan(&schemaType, &orgID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "schema not found")
+		httputil.WriteError(w, http.StatusNotFound, "schema not found")
 		return
 	}
 
 	schemaJSON, err := json.Marshal(req.Schema)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid schema")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid schema")
 		return
 	}
 
 	// Validate x-auth-methods keys.
 	if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
-		writeError(w, http.StatusBadRequest, validationErr)
+		httputil.WriteError(w, http.StatusBadRequest, validationErr)
 		return
 	}
 
@@ -704,7 +705,7 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		newID, schemaType, orgID, string(schemaJSON), newVersion,
 		req.Message, createdBy, now)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create version: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to create version: "+err.Error())
 		return
 	}
 
@@ -716,7 +717,7 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		"from_version": schemaID,
 	})
 
-	writeJSON(w, http.StatusCreated, SchemaResponse{
+	httputil.WriteJSON(w, http.StatusCreated, SchemaResponse{
 		ID:        newID,
 		Type:      schemaType,
 		OrgID:     orgID,
@@ -741,7 +742,7 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 		`SELECT type, org_id, version FROM schemas WHERE id = ?`, schemaID,
 	).Scan(&schemaType, &orgID, &version)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "schema not found")
+		httputil.WriteError(w, http.StatusNotFound, "schema not found")
 		return
 	}
 
@@ -766,7 +767,7 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 		"schema_id": schemaID, "type": schemaType, "version": version,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":            "promoted",
 		"schema_id":         schemaID,
 		"version":           version,
@@ -779,7 +780,7 @@ func (a *API) diffSchema(w http.ResponseWriter, r *http.Request) {
 	schemaID := r.PathValue("id")
 	compareID := r.URL.Query().Get("compare")
 	if compareID == "" {
-		writeError(w, http.StatusBadRequest, "compare query parameter required")
+		httputil.WriteError(w, http.StatusBadRequest, "compare query parameter required")
 		return
 	}
 
@@ -792,7 +793,7 @@ func (a *API) diffSchema(w http.ResponseWriter, r *http.Request) {
 		`SELECT schema, version, COALESCE(message,'') FROM schemas WHERE id = ?`, schemaID,
 	).Scan(&leftStr, &leftVersion, &leftMsg)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "schema not found: "+schemaID)
+		httputil.WriteError(w, http.StatusNotFound, "schema not found: "+schemaID)
 		return
 	}
 
@@ -800,7 +801,7 @@ func (a *API) diffSchema(w http.ResponseWriter, r *http.Request) {
 		`SELECT schema, version, COALESCE(message,'') FROM schemas WHERE id = ?`, compareID,
 	).Scan(&rightStr, &rightVersion, &rightMsg)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "schema not found: "+compareID)
+		httputil.WriteError(w, http.StatusNotFound, "schema not found: "+compareID)
 		return
 	}
 
@@ -842,7 +843,7 @@ func (a *API) diffSchema(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"left":    map[string]any{"id": schemaID, "version": leftVersion, "message": leftMsg},
 		"right":   map[string]any{"id": compareID, "version": rightVersion, "message": rightMsg},
 		"changes": changes,
@@ -913,11 +914,11 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 		EntityID string `json:"entity_id"` // identity ID or identifier
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.EntityID == "" {
-		writeError(w, http.StatusBadRequest, "entity_id is required")
+		httputil.WriteError(w, http.StatusBadRequest, "entity_id is required")
 		return
 	}
 
@@ -927,7 +928,7 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 		`SELECT schema FROM schemas WHERE id = ?`, schemaID,
 	).Scan(&draftSchemaStr)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "schema not found")
+		httputil.WriteError(w, http.StatusNotFound, "schema not found")
 		return
 	}
 
@@ -942,7 +943,7 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 		req.EntityID, req.EntityID,
 	).Scan(&identifier, &dataStr, &currentSchemaStr)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "entity not found")
+		httputil.WriteError(w, http.StatusNotFound, "entity not found")
 		return
 	}
 
@@ -979,7 +980,7 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"entity":         identifier,
 		"current_claims": currentClaims,
 		"draft_claims":   draftClaims,
@@ -1023,7 +1024,7 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 		counts["org"] = orgCount
 	}
 
-	writeJSON(w, http.StatusOK, counts)
+	httputil.WriteJSON(w, http.StatusOK, counts)
 }
 
 // getMetaSchema returns the canonical Zitadel identity schema meta-schema.
@@ -1071,7 +1072,7 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 		count = 0
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
 func (a *API) loadIdentity(r *http.Request, identityID string) (IdentityResponse, error) {
@@ -1151,14 +1152,9 @@ func parseID(r *http.Request, name string) (string, error) {
 	return v, nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
+// writeError wraps httputil.WriteError with the API's ErrorResponse format.
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, ErrorResponse{Error: msg, Code: status})
+	httputil.WriteJSON(w, status, ErrorResponse{Error: msg, Code: status})
 }
 
 // --- Universal Search ---
@@ -1174,7 +1170,7 @@ type SearchResult struct {
 func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}, "query": ""})
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}, "query": ""})
 		return
 	}
 
@@ -1205,7 +1201,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"results": deduped,
 		"query":   q,
 		"count":   len(deduped),

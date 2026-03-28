@@ -1,10 +1,11 @@
 package fga
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // Middleware provides FGA-based authorization for API requests.
@@ -29,7 +30,7 @@ func NewMiddleware(svc *Service) *Middleware {
 func (m *Middleware) Gate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip public routes — AuthGate already handles this, but be safe.
-		if isPublicFGARoute(r.Method, r.URL.Path) {
+		if httputil.IsPublicRoute(r.Method, r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -76,13 +77,13 @@ func (m *Middleware) Gate(next http.Handler) http.Handler {
 		if err != nil {
 			log.Printf("[fga] check error: user=%s perm=%s obj=%s err=%v", userID, permission, object, err)
 			// On FGA errors, deny by default (secure fail-closed).
-			writeJSONError(w, http.StatusForbidden, "authorization check failed")
+			httputil.WriteError(w, http.StatusForbidden, "authorization check failed")
 			return
 		}
 
 		if !allowed {
 			log.Printf("[fga] denied: user=%s perm=%s obj=%s", userID, permission, object)
-			writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+			httputil.WriteError(w, http.StatusForbidden, "insufficient permissions")
 			return
 		}
 
@@ -105,13 +106,13 @@ func (m *Middleware) Require(fgaType, permission, object string) func(http.Handl
 		return func(w http.ResponseWriter, r *http.Request) {
 			userID := r.Header.Get("X-Identity-Id")
 			if userID == "" {
-				writeJSONError(w, http.StatusUnauthorized, "authentication required")
+				httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
 
 			allowed, err := m.svc.Check(r.Context(), "user:"+userID, permission, object)
 			if err != nil || !allowed {
-				writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+				httputil.WriteError(w, http.StatusForbidden, "insufficient permissions")
 				return
 			}
 
@@ -191,53 +192,9 @@ func buildCheckObject(fgaType, resourceID string, r *http.Request) string {
 	}
 }
 
-// resolveOrgID extracts the org context from the request.
-// Priority: X-Org-Id header → org_id query param → "default".
+// resolveOrgID extracts the org context from the request using httputil.
 func resolveOrgID(r *http.Request) string {
-	if orgID := r.Header.Get("X-Org-Id"); orgID != "" {
-		return orgID
-	}
-	if orgID := r.URL.Query().Get("org_id"); orgID != "" {
-		return orgID
-	}
-	return "_global"
-}
-
-// isPublicFGARoute returns true for paths that skip FGA checks.
-func isPublicFGARoute(method, path string) bool {
-	// All non-API routes skip FGA
-	if !strings.HasPrefix(path, "/v1/") {
-		return true
-	}
-
-	// Public GET routes
-	if method == "GET" {
-		publicGET := []string{
-			"/v1/schemas",
-			"/v1/branding",
-			"/v1/auth/settings",
-			"/v1/providers/templates",
-		}
-		for _, p := range publicGET {
-			if path == p || strings.HasPrefix(path, p+"/") {
-				return true
-			}
-		}
-	}
-
-	// Public POST routes
-	if method == "POST" {
-		publicPOST := []string{
-			"/v1/login/",
-		}
-		for _, p := range publicPOST {
-			if strings.HasPrefix(path, p) {
-				return true
-			}
-		}
-	}
-
-	return false
+	return httputil.ResolveOrgID(r, "_global")
 }
 
 // remapToOrgPermission translates resource-level permissions to org-scoped
@@ -255,10 +212,4 @@ func remapToOrgPermission(perm string) string {
 	default:
 		return perm // already an org-level permission (can_manage_*, can_create_entity, etc.)
 	}
-}
-
-func writeJSONError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `{"error":%q,"code":%d}`, msg, status)
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 	"strings"
 	"time"
 
@@ -43,7 +45,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 		 FROM entities WHERE id = ?`, identityID,
 	).Scan(&identifier, &displayName, &state, &profile, &orgID, &schemaID, &createdAt, &updatedAt)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "identity not found")
+		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
@@ -70,7 +72,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 		"entity_id": identityID,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"identity": map[string]any{
 			"id":           identityID,
 			"identifier":   identifier,
@@ -99,7 +101,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		Profile     map[string]any `json:"profile,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -109,7 +111,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		`SELECT COALESCE(profile,'{}'), COALESCE(schema_id,'') FROM entities WHERE id = ?`, identityID,
 	).Scan(&currentProfile, &schemaID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "identity not found")
+		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
@@ -132,7 +134,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if req.Profile != nil {
 		for field := range req.Profile {
 			if allowed, exists := editableFields[field]; exists && !allowed {
-				writeError(w, http.StatusForbidden, fmt.Sprintf("field %q is not editable by the account owner", field))
+				httputil.WriteError(w, http.StatusForbidden, fmt.Sprintf("field %q is not editable by the account owner", field))
 				return
 			}
 		}
@@ -177,7 +179,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("UPDATE entities SET %s WHERE id = ?", strings.Join(updates, ", "))
 	_, err = a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "update failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
 
@@ -188,7 +190,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		"after":          redact.Payload(schemaJSON, existingProfile),
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "fields_changed": changedFields})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "updated", "fields_changed": changedFields})
 }
 
 // --- GET /v1/account/sessions ---
@@ -203,7 +205,7 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY created_at DESC`, identityID,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -223,14 +225,14 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 	if sessions == nil {
 		sessions = []map[string]any{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions, "count": len(sessions)})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"sessions": sessions, "count": len(sessions)})
 }
 
 // --- POST /v1/account/sessions/{id}/revoke ---
@@ -247,7 +249,7 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 		 FROM sessions WHERE id = ? AND revoked_at IS NULL`, sessionID,
 	).Scan(&ownerID, &userAgent, &ipAddress)
 	if err != nil || ownerID != identityID {
-		writeError(w, http.StatusNotFound, "session not found")
+		httputil.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
@@ -260,7 +262,7 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 		"ip_address": ipAddress,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked"})
 }
 
 // --- POST /v1/account/sessions/revoke-others ---
@@ -275,7 +277,7 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 		identityID, currentSessionID,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "revocation failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "revocation failed")
 		return
 	}
 
@@ -286,7 +288,7 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 		"kept_session_id": currentSessionID,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "count": count})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "count": count})
 }
 
 // --- GET /v1/account/activity ---
@@ -308,7 +310,7 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY id DESC LIMIT ?`, identityID, limit,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -332,14 +334,14 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 	if events == nil {
 		events = []map[string]any{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"events": events, "count": len(events)})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"events": events, "count": len(events)})
 }
 
 // --- Helpers ---

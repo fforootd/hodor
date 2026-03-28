@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/id"
@@ -45,15 +47,15 @@ func (a *API) RegisterPATRoutes(mux *http.ServeMux) {
 func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 	var req CreatePATRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.EntityID == "" {
-		writeError(w, http.StatusBadRequest, "entity_id is required")
+		httputil.WriteError(w, http.StatusBadRequest, "entity_id is required")
 		return
 	}
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+		httputil.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -67,13 +69,13 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT 1 FROM entities WHERE id = ?`, req.EntityID).Scan(&exists)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "entity not found")
+		httputil.WriteError(w, http.StatusNotFound, "entity not found")
 		return
 	}
 
 	rawToken, tokenHash, err := generatePrefixedToken(PrefixPAT)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 
@@ -88,7 +90,7 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 		tokenID, tokenHash, req.EntityID, req.Name, string(scopesJSON), now,
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create PAT: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to create PAT: "+err.Error())
 		return
 	}
 
@@ -98,7 +100,7 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 		"entity_id": req.EntityID,
 	})
 
-	writeJSON(w, http.StatusCreated, CreatePATResponse{
+	httputil.WriteJSON(w, http.StatusCreated, CreatePATResponse{
 		ID:        tokenID,
 		Name:      req.Name,
 		EntityID:  req.EntityID,
@@ -126,7 +128,7 @@ func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -144,17 +146,17 @@ func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
 		pats = append(pats, p)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "row iteration failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Items: pats})
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: pats})
 }
 
 func (a *API) revokePAT(w http.ResponseWriter, r *http.Request) {
 	tokenID, err := parseID(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
@@ -163,12 +165,12 @@ func (a *API) revokePAT(w http.ResponseWriter, r *http.Request) {
 		`UPDATE tokens SET revoked_at = ? WHERE id = ? AND type = 'pat' AND revoked_at IS NULL`,
 		now, tokenID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "revoke failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "revoke failed")
 		return
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("PAT %s not found or already revoked", tokenID))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Sprintf("PAT %s not found or already revoked", tokenID))
 		return
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/notify"
 	"github.com/zitadel/zitadel/internal/session"
@@ -70,7 +71,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 func (h *Handler) handleBranding(w http.ResponseWriter, r *http.Request) {
 	cfg := h.getDefaultSchemaConfig(r)
 	b := cfg.Branding
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"org_id":                "",
 		"org_name":              b.OrgName,
 		"logo_url":              b.LogoURL,
@@ -110,7 +111,7 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"preset":               cfg.Login.Preset,
 		"auth_methods":         authMethods,
 		"mfa_required":         cfg.Login.MFARequired,
@@ -181,29 +182,26 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		Identifier string `json:"identifier"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	identifier := strings.TrimSpace(req.Identifier)
 	if identifier == "" {
-		writeErr(w, http.StatusBadRequest, "identifier is required")
+		httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
 		return
 	}
 
 	// Resolve identifier via unique_fields (ADR-016).
-	orgID := r.Header.Get("X-Org-Id")
-	if orgID == "" {
-		orgID = r.URL.Query().Get("org")
-	}
+	orgID := httputil.ResolveOrgID(r, "")
 
 	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if resolved == nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+		httputil.WriteError(w, http.StatusNotFound, "account not found")
 		return
 	}
 
@@ -219,7 +217,7 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  time.Now(),
 	}
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"login_session_id": sid,
 		"entity_id":        identityID,
 		"org_id":           "",
@@ -237,13 +235,13 @@ func (h *Handler) handleLoginPassword(w http.ResponseWriter, r *http.Request) {
 		Password       string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	sess, ok := loginSessions[req.LoginSessionID]
 	if !ok {
-		writeErr(w, http.StatusNotFound, "login session not found")
+		httputil.WriteError(w, http.StatusNotFound, "login session not found")
 		return
 	}
 
@@ -253,12 +251,12 @@ func (h *Handler) handleLoginPassword(w http.ResponseWriter, r *http.Request) {
 			"reason":           "invalid_password",
 			"login_session_id": sess.ID,
 		})
-		writeJSON(w, map[string]any{"error": "invalid_password"})
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{"error": "invalid_password"})
 		return
 	}
 
 	sess.Verified = true
-	writeJSON(w, map[string]any{"next_step": "complete"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"next_step": "complete"})
 }
 
 // --- Login Complete ---
@@ -268,24 +266,24 @@ func (h *Handler) handleLoginComplete(w http.ResponseWriter, r *http.Request) {
 		LoginSessionID string `json:"login_session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	sess, ok := loginSessions[req.LoginSessionID]
 	if !ok {
-		writeErr(w, http.StatusNotFound, "login session not found")
+		httputil.WriteError(w, http.StatusNotFound, "login session not found")
 		return
 	}
 	if !sess.Verified {
-		writeErr(w, http.StatusForbidden, "login not verified")
+		httputil.WriteError(w, http.StatusForbidden, "login not verified")
 		return
 	}
 
 	// Create a real session via the existing API (emits session.created event).
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), sess.IdentityID, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to create session")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 
@@ -301,7 +299,7 @@ func (h *Handler) handleLoginComplete(w http.ResponseWriter, r *http.Request) {
 		"method":     "password",
 	})
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"session_id":   sessResp.Session.ID,
 		"redirect_uri": "/console",
 	})
@@ -314,13 +312,13 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 		Email string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	email := strings.TrimSpace(req.Email)
 	if email == "" {
-		writeErr(w, http.StatusBadRequest, "email is required")
+		httputil.WriteError(w, http.StatusBadRequest, "email is required")
 		return
 	}
 
@@ -341,13 +339,13 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 			newID, email, email,
 		)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to create identity")
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
 			return
 		}
 		identityID = newID
 		log.Printf("[magic-link] created pending identity %s for %s", identityID, email)
 	} else if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	} else {
 		purpose = "login"
@@ -356,7 +354,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	// Generate token.
 	token, err := crypto.RandomBase64URL(32)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "token generation failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "token generation failed")
 		return
 	}
 	expiresAt := time.Now().Add(15 * time.Minute)
@@ -367,7 +365,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 		token, identityID, expiresAt.Format(time.RFC3339),
 	)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to store token")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to store token")
 		return
 	}
 
@@ -387,7 +385,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 		"purpose": purpose,
 	})
 
-	writeJSON(w, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":  "sent",
 		"purpose": purpose,
 		"message": "Check your email for a sign-in link.",
@@ -397,7 +395,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		writeErr(w, http.StatusBadRequest, "token is required")
+		httputil.WriteError(w, http.StatusBadRequest, "token is required")
 		return
 	}
 
@@ -417,11 +415,11 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 			"reason": "invalid_token",
 			"ip":     r.RemoteAddr,
 		})
-		writeErr(w, http.StatusNotFound, "invalid or expired link")
+		httputil.WriteError(w, http.StatusNotFound, "invalid or expired link")
 		return
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -434,7 +432,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 			"identifier": identifier,
 			"ip":         r.RemoteAddr,
 		})
-		writeErr(w, http.StatusGone, "link has expired")
+		httputil.WriteError(w, http.StatusGone, "link has expired")
 		return
 	}
 
@@ -447,7 +445,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 			"used_at":    usedAt.String,
 			"ip":         r.RemoteAddr,
 		})
-		writeErr(w, http.StatusGone, "link has already been used")
+		httputil.WriteError(w, http.StatusGone, "link has already been used")
 		return
 	}
 
@@ -462,7 +460,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	// Create session.
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to create session")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 
@@ -482,17 +480,4 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Redirect to console.
 	http.Redirect(w, r, "/console", http.StatusFound)
-}
-
-// --- Helpers ---
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

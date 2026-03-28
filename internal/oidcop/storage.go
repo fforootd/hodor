@@ -17,6 +17,7 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 	"golang.org/x/text/language"
 
+	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/login"
 )
@@ -65,24 +66,23 @@ func (s *Storage) AuthorizeClientIDSecret(ctx context.Context, clientID, clientS
 	var credData string
 	err := s.db.SQL().QueryRowContext(ctx,
 		`SELECT ic.credential_data FROM entity_credentials ic
-		 JOIN entities e ON ic.entity_id = i.id
-		 WHERE i.identifier = ? AND ic.credential_type = 'client_secret'`,
+		 JOIN entities e ON ic.entity_id = e.id
+		 WHERE e.identifier = ? AND ic.credential_type = 'client_secret'`,
 		clientID,
 	).Scan(&credData)
 	if err != nil {
 		return fmt.Errorf("client not found or no secret configured")
 	}
 
-	// credData is JSON: {"hash": "<bcrypt hash>"}
-	var cred struct {
-		Hash string `json:"hash"`
-	}
-	if err := json.Unmarshal([]byte(credData), &cred); err != nil {
+	// Decode the stored hash from credential JSON and verify using passwap.
+	encoded := auth.DecodeCredentialJSON(credData)
+	if encoded == "" {
 		return fmt.Errorf("invalid credential data")
 	}
 
-	// For the POC, do a simple comparison. Production would use bcrypt.CompareHashAndPassword.
-	if cred.Hash != clientSecret {
+	passwords := auth.NewPasswords(s.db)
+	ok, _, err := passwords.Verify(encoded, clientSecret)
+	if err != nil || !ok {
 		return fmt.Errorf("invalid client secret")
 	}
 	return nil

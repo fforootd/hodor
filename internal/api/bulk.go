@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zitadel/zitadel/internal/httputil"
+
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/id"
 )
@@ -67,7 +69,7 @@ func (a *API) RegisterBulkRoutes(mux *http.ServeMux) {
 func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 	var req ImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.OnConflict == "" {
@@ -79,7 +81,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "begin transaction: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "begin transaction: "+err.Error())
 		return
 	}
 	defer tx.Rollback()
@@ -96,7 +98,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 		case "error":
 			errors++
 			if req.OnConflict == "fail" {
-				writeJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
+				httputil.WriteJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
 				return
 			}
 		}
@@ -114,7 +116,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 		case "error":
 			errors++
 			if req.OnConflict == "fail" {
-				writeJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
+				httputil.WriteJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
 				return
 			}
 		}
@@ -132,19 +134,19 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 		case "error":
 			errors++
 			if req.OnConflict == "fail" {
-				writeJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
+				httputil.WriteJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
 				return
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
 
 	a.bus.Signal()
-	writeJSON(w, http.StatusOK, importResponse(results, created, skipped, errors))
+	httputil.WriteJSON(w, http.StatusOK, importResponse(results, created, skipped, errors))
 }
 
 func importResponse(results []ImportResult, created, skipped, errors int) map[string]any {
@@ -326,7 +328,7 @@ func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 		OnConflict string         `json:"on_conflict"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.OnConflict == "" {
@@ -336,7 +338,7 @@ func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 	// Delegate to import handler logic.
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "begin transaction: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "begin transaction: "+err.Error())
 		return
 	}
 	defer tx.Rollback()
@@ -354,17 +356,17 @@ func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 		case "error":
 			errors++
 			if req.OnConflict == "fail" {
-				writeJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
+				httputil.WriteJSON(w, http.StatusConflict, importResponse(results, created, skipped, errors))
 				return
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "commit: "+err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
 
 	a.bus.Signal()
-	writeJSON(w, http.StatusOK, importResponse(results, created, skipped, errors))
+	httputil.WriteJSON(w, http.StatusOK, importResponse(results, created, skipped, errors))
 }

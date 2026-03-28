@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/id"
@@ -46,21 +48,21 @@ func (a *API) RegisterSessionRoutes(mux *http.ServeMux, requireAdmin func(http.H
 func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.IdentityID == "" {
-		writeError(w, http.StatusBadRequest, "entity_id is required")
+		httputil.WriteError(w, http.StatusBadRequest, "entity_id is required")
 		return
 	}
 
 	resp, err := a.CreateSessionInternal(r.Context(), req.IdentityID, req.UserAgent, req.IPAddress)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httputil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, resp)
+	httputil.WriteJSON(w, http.StatusCreated, resp)
 }
 
 // CreateSessionInternal creates a session programmatically (used by UI login).
@@ -144,17 +146,17 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID string, user
 func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parseID(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	sess, err := a.loadSession(r.Context(), sessionID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
+		httputil.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, sess)
+	httputil.WriteJSON(w, http.StatusOK, sess)
 }
 
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +174,7 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	defer rows.Close()
@@ -184,22 +186,22 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error")
+		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Items: sessions})
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: sessions})
 }
 
 func (a *API) revokeSession(w http.ResponseWriter, r *http.Request) {
 	sessionID, err := parseID(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	if err := a.RevokeSessionInternal(r.Context(), sessionID); err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		httputil.WriteError(w, http.StatusNotFound, err.Error())
 		return
 	}
 

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 func TestResolveRouteType(t *testing.T) {
@@ -84,7 +86,8 @@ func TestBuildCheckObject(t *testing.T) {
 	}
 }
 
-func TestIsPublicFGARoute(t *testing.T) {
+// TestIsPublicRoute verifies public route detection via the shared httputil package.
+func TestIsPublicRoute(t *testing.T) {
 	tests := []struct {
 		method string
 		path   string
@@ -104,9 +107,9 @@ func TestIsPublicFGARoute(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.method+"_"+tc.path, func(t *testing.T) {
-			got := isPublicFGARoute(tc.method, tc.path)
+			got := httputil.IsPublicRoute(tc.method, tc.path)
 			if got != tc.want {
-				t.Errorf("isPublicFGARoute(%q, %q) = %v, want %v", tc.method, tc.path, got, tc.want)
+				t.Errorf("IsPublicRoute(%q, %q) = %v, want %v", tc.method, tc.path, got, tc.want)
 			}
 		})
 	}

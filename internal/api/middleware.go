@@ -7,72 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
 )
-
-// publicRoutes returns the set of path prefixes/patterns that skip authentication.
-// Patterns ending with "*" are treated as prefix matches.
-func publicRoutes() map[string][]string {
-	return map[string][]string{
-		"GET": {
-			"/healthz",
-			"/readyz",
-			"/login",
-			"/assets/",
-			"/console",
-			"/console/",
-			"/account",
-			"/account/",
-			"/.well-known/",
-			"/openapi.json",
-			"/v1/branding",
-			"/v1/auth/settings",
-			"/v1/providers/templates",
-			"/v1/schemas",
-			"/v1/schemas/",
-			"/",
-			"/authorize",
-			"/oauth/",
-			"/userinfo",
-			"/keys",
-			"/end_session",
-			"/revoke",
-			"/devicecode",
-		},
-		"POST": {
-			"/v1/login/",
-			"/authorize",
-			"/oauth/",
-		},
-	}
-}
-
-// isPublicRoute checks if the request matches any public route pattern.
-func isPublicRoute(method, path string) bool {
-	routes := publicRoutes()
-
-	// Check method-specific routes.
-	for _, pattern := range routes[method] {
-		if matchesPattern(path, pattern) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func matchesPattern(path, pattern string) bool {
-	// Exact match.
-	if path == pattern {
-		return true
-	}
-	// Prefix match for patterns ending with "/" (but not the root "/" itself).
-	if len(pattern) > 1 && strings.HasSuffix(pattern, "/") && strings.HasPrefix(path, pattern) {
-		return true
-	}
-	return false
-}
 
 // AuthGate is the top-level default-deny middleware.
 // Every request not on the public allowlist must carry a valid token.
@@ -81,7 +19,7 @@ func AuthGate(cookieCfg *session.CookieConfig, db *sql.DB) func(http.Handler) ht
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Allow public routes unconditionally.
-			if isPublicRoute(r.Method, r.URL.Path) {
+			if httputil.IsPublicRoute(r.Method, r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}

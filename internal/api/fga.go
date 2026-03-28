@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zitadel/zitadel/internal/httputil"
+
 	"github.com/zitadel/zitadel/internal/fga"
 )
 
@@ -33,7 +35,7 @@ func (a *API) RegisterFGARoutes(mux *http.ServeMux) {
 func (a *API) fgaCheck(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -43,21 +45,21 @@ func (a *API) fgaCheck(w http.ResponseWriter, r *http.Request) {
 		Object   string `json:"object"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.User == "" || req.Relation == "" || req.Object == "" {
-		writeError(w, http.StatusBadRequest, "user, relation, and object are required")
+		httputil.WriteError(w, http.StatusBadRequest, "user, relation, and object are required")
 		return
 	}
 
 	allowed, err := svc.Check(r.Context(), req.User, req.Relation, req.Object)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("FGA check failed: %v", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("FGA check failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"allowed":  allowed,
 		"user":     req.User,
 		"relation": req.Relation,
@@ -71,7 +73,7 @@ func (a *API) fgaCheck(w http.ResponseWriter, r *http.Request) {
 func (a *API) fgaWriteTuples(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -83,29 +85,29 @@ func (a *API) fgaWriteTuples(w http.ResponseWriter, r *http.Request) {
 		} `json:"tuples"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if len(req.Tuples) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one tuple is required")
+		httputil.WriteError(w, http.StatusBadRequest, "at least one tuple is required")
 		return
 	}
 
 	tuples := make([][3]string, len(req.Tuples))
 	for i, t := range req.Tuples {
 		if t.User == "" || t.Relation == "" || t.Object == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("tuple %d: user, relation, and object are required", i))
+			httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("tuple %d: user, relation, and object are required", i))
 			return
 		}
 		tuples[i] = [3]string{t.User, t.Relation, t.Object}
 	}
 
 	if err := svc.WriteTuples(r.Context(), tuples...); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("write tuples failed: %v", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("write tuples failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"written": len(tuples),
 	})
@@ -117,7 +119,7 @@ func (a *API) fgaWriteTuples(w http.ResponseWriter, r *http.Request) {
 func (a *API) fgaDeleteTuples(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -129,7 +131,7 @@ func (a *API) fgaDeleteTuples(w http.ResponseWriter, r *http.Request) {
 		} `json:"tuples"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -139,11 +141,11 @@ func (a *API) fgaDeleteTuples(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := svc.DeleteTuples(r.Context(), tuples...); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete tuples failed: %v", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("delete tuples failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"deleted": len(tuples),
 	})
@@ -154,7 +156,7 @@ func (a *API) fgaDeleteTuples(w http.ResponseWriter, r *http.Request) {
 func (a *API) fgaReadTuples(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -166,10 +168,10 @@ func (a *API) fgaReadTuples(w http.ResponseWriter, r *http.Request) {
 	if object == "" && user == "" && relation == "" {
 		allTuples, err := svc.ReadAllTuples(r.Context())
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("read tuples failed: %v", err))
+			httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("read tuples failed: %v", err))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{
 			"tuples": allTuples,
 		})
 		return
@@ -177,11 +179,11 @@ func (a *API) fgaReadTuples(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := svc.ReadTuples(r.Context(), user, relation, object)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("read tuples failed: %v", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("read tuples failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"tuples": resp,
 	})
 }
@@ -192,7 +194,7 @@ func (a *API) fgaReadTuples(w http.ResponseWriter, r *http.Request) {
 func (a *API) fgaListObjects(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -202,21 +204,21 @@ func (a *API) fgaListObjects(w http.ResponseWriter, r *http.Request) {
 		Type     string `json:"type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.User == "" || req.Relation == "" || req.Type == "" {
-		writeError(w, http.StatusBadRequest, "user, relation, and type are required")
+		httputil.WriteError(w, http.StatusBadRequest, "user, relation, and type are required")
 		return
 	}
 
 	objects, err := svc.ListObjects(r.Context(), req.User, req.Relation, req.Type)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list objects failed: %v", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("list objects failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"objects": objects,
 	})
 }
@@ -238,7 +240,7 @@ func (a *API) fgaGetModel(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"schema_version": "1.1",
 		"types":          types,
 	})
@@ -250,7 +252,7 @@ func (a *API) fgaGetModel(w http.ResponseWriter, _ *http.Request) {
 func (a *API) fgaExpand(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -259,21 +261,21 @@ func (a *API) fgaExpand(w http.ResponseWriter, r *http.Request) {
 		Object   string `json:"object"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Relation == "" || req.Object == "" {
-		writeError(w, http.StatusBadRequest, "relation and object are required")
+		httputil.WriteError(w, http.StatusBadRequest, "relation and object are required")
 		return
 	}
 
 	tree, err := svc.Expand(r.Context(), req.Relation, req.Object)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("expand failed: %v", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("expand failed: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"tree": tree,
 	})
 }
@@ -336,7 +338,7 @@ func (a *API) fgaModelGraph(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"nodes": nodes,
 		"edges": edges,
 	})
@@ -348,7 +350,7 @@ func (a *API) fgaModelGraph(w http.ResponseWriter, _ *http.Request) {
 func (a *API) fgaBatchTest(w http.ResponseWriter, r *http.Request) {
 	svc := FGAService
 	if svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "FGA not initialized")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "FGA not initialized")
 		return
 	}
 
@@ -361,7 +363,7 @@ func (a *API) fgaBatchTest(w http.ResponseWriter, r *http.Request) {
 		} `json:"assertions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -397,7 +399,7 @@ func (a *API) fgaBatchTest(w http.ResponseWriter, r *http.Request) {
 		results[i] = result
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"results": results,
 		"total":   len(results),
 		"passed":  passed,
