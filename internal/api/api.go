@@ -226,7 +226,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		orgID = "1"
 	}
 	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, identityID, orgID, req.Identifier); err != nil {
-		if v, ok := err.(*uniqueness.Violation); ok {
+		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
 				"error": "uniqueness_violation",
 				"field": v.Field,

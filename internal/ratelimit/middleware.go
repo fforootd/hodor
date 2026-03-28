@@ -100,9 +100,9 @@ func Middleware(limiter *Limiter, clientIP ClientIPFunc) func(http.Handler) http
 
 			// Write rate limit headers if custom_headers is enabled.
 			if decision.Limit > 0 {
-				w.Header().Set("X-RateLimit-Limit", strconv.Itoa(decision.Limit))
-				w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(decision.Remaining))
-				w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(decision.ResetAt.Unix(), 10))
+				w.Header().Set("X-Ratelimit-Limit", strconv.Itoa(decision.Limit))
+				w.Header().Set("X-Ratelimit-Remaining", strconv.Itoa(decision.Remaining))
+				w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(decision.ResetAt.Unix(), 10))
 			}
 
 			if !decision.Allowed {
@@ -118,16 +118,16 @@ func Middleware(limiter *Limiter, clientIP ClientIPFunc) func(http.Handler) http
 // writeRateLimited writes a 429 Too Many Requests response with appropriate headers.
 func writeRateLimited(w http.ResponseWriter, d Decision) {
 	w.Header().Set("Retry-After", FormatRetryAfter(d.RetryAfter))
-	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(d.Limit))
-	w.Header().Set("X-RateLimit-Remaining", "0")
-	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(d.ResetAt.Unix(), 10))
+	w.Header().Set("X-Ratelimit-Limit", strconv.Itoa(d.Limit))
+	w.Header().Set("X-Ratelimit-Remaining", "0")
+	w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(d.ResetAt.Unix(), 10))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
-	_, _ = w.Write([]byte(fmt.Sprintf(
+	fmt.Fprintf(w,
 		`{"error":"rate_limit_exceeded","message":"Too many requests. Retry after %s seconds.","retry_after":%s}`,
 		FormatRetryAfter(d.RetryAfter),
 		FormatRetryAfter(d.RetryAfter),
-	)))
+	)
 }
 
 // flattenHeaders converts http.Header to a flat map (first value per key).

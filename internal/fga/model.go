@@ -455,18 +455,6 @@ func directUser() *openfgav1.RelationMetadata {
 	}
 }
 
-func directUserAndGroup() *openfgav1.RelationMetadata {
-	return &openfgav1.RelationMetadata{
-		DirectlyRelatedUserTypes: []*openfgav1.RelationReference{
-			{Type: "user"},
-			{
-				Type:               "group",
-				RelationOrWildcard: &openfgav1.RelationReference_Relation{Relation: "member"},
-			},
-		},
-	}
-}
-
 func noDirectRelation() *openfgav1.RelationMetadata {
 	return &openfgav1.RelationMetadata{}
 }

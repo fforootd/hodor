@@ -7,14 +7,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// scopeOrder defines the cascade hierarchy from broadest to most specific.
-var scopeOrder = []string{"instance", "org", "app"}
+// ErrNotFound is returned when no settings exist at the requested scope.
+var ErrNotFound = errors.New("settings: not found")
 
 // Resolve returns the effective settings for a type by deep-merging the
 // scope chain: instance ← org ← app. Only fields explicitly set at a
@@ -42,12 +43,13 @@ func Resolve(ctx context.Context, db *sql.DB, settingsType string, orgID string,
 	result := make(map[string]any)
 	for _, s := range chain {
 		data, err := Get(ctx, db, settingsType, s.scope, s.scopeID)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("get settings %s/%s/%s: %w", settingsType, s.scope, s.scopeID, err)
 		}
-		if data != nil {
-			deepMerge(result, data)
-		}
+		deepMerge(result, data)
 	}
 
 	return result, nil
@@ -62,7 +64,7 @@ func Get(ctx context.Context, db *sql.DB, settingsType, scope, scopeID string) (
 		settingsType, scope, scopeID,
 	).Scan(&dataJSON)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)

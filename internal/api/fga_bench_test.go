@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-const fgaSeedSize = 200
-
 // ──────────────────────────────────────────────────────────────
 // FGA benchmarks: measure authorization check overhead
 // ──────────────────────────────────────────────────────────────

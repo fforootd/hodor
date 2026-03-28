@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -28,16 +29,19 @@ type FieldConstraint struct {
 	Scope     Scope
 }
 
-// Violation is returned when a uniqueness check fails.
-type Violation struct {
+// ViolationError is returned when a uniqueness check fails.
+type ViolationError struct {
 	Field string `json:"field"`
 	Value string `json:"value"`
 	Scope string `json:"scope"`
 }
 
-func (v *Violation) Error() string {
+func (v *ViolationError) Error() string {
 	return fmt.Sprintf("uniqueness violation: field %q value %q already exists (scope: %s)", v.Field, v.Value, v.Scope)
 }
+
+// ErrIdentityNotFound is returned when ResolveIdentifier finds no matching entity.
+var ErrIdentityNotFound = errors.New("identity not found")
 
 // ExtractConstraints parses a JSON schema string and returns all x-unique field constraints.
 func ExtractConstraints(schemaJSON string) []FieldConstraint {
@@ -118,7 +122,7 @@ func Enforce(ctx context.Context, tx *sql.Tx, entityID, orgID string, constraint
 			scopeID, c.FieldName, value, entityID,
 		)
 		if err != nil {
-			return &Violation{
+			return &ViolationError{
 				Field: c.FieldName,
 				Value: fmt.Sprint(rawVal),
 				Scope: string(c.Scope),
@@ -142,7 +146,7 @@ func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, entityID, orgID, ide
 		normalized, entityID,
 	)
 	if err != nil {
-		return &Violation{
+		return &ViolationError{
 			Field: "identifier",
 			Value: identifier,
 			Scope: "instance",
@@ -221,7 +225,7 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 		return &result, nil
 	}
 	if err == sql.ErrNoRows {
-		return nil, nil // Not found.
+		return nil, ErrIdentityNotFound
 	}
 	return nil, fmt.Errorf("resolve identifier (legacy): %w", err)
 }

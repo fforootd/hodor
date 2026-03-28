@@ -2,6 +2,7 @@ package login
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -124,12 +125,12 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	orgID := httputil.ResolveOrgID(r, "")
 
 	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+	if errors.Is(err, uniqueness.ErrIdentityNotFound) {
+		httputil.WriteError(w, http.StatusNotFound, "account not found")
 		return
 	}
-	if resolved == nil {
-		httputil.WriteError(w, http.StatusNotFound, "account not found")
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 

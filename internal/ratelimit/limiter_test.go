@@ -49,7 +49,9 @@ func TestMemoryStore_KeyIsolation(t *testing.T) {
 
 	// Exhaust bucket for key "a".
 	for i := 0; i < 3; i++ {
-		store.Allow(ctx, "a", 3, 3, time.Minute)
+		if _, err := store.Allow(ctx, "a", 3, 3, time.Minute); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Key "b" should still have capacity.
@@ -67,7 +69,9 @@ func TestMemoryStore_Refill(t *testing.T) {
 	// Use a high rate: 6000 per minute = 100 per second.
 	// Exhaust the burst.
 	for i := 0; i < 5; i++ {
-		store.Allow(ctx, "refill", 6000, 5, time.Minute)
+		if _, err := store.Allow(ctx, "refill", 6000, 5, time.Minute); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Should be denied immediately.
@@ -89,7 +93,9 @@ func TestMemoryStore_Sweep(t *testing.T) {
 	defer store.Stop()
 	ctx := context.Background()
 
-	store.Allow(ctx, "sweep-test", 10, 10, 1*time.Millisecond)
+	if _, err := store.Allow(ctx, "sweep-test", 10, 10, 1*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
 
 	if store.Len() != 1 {
 		t.Fatalf("expected 1 bucket, got %d", store.Len())
@@ -218,8 +224,8 @@ func TestMiddleware_RateLimits(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("missing Retry-After header")
 	}
-	if rec.Header().Get("X-RateLimit-Limit") != "3" {
-		t.Errorf("X-RateLimit-Limit = %q, want 3", rec.Header().Get("X-RateLimit-Limit"))
+	if rec.Header().Get("X-Ratelimit-Limit") != "3" {
+		t.Errorf("X-Ratelimit-Limit = %q, want 3", rec.Header().Get("X-Ratelimit-Limit"))
 	}
 }
 
@@ -257,7 +263,9 @@ func BenchmarkMemoryStore_Allow(b *testing.B) {
 		for pb.Next() {
 			// Use rotating keys to simulate different IPs.
 			key := "bench:" + string(rune('A'+i%26))
-			store.Allow(ctx, key, 10000, 100, time.Minute)
+			if _, err := store.Allow(ctx, key, 10000, 100, time.Minute); err != nil {
+				b.Fatal(err)
+			}
 			i++
 		}
 	})
@@ -270,7 +278,9 @@ func BenchmarkMemoryStore_Allow_SingleKey(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		store.Allow(ctx, "single", 1000000, 1000000, time.Minute)
+		if _, err := store.Allow(ctx, "single", 1000000, 1000000, time.Minute); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -377,7 +387,9 @@ func BenchmarkConfigResolve(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		limiter.resolveConfig(ctx, "org1", "")
+		if _, err := limiter.resolveConfig(ctx, "org1", ""); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

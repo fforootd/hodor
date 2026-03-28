@@ -299,7 +299,7 @@ func (a *API) fgaModelGraph(w http.ResponseWriter, _ *http.Request) {
 		Permissions []string `json:"permissions"`
 	}
 
-	var nodes []Node
+	nodes := make([]Node, 0, len(model))
 	var edges []Edge
 
 	for _, td := range model {

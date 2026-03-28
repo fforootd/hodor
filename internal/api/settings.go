@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/zitadel/zitadel/internal/httputil"
@@ -37,11 +38,7 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 			scope = "instance"
 		}
 		data, err := settings.Get(r.Context(), a.db.SQL(), settingsType, scope, scopeID)
-		if err != nil {
-			httputil.WriteError(w, http.StatusInternalServerError, "failed to read settings")
-			return
-		}
-		if data == nil {
+		if errors.Is(err, settings.ErrNotFound) {
 			httputil.WriteJSON(w, http.StatusOK, map[string]any{
 				"type":      settingsType,
 				"scope":     scope,
@@ -49,6 +46,10 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 				"data":      map[string]any{},
 				"inherited": true,
 			})
+			return
+		}
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to read settings")
 			return
 		}
 		httputil.WriteJSON(w, http.StatusOK, map[string]any{
@@ -63,10 +64,11 @@ func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 	// Resolve effective settings by merging the cascade.
 	orgID := scopeID
 	appID := ""
-	if scope == "app" {
+	switch scope {
+	case "app":
 		appID = scopeID
 		orgID = r.URL.Query().Get("org_id")
-	} else if scope == "org" {
+	case "org":
 		orgID = scopeID
 	}
 

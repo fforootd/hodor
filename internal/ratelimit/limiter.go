@@ -75,7 +75,7 @@ func (l *Limiter) Check(ctx context.Context, clientIP, orgID, appID string) (Dec
 	cfg, err := l.resolveConfig(ctx, orgID, appID)
 	if err != nil {
 		// Fail open: if settings can't be resolved, allow the request.
-		return Decision{Allowed: true, Limit: 0}, nil
+		return Decision{Allowed: true, Limit: 0}, nil //nolint:nilerr // fail-open by design
 	}
 
 	// Disabled: rpm=0 means unlimited.

@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -76,12 +77,9 @@ func TestGetMissing(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 
-	got, err := Get(ctx, db, "rate_limit", "org", "nonexistent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Errorf("expected nil for missing scope, got %v", got)
+	_, err := Get(ctx, db, "rate_limit", "org", "nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 
@@ -172,9 +170,9 @@ func TestDelete(t *testing.T) {
 	_ = Put(ctx, db, "rate_limit", "org", "org_1", map[string]any{"burst": float64(10)})
 	_ = Delete(ctx, db, "rate_limit", "org", "org_1")
 
-	got, _ := Get(ctx, db, "rate_limit", "org", "org_1")
-	if got != nil {
-		t.Errorf("expected nil after delete, got %v", got)
+	_, err := Get(ctx, db, "rate_limit", "org", "org_1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
 	}
 }
 

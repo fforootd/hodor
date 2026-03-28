@@ -1107,7 +1107,10 @@ func BenchmarkGet(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		svc.Get("rate-limit-by-path")
+		_, _, err := svc.Get("rate-limit-by-path")
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

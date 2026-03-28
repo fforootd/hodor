@@ -3,6 +3,7 @@ package uniqueness
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -46,6 +47,14 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// commitTx commits the transaction, failing the test on error.
+func commitTx(tb testing.TB, tx *sql.Tx) {
+	tb.Helper()
+	if err := tx.Commit(); err != nil {
+		tb.Fatalf("tx.Commit: %v", err)
+	}
 }
 
 func insertEntity(t *testing.T, db *sql.DB, id, orgID, identifier string) {
@@ -168,7 +177,7 @@ func TestEnforce_InstanceScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	// Second insert with same email in different org: FAIL (instance-scoped).
 	tx2, _ := db.BeginTx(ctx, nil)
@@ -176,9 +185,9 @@ func TestEnforce_InstanceScope(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected uniqueness violation, got nil")
 	}
-	violation, ok := err.(*Violation)
+	violation, ok := err.(*ViolationError)
 	if !ok {
-		t.Fatalf("expected *Violation, got %T", err)
+		t.Fatalf("expected *ViolationError, got %T", err)
 	}
 	if violation.Field != "email" {
 		t.Errorf("field = %q, want email", violation.Field)
@@ -207,7 +216,7 @@ func TestEnforce_OrgScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	// "alice" in org2: OK (different org, org-scoped).
 	tx2, _ := db.BeginTx(ctx, nil)
@@ -215,7 +224,7 @@ func TestEnforce_OrgScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cross-org should succeed: %v", err)
 	}
-	tx2.Commit()
+	commitTx(t, tx2)
 
 	// Another "alice" in org1: FAIL (same org).
 	tx3, _ := db.BeginTx(ctx, nil)
@@ -242,7 +251,7 @@ func TestEnforce_CaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	tx2, _ := db.BeginTx(ctx, nil)
 	err = Enforce(ctx, tx2, "e2", "org1", constraints, map[string]any{"email": "ALICE@TEST.COM"})
@@ -267,7 +276,7 @@ func TestEnforce_EmptyValue_Skipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty value should be skipped: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	// nil value also skipped.
 	insertEntity(t, db, "e2", "org1", "test2")
@@ -276,7 +285,7 @@ func TestEnforce_EmptyValue_Skipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing value should be skipped: %v", err)
 	}
-	tx2.Commit()
+	commitTx(t, tx2)
 }
 
 // --- Release ---
@@ -294,8 +303,10 @@ func TestRelease(t *testing.T) {
 
 	// Insert unique field for e1.
 	tx, _ := db.BeginTx(ctx, nil)
-	Enforce(ctx, tx, "e1", "org1", constraints, map[string]any{"email": "alice@test.com"})
-	tx.Commit()
+	if err := Enforce(ctx, tx, "e1", "org1", constraints, map[string]any{"email": "alice@test.com"}); err != nil {
+		t.Fatalf("enforce: %v", err)
+	}
+	commitTx(t, tx)
 
 	// Release e1 unique fields.
 	tx2, _ := db.BeginTx(ctx, nil)
@@ -303,7 +314,7 @@ func TestRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("release failed: %v", err)
 	}
-	tx2.Commit()
+	commitTx(t, tx2)
 
 	// Now e2 can claim that email.
 	tx3, _ := db.BeginTx(ctx, nil)
@@ -311,7 +322,7 @@ func TestRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("after release, should succeed: %v", err)
 	}
-	tx3.Commit()
+	commitTx(t, tx3)
 }
 
 // --- ResolveIdentifier ---
@@ -375,11 +386,8 @@ func TestResolveIdentifier_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	result, err := ResolveIdentifier(ctx, db, "nonexistent@test.com", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != nil {
-		t.Fatalf("expected nil, got %+v", result)
+	if !errors.Is(err, ErrIdentityNotFound) {
+		t.Fatalf("expected ErrIdentityNotFound, got err=%v result=%+v", err, result)
 	}
 }
 
@@ -437,7 +445,7 @@ func TestEnforceFromIdentifier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	tx2, _ := db.BeginTx(ctx, nil)
 	err = EnforceFromIdentifier(ctx, tx2, "e2", "org1", "admin")
@@ -470,7 +478,7 @@ func TestEnforce_MultipleFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	// e2: different email, same username in same org → FAIL on username.
 	tx2, _ := db.BeginTx(ctx, nil)
@@ -481,7 +489,7 @@ func TestEnforce_MultipleFields(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected violation on username")
 	}
-	v := err.(*Violation)
+	v := err.(*ViolationError)
 	if v.Field != "username" {
 		t.Errorf("expected violation on 'username', got %q", v.Field)
 	}
@@ -496,7 +504,7 @@ func TestEnforce_MultipleFields(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected violation on email")
 	}
-	v = err.(*Violation)
+	v = err.(*ViolationError)
 	if v.Field != "email" {
 		t.Errorf("expected violation on 'email', got %q", v.Field)
 	}
@@ -523,7 +531,7 @@ func TestEnforce_CrossTypeUniqueness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("human enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	// service_user tries to claim same email → FAIL (cross-type).
 	tx2, _ := db.BeginTx(ctx, nil)
@@ -556,7 +564,7 @@ func TestRelease_ReEnforce_Cycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initial enforce failed: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	// Simulate update: release old values, enforce new ones.
 	tx2, _ := db.BeginTx(ctx, nil)
@@ -571,7 +579,7 @@ func TestRelease_ReEnforce_Cycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-enforce failed: %v", err)
 	}
-	tx2.Commit()
+	commitTx(t, tx2)
 
 	// Verify old email is freed.
 	var count int
@@ -589,8 +597,8 @@ func TestRelease_ReEnforce_Cycle(t *testing.T) {
 
 // --- Violation error message ---
 
-func TestViolation_Error(t *testing.T) {
-	v := &Violation{Field: "email", Value: "test@x.com", Scope: "instance"}
+func TestViolationError_Error(t *testing.T) {
+	v := &ViolationError{Field: "email", Value: "test@x.com", Scope: "instance"}
 	msg := v.Error()
 	if msg == "" {
 		t.Fatal("violation error should not be empty")
@@ -624,11 +632,8 @@ func TestResolveIdentifier_SkipsInactive(t *testing.T) {
 	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('', 'email', 'alice@test.com', 'e1')`)
 
 	result, err := ResolveIdentifier(ctx, db, "alice@test.com", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != nil {
-		t.Fatalf("inactive entity should not resolve, got %+v", result)
+	if !errors.Is(err, ErrIdentityNotFound) {
+		t.Fatalf("inactive entity should not resolve, got result=%+v err=%v", result, err)
 	}
 }
 
@@ -662,7 +667,7 @@ func TestEnforceFromIdentifier_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty identifier should be a no-op: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE entity_id = 'e1'`).Scan(&count)
@@ -732,7 +737,7 @@ func TestEnforce_WhitespaceOnlyValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("whitespace-only should be treated as empty (skipped): %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE entity_id = 'e1'`).Scan(&count)
@@ -755,13 +760,17 @@ func TestEnforce_SameEntityReEnforce(t *testing.T) {
 
 	// Initial enforce.
 	tx, _ := db.BeginTx(ctx, nil)
-	Enforce(ctx, tx, "e1", "org1", constraints, map[string]any{"email": "alice@test.com"})
-	tx.Commit()
+	if err := Enforce(ctx, tx, "e1", "org1", constraints, map[string]any{"email": "alice@test.com"}); err != nil {
+		t.Fatalf("enforce: %v", err)
+	}
+	commitTx(t, tx)
 
 	// Release.
 	tx2, _ := db.BeginTx(ctx, nil)
-	Release(ctx, tx2, "e1")
-	tx2.Commit()
+	if err := Release(ctx, tx2, "e1"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	commitTx(t, tx2)
 
 	// Re-enforce same value for same entity: should succeed.
 	tx3, _ := db.BeginTx(ctx, nil)
@@ -769,7 +778,7 @@ func TestEnforce_SameEntityReEnforce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-enforce same value for same entity should succeed: %v", err)
 	}
-	tx3.Commit()
+	commitTx(t, tx3)
 }
 
 // --- ValidateSchemaChange ---
@@ -885,7 +894,7 @@ func TestEnforce_NilData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil data map should be safely handled: %v", err)
 	}
-	tx.Commit()
+	commitTx(t, tx)
 }
 
 // --- Delete entity cascades unique_fields (via ON DELETE CASCADE) ---
@@ -900,10 +909,12 @@ func TestCascadeDelete(t *testing.T) {
 	insertEntity(t, db, "e1", "org1", "alice")
 
 	tx, _ := db.BeginTx(ctx, nil)
-	Enforce(ctx, tx, "e1", "org1",
+	if err := Enforce(ctx, tx, "e1", "org1",
 		[]FieldConstraint{{FieldName: "email", Scope: ScopeInstance}},
-		map[string]any{"email": "alice@test.com"})
-	tx.Commit()
+		map[string]any{"email": "alice@test.com"}); err != nil {
+		t.Fatalf("enforce: %v", err)
+	}
+	commitTx(t, tx)
 
 	// Verify unique_fields row exists.
 	var count int
