@@ -26,7 +26,7 @@ func benchDB(b *testing.B) *sql.DB {
 		b.Fatalf("schema: %v", err)
 	}
 	b.Cleanup(func() {
-		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)") //nolint:errcheck
+		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		db.Close()
 	})
 	return db.SQL()
@@ -40,7 +40,7 @@ func seedIdentities(b *testing.B, db *sql.DB, n int) []string {
 	tx, _ := db.Begin()
 	for i := 0; i < n; i++ {
 		ids[i] = id.New()
-		tx.Exec( //nolint:errcheck
+		tx.Exec(
 			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("user-%d", i), fmt.Sprintf("User %d", i), now, now)
@@ -62,11 +62,11 @@ func seedSessionToken(b *testing.B, db *sql.DB, entityID string) string {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
-	db.Exec( //nolint:errcheck
+	db.Exec(
 		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, '0', ?, 'bench', '127.0.0.1', '{}', ?, ?)`,
 		sessionID, entityID, hash, now, expiresAt)
-	db.Exec( //nolint:errcheck
+	db.Exec(
 		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
 		tokenID, hash, entityID, sessionID, expiresAt, now)
@@ -78,7 +78,7 @@ const seedSize = 1000
 // benchRandN returns a random index in [0, n) for benchmark workload distribution.
 // Uses math/rand/v2 intentionally — crypto strength is unnecessary for index selection.
 func benchRandN(n int) int {
-	return int(uint(time.Now().UnixNano()) % uint(n)) //nolint:gosec
+	return int(uint(time.Now().UnixNano()) % uint(n))
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -140,6 +140,7 @@ func BenchmarkDBListIdentities(b *testing.B) {
 		if err != nil {
 			b.Fatalf("list: %v", err)
 		}
+		defer rows.Close()
 		count := 0
 		for rows.Next() {
 			var rowID, ident, name, state, created string
@@ -149,7 +150,6 @@ func BenchmarkDBListIdentities(b *testing.B) {
 		if err := rows.Err(); err != nil {
 			b.Fatalf("rows iteration: %v", err)
 		}
-		rows.Close()
 		if count == 0 {
 			b.Fatalf("no rows returned at offset %d", offset)
 		}
@@ -192,11 +192,11 @@ func BenchmarkDBInsertSession(b *testing.B) {
 		expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
 		tx, _ := db.BeginTx(context.Background(), nil)
-		tx.Exec( //nolint:errcheck
+		tx.Exec(
 			`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 			 VALUES (?, ?, '0', ?, 'bench', '127.0.0.1', '{}', ?, ?)`,
 			sessionID, entityID, hash, now, expiresAt)
-		tx.Exec( //nolint:errcheck
+		tx.Exec(
 			`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
 			 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
 			tokenID, hash, entityID, sessionID, expiresAt, now)
@@ -254,7 +254,7 @@ func BenchmarkDBConcurrentReads(b *testing.B) {
 		for pb.Next() {
 			target := ids[benchRandN(len(ids))]
 			var identifier string
-			db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier) //nolint:errcheck
+			db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier)
 		}
 	})
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "reads/sec")
@@ -273,7 +273,7 @@ func BenchmarkDBConcurrentMixed(b *testing.B) {
 			if i%5 == 0 {
 				// 20% writes
 				newID := id.New()
-				db.Exec( //nolint:errcheck
+				db.Exec(
 					`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 					 VALUES (?, '0', ?, 'Bench Mixed', 'active', '{}', '{}', '{}', datetime('now'), datetime('now'))`,
 					newID, fmt.Sprintf("mixed-%s", newID))
@@ -281,7 +281,7 @@ func BenchmarkDBConcurrentMixed(b *testing.B) {
 				// 80% reads
 				target := ids[benchRandN(len(ids))]
 				var identifier string
-				db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier) //nolint:errcheck
+				db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier)
 			}
 			i++
 		}

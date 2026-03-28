@@ -31,7 +31,7 @@ type benchServer struct {
 // benchRandN returns a deterministic-ish index for benchmark workload distribution.
 // Uses time-based entropy — crypto strength is unnecessary for test index selection.
 func benchRandN(n int) int {
-	return int(uint(time.Now().UnixNano()) % uint(n)) //nolint:gosec
+	return int(uint(time.Now().UnixNano()) % uint(n))
 }
 
 func newBenchServer(b *testing.B, seedCount int) *benchServer {
@@ -60,13 +60,13 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 
 	b.Cleanup(func() {
 		ts.Close()
-		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)") //nolint:errcheck
+		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		db.Close()
 	})
 
 	// Get admin ID and create a PAT.
 	var adminID string
-	db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID) //nolint:errcheck
+	db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID)
 
 	token := createBenchPAT(b, db, adminID)
 
@@ -76,7 +76,7 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 	tx, _ := db.SQL().Begin()
 	for i := 0; i < seedCount; i++ {
 		ids[i] = id.New()
-		tx.Exec( //nolint:errcheck
+		tx.Exec(
 			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("bench-user-%d", i), fmt.Sprintf("Bench User %d", i), now, now)
@@ -110,10 +110,10 @@ func benchDoJSON(b *testing.B, bs *benchServer, method, path string, body any) (
 	b.Helper()
 	var reqBody io.Reader
 	if body != nil {
-		j, _ := json.Marshal(body) //nolint:errcheck
+		j, _ := json.Marshal(body)
 		reqBody = bytes.NewReader(j)
 	}
-	req, _ := http.NewRequest(method, bs.ts.URL+path, reqBody) //nolint:errcheck
+	req, _ := http.NewRequest(method, bs.ts.URL+path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bs.token)
 	resp, err := http.DefaultClient.Do(req)
@@ -228,7 +228,7 @@ func BenchmarkAPIParallelReads(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			target := bs.ids[benchRandN(len(bs.ids))]
-			req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil) //nolint:errcheck
+			req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil)
 			req.Header.Set("Authorization", "Bearer "+bs.token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -252,11 +252,11 @@ func BenchmarkAPIParallelMixed(b *testing.B) {
 		for pb.Next() {
 			if i%5 == 0 {
 				// 20% writes — create identity
-				body, _ := json.Marshal(map[string]any{ //nolint:errcheck
+				body, _ := json.Marshal(map[string]any{
 					"identifier":   fmt.Sprintf("par-mixed-%s", id.New()),
 					"display_name": "Parallel Mixed",
 				})
-				req, _ := http.NewRequest("POST", bs.ts.URL+"/v1/entities", bytes.NewReader(body)) //nolint:errcheck
+				req, _ := http.NewRequest("POST", bs.ts.URL+"/v1/entities", bytes.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Authorization", "Bearer "+bs.token)
 				resp, err := http.DefaultClient.Do(req)
@@ -268,7 +268,7 @@ func BenchmarkAPIParallelMixed(b *testing.B) {
 			} else {
 				// 80% reads
 				target := bs.ids[benchRandN(len(bs.ids))]
-				req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil) //nolint:errcheck
+				req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil)
 				req.Header.Set("Authorization", "Bearer "+bs.token)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {
