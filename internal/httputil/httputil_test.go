@@ -152,16 +152,16 @@ func TestMatchesPattern(t *testing.T) {
 		path, pattern string
 		want          bool
 	}{
-		{"/v1/schemas", "/v1/schemas", true},                   // exact
-		{"/v1/schemas/abc", "/v1/schemas/", true},              // prefix with /
-		{"/v1/schemas/abc", "/v1/schemas", false},              // no trailing / = exact only
-		{"/v1/login/password", "/v1/login/", true},             // prefix
-		{"/v1/login", "/v1/login/", false},                     // path shorter than prefix
-		{"/console", "/console", true},                         // exact
-		{"/console/foo", "/console/", true},                    // prefix
-		{"/", "/", true},                                       // root exact
-		{"/anything", "/", false},                              // root doesn't prefix-match (len 1)
-		{"/v1/entities", "/v1/schemas", false},                 // no match
+		{"/v1/schemas", "/v1/schemas", true},       // exact
+		{"/v1/schemas/abc", "/v1/schemas/", true},  // prefix with /
+		{"/v1/schemas/abc", "/v1/schemas", false},  // no trailing / = exact only
+		{"/v1/login/password", "/v1/login/", true}, // prefix
+		{"/v1/login", "/v1/login/", false},         // path shorter than prefix
+		{"/console", "/console", true},             // exact
+		{"/console/foo", "/console/", true},        // prefix
+		{"/", "/", true},                           // root exact
+		{"/anything", "/", false},                  // root doesn't prefix-match (len 1)
+		{"/v1/entities", "/v1/schemas", false},     // no match
 	}
 
 	for _, tc := range tests {
