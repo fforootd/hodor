@@ -91,7 +91,7 @@ func TestRealIP_Cloudflare(t *testing.T) {
 
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "10.0.0.1:5678"
-	r.Header.Set("CF-Connecting-IP", "198.51.100.42")
+	r.Header.Set("Cf-Connecting-Ip", "198.51.100.42")
 	r.Header.Set("X-Forwarded-For", "198.51.100.42, 10.0.0.1")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
@@ -116,7 +116,7 @@ func TestRealIP_CustomHeader(t *testing.T) {
 
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "10.0.0.1:5678"
-	r.Header.Set("X-Custom-Client-IP", "192.0.2.77")
+	r.Header.Set("X-Custom-Client-Ip", "192.0.2.77")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 
@@ -148,8 +148,8 @@ func TestRealIP_JP3ATags(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "10.0.0.1:5678"
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
-	r.Header.Set("JP3A-Client-ID", "client-123")
-	r.Header.Set("JP3A-Device-Fingerprint", "fp-abc")
+	r.Header.Set("Jp3a-Client-Id", "client-123")
+	r.Header.Set("Jp3a-Device-Fingerprint", "fp-abc")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 }

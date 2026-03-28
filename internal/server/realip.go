@@ -96,15 +96,15 @@ func RealIP(cfg *RealIPConfig) func(http.Handler) http.Handler {
 
 				// Parse JP3A/vendor enrichment tags.
 				meta := &ProxyMeta{Raw: make(map[string]string)}
-				if v := r.Header.Get("JP3A-Client-ID"); v != "" {
+				if v := r.Header.Get("Jp3a-Client-Id"); v != "" {
 					meta.ClientID = v
 					meta.Raw["JP3A-Client-ID"] = v
 				}
-				if v := r.Header.Get("JP3A-Session-ID"); v != "" {
+				if v := r.Header.Get("Jp3a-Session-Id"); v != "" {
 					meta.SessionID = v
 					meta.Raw["JP3A-Session-ID"] = v
 				}
-				if v := r.Header.Get("JP3A-Device-Fingerprint"); v != "" {
+				if v := r.Header.Get("Jp3a-Device-Fingerprint"); v != "" {
 					meta.DeviceFingerprint = v
 					meta.Raw["JP3A-Device-Fingerprint"] = v
 				}
@@ -156,7 +156,7 @@ func resolveClientIP(r *http.Request, cfg *RealIPConfig) string {
 	switch cfg.Mode {
 	case "cloudflare":
 		// CF-Connecting-IP is set by Cloudflare edge, most reliable.
-		if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		if ip := r.Header.Get("Cf-Connecting-Ip"); ip != "" {
 			return strings.TrimSpace(ip)
 		}
 		return rightmostUntrustedXFF(r, cfg.TrustedCIDRs)
@@ -171,7 +171,7 @@ func resolveClientIP(r *http.Request, cfg *RealIPConfig) string {
 
 	default: // "standard"
 		// Try True-Client-IP first (some CDNs set this).
-		if ip := r.Header.Get("True-Client-IP"); ip != "" {
+		if ip := r.Header.Get("True-Client-Ip"); ip != "" {
 			return strings.TrimSpace(ip)
 		}
 		// Then X-Forwarded-For (rightmost untrusted).

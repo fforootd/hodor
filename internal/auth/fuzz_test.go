@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// FuzzExtractHash stresses the extractHash function with arbitrary JSON.
+// FuzzExtractHash stresses the DecodeCredentialJSON function with arbitrary JSON.
 // Invariant: must never panic.
 func FuzzExtractHash(f *testing.F) {
 	// Seed corpus with edge cases.
@@ -23,7 +23,7 @@ func FuzzExtractHash(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, input string) {
 		// Must not panic.
-		extractHash(input)
+		_ = DecodeCredentialJSON(input)
 	})
 }
 

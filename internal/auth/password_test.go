@@ -216,7 +216,7 @@ func TestHash_Unicode(t *testing.T) {
 
 	passwords := []string{
 		"пароль123",      // Cyrillic
-		"密码测试",         // CJK
+		"密码测试",         //nolint:gosmopolitan // CJK test fixture
 		"パスワード",        // Katakana
 		"🔐🔑🗝️secure",  // Emoji
 		"Ñoño@2026",     // Latin extended
@@ -279,7 +279,7 @@ func TestExtractHash_Injection(t *testing.T) {
 
 	for _, p := range payloads {
 		// Should not panic.
-		_ = extractHash(p)
+		_ = DecodeCredentialJSON(p)
 	}
 }
 
