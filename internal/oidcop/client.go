@@ -119,9 +119,10 @@ func (c *Client) LoginURL(authRequestID string) string {
 func (c *Client) AccessTokenType() op.AccessTokenType { return c.accessTokenType }
 func (c *Client) IDTokenLifetime() time.Duration      { return c.idTokenLifetime }
 func (c *Client) DevMode() bool                       { return c.devMode }
+//nolint:staticcheck // method name defined by upstream oidc library
 func (c *Client) RestrictAdditionalIdTokenScopes() func(scopes []string) []string {
 	return func(s []string) []string { return s }
-} //nolint:staticcheck // method name defined by upstream oidc library
+}
 func (c *Client) RestrictAdditionalAccessTokenScopes() func(scopes []string) []string {
 	return func(s []string) []string { return s }
 }
