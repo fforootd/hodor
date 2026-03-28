@@ -226,7 +226,10 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 	var exists int
 	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE identifier = 'default' AND schema_id = 'org_v1'`).Scan(&exists)
-	if err != nil || exists > 0 {
+	if err != nil {
+		return fmt.Errorf("check default org: %w", err)
+	}
+	if exists > 0 {
 		return nil
 	}
 
@@ -259,8 +262,11 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	var exists int
 	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE identifier = 'console'`).Scan(&exists)
-	if err != nil || exists > 0 {
-		return nil // Already exists or DB error — skip silently.
+	if err != nil {
+		return fmt.Errorf("check console client: %w", err)
+	}
+	if exists > 0 {
+		return nil
 	}
 
 	consoleID, err := id.New()

@@ -613,7 +613,7 @@ func (s *Storage) SetIntrospectionFromToken(ctx context.Context, introspection *
 // ---------- Private Claims ----------
 
 func (s *Storage) GetPrivateClaimsFromScopes(ctx context.Context, userID, clientID string, scopes []string) (map[string]any, error) {
-	return nil, nil
+	return map[string]any{}, nil
 }
 
 // ---------- JWT Profile (not used in POC) ----------

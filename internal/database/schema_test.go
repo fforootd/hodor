@@ -23,6 +23,8 @@ func TestSchemaCreation(t *testing.T) {
 		}
 	}
 	var count int
-	err = db.sql.QueryRow("SELECT count(*) FROM pragma_table_info('schemas')").Scan(&count)
+	if err = db.sql.QueryRow("SELECT count(*) FROM pragma_table_info('schemas')").Scan(&count); err != nil {
+		t.Fatalf("query pragma: %v", err)
+	}
 	fmt.Printf("Columns in schemas: %d\n", count)
 }

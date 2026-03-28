@@ -91,12 +91,9 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 	}
 	info.TokenType = TokenTypeSession
 
-	// Update last_used asynchronously (best-effort).
-	go func() {
-		now := time.Now().UTC().Format(time.RFC3339)
-		db.ExecContext(context.Background(),
-			`UPDATE tokens SET last_used = ? WHERE token_hash = ?`, now, h)
-	}()
+	// Update last_used (best-effort, inline — cheap single-row UPDATE).
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ?`, now, h)
 
 	return &info, nil
 }
@@ -119,12 +116,9 @@ func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenIn
 	}
 	info.TokenType = TokenTypePAT
 
-	// Update last_used asynchronously (best-effort).
-	go func() {
-		now := time.Now().UTC().Format(time.RFC3339)
-		db.ExecContext(context.Background(),
-			`UPDATE tokens SET last_used = ? WHERE token_hash = ?`, now, h)
-	}()
+	// Update last_used (best-effort, inline — cheap single-row UPDATE).
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ?`, now, h)
 
 	return &info, nil
 }

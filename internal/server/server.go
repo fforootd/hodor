@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -141,7 +143,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Mount OIDC Provider (OP) — handles /.well-known/openid-configuration,
 	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
-	issues := fmt.Sprintf("http://%s:%d", cfg.Server.ExternalDomain, cfg.Server.Port)
+	issues := "http://" + net.JoinHostPort(cfg.Server.ExternalDomain, strconv.Itoa(cfg.Server.Port))
 	oidcStorage := oidcop.NewStorage(db)
 	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil)
 	if err != nil {
