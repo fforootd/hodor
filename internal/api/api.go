@@ -136,8 +136,8 @@ type IdentityRequest struct {
 }
 
 type IdentityResponse struct {
-	ID           string    `json:"id"`
-	OrgID        string    `json:"org_id"`
+	ID           string   `json:"id"`
+	OrgID        string   `json:"org_id"`
 	Identifier   string   `json:"identifier"`
 	DisplayName  string   `json:"display_name,omitempty"`
 	State        string   `json:"state"`
@@ -444,7 +444,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 type SchemaRequest struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
-	OrgID   string  `json:"org_id,omitempty"`
+	OrgID   string `json:"org_id,omitempty"`
 	Schema  any    `json:"schema"`  // JSON Schema document
 	Message string `json:"message"` // Version commit message
 }
@@ -452,7 +452,7 @@ type SchemaRequest struct {
 type SchemaResponse struct {
 	ID        string `json:"id"`
 	Type      string `json:"type"`
-	OrgID     string  `json:"org_id"`
+	OrgID     string `json:"org_id"`
 	Schema    any    `json:"schema"`
 	Version   int    `json:"version"`
 	IsDefault bool   `json:"is_default"`
@@ -654,10 +654,10 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.EmitAuthEvent(r.Context(), "schema.version_created", "", map[string]any{
-		"schema_id":  newID,
-		"type":       schemaType,
-		"version":    newVersion,
-		"message":    req.Message,
+		"schema_id":    newID,
+		"type":         schemaType,
+		"version":      newVersion,
+		"message":      req.Message,
 		"from_version": schemaID,
 	})
 
@@ -1345,7 +1345,6 @@ func emitEventSimple(ctx context.Context, db interface {
 		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', '', '', datetime('now'))`,
 		eventIDVal, eventType, actorID, aggregateID, aggregateType, payloadJSON)
 }
-
 
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).
 func (a *API) GetIdentityByID(r *http.Request, identityID string) (IdentityResponse, error) {

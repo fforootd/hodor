@@ -106,19 +106,27 @@ func ClientFromIdentity(clientID string, dataJSON string, schemaJSON string) (*C
 
 // op.Client interface implementation
 
-func (c *Client) GetID() string                             { return c.id }
-func (c *Client) RedirectURIs() []string                    { return c.redirectURIs }
-func (c *Client) PostLogoutRedirectURIs() []string          { return c.postLogoutURIs }
-func (c *Client) ApplicationType() op.ApplicationType       { return c.applicationType }
-func (c *Client) AuthMethod() oidc.AuthMethod               { return c.authMethod }
-func (c *Client) ResponseTypes() []oidc.ResponseType        { return c.responseTypes }
-func (c *Client) GrantTypes() []oidc.GrantType              { return c.grantTypes }
-func (c *Client) LoginURL(authRequestID string) string      { return "/login?auth_request_id=" + authRequestID }
-func (c *Client) AccessTokenType() op.AccessTokenType       { return c.accessTokenType }
-func (c *Client) IDTokenLifetime() time.Duration            { return c.idTokenLifetime }
-func (c *Client) DevMode() bool                             { return c.devMode }
-func (c *Client) RestrictAdditionalIdTokenScopes() func(scopes []string) []string { return func(s []string) []string { return s } } //nolint:staticcheck // method name defined by upstream oidc library
-func (c *Client) RestrictAdditionalAccessTokenScopes() func(scopes []string) []string { return func(s []string) []string { return s } }
-func (c *Client) IsScopeAllowed(scope string) bool          { return strings.HasPrefix(scope, "urn:") || scope == oidc.ScopeOpenID || scope == oidc.ScopeProfile || scope == oidc.ScopeEmail || scope == oidc.ScopePhone || scope == oidc.ScopeOfflineAccess }
-func (c *Client) IDTokenUserinfoClaimsAssertion() bool      { return false }
-func (c *Client) ClockSkew() time.Duration                  { return c.clockSkew }
+func (c *Client) GetID() string                       { return c.id }
+func (c *Client) RedirectURIs() []string              { return c.redirectURIs }
+func (c *Client) PostLogoutRedirectURIs() []string    { return c.postLogoutURIs }
+func (c *Client) ApplicationType() op.ApplicationType { return c.applicationType }
+func (c *Client) AuthMethod() oidc.AuthMethod         { return c.authMethod }
+func (c *Client) ResponseTypes() []oidc.ResponseType  { return c.responseTypes }
+func (c *Client) GrantTypes() []oidc.GrantType        { return c.grantTypes }
+func (c *Client) LoginURL(authRequestID string) string {
+	return "/login?auth_request_id=" + authRequestID
+}
+func (c *Client) AccessTokenType() op.AccessTokenType { return c.accessTokenType }
+func (c *Client) IDTokenLifetime() time.Duration      { return c.idTokenLifetime }
+func (c *Client) DevMode() bool                       { return c.devMode }
+func (c *Client) RestrictAdditionalIdTokenScopes() func(scopes []string) []string {
+	return func(s []string) []string { return s }
+} //nolint:staticcheck // method name defined by upstream oidc library
+func (c *Client) RestrictAdditionalAccessTokenScopes() func(scopes []string) []string {
+	return func(s []string) []string { return s }
+}
+func (c *Client) IsScopeAllowed(scope string) bool {
+	return strings.HasPrefix(scope, "urn:") || scope == oidc.ScopeOpenID || scope == oidc.ScopeProfile || scope == oidc.ScopeEmail || scope == oidc.ScopePhone || scope == oidc.ScopeOfflineAccess
+}
+func (c *Client) IDTokenUserinfoClaimsAssertion() bool { return false }
+func (c *Client) ClockSkew() time.Duration             { return c.clockSkew }

@@ -391,8 +391,8 @@ var entitiesListTmpl = template.Must(template.New("entities").Parse(baseHead + a
 func renderAdminEntities(w http.ResponseWriter, ident *IdentityContext, identities any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	entitiesListTmpl.Execute(w, map[string]any{
-		"Title":      "Entities",
-		"Ident":      ident,
+		"Title":    "Entities",
+		"Ident":    ident,
 		"Entities": identities,
 	})
 }

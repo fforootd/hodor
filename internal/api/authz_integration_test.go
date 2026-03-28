@@ -151,12 +151,12 @@ func TestAuthorizationMatrix(t *testing.T) {
 	userToken := srv.CreateSession(userID)
 
 	type testCase struct {
-		Method   string
-		Path     string
-		Body     map[string]any
-		Unauth   int // expected code without auth
-		User     int // expected code for regular user
-		Admin    int // expected code for admin
+		Method string
+		Path   string
+		Body   map[string]any
+		Unauth int // expected code without auth
+		User   int // expected code for regular user
+		Admin  int // expected code for admin
 	}
 
 	cases := []testCase{

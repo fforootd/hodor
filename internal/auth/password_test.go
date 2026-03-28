@@ -215,11 +215,11 @@ func TestHash_Unicode(t *testing.T) {
 	pw := NewPasswords(db)
 
 	passwords := []string{
-		"пароль123",      // Cyrillic
-		"密码测试",         //nolint:gosmopolitan // CJK test fixture
-		"パスワード",        // Katakana
-		"🔐🔑🗝️secure",  // Emoji
-		"Ñoño@2026",     // Latin extended
+		"пароль123",  // Cyrillic
+		"密码测试",       //nolint:gosmopolitan // CJK test fixture
+		"パスワード",      // Katakana
+		"🔐🔑🗝️secure", // Emoji
+		"Ñoño@2026",  // Latin extended
 	}
 
 	for _, plain := range passwords {
@@ -318,4 +318,3 @@ func TestCheckPassword_TimingEquality(t *testing.T) {
 	// Both should return false — the important thing is neither panics
 	// and both return consistent false results.
 }
-

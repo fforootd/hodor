@@ -13,7 +13,7 @@ import (
 type realIPCtxKey int
 
 const (
-	realIPKey      realIPCtxKey = iota
+	realIPKey realIPCtxKey = iota
 	realProtoKey
 	realHostKey
 	requestIDKey

@@ -17,8 +17,6 @@ import (
 	"github.com/zitadel/zitadel/internal/session"
 )
 
-
-
 // IdentityContext holds the authenticated identity info on the request context.
 type IdentityContext struct {
 	IdentityID   string

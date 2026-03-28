@@ -216,7 +216,7 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{
 		"login_session_id": sid,
-		"entity_id":      identityID,
+		"entity_id":        identityID,
 		"org_id":           "",
 		"display_name":     displayName,
 		"auth_methods":     []string{"password", "magic_link"},

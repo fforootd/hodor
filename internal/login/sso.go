@@ -420,4 +420,3 @@ func parseIDTokenClaims(idToken string) (map[string]any, error) {
 
 	return claims, nil
 }
-

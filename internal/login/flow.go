@@ -54,9 +54,9 @@ type BrandingConfig struct {
 
 // SchemaAuthConfig is the fully extracted auth/login/branding config from a schema.
 type SchemaAuthConfig struct {
-	Identifiers []string                      // field names that can be used as identifiers
-	Fields      map[string]AuthFieldConfig    // field name → auth config
-	AuthMethods map[string]*AuthMethodEntry   // method name → config (from x-auth-methods)
+	Identifiers []string                    // field names that can be used as identifiers
+	Fields      map[string]AuthFieldConfig  // field name → auth config
+	AuthMethods map[string]*AuthMethodEntry // method name → config (from x-auth-methods)
 	Login       LoginConfig
 	Branding    BrandingConfig
 }
@@ -66,10 +66,10 @@ type SchemaAuthConfig struct {
 // ExtractAuthConfig parses per-field auth annotations, x-auth-methods, x-login, and x-branding from a JSON schema string.
 func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	var raw struct {
-		Properties  map[string]map[string]any `json:"properties"`
-		XAuthMethods json.RawMessage          `json:"x-auth-methods"`
-		XLogin      json.RawMessage           `json:"x-login"`
-		XBranding   json.RawMessage           `json:"x-branding"`
+		Properties   map[string]map[string]any `json:"properties"`
+		XAuthMethods json.RawMessage           `json:"x-auth-methods"`
+		XLogin       json.RawMessage           `json:"x-login"`
+		XBranding    json.RawMessage           `json:"x-branding"`
 	}
 	if err := json.Unmarshal([]byte(schemaJSON), &raw); err != nil {
 		return defaultConfig()

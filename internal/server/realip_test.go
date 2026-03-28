@@ -67,7 +67,7 @@ func TestRealIP_UntrustedProxy_Ignored(t *testing.T) {
 	}))
 
 	r := httptest.NewRequest("GET", "/", nil)
-	r.RemoteAddr = "172.16.0.1:5678" // NOT a trusted proxy
+	r.RemoteAddr = "172.16.0.1:5678"           // NOT a trusted proxy
 	r.Header.Set("X-Forwarded-For", "1.2.3.4") // Spoofed
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)

@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/bootstrap"
-	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/config"
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/server"
 )
 
@@ -423,4 +423,3 @@ func (ts *TestServer) RequestWithHeaders(method, path string, headers map[string
 	defer resp.Body.Close()
 	return resp.StatusCode, ts.decodeJSON(resp.Body)
 }
-

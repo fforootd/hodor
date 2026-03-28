@@ -1,4 +1,4 @@
-.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt vet release-snapshot quality check
+.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt fmt-check vet release-snapshot quality check
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
@@ -97,6 +97,14 @@ lint: webdist
 fmt:
 	gofmt -w .
 
+# Check Go formatting.
+fmt-check:
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "Files not formatted:"; \
+		gofmt -l .; \
+		exit 1; \
+	fi
+
 # Go vet.
 vet: webdist
 	go vet ./...
@@ -117,9 +125,12 @@ generate:
 
 # ─── Quality (all-in-one) ──────────────────────────────────
 
-# Run all quality checks: vet → lint → Go tests → web tests.
+# Run all quality checks: fmt → vet → lint → Go tests → web tests.
 # Use this before committing or in CI to catch everything.
 quality: webdist node_modules
+	@echo "═══ go fmt ═══"
+	@$(MAKE) fmt-check
+	@echo ""
 	@echo "═══ go vet ═══"
 	go vet ./...
 	@echo ""

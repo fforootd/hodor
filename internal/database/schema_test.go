@@ -1,9 +1,9 @@
 package database
 
 import (
-"fmt"
-"strings"
-"testing"
+	"fmt"
+	"strings"
+	"testing"
 )
 
 func TestSchemaCreation(t *testing.T) {
@@ -16,7 +16,9 @@ func TestSchemaCreation(t *testing.T) {
 	stmts := strings.Split(schemaDDL, ";")
 	for i, stmt := range stmts {
 		stmt = strings.TrimSpace(stmt)
-		if stmt == "" { continue }
+		if stmt == "" {
+			continue
+		}
 		_, err := db.sql.Exec(stmt)
 		if err != nil {
 			t.Fatalf("Failed at stmt %d: %q\nErr: %v", i, stmt, err)

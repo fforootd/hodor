@@ -15,7 +15,7 @@ import (
 
 type SessionResponse struct {
 	ID         string `json:"id"`
-	IdentityID string  `json:"entity_id"`
+	IdentityID string `json:"entity_id"`
 	OrgID      string `json:"org_id"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
@@ -24,7 +24,7 @@ type SessionResponse struct {
 }
 
 type CreateSessionRequest struct {
-	IdentityID string  `json:"entity_id"`
+	IdentityID string `json:"entity_id"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
 }

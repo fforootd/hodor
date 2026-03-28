@@ -47,16 +47,16 @@ type SeedIdentity struct {
 	State          string              `yaml:"state"`
 	Password       string              `yaml:"password"`
 	Profile        map[string]any      `yaml:"profile"`
-	Capabilities   []string            `yaml:"capabilities"`    // NEW: ["admin", "password"]
-	PATs           []SeedPAT           `yaml:"pats"`            // NEW: personal access tokens
-	OnConflict     string              `yaml:"on_conflict"`     // NEW: "skip" (default), "warn", "update"
+	Capabilities   []string            `yaml:"capabilities"` // NEW: ["admin", "password"]
+	PATs           []SeedPAT           `yaml:"pats"`         // NEW: personal access tokens
+	OnConflict     string              `yaml:"on_conflict"`  // NEW: "skip" (default), "warn", "update"
 	LinkedAccounts []SeedLinkedAccount `yaml:"linked_accounts"`
 }
 
 // SeedPAT defines a personal access token to seed for an identity.
 type SeedPAT struct {
 	Name   string   `yaml:"name"`
-	Token  string   `yaml:"token"`   // raw token (will be prefixed + hashed)
+	Token  string   `yaml:"token"` // raw token (will be prefixed + hashed)
 	Scopes []string `yaml:"scopes"`
 }
 
@@ -235,8 +235,8 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		pw := auth.NewPasswords(nil)
 		hash, err := pw.Hash(ident.Password)
 		if err == nil {
-				credID := id.New()
-				credJSON := auth.EncodeCredentialJSON(hash)
+			credID := id.New()
+			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)
@@ -268,8 +268,8 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID string, id
 		if err == nil {
 			// Delete existing + re-insert.
 			tx.ExecContext(ctx, `DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`, entityID)
-				credID := id.New()
-				credJSON := auth.EncodeCredentialJSON(hash)
+			credID := id.New()
+			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, entityID, credJSON)

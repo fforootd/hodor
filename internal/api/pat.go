@@ -12,7 +12,7 @@ import (
 // --- PAT types ---
 
 type CreatePATRequest struct {
-	EntityID string    `json:"entity_id"`
+	EntityID string   `json:"entity_id"`
 	Name     string   `json:"name"`
 	Scopes   []string `json:"scopes,omitempty"`
 }

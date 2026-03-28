@@ -25,12 +25,12 @@ type Config struct {
 
 // ServerConfig controls HTTP server behavior.
 type ServerConfig struct {
-	Port           int      `toml:"port"`
-	ExternalDomain string   `toml:"external_domain"`
-	TLSCert        string   `toml:"tls_cert"`
-	TLSKey         string   `toml:"tls_key"`
-	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
-	OIDCEncryptionKey string `toml:"oidc_encryption_key"` // 32-byte hex-encoded key for OIDC token encryption
+	Port              int      `toml:"port"`
+	ExternalDomain    string   `toml:"external_domain"`
+	TLSCert           string   `toml:"tls_cert"`
+	TLSKey            string   `toml:"tls_key"`
+	CookieSecrets     []string `toml:"cookie_secrets"`      // HMAC keys for session cookies; first signs, all verify
+	OIDCEncryptionKey string   `toml:"oidc_encryption_key"` // 32-byte hex-encoded key for OIDC token encryption
 
 	// Sub-path deployment: host all routes under a prefix (e.g., "/auth").
 	BasePath      string             `toml:"base_path"`
@@ -38,9 +38,9 @@ type ServerConfig struct {
 	AppAccess     AppAccessConfig    `toml:"app_access"`     // per-app access control
 
 	// Proxy trust: correctly resolve real client IP behind CDN/WAF/reverse proxies.
-	TrustedProxies  []string `toml:"trusted_proxies"`     // CIDR ranges (e.g., ["10.0.0.0/8"])
-	ProxyHeaderMode string   `toml:"proxy_header_mode"`   // "standard" | "cloudflare" | "custom"
-	RealIPHeader    string   `toml:"real_ip_header"`      // custom header (e.g., "CF-Connecting-IP")
+	TrustedProxies  []string `toml:"trusted_proxies"`   // CIDR ranges (e.g., ["10.0.0.0/8"])
+	ProxyHeaderMode string   `toml:"proxy_header_mode"` // "standard" | "cloudflare" | "custom"
+	RealIPHeader    string   `toml:"real_ip_header"`    // custom header (e.g., "CF-Connecting-IP")
 
 	// Security response headers.
 	SecurityHeaders SecurityHeadersConfig `toml:"security_headers"`
@@ -73,13 +73,13 @@ type AppAccessConfig struct {
 
 // SecurityHeadersConfig controls HTTP security response headers.
 type SecurityHeadersConfig struct {
-	HSTSEnabled    bool   `toml:"hsts_enabled"`    // default: true when TLS or external domain
-	HSTSMaxAge     int    `toml:"hsts_max_age"`    // default: 63072000 (2 years)
-	HSTSSubdomains bool   `toml:"hsts_subdomains"` // default: true
-	HSTSPreload    bool   `toml:"hsts_preload"`    // default: false
+	HSTSEnabled    bool `toml:"hsts_enabled"`    // default: true when TLS or external domain
+	HSTSMaxAge     int  `toml:"hsts_max_age"`    // default: 63072000 (2 years)
+	HSTSSubdomains bool `toml:"hsts_subdomains"` // default: true
+	HSTSPreload    bool `toml:"hsts_preload"`    // default: false
 
-	CSPEnabled  bool   `toml:"csp_enabled"`   // default: true
-	CSPPolicy   string `toml:"csp_policy"`    // override entire policy string
+	CSPEnabled   bool   `toml:"csp_enabled"`    // default: true
+	CSPPolicy    string `toml:"csp_policy"`     // override entire policy string
 	CSPReportURI string `toml:"csp_report_uri"` // URI for violation reports
 
 	XFrameOptions       string `toml:"x_frame_options"`        // default: "DENY"

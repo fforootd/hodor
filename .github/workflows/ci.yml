@@ -39,12 +39,7 @@ jobs:
           version-file: .golangci-lint-version
 
       - name: Check formatting
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "Files not formatted:"
-            gofmt -l .
-            exit 1
-          fi
+        run: make fmt-check
 
   lint-web:
     name: Lint Web

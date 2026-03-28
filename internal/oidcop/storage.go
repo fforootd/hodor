@@ -74,7 +74,9 @@ func (s *Storage) AuthorizeClientIDSecret(ctx context.Context, clientID, clientS
 	}
 
 	// credData is JSON: {"hash": "<bcrypt hash>"}
-	var cred struct{ Hash string `json:"hash"` }
+	var cred struct {
+		Hash string `json:"hash"`
+	}
 	if err := json.Unmarshal([]byte(credData), &cred); err != nil {
 		return fmt.Errorf("invalid credential data")
 	}
@@ -341,12 +343,12 @@ type RefreshTokenRequest struct {
 	AuthTime      time.Time
 }
 
-func (r *RefreshTokenRequest) GetAMR() []string          { return nil }
-func (r *RefreshTokenRequest) GetAudience() []string     { return r.Audience }
-func (r *RefreshTokenRequest) GetAuthTime() time.Time    { return r.AuthTime }
-func (r *RefreshTokenRequest) GetClientID() string       { return r.ApplicationID }
-func (r *RefreshTokenRequest) GetScopes() []string       { return r.Scopes }
-func (r *RefreshTokenRequest) GetSubject() string        { return r.UserID }
+func (r *RefreshTokenRequest) GetAMR() []string                 { return nil }
+func (r *RefreshTokenRequest) GetAudience() []string            { return r.Audience }
+func (r *RefreshTokenRequest) GetAuthTime() time.Time           { return r.AuthTime }
+func (r *RefreshTokenRequest) GetClientID() string              { return r.ApplicationID }
+func (r *RefreshTokenRequest) GetScopes() []string              { return r.Scopes }
+func (r *RefreshTokenRequest) GetSubject() string               { return r.UserID }
 func (r *RefreshTokenRequest) SetCurrentScopes(scopes []string) { r.Scopes = scopes }
 
 // ---------- Revocation + Session Termination ----------

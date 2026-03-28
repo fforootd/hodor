@@ -21,7 +21,6 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/account/activity", a.requireSession(a.listOwnActivity))
 }
 
-
 func callerIdentityID(r *http.Request) string {
 	return r.Header.Get("X-Identity-Id")
 }

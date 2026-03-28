@@ -13,7 +13,7 @@ import (
 // ImportRequest is the body for POST /v1/import.
 type ImportRequest struct {
 	Providers      []ImportProvider      `json:"providers,omitempty"`
-	Entities       []ImportEntity      `json:"entities,omitempty"`
+	Entities       []ImportEntity        `json:"entities,omitempty"`
 	LinkedAccounts []ImportLinkedAccount `json:"linked_accounts,omitempty"`
 	OnConflict     string                `json:"on_conflict"` // skip (default), fail, update
 }
@@ -42,7 +42,7 @@ type ImportEntity struct {
 // ImportLinkedAccount links an identity to a provider.
 type ImportLinkedAccount struct {
 	IdentityIdentifier string `json:"entity_identifier"` // resolves to identity ID
-	ProviderName       string `json:"provider_name"`       // resolves to provider ID
+	ProviderName       string `json:"provider_name"`     // resolves to provider ID
 	ExternalSub        string `json:"external_sub"`
 	ExternalEmail      string `json:"external_email,omitempty"`
 }
@@ -323,7 +323,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Entities   []ImportEntity `json:"entities"`
-		OnConflict string           `json:"on_conflict"`
+		OnConflict string         `json:"on_conflict"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
