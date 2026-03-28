@@ -125,17 +125,19 @@ func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
 	var ssoProviders []map[string]any
 	rows, err := h.db.SQL().QueryContext(r.Context(),
 		`SELECT id, name, template, protocol FROM providers WHERE enabled = 1 ORDER BY display_order, name`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var pid, pname, ptemplate, pprotocol string
-			if rows.Scan(&pid, &pname, &ptemplate, &pprotocol) == nil {
-				ssoProviders = append(ssoProviders, map[string]any{
-					"id": pid, "name": pname, "template": ptemplate, "protocol": pprotocol,
-				})
-			}
+	if err != nil {
+		return ssoProviders
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid, pname, ptemplate, pprotocol string
+		if rows.Scan(&pid, &pname, &ptemplate, &pprotocol) == nil {
+			ssoProviders = append(ssoProviders, map[string]any{
+				"id": pid, "name": pname, "template": ptemplate, "protocol": pprotocol,
+			})
 		}
 	}
+	_ = rows.Err()
 	if ssoProviders == nil {
 		ssoProviders = []map[string]any{}
 	}
