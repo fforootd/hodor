@@ -174,7 +174,7 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEventSimple(r.Context(), a.db.SQL(), "provider.created", 0, providerID, "provider", map[string]any{
+	emitEventSimple(r.Context(), a.db.SQL(), "provider.created", "", providerID, "provider", map[string]any{
 		"name": req.Name, "protocol": req.Protocol, "template": req.Template,
 	})
 	a.bus.Signal()
@@ -356,7 +356,7 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	// Also delete linked accounts.
 	a.db.SQL().ExecContext(r.Context(), `DELETE FROM linked_accounts WHERE provider_id = ?`, id)
 
-	emitEventSimple(r.Context(), a.db.SQL(), "provider.deleted", 0, id, "provider", map[string]any{"provider_id": id})
+	emitEventSimple(r.Context(), a.db.SQL(), "provider.deleted", "", id, "provider", map[string]any{"provider_id": id})
 	a.bus.Signal()
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})

@@ -218,7 +218,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	}
 
 	// Check conflict.
-	var existingID int64
+	var existingID string
 	err := tx.QueryRowContext(r.Context(), `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		if onConflict == "update" {
@@ -239,10 +239,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: "identifier exists"}
 	}
 
-	newID, err := id.New()
-	if err != nil {
-		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: "generate id: " + err.Error()}
-	}
+	newID := id.New()
 
 	state := ident.State
 	if state == "" {
@@ -272,7 +269,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
 		hash, err := hasher.Hash(ident.Password)
 		if err == nil {
-			credID, _ := id.New()
+			credID := id.New()
 			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
 			tx.ExecContext(r.Context(),
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
@@ -285,7 +282,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 
 func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAccount, idx int, onConflict string) ImportResult {
 	// Resolve identity by identifier.
-	var identityID int64
+	var identityID string
 	err := tx.QueryRowContext(r.Context(), `SELECT id FROM entities WHERE identifier = ?`, la.IdentityIdentifier).Scan(&identityID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "identity not found: " + la.IdentityIdentifier}
@@ -299,7 +296,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 	}
 
 	// Check conflict.
-	var existingLinkID int64
+	var existingLinkID string
 	err = tx.QueryRowContext(r.Context(),
 		`SELECT id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
 		providerID, la.ExternalSub).Scan(&existingLinkID)
@@ -310,7 +307,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "already linked"}
 	}
 
-	linkID, _ := id.New()
+	linkID := id.New()
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,

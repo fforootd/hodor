@@ -237,7 +237,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { entityApi, magicLinkApi, schemaApi, type Identity } from '@/api/resources'
+import { entityApi, magicLinkApi, schemaApi, metaSchemaApi, type Identity } from '@/api/resources'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -397,8 +397,7 @@ onMounted(async () => {
       if (match) entitySchema.value = match.schema
     }
     try {
-      const metaRes = await fetch('/v1/schemas/$meta')
-      const metaData = await metaRes.json()
+      const metaData = await metaSchemaApi.get()
       const st = identity.value?.schema_name
       if (st) {
         const entry = (metaData['x-catalog'] || {})[st]

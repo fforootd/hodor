@@ -15,10 +15,7 @@ import (
 
 // emitGCEvent emits an audit event for GC operations.
 func emitGCEvent(ctx context.Context, db *database.DB, bus *eventbus.Bus, eventType string, payload map[string]any) {
-	eventID, err := id.New()
-	if err != nil {
-		return
-	}
+	eventID := id.New()
 	payloadJSON := "{}"
 	if len(payload) > 0 {
 		b, _ := json.Marshal(payload)
@@ -26,7 +23,7 @@ func emitGCEvent(ctx context.Context, db *database.DB, bus *eventbus.Bus, eventT
 	}
 	_, _ = db.SQL().ExecContext(ctx,
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, 0, 0, 'system', 0, 'gc', ?, '{}', '', 0, datetime('now'))`,
+		 VALUES (?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', datetime('now'))`,
 		eventID, eventType, payloadJSON)
 	bus.Signal()
 }
@@ -76,7 +73,7 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 // EventGC returns a job function that deletes OLTP events past their retention period.
 func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 	return func(ctx context.Context) error {
-		var lakeCursor int64
+		var lakeCursor string
 		err := db.SQL().QueryRowContext(ctx,
 			`SELECT last_event_id FROM consumer_cursors WHERE consumer_name = 'lake_writer'`,
 		).Scan(&lakeCursor)
@@ -121,7 +118,7 @@ func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 		}
 
 		if totalDeleted > 0 {
-			log.Printf("[event_gc] deleted %d events past retention (cursor=%d)", totalDeleted, lakeCursor)
+			log.Printf("[event_gc] deleted %d events past retention (cursor=%s)", totalDeleted, lakeCursor)
 
 			emitGCEvent(ctx, db, bus, "gc.events_cleaned", map[string]any{
 				"total_deleted":      totalDeleted,

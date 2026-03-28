@@ -1,0 +1,140 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Zitadel Reference Configuration
+#
+# This is a REFERENCE file. Copy it to zitadel.toml and adjust to your needs.
+# All values shown are defaults unless otherwise noted.
+# Environment variables (ZITADEL_ prefix) override TOML settings.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVER — HTTP server behavior, path routing, and security
+# ═══════════════════════════════════════════════════════════════════════════════
+[server]
+port = 8080
+external_domain = "localhost"
+
+# TLS — set both to enable HTTPS directly (without a reverse proxy).
+# tls_cert = "/etc/zitadel/tls/cert.pem"
+# tls_key  = "/etc/zitadel/tls/key.pem"
+
+# Cookie signing keys (HMAC-SHA256). First key signs, all keys verify.
+# Rotate by prepending a new key and keeping old ones for grace period.
+# cookie_secrets = ["new-secret-key", "old-secret-key"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Path-Based Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+# Host all routes under a sub-path. Set to "" (default) for root deployment.
+# Example: base_path = "/auth"  →  console at /auth/console, API at /auth/v1/*
+# Env: ZITADEL_BASE_PATH
+base_path = ""
+
+# Per-app path overrides. Set to "/" to keep an app at the domain root.
+# Leave empty to inherit from base_path.
+[server.path_overrides]
+# OIDC and SAML default to root when base_path is set (for discovery compat).
+# oidc    = "/"      # /.well-known/openid-configuration stays at root
+# saml    = "/"      # SAML metadata stays at root
+# api     = ""       # inherits base_path
+# login   = ""       # inherits base_path
+# console = ""       # inherits base_path
+# assets  = ""       # inherits base_path
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Proxy Trust — CDN/WAF/Reverse Proxy support
+# ─────────────────────────────────────────────────────────────────────────────
+# CIDR ranges of trusted proxy IPs. Headers are ONLY read from these sources.
+# Common ranges:
+#   - Docker/K8s:   ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+#   - Cloudflare:   see https://www.cloudflare.com/ips/
+# Env: ZITADEL_TRUSTED_PROXIES (comma-separated)
+# trusted_proxies = ["10.0.0.0/8"]
+
+# How to extract the real client IP from proxy headers.
+#   "standard"     — X-Forwarded-For → X-Real-IP → True-Client-IP (default)
+#   "cloudflare"   — CF-Connecting-IP → X-Forwarded-For
+#   "custom"       — real_ip_header → X-Forwarded-For
+# Env: ZITADEL_PROXY_HEADER_MODE
+# proxy_header_mode = "standard"
+
+# Custom header for real client IP (used when proxy_header_mode = "custom").
+# Env: ZITADEL_REAL_IP_HEADER
+# real_ip_header = "X-Custom-Client-IP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# App Access Control
+# ─────────────────────────────────────────────────────────────────────────────
+# Disable or restrict access to individual apps. Useful for:
+#   - Hiding the admin console from public internet
+#   - Restricting API access to internal networks
+#   - Disabling login UI for API-only deployments
+[server.app_access.console]
+enabled = true
+# ip_allow = ["10.0.0.0/8"]  # restrict to internal only
+
+[server.app_access.admin]
+enabled = true
+# ip_allow = ["10.0.0.0/8"]
+
+[server.app_access.api]
+enabled = true
+
+[server.app_access.login]
+enabled = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Response Headers
+# ─────────────────────────────────────────────────────────────────────────────
+[server.security_headers]
+# HSTS — only sent over HTTPS connections.
+hsts_enabled = true
+hsts_max_age = 63072000 # 2 years (recommended for preload)
+hsts_subdomains = true
+hsts_preload = false    # set true only after testing, submission required
+
+# Content Security Policy. Override the entire policy or use the secure default.
+csp_enabled = true
+# csp_policy = "default-src 'self'; script-src 'self'"
+# csp_report_uri = "https://example.com/csp-report"
+
+# Other headers.
+x_frame_options = "DENY"
+x_content_type_options = true                                               # sets "nosniff"
+referrer_policy = "strict-origin-when-cross-origin"
+permissions_policy = "camera=(), microphone=(), geolocation=(), payment=()"
+cross_origin_opener = "same-origin"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DATABASE — Primary data store
+# ═══════════════════════════════════════════════════════════════════════════════
+[database]
+# SQLite (default, good for dev/single-node). Prefix with "sqlite://".
+# PostgreSQL: "postgres://user:pass@host:5432/zitadel?sslmode=require"
+url = "sqlite://./zitadel.db"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OBSERVABILITY — Logging and telemetry
+# ═══════════════════════════════════════════════════════════════════════════════
+[observability]
+log_level = "info"  # debug, info, warn, error
+log_format = "text" # text, json
+
+# OpenTelemetry OTLP endpoint for traces, metrics, and logs.
+# otlp_endpoint = "localhost:4317"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORKERS — Background task processing
+# ═══════════════════════════════════════════════════════════════════════════════
+[workers]
+notification_workers = 1
+event_workers = 1
+lake_batch_size = 1000
+lake_batch_window_secs = 5
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEV — Development and testing features (DO NOT USE IN PRODUCTION)
+# ═══════════════════════════════════════════════════════════════════════════════
+[dev]
+mock_oidc = false
+mock_oidc_port = 9998
+# seed_file    = "./seed.yaml"

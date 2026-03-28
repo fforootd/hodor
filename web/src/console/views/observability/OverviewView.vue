@@ -105,6 +105,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Activity, Users, KeyRound, Shield, Search } from 'lucide-vue-next'
+import { api } from '@/api/client'
 
 const timeRange = ref('12h')
 const eventFilter = ref('')
@@ -141,12 +142,7 @@ function formatNumber(n: number): string {
 onMounted(async () => {
   try {
     // Fetch real event counts
-    const res = await fetch('/v1/analytics/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: "SELECT event_type, COUNT(*) as count FROM events GROUP BY event_type ORDER BY count DESC LIMIT 20" }),
-    })
-    const data = await res.json()
+    const data = await api.post<any>('/v1/analytics/query', { query: "SELECT event_type, COUNT(*) as count FROM events GROUP BY event_type ORDER BY count DESC LIMIT 20" })
     const rows = (data.rows || []) as any[]
 
     // Build event breakdown

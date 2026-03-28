@@ -22,16 +22,12 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 }
 
 
-func callerIdentityID(r *http.Request) int64 {
-	var id int64
-	_, _ = fmt.Sscanf(r.Header.Get("X-Identity-Id"), "%d", &id)
-	return id
+func callerIdentityID(r *http.Request) string {
+	return r.Header.Get("X-Identity-Id")
 }
 
-func callerSessionID(r *http.Request) int64 {
-	var id int64
-	_, _ = fmt.Sscanf(r.Header.Get("X-Session-Id"), "%d", &id)
-	return id
+func callerSessionID(r *http.Request) string {
+	return r.Header.Get("X-Session-Id")
 }
 
 // --- GET /v1/account/profile ---
@@ -41,7 +37,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Load identity.
 	var identifier, displayName, state, profile, schemaID, createdAt, updatedAt string
-	var orgID int64
+	var orgID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT identifier, COALESCE(display_name,''), state, COALESCE(profile,'{}'),
 		        org_id, COALESCE(schema_id,''), created_at, updated_at
@@ -77,11 +73,11 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"identity": map[string]any{
-			"id":           fmt.Sprintf("%d", identityID),
+			"id":           identityID,
 			"identifier":   identifier,
 			"display_name": displayName,
 			"state":        state,
-			"org_id":       fmt.Sprintf("%d", orgID),
+			"org_id":       orgID,
 			"profile":      profileMap,
 			"created_at":   createdAt,
 			"updated_at":   updatedAt,
@@ -215,11 +211,11 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 
 	var sessions []map[string]any
 	for rows.Next() {
-		var sid int64
+		var sid string
 		var userAgent, ipAddress, createdAt, expiresAt string
 		rows.Scan(&sid, &userAgent, &ipAddress, &createdAt, &expiresAt)
 		sessions = append(sessions, map[string]any{
-			"id":         fmt.Sprintf("%d", sid),
+			"id":         sid,
 			"user_agent": userAgent,
 			"ip_address": ipAddress,
 			"created_at": createdAt,
@@ -245,7 +241,7 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
 	// Only allow revoking own sessions.
-	var ownerID int64
+	var ownerID string
 	var userAgent, ipAddress string
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT entity_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
@@ -288,7 +284,7 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 
 	a.EmitAuthEvent(r.Context(), "account.sessions_revoked_all", identityID, map[string]any{
 		"count":           count,
-		"kept_session_id": fmt.Sprintf("%d", currentSessionID),
+		"kept_session_id": currentSessionID,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "count": count})
@@ -320,7 +316,7 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 
 	var events []map[string]any
 	for rows.Next() {
-		var eid int64
+		var eid string
 		var eventType, aggregateType, payload, createdAt string
 		rows.Scan(&eid, &eventType, &aggregateType, &payload, &createdAt)
 
@@ -328,7 +324,7 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal([]byte(payload), &payloadMap)
 
 		events = append(events, map[string]any{
-			"id":            fmt.Sprintf("%d", eid),
+			"id":            eid,
 			"event_type":    eventType,
 			"resource_type": aggregateType,
 			"payload":       payloadMap,

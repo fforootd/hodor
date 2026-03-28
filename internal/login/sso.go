@@ -244,9 +244,9 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 
 // --- Identity Linking ---
 
-func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, externalSub, externalEmail string, claims map[string]any, overridesJSON string, autoRegister bool) (int64, error) {
+func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, externalSub, externalEmail string, claims map[string]any, overridesJSON string, autoRegister bool) (string, error) {
 	// Check if already linked.
-	var identityID int64
+	var identityID string
 	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT entity_id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
 		providerID, externalSub,
@@ -263,7 +263,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	}
 
 	if !autoRegister {
-		return 0, fmt.Errorf("no linked account found and auto_register is disabled")
+		return "", fmt.Errorf("no linked account found and auto_register is disabled")
 	}
 
 	// Map claims to profile using schema + provider overrides.
@@ -287,10 +287,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	}
 
 	// Create identity.
-	newID, err := id.New()
-	if err != nil {
-		return 0, fmt.Errorf("generate id: %w", err)
-	}
+	newID := id.New()
 
 	profileJSON, _ := json.Marshal(profile)
 
@@ -300,11 +297,11 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 		newID, identifier, displayName, string(profileJSON),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("create identity: %w", err)
+		return "", fmt.Errorf("create identity: %w", err)
 	}
 
 	// Create linked account.
-	linkID, _ := id.New()
+	linkID := id.New()
 	claimsJSON, _ := json.Marshal(claims)
 	_, err = h.db.SQL().ExecContext(ctx,
 		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
@@ -312,7 +309,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 		linkID, newID, providerID, externalSub, externalEmail, string(claimsJSON),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("create linked account: %w", err)
+		return "", fmt.Errorf("create linked account: %w", err)
 	}
 
 	return newID, nil

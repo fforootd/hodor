@@ -20,7 +20,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	cfg := h.getDefaultSchemaConfig(r)
 	ssoProviders := h.loadSSOProviders(r)
 
-	flowID := fmt.Sprintf("flow_%d", id.MustNew())
+	flowID := id.NewFlow()
 	flow := &Flow{
 		ID:           flowID,
 		SchemaConfig: cfg,
@@ -80,7 +80,7 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		h.flowSubmitSSO(w, r, flow, req.ProviderID)
 	case "back":
 		flow.CurrentStep = StepIdentifier
-		flow.IdentityID = 0
+		flow.IdentityID = ""
 		flow.Identifier = ""
 		flow.DisplayName = ""
 		flow.Verified = false
@@ -118,7 +118,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 
-	var identityID int64
+	var identityID string
 	var displayName string
 	err := h.db.SQL().QueryRowContext(r.Context(),
 		`SELECT id, COALESCE(display_name, identifier) FROM entities WHERE identifier = ? AND state = 'active'`,
@@ -139,7 +139,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	flow.CurrentStep = StepAuthSelect
 	h.flows.Put(flow)
 
-	log.Printf("[flow] %s identifier resolved: %s (identity=%d)", flow.ID, identifier, identityID)
+	log.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, identityID)
 	writeJSON(w, flow.ToFlowStep())
 }
 
@@ -155,7 +155,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 		flow.IdentityID,
 	).Scan(&credData)
 	if err != nil {
-		log.Printf("[flow] %s password lookup failed for identity=%d: %v", flow.ID, flow.IdentityID, err)
+		log.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IdentityID, err)
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -165,7 +165,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 		Hash string `json:"hash"`
 	}
 	if err := json.Unmarshal([]byte(credData), &cred); err != nil || cred.Hash == "" {
-		log.Printf("[flow] %s invalid credential data for identity=%d", flow.ID, flow.IdentityID)
+		log.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -231,7 +231,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 	flow.CurrentStep = StepComplete
 	h.flows.Put(flow)
 
-	log.Printf("[flow] %s completed (identity=%d, session=%d)", flow.ID, flow.IdentityID, sessResp.Session.ID)
+	log.Printf("[flow] %s completed (identity=%s, session=%s)", flow.ID, flow.IdentityID, sessResp.Session.ID)
 
 	h.api.EmitAuthEvent(r.Context(), "auth.login_completed", flow.IdentityID, map[string]any{
 		"session_id": sessResp.Session.ID,

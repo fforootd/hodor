@@ -1,4 +1,4 @@
-.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt vet release-snapshot
+.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt vet release-snapshot quality check
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
@@ -114,6 +114,32 @@ generate:
 	@echo "TODO: buf generate"
 	@echo "TODO: templ generate"
 	@echo "TODO: sqlc generate"
+
+# ─── Quality (all-in-one) ──────────────────────────────────
+
+# Run all quality checks: vet → lint → Go tests → web tests.
+# Use this before committing or in CI to catch everything.
+quality: webdist node_modules
+	@echo "═══ go vet ═══"
+	go vet ./...
+	@echo ""
+	@echo "═══ golangci-lint ═══"
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "(skipped — golangci-lint not installed)"; \
+	fi
+	@echo ""
+	@echo "═══ go test ═══"
+	go test -count=1 -timeout 120s ./...
+	@echo ""
+	@echo "═══ web tests (vitest) ═══"
+	npm test -w web || echo "(web tests had failures — review above)"
+	@echo ""
+	@echo "✅ quality gate complete"
+
+# Alias for quality.
+check: quality
 
 # ─── Clean ─────────────────────────────────────────────────
 

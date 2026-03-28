@@ -160,10 +160,7 @@ func createRandomAdmin(ctx context.Context, db *database.DB) error {
 
 // createAdmin inserts the admin identity with capabilities and password.
 func createAdmin(ctx context.Context, db *database.DB, username, email, password string) error {
-	identityID, err := id.New()
-	if err != nil {
-		return fmt.Errorf("generate identity id: %w", err)
-	}
+	identityID := id.New()
 
 	profileJSON := fmt.Sprintf(`{"email":%q}`, email)
 
@@ -233,10 +230,7 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 		return nil
 	}
 
-	orgID, err := id.New()
-	if err != nil {
-		return fmt.Errorf("gen org id: %w", err)
-	}
+	orgID := id.New()
 
 	orgData := `{
 		"display_name": "Default",
@@ -269,10 +263,7 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 		return nil
 	}
 
-	consoleID, err := id.New()
-	if err != nil {
-		return fmt.Errorf("gen console id: %w", err)
-	}
+	consoleID := id.New()
 
 	consoleData := `{
 		"client_name": "Zitadel Console",

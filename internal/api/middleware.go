@@ -99,8 +99,8 @@ func AuthGate(cookieCfg *session.CookieConfig, db *sql.DB) func(http.Handler) ht
 			}
 
 			// Inject identity info into request headers (internal use only).
-			r.Header.Set("X-Identity-Id", fmt.Sprintf("%d", info.EntityID))
-			r.Header.Set("X-Session-Id", fmt.Sprintf("%d", info.SessionID))
+			r.Header.Set("X-Identity-Id", info.EntityID)
+			r.Header.Set("X-Session-Id", info.SessionID)
 			r.Header.Set("X-Token-Type", info.TokenType)
 
 			next.ServeHTTP(w, r)
@@ -177,30 +177,26 @@ func (a *API) requireSession(next http.HandlerFunc) http.HandlerFunc {
 
 // resolveCallerIdentity extracts the caller's identity from AuthGate-injected headers,
 // falling back to direct token resolution if headers aren't set (e.g., in tests).
-func (a *API) resolveCallerIdentity(r *http.Request) (int64, error) {
+func (a *API) resolveCallerIdentity(r *http.Request) (string, error) {
 	// Fast path: AuthGate already resolved the identity.
 	if idStr := r.Header.Get("X-Identity-Id"); idStr != "" {
-		var id int64
-		_, err := fmt.Sscanf(idStr, "%d", &id)
-		if err == nil && id > 0 {
-			return id, nil
-		}
+		return idStr, nil
 	}
 
 	// Slow path: resolve token directly (backward compatibility / tests).
 	rawToken := a.extractToken(r)
 	if rawToken == "" {
-		return 0, fmt.Errorf("no token")
+		return "", fmt.Errorf("no token")
 	}
 
 	info, err := resolveToken(r.Context(), a.db.SQL(), rawToken)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	// Inject headers for downstream handlers.
-	r.Header.Set("X-Identity-Id", fmt.Sprintf("%d", info.EntityID))
-	r.Header.Set("X-Session-Id", fmt.Sprintf("%d", info.SessionID))
+	r.Header.Set("X-Identity-Id", info.EntityID)
+	r.Header.Set("X-Session-Id", info.SessionID)
 	r.Header.Set("X-Token-Type", info.TokenType)
 
 	return info.EntityID, nil

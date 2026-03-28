@@ -56,7 +56,7 @@ func (p *Passwords) Verify(encoded, plain string) (ok bool, updated string, err 
 
 // SetPassword stores a password credential for the given identity.
 // If a password credential already exists, it is replaced.
-func (p *Passwords) SetPassword(ctx context.Context, identityID int64, plain string) error {
+func (p *Passwords) SetPassword(ctx context.Context, identityID string, plain string) error {
 	encoded, err := p.Hash(plain)
 	if err != nil {
 		return err
@@ -77,10 +77,7 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID int64, plain str
 		return fmt.Errorf("delete old password: %w", err)
 	}
 
-	credID, err := id.New()
-	if err != nil {
-		return fmt.Errorf("generate credential id: %w", err)
-	}
+	credID := id.New()
 
 	// Store the encoded hash as credential_data JSON.
 	credJSON := fmt.Sprintf(`{"hash":"%s"}`, encoded)
@@ -99,10 +96,10 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID int64, plain str
 // CheckPassword verifies a password for the given identity.
 // Returns true if the password is correct. Transparently re-hashes if the
 // algorithm has been upgraded.
-func (p *Passwords) CheckPassword(ctx context.Context, identityID int64, plain string) (bool, error) {
+func (p *Passwords) CheckPassword(ctx context.Context, identityID string, plain string) (bool, error) {
 	// Load password credential.
 	var credJSON string
-	var credID int64
+	var credID string
 	err := p.db.SQL().QueryRowContext(ctx,
 		`SELECT id, credential_data FROM entity_credentials
 		 WHERE entity_id = ? AND credential_type = 'password'`,

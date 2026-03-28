@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
+
 	"strings"
 
 	"github.com/zitadel/zitadel/internal/api"
@@ -22,7 +22,7 @@ import (
 
 // IdentityContext holds the authenticated identity info on the request context.
 type IdentityContext struct {
-	IdentityID   int64
+	IdentityID   string
 	Identifier   string
 	DisplayName  string
 	Capabilities []string
@@ -91,13 +91,13 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up identity by identifier.
-	var identityID int64
+	var identityID string
 	err := u.db.SQL().QueryRowContext(r.Context(),
 		`SELECT id FROM entities WHERE identifier = ? AND state = 'active'`,
 		identifier,
 	).Scan(&identityID)
 	if err == sql.ErrNoRows {
-		u.api.EmitAuthEvent(r.Context(), "auth.login_failure", 0, map[string]any{
+		u.api.EmitAuthEvent(r.Context(), "auth.login_failure", "", map[string]any{
 			"identifier": identifier,
 			"reason":     "unknown_user",
 			"ip_address": r.RemoteAddr,
@@ -165,11 +165,11 @@ func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
 		h := sha256.Sum256([]byte(rawToken))
 		tokenHash := hex.EncodeToString(h[:])
 
-		var sessionID int64
+		var sessionID string
 		err := u.db.SQL().QueryRowContext(r.Context(),
 			`SELECT id FROM sessions WHERE token_hash = ? AND revoked_at IS NULL`, tokenHash,
 		).Scan(&sessionID)
-		if err == nil && sessionID > 0 {
+		if err == nil && sessionID != "" {
 			_ = u.api.RevokeSessionInternal(r.Context(), sessionID)
 		}
 	}
@@ -205,7 +205,7 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type IdentityRow struct {
-		ID          int64
+		ID          string
 		Identifier  string
 		DisplayName string
 		State       string
@@ -245,7 +245,7 @@ func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type SessionRow struct {
-		ID         int64
+		ID         string
 		Identifier string
 		UserAgent  string
 		IPAddress  string
@@ -294,14 +294,14 @@ func (u *UI) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type EventRow struct {
-		ID            int64
+		ID            string
 		EventType     string
-		ActorID       int64
-		AggregateID   int64
+		ActorID       string
+		AggregateID   string
 		AggregateType string
 		Payload       string
 		TraceID       string
-		SessionID     int64
+		SessionID     string
 		CreatedAt     string
 	}
 	var events []EventRow
@@ -514,9 +514,8 @@ func (u *UI) handleAdminIdentityCreate(w http.ResponseWriter, r *http.Request) {
 func (u *UI) handleAdminIdentityEdit(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
 
-	idStr := r.PathValue("id")
-	parsedID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
+	parsedID := r.PathValue("id")
+	if parsedID == "" {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
@@ -538,9 +537,8 @@ func (u *UI) handleAdminIdentityUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idStr := r.PathValue("id")
-	parsedID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
+	parsedID := r.PathValue("id")
+	if parsedID == "" {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
@@ -561,14 +559,14 @@ func (u *UI) handleAdminIdentityUpdate(w http.ResponseWriter, r *http.Request) {
 		data["display_name"] = displayName
 	}
 
-	_, err = u.api.UpdateIdentityInternal(r, parsedID, api.IdentityRequest{
+	_, updateErr := u.api.UpdateIdentityInternal(r, parsedID, api.IdentityRequest{
 		State:   state,
 		Profile: data,
 	})
-	if err != nil {
+	if updateErr != nil {
 		identity, _ := u.api.GetIdentityByID(r, parsedID)
 		schemas := u.loadSchemaOptions(r.Context())
-		renderAdminIdentityForm(w, ident, &identity, "Update failed: "+err.Error(), schemas)
+		renderAdminIdentityForm(w, ident, &identity, "Update failed: "+updateErr.Error(), schemas)
 		return
 	}
 
@@ -580,9 +578,8 @@ func (u *UI) handleAdminIdentityUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminIdentityDelete(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	parsedID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
+	parsedID := r.PathValue("id")
+	if parsedID == "" {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
@@ -606,7 +603,7 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 	h := sha256.Sum256([]byte(rawToken))
 	tokenHash := hex.EncodeToString(h[:])
 
-	var identityID int64
+	var identityID string
 	var identifier string
 	var dataJSON sql.NullString
 	err := u.db.SQL().QueryRowContext(r.Context(),

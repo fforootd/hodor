@@ -87,12 +87,25 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test -race -count=1 -timeout 120s ./...
+        run: go test -race -count=1 -timeout 240s ./...
 
       - name: Fuzz (10s each)
         run: |
+          # Login layer
           go test -fuzz FuzzParseIDTokenClaims -fuzztime 10s ./internal/login/
           go test -fuzz FuzzMapClaims -fuzztime 10s ./internal/login/
+          # API layer
+          go test -fuzz FuzzAPIJSON -fuzztime 10s ./internal/api/
+          go test -fuzz FuzzSessionToken -fuzztime 10s ./internal/api/
+          go test -fuzz FuzzBearerTokenResolution -fuzztime 10s ./internal/api/
+          go test -fuzz FuzzCookieTokenResolution -fuzztime 10s ./internal/api/
+          go test -fuzz FuzzXIdentityIdHeader -fuzztime 10s ./internal/api/
+          # Session layer
+          go test -fuzz FuzzCookieVerify -fuzztime 10s ./internal/session/
+          go test -fuzz FuzzCookieSign -fuzztime 10s ./internal/session/
+          go test -fuzz FuzzCookieSignVerifyRoundTrip -fuzztime 10s ./internal/session/
+          # Auth layer
+          go test -fuzz FuzzExtractHash -fuzztime 10s ./internal/auth/
 
   test-web:
     name: Test Web

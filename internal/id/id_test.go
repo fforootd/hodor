@@ -1,41 +1,57 @@
 package id
 
 import (
-	"fmt"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
-func TestNew(t *testing.T) {
-	id, err := New()
+func TestNew_ValidUUIDv7(t *testing.T) {
+	raw := New()
+	u, err := uuid.Parse(raw)
 	if err != nil {
-		t.Fatalf("New() error: %v", err)
+		t.Fatalf("New() returned invalid UUID %q: %v", raw, err)
 	}
-	if id <= 0 {
-		t.Errorf("New() = %d, want > 0", id)
+	if u.Version() != 7 {
+		t.Errorf("New() version = %d, want 7", u.Version())
+	}
+	if len(raw) != 36 {
+		t.Errorf("New() length = %d, want 36", len(raw))
 	}
 }
 
 func TestUniqueness(t *testing.T) {
-	seen := make(map[int64]bool, 1000)
-	for i := 0; i < 1000; i++ {
-		id, err := New()
-		if err != nil {
-			t.Fatalf("New() error on iteration %d: %v", i, err)
-		}
+	const n = 10_000
+	seen := make(map[string]bool, n)
+	for i := 0; i < n; i++ {
+		id := New()
 		if seen[id] {
-			t.Fatalf("duplicate ID %d on iteration %d", id, i)
+			t.Fatalf("duplicate ID %q on iteration %d", id, i)
 		}
 		seen[id] = true
 	}
 }
 
+func TestMonotonicity(t *testing.T) {
+	// UUIDv7 strings sort lexicographically in time order.
+	prev := New()
+	for i := 0; i < 1000; i++ {
+		curr := New()
+		if curr <= prev {
+			t.Fatalf("non-monotonic: %q <= %q at iteration %d", curr, prev, i)
+		}
+		prev = curr
+	}
+}
+
 func TestConcurrent(t *testing.T) {
 	const goroutines = 10
-	const idsPerGoroutine = 100
+	const idsPerGoroutine = 1000
 
 	var mu sync.Mutex
-	seen := make(map[int64]bool, goroutines*idsPerGoroutine)
+	seen := make(map[string]bool, goroutines*idsPerGoroutine)
 	errs := make(chan error, goroutines)
 
 	var wg sync.WaitGroup
@@ -44,15 +60,11 @@ func TestConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < idsPerGoroutine; i++ {
-				id, err := New()
-				if err != nil {
-					errs <- err
-					return
-				}
+				id := New()
 				mu.Lock()
 				if seen[id] {
 					mu.Unlock()
-					errs <- fmt.Errorf("duplicate ID %d", id)
+					errs <- &duplicateError{id}
 					return
 				}
 				seen[id] = true
@@ -69,15 +81,63 @@ func TestConcurrent(t *testing.T) {
 	}
 }
 
+type duplicateError struct{ id string }
+
+func (e *duplicateError) Error() string { return "duplicate ID: " + e.id }
+
+func TestNewFlow(t *testing.T) {
+	id := NewFlow()
+	if !strings.HasPrefix(id, "flow_") {
+		t.Errorf("NewFlow() = %q, want prefix 'flow_'", id)
+	}
+	// Parse the UUID portion after the prefix.
+	uuidPart := strings.TrimPrefix(id, "flow_")
+	if _, err := uuid.Parse(uuidPart); err != nil {
+		t.Errorf("NewFlow() UUID portion %q is invalid: %v", uuidPart, err)
+	}
+}
+
+func TestNewLoginSession(t *testing.T) {
+	id := NewLoginSession()
+	if !strings.HasPrefix(id, "ls_") {
+		t.Errorf("NewLoginSession() = %q, want prefix 'ls_'", id)
+	}
+	uuidPart := strings.TrimPrefix(id, "ls_")
+	if _, err := uuid.Parse(uuidPart); err != nil {
+		t.Errorf("NewLoginSession() UUID portion %q is invalid: %v", uuidPart, err)
+	}
+}
+
+func TestNewSSEConsumer(t *testing.T) {
+	id := NewSSEConsumer()
+	if !strings.HasPrefix(id, "sse-") {
+		t.Errorf("NewSSEConsumer() = %q, want prefix 'sse-'", id)
+	}
+	uuidPart := strings.TrimPrefix(id, "sse-")
+	if _, err := uuid.Parse(uuidPart); err != nil {
+		t.Errorf("NewSSEConsumer() UUID portion %q is invalid: %v", uuidPart, err)
+	}
+}
+
 func FuzzNew(f *testing.F) {
-	f.Add(uint16(1))
-	f.Fuzz(func(t *testing.T, _ uint16) {
-		id, err := New()
-		if err != nil {
-			t.Skip("sonyflake timing constraint")
+	f.Add(byte(0))
+	f.Fuzz(func(t *testing.T, _ byte) {
+		raw := New()
+		if raw == "" {
+			t.Fatal("New() returned empty string")
 		}
-		if id <= 0 {
-			t.Errorf("got non-positive ID: %d", id)
+		u, err := uuid.Parse(raw)
+		if err != nil {
+			t.Fatalf("New() returned invalid UUID %q: %v", raw, err)
+		}
+		if u.Version() != 7 {
+			t.Errorf("New() version = %d, want 7", u.Version())
 		}
 	})
+}
+
+func BenchmarkNew(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = New()
+	}
 }

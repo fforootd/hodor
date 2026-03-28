@@ -25,8 +25,8 @@ const (
 
 // TokenInfo carries the resolved identity of a token holder.
 type TokenInfo struct {
-	EntityID  int64    // The identity this token belongs to (0 if nullable)
-	SessionID int64    // Only for session tokens
+	EntityID  string   // The identity this token belongs to ("" if nullable)
+	SessionID string   // Only for session tokens
 	TokenType string   // "session", "pat", "opaque"
 	Scopes    []string // Future: fine-grained scopes
 }
@@ -152,7 +152,7 @@ func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string) (*Toke
 	// First try the new tokens table (for migrated tokens).
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.entity_id, COALESCE(t.session_id, 0), t.type FROM tokens t
+		`SELECT t.entity_id, COALESCE(t.session_id, ''), t.type FROM tokens t
 		 WHERE t.token_hash = ?
 		   AND t.revoked_at IS NULL
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,

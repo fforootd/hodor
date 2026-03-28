@@ -158,6 +158,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Play, FileJson, BarChart3, TrendingUp, Search, Database } from 'lucide-vue-next'
+import { api } from '@/api/client'
 
 const timeRange = ref('12h')
 const chartType = ref<'bar' | 'line'>('bar')
@@ -224,16 +225,11 @@ async function runQuery() {
 
   const start = performance.now()
   try {
-    const res = await fetch('/v1/analytics/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: query.value }),
-    })
-    const data = await res.json()
+    const data = await api.post<any>('/v1/analytics/query', { query: query.value })
     queryTime.value = Math.round(performance.now() - start)
 
-    if (!res.ok) {
-      queryError.value = data.error || `HTTP ${res.status}`
+    if (data.error) {
+      queryError.value = data.error
       rows.value = []
       columns.value = []
       return

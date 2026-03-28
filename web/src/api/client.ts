@@ -1,6 +1,8 @@
 /** Shared fetch wrapper with auth handling */
 
-const BASE_URL = ''
+// Runtime base path: injected by the Go server via <script>window.__ZITADEL_BASE_PATH__="..."</script>
+// This allows the same build to work at any sub-path (e.g., /auth, /zitadel).
+const BASE_URL = (window as any).__ZITADEL_BASE_PATH__ || ''
 
 interface ApiError {
   error: string

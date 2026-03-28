@@ -19,6 +19,7 @@
 | [008](008-meta-schema-catalog.md) | Meta Schema as Entity Catalog | Proposed | 2026-03-27 |
 | [009](009-settings-engine-pipeline.md) | Hierarchical Settings & Engine Pipeline | Proposed | 2026-03-27 |
 | [010](010-analytics-two-tier.md) | Identity Observability — Three Domains & Two Data Paths | Proposed | 2026-03-27 |
+| [011](011-security-testing-philosophy.md) | Security Testing Philosophy — OWASP-Grounded | Accepted | 2026-03-27 |
 
 ## Architecture
 
@@ -57,6 +58,8 @@ graph TD
     A008 --> A009[009 Settings Pipeline]
     A005 --> A010[010 Analytics]
     A006 --> A010
+    A002 --> A011[011 Security Testing]
+    A003 --> A011
 ```
 
 ## Conventions
@@ -64,4 +67,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 011
+- **Next ADR number**: 012

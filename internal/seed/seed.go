@@ -183,7 +183,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	}
 
 	// Check if exists by identifier.
-	var existingID int64
+	var existingID string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		// Entity already exists — handle according to on_conflict.
@@ -207,10 +207,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		}
 	}
 
-	newID, err := id.New()
-	if err != nil {
-		return fmt.Errorf("generate id: %w", err)
-	}
+	newID := id.New()
 
 	state := ident.State
 	if state == "" {
@@ -239,7 +236,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
 		hash, err := hasher.Hash(ident.Password)
 		if err == nil {
-			credID, _ := id.New()
+			credID := id.New()
 			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
@@ -253,7 +250,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	// Seed PATs.
 	seedPATs(ctx, tx, newID, ident.PATs)
 
-	log.Printf("[seed] created identity %q (id: %d)", ident.Identifier, newID)
+	log.Printf("[seed] created identity %q (id: %s)", ident.Identifier, newID)
 
 	// Process linked accounts.
 	for _, la := range ident.LinkedAccounts {
@@ -264,7 +261,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 }
 
 // updateExistingIdentity handles the on_conflict: update case.
-func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID int64, ident SeedIdentity) error {
+func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID string, ident SeedIdentity) error {
 	// Update password if provided.
 	if ident.Password != "" {
 		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
@@ -272,7 +269,7 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID int64, ide
 		if err == nil {
 			// Delete existing + re-insert.
 			tx.ExecContext(ctx, `DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`, entityID)
-			credID, _ := id.New()
+			credID := id.New()
 			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
@@ -296,7 +293,7 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID int64, ide
 }
 
 // seedCapabilities inserts capabilities for an entity (idempotent via INSERT OR IGNORE).
-func seedCapabilities(ctx context.Context, tx *sql.Tx, entityID int64, caps []string) {
+func seedCapabilities(ctx context.Context, tx *sql.Tx, entityID string, caps []string) {
 	for _, cap := range caps {
 		tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
@@ -305,15 +302,15 @@ func seedCapabilities(ctx context.Context, tx *sql.Tx, entityID int64, caps []st
 }
 
 // seedPATs creates PAT tokens for an entity (idempotent via name check).
-func seedPATs(ctx context.Context, tx *sql.Tx, entityID int64, pats []SeedPAT) {
+func seedPATs(ctx context.Context, tx *sql.Tx, entityID string, pats []SeedPAT) {
 	for _, pat := range pats {
 		// Skip if a PAT with this name already exists for this entity.
-		var existingID int64
+		var existingID string
 		err := tx.QueryRowContext(ctx,
 			`SELECT id FROM tokens WHERE entity_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL`,
 			entityID, pat.Name).Scan(&existingID)
 		if err == nil {
-			log.Printf("[seed]   PAT %q already exists for entity %d, skipping", pat.Name, entityID)
+			log.Printf("[seed]   PAT %q already exists for entity %s, skipping", pat.Name, entityID)
 			continue
 		}
 
@@ -327,11 +324,7 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID int64, pats []SeedPAT) {
 		h := sha256.Sum256([]byte(rawToken))
 		tokenHash := hex.EncodeToString(h[:])
 
-		tokenID, err := id.New()
-		if err != nil {
-			log.Printf("[seed]   failed to generate PAT id: %v", err)
-			continue
-		}
+		tokenID := id.New()
 
 		scopes := pat.Scopes
 		if len(scopes) == 0 {
@@ -348,11 +341,11 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID int64, pats []SeedPAT) {
 			continue
 		}
 
-		log.Printf("[seed]   created PAT %q for entity %d", pat.Name, entityID)
+		log.Printf("[seed]   created PAT %q for entity %s", pat.Name, entityID)
 	}
 }
 
-func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID int64, la SeedLinkedAccount) {
+func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID string, la SeedLinkedAccount) {
 	// Resolve provider by name or ID.
 	var providerID string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM providers WHERE name = ? OR id = ?`, la.Provider, la.Provider).Scan(&providerID)
@@ -370,19 +363,15 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID int64, la See
 		return // already linked
 	}
 
-	linkID, _ := id.New()
+	linkID := id.New()
 	tx.ExecContext(ctx,
 		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
 		linkID, identityID, providerID, la.ExternalSub, la.ExternalEmail)
 
-	log.Printf("[seed] linked identity %d → provider %s (sub: %s)", identityID, providerID, la.ExternalSub)
+	log.Printf("[seed] linked identity %s → provider %s (sub: %s)", identityID, providerID, la.ExternalSub)
 }
 
 func generateShortID() string {
-	newID, err := id.New()
-	if err != nil {
-		return "unknown"
-	}
-	return fmt.Sprintf("%d", newID)
+	return id.New()
 }

@@ -60,6 +60,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Users, FileJson, Globe, Activity } from 'lucide-vue-next'
+import { api } from '@/api/client'
 
 const stats = ref([
   { label: 'Identities', value: '—', icon: Users, description: 'Total identities' },
@@ -81,10 +82,10 @@ function timeAgo(ts: string): string {
 onMounted(async () => {
   try {
     const [identities, schemas, providers, events] = await Promise.allSettled([
-      fetch('/v1/identities?limit=0').then(r => r.json()),
-      fetch('/v1/schemas').then(r => r.json()),
-      fetch('/v1/providers').then(r => r.json()),
-      fetch('/v1/events?limit=10&order=desc').then(r => r.json()),
+      api.get<any>('/v1/identities?limit=0'),
+      api.get<any>('/v1/schemas'),
+      api.get<any>('/v1/providers'),
+      api.get<any>('/v1/events?limit=10&order=desc'),
     ])
 
     if (identities.status === 'fulfilled') stats.value[0].value = String(identities.value.total ?? identities.value.items?.length ?? 0)

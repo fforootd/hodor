@@ -87,7 +87,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { type Identity } from '@/api/resources'
+import { type Identity, metaSchemaApi } from '@/api/resources'
+import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -105,9 +106,10 @@ const identities = ref<Identity[]>([])
 
 onMounted(async () => {
   let apiPath = props.schemaType
+
   try {
-    const metaRes = await fetch('/v1/schemas/$meta')
-    const metaData = await metaRes.json()
+    const metaData = await metaSchemaApi.get()
+
     const catalog = metaData['x-catalog'] || {}
     const entry = catalog[props.schemaType]
     if (entry) {
@@ -116,12 +118,14 @@ onMounted(async () => {
     }
   } catch { /* ignore */ }
 
+
   try {
     let url = `/v1/${apiPath}`
     const orgId = localStorage.getItem('zitadel_org')
     if (orgId) url += `?org_id=${orgId}`
-    const res = await fetch(url)
-    const data = await res.json()
+
+    const data = await api.get<any>(url)
+
     identities.value = data.items || []
   } catch { /* ignore */ }
 })

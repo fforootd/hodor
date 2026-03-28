@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/id"
@@ -13,24 +12,24 @@ import (
 // --- PAT types ---
 
 type CreatePATRequest struct {
-	EntityID int64    `json:"entity_id"`
+	EntityID string    `json:"entity_id"`
 	Name     string   `json:"name"`
 	Scopes   []string `json:"scopes,omitempty"`
 }
 
 type CreatePATResponse struct {
-	ID        int64    `json:"id,string"`
+	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	EntityID  int64    `json:"entity_id,string"`
+	EntityID  string   `json:"entity_id"`
 	Token     string   `json:"token"` // Only returned on creation — never again.
 	Scopes    []string `json:"scopes"`
 	CreatedAt string   `json:"created_at"`
 }
 
 type PATResponse struct {
-	ID        int64    `json:"id,string"`
+	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	EntityID  int64    `json:"entity_id,string"`
+	EntityID  string   `json:"entity_id"`
 	Scopes    []string `json:"scopes"`
 	LastUsed  *string  `json:"last_used,omitempty"`
 	CreatedAt string   `json:"created_at"`
@@ -49,7 +48,7 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.EntityID == 0 {
+	if req.EntityID == "" {
 		writeError(w, http.StatusBadRequest, "entity_id is required")
 		return
 	}
@@ -78,11 +77,7 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenID, err := id.New()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to generate id")
-		return
-	}
+	tokenID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	scopesJSON, _ := json.Marshal(req.Scopes)
@@ -114,11 +109,11 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
-	entityFilter, _ := strconv.ParseInt(r.URL.Query().Get("entity_id"), 10, 64)
+	entityFilter := r.URL.Query().Get("entity_id")
 
 	var query string
 	var args []any
-	if entityFilter > 0 {
+	if entityFilter != "" {
 		query = `SELECT id, name, entity_id, scopes, last_used, created_at
 		         FROM tokens WHERE type = 'pat' AND revoked_at IS NULL AND entity_id = ?
 		         ORDER BY created_at DESC`
@@ -173,11 +168,11 @@ func (a *API) revokePAT(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("PAT %d not found or already revoked", tokenID))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("PAT %s not found or already revoked", tokenID))
 		return
 	}
 
-	a.EmitAuthEvent(r.Context(), "pat.revoked", 0, map[string]any{
+	a.EmitAuthEvent(r.Context(), "pat.revoked", "", map[string]any{
 		"token_id": tokenID,
 	})
 

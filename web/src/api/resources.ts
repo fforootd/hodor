@@ -120,3 +120,56 @@ export const magicLinkApi = {
       '/v1/auth/magic-link', { email }
     ),
 }
+
+// Meta schema (catalog + groups)
+export const metaSchemaApi = {
+  get: () => api.get<Record<string, any>>('/v1/schemas/$meta'),
+}
+
+// Organization management
+export interface Org {
+  id: number
+  identifier: string
+  display_name: string
+}
+
+export const orgApi = {
+  list: () => api.get<ListResponse<Org>>('/v1/orgs').then(r => r.items || []),
+}
+
+// Provider management
+export interface Provider {
+  id: string
+  name: string
+  type: string
+  template?: string
+  enabled: boolean
+  config: Record<string, unknown>
+  created_at: string
+}
+
+export interface ProviderTemplate {
+  template: string
+  name: string
+  type: string
+  fields: Record<string, any>[]
+}
+
+export const providerApi = {
+  list: () => api.get<ListResponse<Provider>>('/v1/providers').then(r => r.items || []),
+  templates: () => api.get<{ templates: ProviderTemplate[] }>('/v1/providers/templates').then(r => r.templates || []),
+  create: (data: Record<string, unknown>) => api.post<Provider>('/v1/providers', data),
+  update: (id: string, data: Record<string, unknown>) => api.patch<Provider>(`/v1/providers/${id}`, data),
+  delete: (id: string) => api.delete<void>(`/v1/providers/${id}`),
+}
+
+// Analytics
+export const analyticsApi = {
+  query: (body: Record<string, unknown>) =>
+    api.post<Record<string, any>>('/v1/analytics/query', body),
+  schema: () =>
+    api.get<Record<string, any>>('/v1/analytics/schema'),
+  tables: () =>
+    api.get<Record<string, any>>('/v1/analytics/tables'),
+}
+

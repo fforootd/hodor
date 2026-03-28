@@ -6,8 +6,8 @@
 -- ENTITIES — the universal identity table (ADR-001)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS entities (
-    id           INTEGER PRIMARY KEY,
-    org_id       INTEGER NOT NULL DEFAULT 0,
+    id           TEXT PRIMARY KEY,
+    org_id       TEXT NOT NULL DEFAULT '0',
     identifier   TEXT NOT NULL,
     display_name TEXT,
     state        TEXT NOT NULL DEFAULT 'active',
@@ -25,7 +25,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_identifier ON entities(org_id, id
 -- ENTITY CAPABILITIES — junction table for hot-path indexed checks
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS entity_capabilities (
-    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     capability  TEXT NOT NULL,
     PRIMARY KEY (entity_id, capability)
 );
@@ -35,8 +35,8 @@ CREATE INDEX IF NOT EXISTS idx_caps_capability ON entity_capabilities(capability
 -- ENTITY CREDENTIALS — type-specific credential data
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS entity_credentials (
-    id              INTEGER PRIMARY KEY,
-    entity_id     INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    id              TEXT PRIMARY KEY,
+    entity_id     TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     credential_type TEXT NOT NULL,
     credential_data TEXT DEFAULT '{}',
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
@@ -47,9 +47,9 @@ CREATE INDEX IF NOT EXISTS idx_creds_identity ON entity_credentials(entity_id);
 -- SESSIONS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sessions (
-    id          INTEGER PRIMARY KEY,
-    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    org_id      INTEGER NOT NULL DEFAULT 0,
+    id          TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    org_id      TEXT NOT NULL DEFAULT '0',
     token_hash  TEXT NOT NULL,
     user_agent  TEXT,
     ip_address  TEXT,
@@ -66,11 +66,11 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 -- Stripe-style prefixed tokens: zit_ses_, zit_pat_, zit_opq_
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tokens (
-    id          INTEGER PRIMARY KEY,
+    id          TEXT PRIMARY KEY,
     type        TEXT NOT NULL,              -- 'session', 'pat', 'opaque'
     token_hash  TEXT NOT NULL UNIQUE,       -- SHA-256 of the full prefixed token
-    entity_id   INTEGER REFERENCES entities(id) ON DELETE CASCADE,  -- nullable: service tokens, pre-auth
-    session_id  INTEGER REFERENCES sessions(id) ON DELETE CASCADE,  -- nullable: only for session tokens
+    entity_id   TEXT REFERENCES entities(id) ON DELETE CASCADE,  -- nullable: service tokens, pre-auth
+    session_id  TEXT REFERENCES sessions(id) ON DELETE CASCADE,  -- nullable: only for session tokens
     name        TEXT,                       -- human label for PATs: "CI token", "dev-admin"
     scopes      TEXT NOT NULL DEFAULT '[]', -- JSON array: ["admin", "read"]
     expires_at  TEXT,                       -- NULL = never expires
@@ -86,17 +86,17 @@ CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
 -- EVENTS — append-only event log (the queue IS the table)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
-    id             INTEGER PRIMARY KEY,
+    id             TEXT PRIMARY KEY,
     event_type     TEXT NOT NULL,
-    org_id         INTEGER NOT NULL DEFAULT 0,
-    actor_id       INTEGER,
+    org_id         TEXT NOT NULL DEFAULT '0',
+    actor_id       TEXT,
     actor_type     TEXT,
-    aggregate_id   INTEGER,
+    aggregate_id   TEXT,
     aggregate_type TEXT,
     payload        TEXT DEFAULT '{}',
     metadata       TEXT DEFAULT '{}',
     trace_id       TEXT DEFAULT '',
-    session_id     INTEGER DEFAULT 0,
+    session_id     TEXT DEFAULT '',
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
@@ -109,8 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS domains (
     domain      TEXT PRIMARY KEY,
-    org_id      INTEGER NOT NULL,
-    instance_id INTEGER DEFAULT 0,
+    org_id      TEXT NOT NULL,
+    instance_id TEXT DEFAULT '0',
     verified    INTEGER NOT NULL DEFAULT 0,
     is_primary  INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -122,8 +122,8 @@ CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 -- NOTIFICATION TEMPLATES — per-org, per-language
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS notification_templates (
-    id       INTEGER PRIMARY KEY,
-    org_id   INTEGER,
+    id       TEXT PRIMARY KEY,
+    org_id   TEXT,
     channel  TEXT NOT NULL,
     event    TEXT NOT NULL,
     language TEXT NOT NULL DEFAULT 'en',
@@ -137,10 +137,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_tpl_unique ON notification_templates
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS magic_tokens (
     token       TEXT PRIMARY KEY,
-    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     expires_at  TEXT NOT NULL,
     used_at     TEXT,
-    session_id  INTEGER
+    session_id  TEXT
 );
 
 -- ============================================================================
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS magic_tokens (
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS consumer_cursors (
     consumer_name TEXT PRIMARY KEY,
-    last_event_id INTEGER NOT NULL DEFAULT 0,
+    last_event_id TEXT NOT NULL DEFAULT '',
     updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 -- RETENTION POLICIES — per-event-type TTLs
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS retention_policies (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            TEXT PRIMARY KEY,
     event_pattern TEXT NOT NULL,
     oltp_ttl      TEXT NOT NULL,
     lake_ttl      TEXT NOT NULL,
@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 -- INSTANCES — virtual identity systems (top-level isolation)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS instances (
-    id         INTEGER PRIMARY KEY,
+    id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     state      TEXT NOT NULL DEFAULT 'active',
     settings   TEXT DEFAULT '{}',
@@ -198,8 +198,8 @@ CREATE TABLE IF NOT EXISTS instances (
 -- ORGS — groupings within an instance
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS orgs (
-    id          INTEGER PRIMARY KEY,
-    instance_id INTEGER NOT NULL REFERENCES instances(id),
+    id          TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL REFERENCES instances(id),
     name        TEXT NOT NULL,
     state       TEXT NOT NULL DEFAULT 'active',
     metadata    TEXT DEFAULT '{}',
@@ -212,8 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
 -- GROUPS — RBAC grouping within an org
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS groups (
-    id         INTEGER PRIMARY KEY,
-    org_id     INTEGER NOT NULL REFERENCES orgs(id),
+    id         TEXT PRIMARY KEY,
+    org_id     TEXT NOT NULL REFERENCES orgs(id),
     name       TEXT NOT NULL,
     metadata   TEXT DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -227,7 +227,7 @@ CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
 CREATE TABLE IF NOT EXISTS schemas (
     id         TEXT PRIMARY KEY,
     type       TEXT NOT NULL,
-    org_id     INTEGER NOT NULL DEFAULT 1,
+    org_id     TEXT NOT NULL DEFAULT '1',
     schema     TEXT NOT NULL,
     version    INTEGER DEFAULT 1,
     is_default BOOLEAN DEFAULT false,
@@ -245,7 +245,7 @@ CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS entity_indexes (
     entity_type TEXT NOT NULL,
-    entity_id   INTEGER NOT NULL,
+    entity_id   TEXT NOT NULL,
     field       TEXT NOT NULL,
     value       TEXT NOT NULL,
     PRIMARY KEY (entity_type, entity_id, field)
@@ -257,7 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_ei_lookup ON entity_indexes(entity_type, field, v
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS providers (
     id              TEXT PRIMARY KEY,
-    org_id          INTEGER NOT NULL DEFAULT 1,
+    org_id          TEXT NOT NULL DEFAULT '1',
     name            TEXT NOT NULL,
     protocol        TEXT NOT NULL DEFAULT 'oidc',
     template        TEXT NOT NULL DEFAULT 'custom',
@@ -275,8 +275,8 @@ CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 -- LINKED ACCOUNTS — user ↔ external provider links
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS linked_accounts (
-    id             INTEGER PRIMARY KEY,
-    entity_id    INTEGER NOT NULL,
+    id             TEXT PRIMARY KEY,
+    entity_id    TEXT NOT NULL,
     provider_id    TEXT NOT NULL,
     external_sub   TEXT NOT NULL,
     external_email TEXT DEFAULT '',
@@ -389,7 +389,7 @@ INSERT OR IGNORE INTO retention_policies (event_pattern, oltp_ttl, lake_ttl, pri
 
 -- Default instance and org
 INSERT OR IGNORE INTO instances (id, name, created_at, updated_at)
-    VALUES (1, 'default', datetime('now'), datetime('now'));
+    VALUES ('inst_default', 'default', datetime('now'), datetime('now'));
 
 INSERT OR IGNORE INTO orgs (id, instance_id, name, created_at, updated_at)
-    VALUES (1, 1, 'default', datetime('now'), datetime('now'));
+    VALUES ('org_default', 'inst_default', 'default', datetime('now'), datetime('now'));

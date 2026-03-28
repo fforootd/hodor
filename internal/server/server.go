@@ -163,13 +163,41 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		log.Printf("OIDC Provider ready (issuer=%s)", issues)
 	}
 
-	// Wrap the mux with AuthGate (default-deny) then OTel for trace_id injection.
-	authedHandler := api.AuthGate(cookieCfg, db.SQL())(mux)
-	wrappedHandler := OTelMiddleware(authedHandler)
+	// --- Resolve paths for route prefixing ---
+	paths := cfg.Server.ResolvePaths()
+	log.Printf("Path config: base=%q console=%q api=%q oidc=%q", paths.Base, paths.Console, paths.API, paths.OIDC)
+
+	// --- Build middleware chain (outermost first) ---
+	// 1. RealIP — resolve true client IP from proxy headers.
+	var realIPCfg *RealIPConfig
+	if len(cfg.Server.TrustedProxies) > 0 {
+		cidrs, err := ParseTrustedProxies(cfg.Server.TrustedProxies)
+		if err != nil {
+			log.Printf("WARN: failed to parse trusted proxies: %v", err)
+		} else {
+			realIPCfg = &RealIPConfig{
+				TrustedCIDRs: cidrs,
+				Mode:         cfg.Server.ProxyHeaderMode,
+				CustomHeader: cfg.Server.RealIPHeader,
+			}
+			log.Printf("RealIP middleware: mode=%q trusted_cidrs=%d", realIPCfg.Mode, len(cidrs))
+		}
+	}
+
+	// 2. Security headers.
+	isSecure := cfg.Server.TLSCert != "" || (cfg.Server.ExternalDomain != "" && cfg.Server.ExternalDomain != "localhost")
+
+	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → AuthGate → OTel.
+	var handler http.Handler = mux
+	handler = api.AuthGate(cookieCfg, db.SQL())(handler)
+	handler = AppGate(paths, &cfg.Server.AppAccess)(handler)
+	handler = SecurityHeaders(cfg.Server.SecurityHeaders, isSecure)(handler)
+	handler = RealIP(realIPCfg)(handler)
+	handler = OTelMiddleware(handler)
 
 	httpSrv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:      wrappedHandler,
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,

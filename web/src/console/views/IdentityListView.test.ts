@@ -24,6 +24,11 @@ vi.mock('lucide-vue-next', () => ({
   Plus: { template: '<span class="icon-plus" />' },
 }))
 
+/** Create a mock Response compatible with the api client. */
+function mockResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}
+
 // Minimal router for tests.
 function makeRouter() {
   return createRouter({
@@ -38,22 +43,25 @@ function makeRouter() {
 
 describe('IdentityListView', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     vi.restoreAllMocks()
-  })
-
-  async function mountView(fetchImpl?: typeof fetch) {
-    // Mock fetch for schema meta + identity list
-    if (fetchImpl) {
-      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchImpl)
-    } else {
-      vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
-        const urlStr = typeof url === 'string' ? url : url.toString()
-        if (urlStr.includes('$meta'))
-          return Promise.resolve({ json: () => Promise.resolve({}) } as Response)
-        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) } as Response)
+    // Provide localStorage mock for happy-dom.
+    if (!globalThis.localStorage || typeof globalThis.localStorage.getItem !== 'function') {
+      const store: Record<string, string> = {}
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: {
+          getItem: (key: string) => store[key] ?? null,
+          setItem: (key: string, value: string) => { store[key] = value },
+          removeItem: (key: string) => { delete store[key] },
+          clear: () => { Object.keys(store).forEach((k) => delete store[k]) },
+        },
+        writable: true,
+        configurable: true,
       })
     }
+  })
+
+  async function mountView(fetchImpl: typeof fetch) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(fetchImpl)
 
     const router = makeRouter()
     await router.push('/')
@@ -61,17 +69,17 @@ describe('IdentityListView', () => {
 
     const wrapper = mount(IdentityListView, {
       props: { schemaType: 'human_user' },
-      global: {
-        plugins: [router],
-        stubs: stubComponents,
-      },
+      global: { plugins: [router], stubs: stubComponents },
     })
-    await flushPromises()
+    // Multiple flushes to handle chained async operations in onMounted.
+    for (let i = 0; i < 5; i++) await flushPromises()
     return wrapper
   }
 
   it('renders "No human users found" when empty', async () => {
-    const wrapper = await mountView()
+    const wrapper = await mountView(() =>
+      Promise.resolve(mockResponse({ items: [] })),
+    )
     expect(wrapper.text()).toContain('No human users found')
     expect(wrapper.text()).toContain('0 human users total')
   })
@@ -80,16 +88,15 @@ describe('IdentityListView', () => {
     const wrapper = await mountView((url: any) => {
       const urlStr = typeof url === 'string' ? url : url.toString()
       if (urlStr.includes('$meta'))
-        return Promise.resolve({ json: () => Promise.resolve({}) } as Response)
-      return Promise.resolve({
-        json: () =>
-          Promise.resolve({
-            items: [
-              { id: '1', identifier: 'admin@test.com', display_name: 'Admin', state: 'active', created_at: '2026-01-01T00:00:00Z' },
-              { id: '2', identifier: 'user@test.com', display_name: 'User', state: 'deactivated', created_at: '2026-01-02T00:00:00Z' },
-            ],
-          }),
-      } as Response)
+        return Promise.resolve(mockResponse({}))
+      return Promise.resolve(
+        mockResponse({
+          items: [
+            { id: '1', identifier: 'admin@test.com', display_name: 'Admin', state: 'active', created_at: '2026-01-01T00:00:00Z' },
+            { id: '2', identifier: 'user@test.com', display_name: 'User', state: 'deactivated', created_at: '2026-01-02T00:00:00Z' },
+          ],
+        }),
+      )
     })
 
     expect(wrapper.text()).toContain('2 human users total')
@@ -106,7 +113,9 @@ describe('IdentityListView', () => {
   })
 
   it('has a "New" button', async () => {
-    const wrapper = await mountView()
+    const wrapper = await mountView(() =>
+      Promise.resolve(mockResponse({ items: [] })),
+    )
     const btn = wrapper.find('.btn')
     expect(btn.exists()).toBe(true)
     expect(btn.text()).toContain('New')

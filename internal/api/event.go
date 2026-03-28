@@ -13,12 +13,12 @@ import (
 // --- Event types ---
 
 type EventResponse struct {
-	ID            int64  `json:"id,string"`
+	ID            string `json:"id"`
 	EventType     string `json:"event_type"`
-	OrgID         int64  `json:"org_id,string"`
-	ActorID       int64  `json:"actor_id,string"`
+	OrgID         string `json:"org_id"`
+	ActorID       string `json:"actor_id"`
 	ActorType     string `json:"actor_type"`
-	AggregateID   int64  `json:"aggregate_id,string"`
+	AggregateID   string `json:"aggregate_id"`
 	AggregateType string `json:"aggregate_type"`
 	Payload       any    `json:"payload,omitempty"`
 	Metadata      any    `json:"metadata,omitempty"`
@@ -44,9 +44,9 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	var cursor int64
+	var cursor string
 	if c := r.URL.Query().Get("cursor"); c != "" {
-		cursor, _ = strconv.ParseInt(c, 10, 64)
+		cursor = c
 	}
 
 	query := `SELECT id, event_type, org_id, actor_id, actor_type,
@@ -55,20 +55,16 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	args := []any{cursor}
 
 	if orgID := r.URL.Query().Get("org_id"); orgID != "" {
-		if oid, err := strconv.ParseInt(orgID, 10, 64); err == nil {
-			query += ` AND org_id = ?`
-			args = append(args, oid)
-		}
+		query += ` AND org_id = ?`
+		args = append(args, orgID)
 	}
 	if aggType := r.URL.Query().Get("aggregate_type"); aggType != "" {
 		query += ` AND aggregate_type = ?`
 		args = append(args, aggType)
 	}
 	if aggID := r.URL.Query().Get("aggregate_id"); aggID != "" {
-		if aid, err := strconv.ParseInt(aggID, 10, 64); err == nil {
-			query += ` AND aggregate_id = ?`
-			args = append(args, aid)
-		}
+		query += ` AND aggregate_id = ?`
+		args = append(args, aggID)
 	}
 	if types := r.URL.Query().Get("types"); types != "" {
 		typeList := strings.Split(types, ",")
@@ -120,7 +116,7 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	var nextCursor string
 	if len(events) > limit {
 		events = events[:limit]
-		nextCursor = strconv.FormatInt(events[len(events)-1].ID, 10)
+		nextCursor = events[len(events)-1].ID
 	}
 
 	writeJSON(w, http.StatusOK, ListResponse{Items: events, NextCursor: nextCursor})
@@ -134,7 +130,7 @@ func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 
 	switch queryName {
 	case "event_counts":
-		orgID, _ := strconv.ParseInt(r.URL.Query().Get("org_id"), 10, 64)
+		orgID := r.URL.Query().Get("org_id")
 		query = `SELECT event_type, COUNT(*) as cnt FROM events WHERE org_id = ? GROUP BY event_type`
 		args = []any{orgID}
 	default:
@@ -183,14 +179,14 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	consumer := a.bus.Register(fmt.Sprintf("sse-%d", id.MustNew()))
+	consumer := a.bus.Register(id.NewSSEConsumer())
 
 	// Determine starting cursor.
-	var cursor int64
+	var cursor string
 	if c := r.URL.Query().Get("cursor"); c != "" && c != "now" {
-		cursor, _ = strconv.ParseInt(c, 10, 64)
+		cursor = c
 	} else {
-		a.db.SQL().QueryRowContext(r.Context(), `SELECT COALESCE(MAX(id), 0) FROM events`).Scan(&cursor)
+		a.db.SQL().QueryRowContext(r.Context(), `SELECT COALESCE(MAX(id), '') FROM events`).Scan(&cursor)
 	}
 
 	typeFilter := r.URL.Query().Get("types")

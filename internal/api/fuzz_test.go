@@ -93,3 +93,91 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
+
+// FuzzBearerTokenResolution fuzz tests the Authorization: Bearer header parsing.
+func FuzzBearerTokenResolution(f *testing.F) {
+	f.Add("zit_ses_valid")
+	f.Add("zit_pat_valid")
+	f.Add("zit_opq_valid")
+	f.Add("Bearer token") // Double-Bearer
+	f.Add("' OR 1=1 --")
+	f.Add("../../../etc/passwd")
+	f.Add(string(make([]byte, 5000)))
+
+	f.Fuzz(func(t *testing.T, token string) {
+		srv := testutil.NewTestServer(t)
+
+		req, err := http.NewRequest("GET", srv.URL()+"/v1/account/profile", nil)
+		if err != nil {
+			return // malformed URL is fine
+		}
+		req.Header["Authorization"] = []string{"Bearer " + token}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return // transport-level errors (e.g. invalid header bytes) are fine
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 500 {
+			t.Errorf("5xx for bearer %q: %d", truncate(token, 50), resp.StatusCode)
+		}
+	})
+}
+
+// FuzzCookieTokenResolution fuzz tests cookie-based auth through the AuthGate.
+func FuzzCookieTokenResolution(f *testing.F) {
+	f.Add("raw-unsigned")
+	f.Add("base64.garbage")
+	f.Add("")
+	f.Add(string(make([]byte, 5000)))
+
+	f.Fuzz(func(t *testing.T, cookie string) {
+		srv := testutil.NewTestServer(t)
+
+		req, _ := http.NewRequest("GET", srv.URL()+"/v1/account/profile", nil)
+		req.AddCookie(&http.Cookie{Name: "__zitadel_session", Value: cookie})
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 500 {
+			t.Errorf("5xx for cookie %q: %d", truncate(cookie, 50), resp.StatusCode)
+		}
+	})
+}
+
+// FuzzXIdentityIdHeader ensures the X-Identity-Id header cannot be injected.
+func FuzzXIdentityIdHeader(f *testing.F) {
+	f.Add("1")
+	f.Add("99999")
+	f.Add("0")
+	f.Add("-1")
+	f.Add("abc")
+	f.Add("' OR 1=1 --")
+
+	f.Fuzz(func(t *testing.T, headerVal string) {
+		srv := testutil.NewTestServer(t)
+
+		req, _ := http.NewRequest("GET", srv.URL()+"/v1/account/profile", nil)
+		req.Header.Set("X-Identity-Id", headerVal)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+
+		// Without valid auth, the injected header should be ignored → 401.
+		if resp.StatusCode >= 500 {
+			t.Errorf("5xx for X-Identity-Id %q: %d", headerVal, resp.StatusCode)
+		}
+		if resp.StatusCode == 200 {
+			t.Errorf("injected X-Identity-Id %q returned 200 — auth bypass!", headerVal)
+		}
+	})
+}
+

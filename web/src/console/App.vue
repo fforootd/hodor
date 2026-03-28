@@ -73,13 +73,13 @@
               </DropdownMenuTrigger>
               <DropdownMenuContent class="w-56" side="top" align="start">
                 <DropdownMenuItem as-child>
-                  <a href="/account">
+                  <a :href="basePath + '/account'">
                     <User class="mr-2 size-4" />
                     <span>My Account</span>
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem as-child>
-                  <a href="/logout">
+                  <a :href="basePath + '/logout'">
                     <LogOut class="mr-2 size-4" />
                     <span>Sign out</span>
                   </a>
@@ -225,7 +225,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { searchApi, type SearchResult } from '@/api/resources'
+import { searchApi, metaSchemaApi, orgApi, type SearchResult } from '@/api/resources'
 
 // shadcn components
 import {
@@ -256,6 +256,9 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+
+// Base path for navigation links (injected at runtime by the server)
+const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
 
 // ─── Org Switcher ───
 interface OrgEntry { id: number; display_name: string; identifier: string }
@@ -360,8 +363,7 @@ function getIcon(type: string) {
 onMounted(async () => {
   // Fetch meta schema for nav
   try {
-    const res = await fetch('/v1/schemas/$meta')
-    const meta = await res.json()
+    const meta = await metaSchemaApi.get()
     const catalog = meta['x-catalog'] || {}
     const groups = meta['x-groups'] || {}
 
@@ -399,9 +401,8 @@ onMounted(async () => {
 
   // Fetch orgs
   try {
-    const res = await fetch('/v1/orgs')
-    const data = await res.json()
-    orgs.value = (data.items || []).map((o: any) => ({
+    const items = await orgApi.list()
+    orgs.value = items.map((o: any) => ({
       id: o.id,
       display_name: o.display_name || o.identifier,
       identifier: o.identifier,

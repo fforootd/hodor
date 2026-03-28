@@ -186,6 +186,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -221,16 +222,14 @@ onMounted(async () => {
 
 async function fetchProviders() {
   try {
-    const res = await fetch('/v1/providers')
-    const data = await res.json()
+    const data = await api.get<any>('/v1/providers')
     providers.value = data.providers || []
   } catch { /* ignore */ }
 }
 
 async function fetchTemplates() {
   try {
-    const res = await fetch('/v1/providers/templates')
-    const data = await res.json()
+    const data = await api.get<any>('/v1/providers/templates')
     templates.value = data.templates || []
   } catch { /* ignore */ }
 }
@@ -248,47 +247,34 @@ function pickTemplate(t: Template) {
 async function createProvider() {
   createError.value = ''
   try {
-    const res = await fetch('/v1/providers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: createForm.value.name,
-        protocol: selectedTemplate.value?.protocol || 'oidc',
-        template: selectedTemplate.value?.id || 'custom',
-        config: {
-          issuer: createForm.value.issuer,
-          client_id: createForm.value.client_id,
-          client_secret: createForm.value.client_secret,
-          scopes: createForm.value.scopes,
-        },
-        auto_register: createForm.value.auto_register,
-      })
+    await api.post('/v1/providers', {
+      name: createForm.value.name,
+      protocol: selectedTemplate.value?.protocol || 'oidc',
+      template: selectedTemplate.value?.id || 'custom',
+      config: {
+        issuer: createForm.value.issuer,
+        client_id: createForm.value.client_id,
+        client_secret: createForm.value.client_secret,
+        scopes: createForm.value.scopes,
+      },
+      auto_register: createForm.value.auto_register,
     })
-    if (!res.ok) {
-      const err = await res.json()
-      createError.value = err.error || 'Create failed'
-      return
-    }
     showCreate.value = false
     selectedTemplate.value = null
     await fetchProviders()
   } catch (e: any) {
-    createError.value = e.message || 'Network error'
+    createError.value = e.message || 'Create failed'
   }
 }
 
 async function toggleEnabled(p: Provider) {
-  await fetch(`/v1/providers/${p.id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: !p.enabled })
-  })
+  await api.patch(`/v1/providers/${p.id}`, { enabled: !p.enabled })
   await fetchProviders()
 }
 
 async function deleteProvider(p: Provider) {
   if (!confirm(`Delete provider "${p.name}"?`)) return
-  await fetch(`/v1/providers/${p.id}`, { method: 'DELETE' })
+  await api.delete(`/v1/providers/${p.id}`)
   if (detailProvider.value?.id === p.id) detailProvider.value = null
   await fetchProviders()
 }
@@ -299,8 +285,7 @@ async function toggleDetail(p: Provider) {
     return
   }
   try {
-    const res = await fetch(`/v1/providers/${p.id}`)
-    detailProvider.value = await res.json()
+    detailProvider.value = await api.get<Provider>(`/v1/providers/${p.id}`)
   } catch {
     detailProvider.value = p
   }

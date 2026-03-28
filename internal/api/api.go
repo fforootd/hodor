@@ -136,8 +136,8 @@ type IdentityRequest struct {
 }
 
 type IdentityResponse struct {
-	ID           int64    `json:"id,string"`
-	OrgID        int64    `json:"org_id,string"`
+	ID           string    `json:"id"`
+	OrgID        string    `json:"org_id"`
 	Identifier   string   `json:"identifier"`
 	DisplayName  string   `json:"display_name,omitempty"`
 	State        string   `json:"state"`
@@ -174,11 +174,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	identityID, err := id.New()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "generate id failed")
-		return
-	}
+	identityID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	profileJSON := "{}"
@@ -238,7 +234,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 
 	resp := IdentityResponse{
 		ID:           identityID,
-		OrgID:        1,
+		OrgID:        "org_default",
 		Identifier:   req.Identifier,
 		DisplayName:  req.DisplayName,
 		State:        "active",
@@ -273,9 +269,9 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	var cursor int64
+	var cursor string
 	if c := r.URL.Query().Get("cursor"); c != "" {
-		cursor, _ = strconv.ParseInt(c, 10, 64)
+		cursor = c
 	}
 
 	// Optional schema_type filter (e.g. ?schema_type=app for OIDC clients).
@@ -297,10 +293,8 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 		args = append(args, schemaType)
 	}
 	if orgIDFilter != "" {
-		if oid, e := strconv.ParseInt(orgIDFilter, 10, 64); e == nil {
-			where = append(where, `i.org_id = ?`)
-			args = append(args, oid)
-		}
+		where = append(where, `i.org_id = ?`)
+		args = append(args, orgIDFilter)
 	}
 	where = append(where, `i.id > ?`)
 	args = append(args, cursor)
@@ -328,7 +322,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	var nextCursor string
 	if len(identities) > limit {
 		identities = identities[:limit]
-		nextCursor = strconv.FormatInt(identities[len(identities)-1].ID, 10)
+		nextCursor = identities[len(identities)-1].ID
 	}
 
 	writeJSON(w, http.StatusOK, ListResponse{
@@ -450,7 +444,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 type SchemaRequest struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
-	OrgID   int64  `json:"org_id,omitempty"`
+	OrgID   string  `json:"org_id,omitempty"`
 	Schema  any    `json:"schema"`  // JSON Schema document
 	Message string `json:"message"` // Version commit message
 }
@@ -458,7 +452,7 @@ type SchemaRequest struct {
 type SchemaResponse struct {
 	ID        string `json:"id"`
 	Type      string `json:"type"`
-	OrgID     int64  `json:"org_id"`
+	OrgID     string  `json:"org_id"`
 	Schema    any    `json:"schema"`
 	Version   int    `json:"version"`
 	IsDefault bool   `json:"is_default"`
@@ -477,8 +471,8 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "type and schema are required")
 		return
 	}
-	if req.OrgID == 0 {
-		req.OrgID = 1
+	if req.OrgID == "" {
+		req.OrgID = "org_default"
 	}
 
 	schemaJSON, err := json.Marshal(req.Schema)
@@ -616,7 +610,7 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 
 	// Load existing schema to get type+org.
 	var schemaType string
-	var orgID int64
+	var orgID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT type, org_id FROM schemas WHERE id = ?`, schemaID,
 	).Scan(&schemaType, &orgID)
@@ -659,7 +653,7 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.EmitAuthEvent(r.Context(), "schema.version_created", 0, map[string]any{
+	a.EmitAuthEvent(r.Context(), "schema.version_created", "", map[string]any{
 		"schema_id":  newID,
 		"type":       schemaType,
 		"version":    newVersion,
@@ -686,7 +680,7 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 
 	// Get type+org of the target schema.
 	var schemaType string
-	var orgID int64
+	var orgID string
 	var version int
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT type, org_id, version FROM schemas WHERE id = ?`, schemaID,
@@ -713,7 +707,7 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 	a.db.SQL().ExecContext(r.Context(),
 		`UPDATE schemas SET is_default = true WHERE id = ?`, schemaID)
 
-	a.EmitAuthEvent(r.Context(), "schema.promoted", 0, map[string]any{
+	a.EmitAuthEvent(r.Context(), "schema.promoted", "", map[string]any{
 		"schema_id": schemaID, "type": schemaType, "version": version,
 	})
 
@@ -986,7 +980,7 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse, error) {
+func (a *API) loadIdentity(r *http.Request, identityID string) (IdentityResponse, error) {
 	var resp IdentityResponse
 	var displayName, profileStr, metaStr, dataStr sql.NullString
 	err := a.db.SQL().QueryRowContext(r.Context(),
@@ -1013,7 +1007,7 @@ func (a *API) loadIdentity(r *http.Request, identityID int64) (IdentityResponse,
 	return resp, nil
 }
 
-func (a *API) loadCapabilities(r *http.Request, identityID int64) []string {
+func (a *API) loadCapabilities(r *http.Request, identityID string) []string {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT capability FROM entity_capabilities WHERE entity_id = ?`, identityID)
 	if err != nil {
@@ -1055,8 +1049,12 @@ func scanIdentityRow(rows *sql.Rows) (IdentityResponse, error) {
 	return resp, nil
 }
 
-func parseID(r *http.Request, name string) (int64, error) {
-	return strconv.ParseInt(r.PathValue(name), 10, 64)
+func parseID(r *http.Request, name string) (string, error) {
+	v := r.PathValue(name)
+	if v == "" {
+		return "", fmt.Errorf("missing path param %q", name)
+	}
+	return v, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -1132,7 +1130,7 @@ func (a *API) searchEntities(r *http.Request, pattern string, limit int) []Searc
 	defer rows.Close()
 	var results []SearchResult
 	for rows.Next() {
-		var id int64
+		var id string
 		var ident, displayName, state string
 		var dn sql.NullString
 		if err := rows.Scan(&id, &ident, &dn, &state); err != nil {
@@ -1143,10 +1141,10 @@ func (a *API) searchEntities(r *http.Request, pattern string, limit int) []Searc
 		}
 		results = append(results, SearchResult{
 			ResourceType: "identity",
-			ID:           strconv.FormatInt(id, 10),
+			ID:           id,
 			Title:        ident,
 			Subtitle:     displayName + " · " + state,
-			Link:         fmt.Sprintf("/console/identities/%d", id),
+			Link:         "/admin/entities/" + id + "/edit",
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1170,13 +1168,13 @@ func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []
 	seen := map[string]bool{}
 	var results []SearchResult
 	for rows.Next() {
-		var entityID int64
+		var entityID string
 		var ident, field, value string
 		var dn sql.NullString
 		if err := rows.Scan(&entityID, &ident, &dn, &field, &value); err != nil {
 			continue
 		}
-		idStr := strconv.FormatInt(entityID, 10)
+		idStr := entityID
 		if seen[idStr] {
 			continue
 		}
@@ -1190,7 +1188,7 @@ func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []
 			ID:           idStr,
 			Title:        ident,
 			Subtitle:     fmt.Sprintf("%s: %s · %s", field, value, displayName),
-			Link:         fmt.Sprintf("/console/identities/%d", entityID),
+			Link:         "/admin/entities/" + entityID + "/edit",
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1237,14 +1235,14 @@ func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchR
 	defer rows.Close()
 	var results []SearchResult
 	for rows.Next() {
-		var evtID int64
+		var evtID string
 		var evtType, createdAt string
 		if err := rows.Scan(&evtID, &evtType, &createdAt); err != nil {
 			continue
 		}
 		results = append(results, SearchResult{
 			ResourceType: "event",
-			ID:           strconv.FormatInt(evtID, 10),
+			ID:           evtID,
 			Title:        evtType,
 			Subtitle:     createdAt,
 			Link:         "/console/events",
@@ -1286,7 +1284,7 @@ func (a *API) searchProviders(r *http.Request, pattern string, limit int) []Sear
 	return results
 }
 
-func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID int64, dataJSON string) {
+func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID string, dataJSON string) {
 	_, _ = tx.ExecContext(ctx,
 		`DELETE FROM entity_indexes WHERE entity_type = ? AND entity_id = ?`,
 		entityType, entityID)
@@ -1304,11 +1302,8 @@ func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID
 	}
 }
 
-func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggregateID int64, aggregateType string, payload map[string]any) {
-	eventID, err := id.New()
-	if err != nil {
-		return
-	}
+func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggregateID string, aggregateType string, payload map[string]any) {
+	eventID := id.New()
 	payloadJSON := "{}"
 	if len(payload) > 0 {
 		b, _ := json.Marshal(payload)
@@ -1316,16 +1311,13 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 	}
 	tx.ExecContext(ctx,
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, 0, ?, '', ?, ?, ?, '{}', '', 0, datetime('now'))`,
+		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', '', '', datetime('now'))`,
 		eventID, eventType, actorID, aggregateID, aggregateType, payloadJSON)
 }
 
 // EmitAuthEvent is an exported helper for the UI to emit auth-related events.
-func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID int64, payload map[string]any) {
-	eventID, err := id.New()
-	if err != nil {
-		return
-	}
+func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
+	eventID := id.New()
 	payloadJSON := "{}"
 	if len(payload) > 0 {
 		b, _ := json.Marshal(payload)
@@ -1333,7 +1325,7 @@ func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID int64
 	}
 	a.db.SQL().ExecContext(ctx,
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, 0, ?, '', ?, 'auth', ?, '{}', '', 0, datetime('now'))`,
+		 VALUES (?, ?, '0', ?, '', ?, 'auth', ?, '{}', '', '', datetime('now'))`,
 		eventID, eventType, actorID, actorID, payloadJSON)
 	a.bus.Signal()
 }
@@ -1341,11 +1333,8 @@ func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID int64
 // emitEventSimple is a package-level helper for event emission outside transactions.
 func emitEventSimple(ctx context.Context, db interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, eventType string, actorID int64, aggregateID, aggregateType string, payload map[string]any) {
-	eventIDVal, err := id.New()
-	if err != nil {
-		return
-	}
+}, eventType string, actorID string, aggregateID, aggregateType string, payload map[string]any) {
+	eventIDVal := id.New()
 	payloadJSON := "{}"
 	if len(payload) > 0 {
 		b, _ := json.Marshal(payload)
@@ -1353,21 +1342,19 @@ func emitEventSimple(ctx context.Context, db interface {
 	}
 	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
 		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, 0, ?, '', ?, ?, ?, '{}', '', 0, datetime('now'))`,
+		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', '', '', datetime('now'))`,
 		eventIDVal, eventType, actorID, aggregateID, aggregateType, payloadJSON)
 }
 
+
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).
-func (a *API) GetIdentityByID(r *http.Request, identityID int64) (IdentityResponse, error) {
+func (a *API) GetIdentityByID(r *http.Request, identityID string) (IdentityResponse, error) {
 	return a.loadIdentity(r, identityID)
 }
 
 // CreateIdentityInternal is an exported helper for the UI to create an identity.
 func (a *API) CreateIdentityInternal(r *http.Request, req IdentityRequest) (IdentityResponse, error) {
-	identityID, err := id.New()
-	if err != nil {
-		return IdentityResponse{}, fmt.Errorf("generate id: %w", err)
-	}
+	identityID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	profileJSON := "{}"
@@ -1407,14 +1394,14 @@ func (a *API) CreateIdentityInternal(r *http.Request, req IdentityRequest) (Iden
 	a.bus.Signal()
 
 	return IdentityResponse{
-		ID: identityID, OrgID: 1, Identifier: req.Identifier, DisplayName: req.DisplayName,
+		ID: identityID, OrgID: "org_default", Identifier: req.Identifier, DisplayName: req.DisplayName,
 		State: "active", Profile: req.Profile, Capabilities: req.Capabilities,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
 // UpdateIdentityInternal is an exported helper for the UI to update an identity.
-func (a *API) UpdateIdentityInternal(r *http.Request, identityID int64, req IdentityRequest) (IdentityResponse, error) {
+func (a *API) UpdateIdentityInternal(r *http.Request, identityID string, req IdentityRequest) (IdentityResponse, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -1443,7 +1430,7 @@ func (a *API) UpdateIdentityInternal(r *http.Request, identityID int64, req Iden
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return IdentityResponse{}, fmt.Errorf("identity %d not found", identityID)
+		return IdentityResponse{}, fmt.Errorf("identity %s", identityID)
 	}
 
 	emitEvent(r.Context(), tx, "identity.updated", identityID, identityID, "identity", nil)
@@ -1456,7 +1443,7 @@ func (a *API) UpdateIdentityInternal(r *http.Request, identityID int64, req Iden
 }
 
 // DeleteIdentityInternal is an exported helper for the UI to delete an identity.
-func (a *API) DeleteIdentityInternal(r *http.Request, identityID int64) error {
+func (a *API) DeleteIdentityInternal(r *http.Request, identityID string) error {
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -1470,7 +1457,7 @@ func (a *API) DeleteIdentityInternal(r *http.Request, identityID int64) error {
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("identity %d not found", identityID)
+		return fmt.Errorf("identity %s", identityID)
 	}
 
 	emitEvent(r.Context(), tx, "identity.deleted", identityID, identityID, "identity", nil)

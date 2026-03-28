@@ -25,6 +25,11 @@ vi.mock('lucide-vue-next', () => ({
   Activity: { template: '<span class="icon-activity" />' },
 }))
 
+/** Helper: create a mock Response compatible with the api client. */
+function mockResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}
+
 describe('DashboardView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -63,20 +68,19 @@ describe('DashboardView', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
       const urlStr = typeof url === 'string' ? url : url.toString()
       if (urlStr.includes('/v1/identities'))
-        return Promise.resolve({ json: () => Promise.resolve({ total: 2, items: [{ id: 1 }, { id: 2 }] }) } as Response)
+        return Promise.resolve(mockResponse({ total: 2, items: [{ id: 1 }, { id: 2 }] }))
       if (urlStr.includes('/v1/schemas'))
-        return Promise.resolve({ json: () => Promise.resolve({ items: [{ id: 's1' }] }) } as Response)
+        return Promise.resolve(mockResponse({ items: [{ id: 's1' }] }))
       if (urlStr.includes('/v1/providers'))
-        return Promise.resolve({ json: () => Promise.resolve({ items: [{ id: 'p1' }, { id: 'p2' }] }) } as Response)
+        return Promise.resolve(mockResponse({ items: [{ id: 'p1' }, { id: 'p2' }] }))
       if (urlStr.includes('/v1/events'))
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({
-              total: 1,
-              items: [{ id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z' }],
-            }),
-        } as Response)
-      return Promise.resolve({ json: () => Promise.resolve({}) } as Response)
+        return Promise.resolve(
+          mockResponse({
+            total: 1,
+            items: [{ id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z' }],
+          }),
+        )
+      return Promise.resolve(mockResponse({}))
     })
 
     const wrapper = mountView()
@@ -92,7 +96,7 @@ describe('DashboardView', () => {
 
   it('displays "No recent events" when empty', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
-      Promise.resolve({ json: () => Promise.resolve({ items: [] }) } as Response),
+      Promise.resolve(mockResponse({ items: [] })),
     )
 
     const wrapper = mountView()
@@ -105,16 +109,15 @@ describe('DashboardView', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
       const urlStr = typeof url === 'string' ? url : url.toString()
       if (urlStr.includes('/v1/events'))
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({
-              items: [
-                { id: '1', event_type: 'identity.created', created_at: '2026-01-01T10:00:00Z' },
-                { id: '2', event_type: 'session.deleted', created_at: '2026-01-01T11:00:00Z' },
-              ],
-            }),
-        } as Response)
-      return Promise.resolve({ json: () => Promise.resolve({ items: [] }) } as Response)
+        return Promise.resolve(
+          mockResponse({
+            items: [
+              { id: '1', event_type: 'identity.created', created_at: '2026-01-01T10:00:00Z' },
+              { id: '2', event_type: 'session.deleted', created_at: '2026-01-01T11:00:00Z' },
+            ],
+          }),
+        )
+      return Promise.resolve(mockResponse({ items: [] }))
     })
 
     const wrapper = mountView()

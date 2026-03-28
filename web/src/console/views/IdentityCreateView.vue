@@ -160,7 +160,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { entityApi, magicLinkApi, schemaApi, type Schema } from '@/api/resources'
+import { entityApi, magicLinkApi, schemaApi, metaSchemaApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
@@ -261,8 +261,7 @@ onMounted(async () => {
       .sort((a: Schema, b: Schema) => b.version - a.version)
 
     try {
-      const metaRes = await fetch('/v1/schemas/$meta')
-      const metaData = await metaRes.json()
+      const metaData = await metaSchemaApi.get()
       const entry = (metaData['x-catalog'] || {})[props.schemaType]
       if (entry) {
         displayMeta.value = { singular: entry.singular, alias: entry.alias, path: entry.path, icon: entry.icon }

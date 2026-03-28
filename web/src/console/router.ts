@@ -1,7 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+// Runtime base path: injected by the Go server for sub-path deployments
+const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
+
 const router = createRouter({
-  history: createWebHistory('/console'),
+  history: createWebHistory(basePath + '/console'),
   routes: [
     { path: '/', name: 'dashboard', component: () => import('./views/DashboardView.vue') },
     // Dynamic schema-type identity list: /s/human_user, /s/app, /s/ai_agent, etc.

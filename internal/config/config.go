@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -29,6 +30,62 @@ type ServerConfig struct {
 	TLSCert        string   `toml:"tls_cert"`
 	TLSKey         string   `toml:"tls_key"`
 	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
+
+	// Sub-path deployment: host all routes under a prefix (e.g., "/auth").
+	BasePath      string             `toml:"base_path"`
+	PathOverrides PathOverrideConfig `toml:"path_overrides"` // per-app path overrides
+	AppAccess     AppAccessConfig    `toml:"app_access"`     // per-app access control
+
+	// Proxy trust: correctly resolve real client IP behind CDN/WAF/reverse proxies.
+	TrustedProxies  []string `toml:"trusted_proxies"`     // CIDR ranges (e.g., ["10.0.0.0/8"])
+	ProxyHeaderMode string   `toml:"proxy_header_mode"`   // "standard" | "cloudflare" | "custom"
+	RealIPHeader    string   `toml:"real_ip_header"`      // custom header (e.g., "CF-Connecting-IP")
+
+	// Security response headers.
+	SecurityHeaders SecurityHeadersConfig `toml:"security_headers"`
+}
+
+// PathOverrideConfig allows individual app path prefixes to diverge from the global BasePath.
+// Set a value to "/" to keep that app at the domain root. Leave empty to inherit BasePath.
+type PathOverrideConfig struct {
+	OIDC    string `toml:"oidc"`    // default: "/" when base_path is set
+	SAML    string `toml:"saml"`    // default: "/" when base_path is set
+	API     string `toml:"api"`     // default: "" (inherit)
+	Login   string `toml:"login"`   // default: "" (inherit)
+	Console string `toml:"console"` // default: "" (inherit)
+	Assets  string `toml:"assets"`  // default: "" (inherit)
+}
+
+// AppAccessEntry controls access to an individual app.
+type AppAccessEntry struct {
+	Enabled bool     `toml:"enabled"`  // false = 404 for all requests
+	IPAllow []string `toml:"ip_allow"` // CIDR ranges; empty = allow all
+}
+
+// AppAccessConfig controls per-app access restrictions.
+type AppAccessConfig struct {
+	Console AppAccessEntry `toml:"console"`
+	Admin   AppAccessEntry `toml:"admin"`
+	API     AppAccessEntry `toml:"api"`
+	Login   AppAccessEntry `toml:"login"`
+}
+
+// SecurityHeadersConfig controls HTTP security response headers.
+type SecurityHeadersConfig struct {
+	HSTSEnabled    bool   `toml:"hsts_enabled"`    // default: true when TLS or external domain
+	HSTSMaxAge     int    `toml:"hsts_max_age"`    // default: 63072000 (2 years)
+	HSTSSubdomains bool   `toml:"hsts_subdomains"` // default: true
+	HSTSPreload    bool   `toml:"hsts_preload"`    // default: false
+
+	CSPEnabled  bool   `toml:"csp_enabled"`   // default: true
+	CSPPolicy   string `toml:"csp_policy"`    // override entire policy string
+	CSPReportURI string `toml:"csp_report_uri"` // URI for violation reports
+
+	XFrameOptions       string `toml:"x_frame_options"`        // default: "DENY"
+	XContentTypeOptions bool   `toml:"x_content_type_options"` // default: true (nosniff)
+	ReferrerPolicy      string `toml:"referrer_policy"`        // default: "strict-origin-when-cross-origin"
+	PermissionsPolicy   string `toml:"permissions_policy"`     // default: restrict camera, mic, etc.
+	CrossOriginOpener   string `toml:"cross_origin_opener"`    // default: "same-origin"
 }
 
 // DatabaseConfig controls the primary database connection.
@@ -64,6 +121,23 @@ func Defaults() *Config {
 		Server: ServerConfig{
 			Port:           8080,
 			ExternalDomain: "localhost",
+			AppAccess: AppAccessConfig{
+				Console: AppAccessEntry{Enabled: true},
+				Admin:   AppAccessEntry{Enabled: true},
+				API:     AppAccessEntry{Enabled: true},
+				Login:   AppAccessEntry{Enabled: true},
+			},
+			SecurityHeaders: SecurityHeadersConfig{
+				HSTSEnabled:         true,
+				HSTSMaxAge:          63072000,
+				HSTSSubdomains:      true,
+				CSPEnabled:          true,
+				XFrameOptions:       "DENY",
+				XContentTypeOptions: true,
+				ReferrerPolicy:      "strict-origin-when-cross-origin",
+				PermissionsPolicy:   "camera=(), microphone=(), geolocation=(), payment=()",
+				CrossOriginOpener:   "same-origin",
+			},
 		},
 		Database: DatabaseConfig{
 			URL: "sqlite://./zitadel.db",
@@ -137,4 +211,32 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_SEED_FILE"); v != "" {
 		cfg.Dev.SeedFile = v
 	}
+
+	// Path-based deployment
+	if v := os.Getenv("ZITADEL_BASE_PATH"); v != "" {
+		cfg.Server.BasePath = v
+	}
+
+	// Proxy trust
+	if v := os.Getenv("ZITADEL_TRUSTED_PROXIES"); v != "" {
+		cfg.Server.TrustedProxies = splitCSV(v)
+	}
+	if v := os.Getenv("ZITADEL_PROXY_HEADER_MODE"); v != "" {
+		cfg.Server.ProxyHeaderMode = v
+	}
+	if v := os.Getenv("ZITADEL_REAL_IP_HEADER"); v != "" {
+		cfg.Server.RealIPHeader = v
+	}
+}
+
+// splitCSV splits a comma-separated string into a slice, trimming whitespace.
+func splitCSV(s string) []string {
+	parts := []string{}
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
 }

@@ -119,6 +119,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
+import { api } from '@/api/client'
 
 interface QueryResult {
   columns: string[]
@@ -182,8 +183,7 @@ function onEditorMount(editor: any, monaco: any) {
 
 async function loadTablesIntoAutocomplete(monaco: any) {
   try {
-    const res = await fetch('/v1/analytics/schema')
-    const schema = await res.json()
+    const schema = await api.get<any>('/v1/analytics/schema')
 
     monaco.languages.registerCompletionItemProvider('sql', {
       provideCompletionItems: (_model: any, position: any) => {
@@ -218,12 +218,7 @@ async function runQuery() {
   result.value = null
 
   try {
-    const res = await fetch('/v1/analytics/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql: sql.value, limit: 1000 }),
-    })
-    const data = await res.json()
+    const data = await api.post<any>('/v1/analytics/query', { sql: sql.value, limit: 1000 })
     if (data.error) {
       error.value = data.error
     } else {
@@ -455,8 +450,7 @@ function startResize(e: MouseEvent) {
 
 onMounted(async () => {
   try {
-    const res = await fetch('/v1/analytics/tables')
-    const data = await res.json()
+    const data = await api.get<any>('/v1/analytics/tables')
     tables.value = data.tables || []
   } catch {}
 })

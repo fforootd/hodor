@@ -591,7 +591,7 @@ func renderAdminIdentityForm(w http.ResponseWriter, ident *IdentityContext, iden
 	if identity != nil {
 		data["Title"] = "Edit " + identity.Identifier
 		data["IsEdit"] = true
-		data["FormAction"] = fmt.Sprintf("/admin/entities/%d", identity.ID)
+		data["FormAction"] = fmt.Sprintf("/admin/entities/%s", identity.ID)
 		data["Identifier"] = identity.Identifier
 		data["State"] = identity.State
 

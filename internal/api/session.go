@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/id"
@@ -15,9 +14,9 @@ import (
 // --- Session types ---
 
 type SessionResponse struct {
-	ID         int64  `json:"id,string"`
-	IdentityID int64  `json:"entity_id,string"`
-	OrgID      int64  `json:"org_id,string"`
+	ID         string `json:"id"`
+	IdentityID string  `json:"entity_id"`
+	OrgID      string `json:"org_id"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
 	CreatedAt  string `json:"created_at"`
@@ -25,7 +24,7 @@ type SessionResponse struct {
 }
 
 type CreateSessionRequest struct {
-	IdentityID int64  `json:"entity_id"`
+	IdentityID string  `json:"entity_id"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
 }
@@ -49,7 +48,7 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.IdentityID == 0 {
+	if req.IdentityID == "" {
 		writeError(w, http.StatusBadRequest, "entity_id is required")
 		return
 	}
@@ -64,11 +63,8 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateSessionInternal creates a session programmatically (used by UI login).
-func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userAgent, ipAddress string) (*CreateSessionResponse, error) {
-	sessionID, err := id.New()
-	if err != nil {
-		return nil, fmt.Errorf("generate id: %w", err)
-	}
+func (a *API) CreateSessionInternal(ctx context.Context, identityID string, userAgent, ipAddress string) (*CreateSessionResponse, error) {
+	sessionID := id.New()
 
 	rawToken, tokenHash, err := generatePrefixedToken(PrefixSession)
 	if err != nil {
@@ -88,7 +84,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 	var exists int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM entities WHERE id = ?`, identityID).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("identity %d not found", identityID)
+		return nil, fmt.Errorf("identity %s not found", identityID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("check identity: %w", err)
@@ -97,7 +93,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 	// Insert session (metadata record).
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
-		 VALUES (?, ?, 1, ?, ?, ?, '{}', ?, ?)`,
+		 VALUES (?, ?, '1', ?, ?, ?, '{}', ?, ?)`,
 		sessionID, identityID, tokenHash,
 		userAgent, ipAddress,
 		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
@@ -107,10 +103,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 	}
 
 	// Insert into unified tokens table.
-	tokenID, err := id.New()
-	if err != nil {
-		return nil, fmt.Errorf("generate token id: %w", err)
-	}
+	tokenID := id.New()
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
@@ -137,7 +130,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID int64, userA
 		Session: SessionResponse{
 			ID:         sessionID,
 			IdentityID: identityID,
-			OrgID:      1,
+			OrgID:      "org_default",
 			UserAgent:  userAgent,
 			IPAddress:  ipAddress,
 			CreatedAt:  now.Format(time.RFC3339),
@@ -164,13 +157,13 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
-	identityID, _ := strconv.ParseInt(r.URL.Query().Get("entity_id"), 10, 64)
+	identityID, _ := r.URL.Query().Get("entity_id"), ""
 	limit := 50
 
 	query := `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
 	          FROM sessions WHERE revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
 	args := []any{limit}
-	if identityID > 0 {
+	if identityID != "" {
 		query = `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
 		         FROM sessions WHERE entity_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
 		args = []any{identityID, limit}
@@ -213,7 +206,7 @@ func (a *API) revokeSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // RevokeSessionInternal revokes a session programmatically (used by UI logout).
-func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error {
+func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error {
 	tx, err := a.db.SQL().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -229,7 +222,7 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error 
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session %d not found or already revoked", sessionID)
+		return fmt.Errorf("session %s not found or already revoked", sessionID)
 	}
 
 	// Also revoke all tokens associated with this session.
@@ -237,7 +230,7 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error 
 		`UPDATE tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`,
 		now, sessionID)
 
-	var revokedIdentityID int64
+	var revokedIdentityID string
 	tx.QueryRowContext(ctx, `SELECT entity_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIdentityID)
 
 	emitEvent(ctx, tx, "session.revoked", revokedIdentityID, sessionID, "session", map[string]any{
@@ -253,7 +246,7 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID int64) error 
 	return nil
 }
 
-func (a *API) loadSession(ctx context.Context, sessionID int64) (SessionResponse, error) {
+func (a *API) loadSession(ctx context.Context, sessionID string) (SessionResponse, error) {
 	var s SessionResponse
 	err := a.db.SQL().QueryRowContext(ctx,
 		`SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at

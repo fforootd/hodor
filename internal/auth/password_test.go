@@ -24,12 +24,12 @@ func newTestDB(t *testing.T) *database.DB {
 	return db
 }
 
-func createTestIdentity(t *testing.T, db *database.DB) int64 {
+func createTestIdentity(t *testing.T, db *database.DB) string {
 	t.Helper()
-	identityID := id.MustNew()
+	identityID := id.New()
 	_, err := db.SQL().Exec(
-		`INSERT INTO entities (id, org_id, identifier, state, data, schema_id, created_at, updated_at)
-		 VALUES (?, 1, 'test@example.com', 'active', '{"display_name":"Test User"}', '', datetime('now'), datetime('now'))`,
+		`INSERT INTO entities (id, org_id, identifier, state, profile, metadata, created_at, updated_at)
+		 VALUES (?, '1', 'test@example.com', 'active', '{"display_name":"Test User"}', '{}', datetime('now'), datetime('now'))`,
 		identityID,
 	)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestSetAndCheckPassword(t *testing.T) {
 	}
 
 	// Check for non-existent identity.
-	ok, err = pw.CheckPassword(ctx, 99999, "any-password")
+	ok, err = pw.CheckPassword(ctx, "nonexistent_id", "any-password")
 	if err != nil {
 		t.Fatalf("CheckPassword non-existent: %v", err)
 	}
@@ -186,3 +186,136 @@ func TestExtractHash(t *testing.T) {
 		}
 	}
 }
+
+// --- OWASP AUTH: Password Security Tests ---
+
+func TestHash_EmptyPassword(t *testing.T) {
+	db := newTestDB(t)
+	pw := NewPasswords(db)
+
+	encoded, err := pw.Hash("")
+	if err != nil {
+		t.Fatalf("Hash empty: %v", err)
+	}
+	if encoded == "" {
+		t.Fatal("Hash of empty password should still produce a hash")
+	}
+
+	ok, _, err := pw.Verify(encoded, "")
+	if err != nil {
+		t.Fatalf("Verify empty: %v", err)
+	}
+	if !ok {
+		t.Fatal("empty password should verify against its own hash")
+	}
+}
+
+func TestHash_Unicode(t *testing.T) {
+	db := newTestDB(t)
+	pw := NewPasswords(db)
+
+	passwords := []string{
+		"пароль123",      // Cyrillic
+		"密码测试",         // CJK
+		"パスワード",        // Katakana
+		"🔐🔑🗝️secure",  // Emoji
+		"Ñoño@2026",     // Latin extended
+	}
+
+	for _, plain := range passwords {
+		encoded, err := pw.Hash(plain)
+		if err != nil {
+			t.Fatalf("Hash(%q): %v", plain, err)
+		}
+		ok, _, err := pw.Verify(encoded, plain)
+		if err != nil {
+			t.Fatalf("Verify(%q): %v", plain, err)
+		}
+		if !ok {
+			t.Fatalf("unicode password %q should verify", plain)
+		}
+	}
+}
+
+func TestHash_LongPassword(t *testing.T) {
+	db := newTestDB(t)
+	pw := NewPasswords(db)
+
+	// 128 chars + 256 chars.
+	for _, length := range []int{128, 256} {
+		long := make([]byte, length)
+		for i := range long {
+			long[i] = 'A' + byte(i%26)
+		}
+		plain := string(long)
+
+		encoded, err := pw.Hash(plain)
+		if err != nil {
+			t.Fatalf("Hash(%d chars): %v", length, err)
+		}
+		ok, _, err := pw.Verify(encoded, plain)
+		if err != nil {
+			t.Fatalf("Verify(%d chars): %v", length, err)
+		}
+		if !ok {
+			t.Fatalf("long password (%d chars) should verify", length)
+		}
+	}
+}
+
+func TestExtractHash_Injection(t *testing.T) {
+	// Crafted JSON payloads that might try to break extraction.
+	payloads := []string{
+		`{"hash":"'; DROP TABLE passwords;--"}`,
+		`{"hash":"$argon2id$v=19","extra":"\u0000null byte"}`,
+		`{"hash":null}`,
+		`{"hash":true}`,
+		`{"hash":12345}`,
+		`[]`,
+		`""`,
+		`null`,
+		string(make([]byte, 10000)), // large input
+	}
+
+	for _, p := range payloads {
+		// Should not panic.
+		_ = extractHash(p)
+	}
+}
+
+func TestCheckPassword_TimingEquality(t *testing.T) {
+	// Verify that checking a wrong password for a non-existent user
+	// doesn't return significantly faster than for a real user.
+	// This is a behavioral test — not a strict timing test — to verify
+	// the code path exists. Passwap handles constant-time comparison internally.
+	db := newTestDB(t)
+	pw := NewPasswords(db)
+	ctx := context.Background()
+
+	identityID := createTestIdentity(t, db)
+	if err := pw.SetPassword(ctx, identityID, "real-password"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+
+	// Wrong password for existing user.
+	ok1, err := pw.CheckPassword(ctx, identityID, "wrong-password")
+	if err != nil {
+		t.Fatalf("CheckPassword existing: %v", err)
+	}
+	if ok1 {
+		t.Fatal("wrong password should fail")
+	}
+
+	// Any password for non-existent user.
+	ok2, err := pw.CheckPassword(ctx, "nonexistent_id", "any-password")
+	if err != nil {
+		t.Fatalf("CheckPassword non-existent: %v", err)
+	}
+	if ok2 {
+		t.Fatal("non-existent user should fail")
+	}
+
+	// Both should return false — the important thing is neither panics
+	// and both return consistent false results.
+}
+
