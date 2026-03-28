@@ -2,9 +2,7 @@ package ui
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/session"
@@ -162,8 +161,7 @@ func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
 		} else {
 			rawToken = cookie.Value
 		}
-		h := sha256.Sum256([]byte(rawToken))
-		tokenHash := hex.EncodeToString(h[:])
+		tokenHash := crypto.HashTokenHex(rawToken)
 
 		var sessionID string
 		err := u.db.SQL().QueryRowContext(r.Context(),
@@ -600,8 +598,7 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 		return nil, false
 	}
 
-	h := sha256.Sum256([]byte(rawToken))
-	tokenHash := hex.EncodeToString(h[:])
+	tokenHash := crypto.HashTokenHex(rawToken)
 
 	var identityID string
 	var identifier string

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
 )
@@ -161,16 +162,14 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	}
 
 	// Extract hash from credential_data JSON: {"hash":"..."}
-	var cred struct {
-		Hash string `json:"hash"`
-	}
-	if err := json.Unmarshal([]byte(credData), &cred); err != nil || cred.Hash == "" {
+	hash := auth.DecodeCredentialJSON(credData)
+	if hash == "" {
 		log.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	ok, _, err := h.passwords.Verify(cred.Hash, password)
+	ok, _, err := h.passwords.Verify(hash, password)
 	if err != nil || !ok {
 		writeErr(w, http.StatusUnauthorized, "invalid_password")
 		return

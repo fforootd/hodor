@@ -30,6 +30,7 @@ type ServerConfig struct {
 	TLSCert        string   `toml:"tls_cert"`
 	TLSKey         string   `toml:"tls_key"`
 	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
+	OIDCEncryptionKey string `toml:"oidc_encryption_key"` // 32-byte hex-encoded key for OIDC token encryption
 
 	// Sub-path deployment: host all routes under a prefix (e.g., "/auth").
 	BasePath      string             `toml:"base_path"`

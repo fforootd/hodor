@@ -1,12 +1,13 @@
 package api
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/crypto"
 )
 
 // ProviderTemplate defines a preconfigured IDP preset.
@@ -365,9 +366,5 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 // --- Helpers ---
 
 func generateShortID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%x", time.Now().UnixNano())[:12]
-	}
-	return fmt.Sprintf("%x", b)
+	return crypto.MustRandomHex(6)
 }

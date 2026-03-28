@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/zitadel/passwap/argon2"
-
+	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/id"
 )
 
@@ -266,11 +265,11 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 
 	// Hash password and store as entity_credential.
 	if ident.Password != "" {
-		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
-		hash, err := hasher.Hash(ident.Password)
+		pw := auth.NewPasswords(nil)
+		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			credID := id.New()
-			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
+			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(r.Context(),
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)

@@ -8,10 +8,7 @@ package login
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
 )
@@ -89,10 +87,10 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate state, nonce, PKCE.
-	state := randomString(32)
-	nonce := randomString(16)
-	pkceVerifier := randomString(43)
-	pkceChallenge := sha256URLSafe(pkceVerifier)
+	state := crypto.MustRandomHex(16)
+	nonce := crypto.MustRandomHex(8)
+	pkceVerifier := crypto.MustRandomHex(22)
+	pkceChallenge := crypto.HashTokenBase64URL(pkceVerifier)
 
 	// Store state in database.
 	_, _ = h.db.SQL().ExecContext(r.Context(),
@@ -423,15 +421,3 @@ func parseIDTokenClaims(idToken string) (map[string]any, error) {
 	return claims, nil
 }
 
-// --- Crypto Helpers ---
-
-func randomString(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)[:n]
-}
-
-func sha256URLSafe(input string) string {
-	h := sha256.Sum256([]byte(input))
-	return base64.RawURLEncoding.EncodeToString(h[:])
-}

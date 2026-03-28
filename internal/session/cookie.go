@@ -5,13 +5,14 @@ package session
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/crypto"
 )
 
 const (
@@ -43,9 +44,7 @@ func NewCookieConfig(secrets []string, externalDomain string) *CookieConfig {
 	secure := externalDomain != "" && externalDomain != "localhost" && externalDomain != "127.0.0.1"
 
 	if len(secrets) == 0 {
-		key := make([]byte, 32)
-		rand.Read(key)
-		secrets = []string{hex.EncodeToString(key)}
+		secrets = []string{crypto.MustRandomHex(32)}
 	}
 
 	return &CookieConfig{

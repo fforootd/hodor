@@ -4,10 +4,10 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
+
+	"github.com/zitadel/zitadel/internal/crypto"
 
 	"github.com/zitadel/passwap"
 	"github.com/zitadel/passwap/argon2"
@@ -80,7 +80,7 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID string, plain st
 	credID := id.New()
 
 	// Store the encoded hash as credential_data JSON.
-	credJSON := fmt.Sprintf(`{"hash":"%s"}`, encoded)
+	credJSON := EncodeCredentialJSON(encoded)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data)
 		 VALUES (?, ?, 'password', ?)`,
@@ -112,8 +112,8 @@ func (p *Passwords) CheckPassword(ctx context.Context, identityID string, plain 
 		return false, fmt.Errorf("load password: %w", err)
 	}
 
-	// Extract hash from JSON. Simple extraction — credential_data is {"hash":"..."}
-	encoded := extractHash(credJSON)
+	// Extract hash from credential_data JSON.
+	encoded := DecodeCredentialJSON(credJSON)
 	if encoded == "" {
 		return false, fmt.Errorf("invalid password credential data")
 	}
@@ -128,7 +128,7 @@ func (p *Passwords) CheckPassword(ctx context.Context, identityID string, plain 
 
 	// If passwap returned an updated hash (algorithm upgrade), persist it.
 	if updated != "" {
-		updatedJSON := fmt.Sprintf(`{"hash":"%s"}`, updated)
+		updatedJSON := EncodeCredentialJSON(updated)
 		_, _ = p.db.SQL().ExecContext(ctx,
 			`UPDATE entity_credentials SET credential_data = ? WHERE id = ?`,
 			updatedJSON, credID,
@@ -138,10 +138,15 @@ func (p *Passwords) CheckPassword(ctx context.Context, identityID string, plain 
 	return true, nil
 }
 
-// extractHash extracts the hash value from credential_data JSON.
-// Expected format: {"hash":"$argon2id$..."}
-func extractHash(credJSON string) string {
-	// Simple extraction without importing encoding/json for this hot path.
+// EncodeCredentialJSON wraps a hash string into the canonical credential_data
+// JSON format: {"hash":"<hash>"}.
+func EncodeCredentialJSON(hash string) string {
+	return fmt.Sprintf(`{"hash":"%s"}`, hash)
+}
+
+// DecodeCredentialJSON extracts the hash value from credential_data JSON.
+// Expected format: {"hash":"$argon2id$..."}.
+func DecodeCredentialJSON(credJSON string) string {
 	const prefix = `{"hash":"`
 	const suffix = `"}`
 	if len(credJSON) < len(prefix)+len(suffix) {
@@ -157,11 +162,11 @@ func extractHash(credJSON string) string {
 }
 
 // GenerateRandomPassword generates a cryptographically random password
-// of the given length (hex-encoded, so actual entropy is length*4 bits).
+// of the given length (hex-encoded, so actual entropy is length×4 bits).
 func GenerateRandomPassword(length int) (string, error) {
-	b := make([]byte, length/2+1)
-	if _, err := rand.Read(b); err != nil {
+	s, err := crypto.RandomHex(length/2 + 1)
+	if err != nil {
 		return "", fmt.Errorf("generate random password: %w", err)
 	}
-	return hex.EncodeToString(b)[:length], nil
+	return s[:length], nil
 }

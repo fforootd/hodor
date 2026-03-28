@@ -145,7 +145,11 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
 	issues := "http://" + net.JoinHostPort(cfg.Server.ExternalDomain, strconv.Itoa(cfg.Server.Port))
 	oidcStorage := oidcop.NewStorage(db)
-	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil)
+	var firstCookieSecret string
+	if len(cfg.Server.CookieSecrets) > 0 {
+		firstCookieSecret = cfg.Server.CookieSecrets[0]
+	}
+	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil, cfg.Server.OIDCEncryptionKey, firstCookieSecret)
 	if err != nil {
 		log.Printf("WARN: OIDC Provider setup failed: %v", err)
 	} else {

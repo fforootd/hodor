@@ -169,7 +169,7 @@ func TestGenerateRandomPassword(t *testing.T) {
 	}
 }
 
-func TestExtractHash(t *testing.T) {
+func TestDecodeCredentialJSON(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -180,9 +180,9 @@ func TestExtractHash(t *testing.T) {
 		{`{}`, ``},
 	}
 	for _, tt := range tests {
-		got := extractHash(tt.input)
+		got := DecodeCredentialJSON(tt.input)
 		if got != tt.want {
-			t.Errorf("extractHash(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("DecodeCredentialJSON(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

@@ -3,9 +3,7 @@
 package login
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/notify"
@@ -346,12 +345,11 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Generate token.
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	token, err := crypto.RandomBase64URL(32)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token generation failed")
 		return
 	}
-	token := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(tokenBytes)
 	expiresAt := time.Now().Add(15 * time.Minute)
 
 	// Store token.

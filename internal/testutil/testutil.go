@@ -17,6 +17,7 @@ import (
 	"github.com/zitadel/zitadel/internal/bootstrap"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/config"
+	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/server"
@@ -138,20 +139,19 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) string {
 func (ts *TestServer) CreateSession(identityID string) string {
 	ts.t.Helper()
 
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		ts.t.Fatalf("rand.Read: %v", err)
+	hexPart, err := crypto.RandomHex(32)
+	if err != nil {
+		ts.t.Fatalf("crypto.RandomHex: %v", err)
 	}
-	raw := "zit_ses_" + hex.EncodeToString(b)
-	h := sha256.Sum256([]byte(raw))
-	hash := hex.EncodeToString(h[:])
+	raw := "zit_ses_" + hexPart
+	hash := crypto.HashTokenHex(raw)
 
 	sessionID := id.New()
 	tokenID := id.New()
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
-	_, err := ts.DB.SQL().Exec(
+	_, err = ts.DB.SQL().Exec(
 		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, ?, ?, 'testutil', '127.0.0.1', '{}', ?, ?)`,
 		sessionID, identityID, ts.OrgID, hash, now, expiresAt)
