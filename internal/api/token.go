@@ -2,13 +2,12 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/crypto"
 )
 
 // Token type constants.
@@ -35,20 +34,18 @@ type TokenInfo struct {
 // Returns (rawToken, sha256Hash, error).
 // Token format: {prefix}{64 hex chars} — total length = len(prefix) + 64.
 func generatePrefixedToken(prefix string) (raw string, hash string, err error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	hexPart, err := crypto.RandomHex(32)
+	if err != nil {
 		return "", "", fmt.Errorf("generate token: %w", err)
 	}
-	raw = prefix + hex.EncodeToString(b)
-	h := sha256.Sum256([]byte(raw))
-	hash = hex.EncodeToString(h[:])
+	raw = prefix + hexPart
+	hash = crypto.HashTokenHex(raw)
 	return raw, hash, nil
 }
 
 // hashToken returns the SHA-256 hex digest of a raw token string.
 func hashToken(raw string) string {
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])
+	return crypto.HashTokenHex(raw)
 }
 
 // resolveToken looks up a raw token in the database and returns its TokenInfo.

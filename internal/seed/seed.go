@@ -7,9 +7,7 @@ package seed
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,9 +15,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zitadel/passwap/argon2"
 	"gopkg.in/yaml.v3"
 
+	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/id"
 )
 
@@ -236,11 +235,11 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 
 	// Hash password and store as entity_credential.
 	if ident.Password != "" {
-		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
-		hash, err := hasher.Hash(ident.Password)
+		pw := auth.NewPasswords(nil)
+		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			credID, _ := id.New()
-			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
+			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)
@@ -267,13 +266,13 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID int64, ident SeedIdentity) error {
 	// Update password if provided.
 	if ident.Password != "" {
-		hasher := argon2.NewArgon2id(argon2.RecommendedIDParams, nil)
-		hash, err := hasher.Hash(ident.Password)
+		pw := auth.NewPasswords(nil)
+		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			// Delete existing + re-insert.
 			tx.ExecContext(ctx, `DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`, entityID)
 			credID, _ := id.New()
-			credJSON := fmt.Sprintf(`{"hash":"%s"}`, hash)
+			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
 				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, entityID, credJSON)
@@ -324,8 +323,7 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID int64, pats []SeedPAT) {
 		}
 
 		// Hash the token.
-		h := sha256.Sum256([]byte(rawToken))
-		tokenHash := hex.EncodeToString(h[:])
+		tokenHash := crypto.HashTokenHex(rawToken)
 
 		tokenID, err := id.New()
 		if err != nil {

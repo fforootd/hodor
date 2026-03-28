@@ -24,11 +24,12 @@ type Config struct {
 
 // ServerConfig controls HTTP server behavior.
 type ServerConfig struct {
-	Port           int      `toml:"port"`
-	ExternalDomain string   `toml:"external_domain"`
-	TLSCert        string   `toml:"tls_cert"`
-	TLSKey         string   `toml:"tls_key"`
-	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
+	Port               int      `toml:"port"`
+	ExternalDomain     string   `toml:"external_domain"`
+	TLSCert            string   `toml:"tls_cert"`
+	TLSKey             string   `toml:"tls_key"`
+	CookieSecrets      []string `toml:"cookie_secrets"`       // HMAC keys for session cookies; first signs, all verify
+	OIDCEncryptionKey  string   `toml:"oidc_encryption_key"` // 32-byte hex-encoded key for OIDC token encryption
 }
 
 // DatabaseConfig controls the primary database connection.
@@ -136,5 +137,8 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("ZITADEL_SEED_FILE"); v != "" {
 		cfg.Dev.SeedFile = v
+	}
+	if v := os.Getenv("ZITADEL_OIDC_ENCRYPTION_KEY"); v != "" {
+		cfg.Server.OIDCEncryptionKey = v
 	}
 }

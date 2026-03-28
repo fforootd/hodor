@@ -3,9 +3,6 @@ package testutil
 
 import (
 	"bytes"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,6 +13,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/bootstrap"
 	"github.com/zitadel/zitadel/internal/config"
+	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/server"
@@ -128,20 +126,19 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) int64 {
 func (ts *TestServer) CreateSession(identityID int64) string {
 	ts.t.Helper()
 
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		ts.t.Fatalf("rand.Read: %v", err)
+	hexPart, err := crypto.RandomHex(32)
+	if err != nil {
+		ts.t.Fatalf("crypto.RandomHex: %v", err)
 	}
-	raw := "zit_ses_" + hex.EncodeToString(b)
-	h := sha256.Sum256([]byte(raw))
-	hash := hex.EncodeToString(h[:])
+	raw := "zit_ses_" + hexPart
+	hash := crypto.HashTokenHex(raw)
 
 	sessionID := time.Now().UnixNano()
 	tokenID := sessionID + 1
 	now := time.Now().UTC().Format(time.RFC3339)
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
 
-	_, err := ts.DB.SQL().Exec(
+	_, err = ts.DB.SQL().Exec(
 		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, 1, ?, 'testutil', '127.0.0.1', '{}', ?, ?)`,
 		sessionID, identityID, hash, now, expiresAt)

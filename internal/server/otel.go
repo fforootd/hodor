@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/crypto"
 )
 
 type contextKey string
@@ -53,7 +53,5 @@ func extractTraceID(r *http.Request) string {
 
 // generateTraceID creates a random 32-char hex trace ID (128-bit).
 func generateTraceID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	return crypto.MustRandomHex(16)
 }

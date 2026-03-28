@@ -2,6 +2,8 @@ package login
 
 import (
 	"testing"
+
+	"github.com/zitadel/zitadel/internal/crypto"
 )
 
 func TestClaimMappings_ExtractsFromSchema(t *testing.T) {
@@ -192,8 +194,8 @@ func TestParseIDTokenClaims_InvalidJWT(t *testing.T) {
 }
 
 func TestRandomString(t *testing.T) {
-	a := randomString(32)
-	b := randomString(32)
+	a := crypto.MustRandomHex(16)
+	b := crypto.MustRandomHex(16)
 	if len(a) != 32 {
 		t.Errorf("expected length 32, got %d", len(a))
 	}
@@ -203,7 +205,7 @@ func TestRandomString(t *testing.T) {
 }
 
 func TestSha256URLSafe(t *testing.T) {
-	result := sha256URLSafe("hello")
+	result := crypto.HashTokenBase64URL("hello")
 	if result == "" {
 		t.Error("expected non-empty result")
 	}
