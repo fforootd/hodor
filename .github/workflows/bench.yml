@@ -1,0 +1,84 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'  # daily 06:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-go@v6.3.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install deps + build web assets
+        run: npm ci && npm run build
+
+      - name: Embed web dist
+        run: make webdist-only
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run benchmarks (GOMAXPROCS sweep)
+        run: |
+          mkdir -p bench-results
+          for procs in 1 2 4 $(nproc); do
+            echo "═══ GOMAXPROCS=$procs ═══"
+            GOMAXPROCS=$procs go test -bench=. -benchmem -count=5 -timeout 600s \
+              ./internal/database/ ./internal/api/ 2>&1 \
+              | grep -v 'schema ready\|Columns in\|seeded\|bootstrapped\|alias.*registered\|analytics.*OLTP\|OIDC Provider\|Path config' \
+              | tee bench-results/bench-$procs.txt
+          done
+
+      - name: Benchmark summary
+        if: always()
+        run: |
+          echo "## 🏎️ Performance Benchmark Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**CPU**: $(nproc) cores" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Per-GOMAXPROCS results.
+          for procs in 1 2 4 $(nproc); do
+            FILE="bench-results/bench-$procs.txt"
+            if [ ! -f "$FILE" ]; then continue; fi
+
+            echo "### GOMAXPROCS=$procs" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat "$FILE" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+
+          # Scaling comparison.
+          echo "### vCPU Scaling Analysis (1 → 2 → 4 cores)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          benchstat bench-results/bench-1.txt bench-results/bench-2.txt bench-results/bench-4.txt 2>&1 \
+            >> $GITHUB_STEP_SUMMARY || echo "(benchstat comparison failed)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: bench-results
+          path: bench-results/
+          retention-days: 30

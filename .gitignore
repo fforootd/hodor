@@ -39,3 +39,6 @@ dist/
 testdata/fuzz/
 lake_data/
 
+
+# Benchmark output
+bench-results/

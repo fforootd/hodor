@@ -148,3 +148,30 @@ clean:
 	rm -rf internal/server/webdist/
 	rm -rf web/dist/
 	rm -f zitadel
+
+# ─── Performance Benchmarks ───────────────────────────────
+
+.PHONY: bench bench-scale
+
+bench: ## Run benchmarks (default GOMAXPROCS)
+	@echo "═══ Benchmarks (GOMAXPROCS=$$(sysctl -n hw.ncpu 2>/dev/null || nproc)) ═══"
+	go test -bench=. -benchmem -count=3 -timeout 300s \
+		./internal/database/ ./internal/api/ 2>&1 | grep -v 'schema ready\|Columns in\|seeded\|bootstrapped\|alias.*registered\|analytics.*OLTP\|OIDC Provider\|Path config'
+
+bench-scale: ## Run vCPU scaling sweep (1 → N cores)
+	@mkdir -p bench-results
+	@for procs in 1 2 4 $$(sysctl -n hw.ncpu 2>/dev/null || nproc); do \
+		echo ""; \
+		echo "═══ GOMAXPROCS=$$procs ═══"; \
+		GOMAXPROCS=$$procs go test -bench=. -benchmem -count=5 -timeout 600s \
+			./internal/database/ ./internal/api/ 2>&1 \
+			| grep -v 'schema ready\|Columns in\|seeded\|bootstrapped\|alias.*registered\|analytics.*OLTP\|OIDC Provider\|Path config' \
+			| tee bench-results/bench-$$procs.txt; \
+	done
+	@echo ""
+	@echo "═══ Scaling Analysis ═══"
+	@if command -v benchstat >/dev/null 2>&1; then \
+		benchstat bench-results/bench-1.txt bench-results/bench-2.txt bench-results/bench-4.txt; \
+	else \
+		echo "(install benchstat: go install golang.org/x/perf/cmd/benchstat@latest)"; \
+	fi
