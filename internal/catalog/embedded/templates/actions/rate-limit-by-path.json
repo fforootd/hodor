@@ -1,0 +1,38 @@
+{
+  "type": "action",
+  "version": "1.0.0",
+  "name": "Rate Limit by Path",
+  "description": "Apply different rate limits to specific API paths. Useful for protecting expensive endpoints like /v1/auth or /v1/users while allowing higher throughput on read-only paths.",
+  "variables": {
+    "path_prefix": {
+      "type": "string",
+      "description": "API path prefix to rate limit (e.g. /v1/auth)",
+      "default": "/v1/auth"
+    },
+    "requests_per_minute": {
+      "type": "integer",
+      "description": "Maximum requests per minute for this path",
+      "default": 60
+    },
+    "burst": {
+      "type": "integer",
+      "description": "Burst capacity (max concurrent requests)",
+      "default": 10
+    }
+  },
+  "payload": {
+    "display_name": "Rate Limit: {{path_prefix}}",
+    "hook": "on_request",
+    "action_type": "rate_limit",
+    "trigger": "request.path startsWith '{{path_prefix}}'",
+    "config": {
+      "key": "request.ip",
+      "limit": "{{requests_per_minute}}",
+      "burst": "{{burst}}",
+      "window": "1m"
+    },
+    "priority": 40,
+    "enabled": true,
+    "fail_open": true
+  }
+}

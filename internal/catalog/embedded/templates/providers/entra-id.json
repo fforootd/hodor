@@ -1,0 +1,37 @@
+{
+  "type": "provider",
+  "version": "1.0.0",
+  "name": "Microsoft Entra ID",
+  "description": "Microsoft Entra ID (Azure AD) provider with tenant-aware OIDC configuration. Maps Microsoft claims including UPN, preferred_username, and group memberships.",
+  "variables": {
+    "tenant_id": {
+      "type": "string",
+      "description": "Azure AD Tenant ID (or 'common' for multi-tenant)"
+    },
+    "client_id": {
+      "type": "string",
+      "description": "Application (client) ID from Azure App Registration"
+    },
+    "client_secret": {
+      "type": "string",
+      "description": "Client secret from Azure App Registration",
+      "sensitive": true
+    }
+  },
+  "payload": {
+    "display_name": "Microsoft Entra ID",
+    "type": "oidc",
+    "issuer": "https://login.microsoftonline.com/{{tenant_id}}/v2.0",
+    "client_id": "{{client_id}}",
+    "client_secret": "{{client_secret}}",
+    "scopes": ["openid", "profile", "email"],
+    "claim_mappings": {
+      "email": "claims.preferred_username ?? claims.email ?? claims.upn",
+      "display_name": "claims.name",
+      "first_name": "claims.given_name",
+      "last_name": "claims.family_name",
+      "picture": "claims.picture",
+      "groups": "claims.groups"
+    }
+  }
+}

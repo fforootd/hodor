@@ -20,6 +20,8 @@ type Config struct {
 	Database      DatabaseConfig      `toml:"database"`
 	Observability ObservabilityConfig `toml:"observability"`
 	Workers       WorkersConfig       `toml:"workers"`
+	RateLimit     RateLimitConfig     `toml:"rate_limit"`
+	Catalog       CatalogConfig       `toml:"catalog"`
 	Dev           DevConfig           `toml:"dev"`
 }
 
@@ -109,6 +111,24 @@ type WorkersConfig struct {
 	LakeBatchWindowSecs int `toml:"lake_batch_window_secs"`
 }
 
+// RateLimitConfig controls the rate limiter backend and behavior.
+// Backend options mirror the analytics pattern: "memory" (default), "sql", "redis".
+type RateLimitConfig struct {
+	Backend    string `toml:"backend"`     // "memory" (default) | "sql" | "redis"
+	RedisURL   string `toml:"redis_url"`   // Redis connection URL (only when backend="redis")
+	GCInterval int    `toml:"gc_interval"` // Bucket cleanup interval in seconds (memory backend, default: 60)
+	BatchWrite bool   `toml:"batch_write"` // Batch counter updates to DB instead of per-request (sql backend)
+}
+
+// CatalogConfig controls the template catalog source (ADR-015).
+// Templates (actions, providers, FGA models, schemas) are loaded from a git
+// repository or local directory.
+type CatalogConfig struct {
+	URL             string `toml:"url"`              // Git repo URL for catalog (default: official zitadel catalog)
+	LocalPath       string `toml:"local_path"`       // Local directory override (dev/air-gapped)
+	RefreshInterval string `toml:"refresh_interval"` // How often to refresh (default: "1h", "0" = manual)
+}
+
 // DevConfig controls development and testing features.
 type DevConfig struct {
 	MockOIDC     bool   `toml:"mock_oidc"`      // Enable embedded mock OIDC identity provider
@@ -152,6 +172,10 @@ func Defaults() *Config {
 			EventWorkers:        1,
 			LakeBatchSize:       1000,
 			LakeBatchWindowSecs: 5,
+		},
+		RateLimit: RateLimitConfig{
+			Backend:    "memory",
+			GCInterval: 60,
 		},
 	}
 }
@@ -227,6 +251,22 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("ZITADEL_REAL_IP_HEADER"); v != "" {
 		cfg.Server.RealIPHeader = v
+	}
+
+	// Rate limit backend
+	if v := os.Getenv("ZITADEL_RATE_LIMIT_BACKEND"); v != "" {
+		cfg.RateLimit.Backend = v
+	}
+	if v := os.Getenv("ZITADEL_RATE_LIMIT_REDIS_URL"); v != "" {
+		cfg.RateLimit.RedisURL = v
+	}
+	if v := os.Getenv("ZITADEL_RATE_LIMIT_GC_INTERVAL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RateLimit.GCInterval = n
+		}
+	}
+	if v := os.Getenv("ZITADEL_RATE_LIMIT_BATCH_WRITE"); v == "true" || v == "1" {
+		cfg.RateLimit.BatchWrite = true
 	}
 }
 

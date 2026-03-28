@@ -163,6 +163,36 @@ func (s *Service) ReadTuples(ctx context.Context, user, relation, object string)
 	return result, nil
 }
 
+// ReadAllTuples returns all tuples in the system store by querying the
+// underlying OpenFGA tuple table directly. The OpenFGA Read API requires
+// at least one filter, so this bypasses it for the "show all" use case.
+func (s *Service) ReadAllTuples(ctx context.Context) ([]map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT user_object_type || ':' || user_object_id, relation, object_type || ':' || object_id
+		 FROM tuple WHERE store = ? ORDER BY object_type, object_id, relation LIMIT 500`, s.storeID)
+	if err != nil {
+		return nil, fmt.Errorf("fga: read all tuples: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]map[string]string, 0)
+	for rows.Next() {
+		var user, relation, object string
+		if err := rows.Scan(&user, &relation, &object); err != nil {
+			continue
+		}
+		result = append(result, map[string]string{
+			"user":     user,
+			"relation": relation,
+			"object":   object,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fga: read all tuples iter: %w", err)
+	}
+	return result, nil
+}
+
 // Expand returns the userset tree for a relation on an object.
 func (s *Service) Expand(ctx context.Context, relation, object string) (any, error) {
 	resp, err := s.srv.Expand(ctx, &openfgav1.ExpandRequest{

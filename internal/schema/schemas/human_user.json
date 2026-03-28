@@ -33,8 +33,16 @@
       "x-editable": true,
       "x-claim": "claims.email",
       "x-identifier": true,
+      "x-unique": "instance",
       "x-verify": "email",
       "x-recover": "email"
+    },
+    "username": {
+      "type": "string",
+      "description": "Login username, unique per org",
+      "x-editable": true,
+      "x-identifier": true,
+      "x-unique": "org"
     },
     "phone": {
       "type": "string",

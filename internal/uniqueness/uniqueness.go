@@ -1,0 +1,286 @@
+// Package uniqueness provides schema-driven uniqueness enforcement (ADR-016).
+//
+// It extracts x-unique annotations from entity schemas and enforces them
+// via the unique_fields table. Uniqueness is cross-type: an email unique at
+// instance scope is unique regardless of whether the entity is a human_user
+// or service_user.
+package uniqueness
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// Scope defines the uniqueness scope for a field.
+type Scope string
+
+const (
+	ScopeInstance Scope = "instance" // Globally unique across all orgs.
+	ScopeOrg      Scope = "org"      // Unique within an org.
+)
+
+// FieldConstraint represents a single x-unique annotation extracted from a schema.
+type FieldConstraint struct {
+	FieldName string
+	Scope     Scope
+}
+
+// Violation is returned when a uniqueness check fails.
+type Violation struct {
+	Field string `json:"field"`
+	Value string `json:"value"`
+	Scope string `json:"scope"`
+}
+
+func (v *Violation) Error() string {
+	return fmt.Sprintf("uniqueness violation: field %q value %q already exists (scope: %s)", v.Field, v.Value, v.Scope)
+}
+
+// ExtractConstraints parses a JSON schema string and returns all x-unique field constraints.
+func ExtractConstraints(schemaJSON string) []FieldConstraint {
+	var raw struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schemaJSON), &raw); err != nil {
+		return nil
+	}
+
+	var constraints []FieldConstraint
+	for name, def := range raw.Properties {
+		v, ok := def["x-unique"]
+		if !ok {
+			continue
+		}
+
+		switch val := v.(type) {
+		case string:
+			scope := Scope(val)
+			if scope == ScopeInstance || scope == ScopeOrg {
+				constraints = append(constraints, FieldConstraint{FieldName: name, Scope: scope})
+			}
+		case bool:
+			// x-unique: false — explicitly no uniqueness.
+		}
+	}
+	return constraints
+}
+
+// ExtractIdentifiers returns field names marked with x-identifier: true.
+func ExtractIdentifiers(schemaJSON string) []string {
+	var raw struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(schemaJSON), &raw); err != nil {
+		return nil
+	}
+
+	var identifiers []string
+	for name, def := range raw.Properties {
+		if v, ok := def["x-identifier"].(bool); ok && v {
+			identifiers = append(identifiers, name)
+		}
+	}
+	return identifiers
+}
+
+// Normalize lowercases and trims a value for uniqueness comparison.
+func Normalize(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// Enforce inserts unique_fields rows for an entity within a transaction.
+// It reads the entity's data JSON, extracts values for x-unique fields,
+// normalizes them, and inserts into unique_fields.
+// Returns a *Violation error if a constraint is violated.
+func Enforce(ctx context.Context, tx *sql.Tx, entityID, orgID string, constraints []FieldConstraint, data map[string]any) error {
+	for _, c := range constraints {
+		rawVal, ok := data[c.FieldName]
+		if !ok || rawVal == nil {
+			continue
+		}
+
+		value := Normalize(fmt.Sprint(rawVal))
+		if value == "" {
+			continue
+		}
+
+		scopeID := "" // instance scope
+		if c.Scope == ScopeOrg {
+			scopeID = orgID
+		}
+
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+			 VALUES (?, ?, ?, ?)`,
+			scopeID, c.FieldName, value, entityID,
+		)
+		if err != nil {
+			return &Violation{
+				Field: c.FieldName,
+				Value: fmt.Sprint(rawVal),
+				Scope: string(c.Scope),
+			}
+		}
+	}
+	return nil
+}
+
+// EnforceFromIdentifier is a convenience for entities that use the legacy
+// identifier column as their primary unique field. It writes an "identifier"
+// entry into unique_fields at instance scope.
+func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, entityID, orgID, identifier string) error {
+	if identifier == "" {
+		return nil
+	}
+	normalized := Normalize(identifier)
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+		 VALUES ('', 'identifier', ?, ?)`,
+		normalized, entityID,
+	)
+	if err != nil {
+		return &Violation{
+			Field: "identifier",
+			Value: identifier,
+			Scope: "instance",
+		}
+	}
+	return nil
+}
+
+// Release removes all unique_fields rows for an entity (used before re-enforcement on update).
+func Release(ctx context.Context, tx *sql.Tx, entityID string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM unique_fields WHERE entity_id = ?`, entityID)
+	return err
+}
+
+// ResolvedEntity is the result of an identifier resolution.
+type ResolvedEntity struct {
+	EntityID    string
+	DisplayName string
+	OrgID       string
+}
+
+// ResolveIdentifier looks up an entity by a unique field value.
+// It tries instance-scoped matches first, then org-scoped matches if orgID is provided.
+func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string) (*ResolvedEntity, error) {
+	normalized := Normalize(identifier)
+
+	// Phase 1: Instance-scoped match (globally unique identifiers).
+	var result ResolvedEntity
+	err := db.QueryRowContext(ctx,
+		`SELECT uf.entity_id, COALESCE(e.display_name, e.identifier), e.org_id
+		 FROM unique_fields uf
+		 JOIN entities e ON e.id = uf.entity_id
+		 WHERE uf.normalized_value = ?
+		   AND uf.scope_id = ''
+		   AND e.state = 'active'
+		 LIMIT 1`, normalized,
+	).Scan(&result.EntityID, &result.DisplayName, &result.OrgID)
+	if err == nil {
+		return &result, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("resolve identifier (instance): %w", err)
+	}
+
+	// Phase 2: Org-scoped match (if org context is available).
+	if orgID != "" {
+		err = db.QueryRowContext(ctx,
+			`SELECT uf.entity_id, COALESCE(e.display_name, e.identifier), e.org_id
+			 FROM unique_fields uf
+			 JOIN entities e ON e.id = uf.entity_id
+			 WHERE uf.normalized_value = ?
+			   AND uf.scope_id = ?
+			   AND e.state = 'active'
+			 LIMIT 1`, normalized, orgID,
+		).Scan(&result.EntityID, &result.DisplayName, &result.OrgID)
+		if err == nil {
+			return &result, nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, fmt.Errorf("resolve identifier (org): %w", err)
+		}
+	}
+
+	// Phase 3: Fall back to legacy entities.identifier column for backward compat.
+	query := `SELECT id, COALESCE(display_name, identifier), org_id
+	          FROM entities WHERE LOWER(identifier) = ? AND state = 'active'`
+	args := []any{normalized}
+	if orgID != "" {
+		query += ` AND org_id = ?`
+		args = append(args, orgID)
+	}
+	query += ` LIMIT 1`
+
+	err = db.QueryRowContext(ctx, query, args...).Scan(&result.EntityID, &result.DisplayName, &result.OrgID)
+	if err == nil {
+		return &result, nil
+	}
+	if err == sql.ErrNoRows {
+		return nil, nil // Not found.
+	}
+	return nil, fmt.Errorf("resolve identifier (legacy): %w", err)
+}
+
+// ValidateSchemaChange checks whether tightening uniqueness constraints on a
+// schema type would cause violations against existing data.
+// Returns a list of violations (duplicate values that would conflict).
+func ValidateSchemaChange(ctx context.Context, db *sql.DB, constraints []FieldConstraint) ([]map[string]any, error) {
+	var violations []map[string]any
+
+	for _, c := range constraints {
+		var query string
+		switch c.Scope {
+		case ScopeInstance:
+			query = `SELECT normalized_value, COUNT(*) as cnt
+			         FROM unique_fields
+			         WHERE field_name = ?
+			         GROUP BY normalized_value
+			         HAVING cnt > 1`
+		case ScopeOrg:
+			query = `SELECT scope_id, normalized_value, COUNT(*) as cnt
+			         FROM unique_fields
+			         WHERE field_name = ?
+			         GROUP BY scope_id, normalized_value
+			         HAVING cnt > 1`
+		}
+
+		rows, err := db.QueryContext(ctx, query, c.FieldName)
+		if err != nil {
+			return nil, fmt.Errorf("check duplicates for %s: %w", c.FieldName, err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			v := map[string]any{"field": c.FieldName, "scope": string(c.Scope)}
+			switch c.Scope {
+			case ScopeInstance:
+				var value string
+				var cnt int
+				if rows.Scan(&value, &cnt) == nil {
+					v["value"] = value
+					v["count"] = cnt
+					violations = append(violations, v)
+				}
+			case ScopeOrg:
+				var scopeID, value string
+				var cnt int
+				if rows.Scan(&scopeID, &value, &cnt) == nil {
+					v["value"] = value
+					v["org_id"] = scopeID
+					v["count"] = cnt
+					violations = append(violations, v)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate duplicates: %w", err)
+		}
+	}
+
+	return violations, nil
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/zitadel/zitadel/internal/analytics"
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/catalog"
 	"github.com/zitadel/zitadel/internal/config"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
@@ -26,6 +27,7 @@ import (
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/oidcop"
+	"github.com/zitadel/zitadel/internal/ratelimit"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/ui"
 )
@@ -70,6 +72,11 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
 	restAPI := api.New(db, bus, cookieCfg)
 	restAPI.RegisterRoutes(mux)
+
+	// Mount template catalog API (ADR-015).
+	catalogSvc := catalog.New(cfg.Catalog, db.SQL())
+	api.RegisterCatalogRoutes(mux, catalogSvc, db.SQL())
+	log.Printf("Catalog ready (%d embedded templates)", catalogSvc.EmbeddedCount())
 
 	// Mount analytics engine (queries OLTP database directly — pure Go, no DuckDB).
 	oltpBackend := analytics.NewOLTPBackend(db.SQL(), db.Dialect())
@@ -223,11 +230,34 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Build FGA middleware.
 	fgaMiddleware := fga.NewMiddleware(fgaSvc)
 
-	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → FGAGate → AuthGate → EventStream → OTel.
+	// Initialize rate limiter — backend from config (memory | sql | redis).
+	var rlStore ratelimit.Store
+	gcInterval := time.Duration(cfg.RateLimit.GCInterval) * time.Second
+	if gcInterval == 0 {
+		gcInterval = 60 * time.Second
+	}
+	switch cfg.RateLimit.Backend {
+	case "sql":
+		log.Printf("Rate limiter: sql backend (batch_write=%v) — not yet implemented, using memory", cfg.RateLimit.BatchWrite)
+		rlStore = ratelimit.NewMemoryStore(gcInterval)
+	case "redis":
+		log.Printf("Rate limiter: redis backend (%s) — not yet implemented, using memory", cfg.RateLimit.RedisURL)
+		rlStore = ratelimit.NewMemoryStore(gcInterval)
+	default: // "memory"
+		rlStore = ratelimit.NewMemoryStore(gcInterval)
+		log.Printf("Rate limiter ready (backend=memory, gc=%s)", gcInterval)
+	}
+	rateLimiter := ratelimit.New(rlStore, db.SQL())
+
+	// Start catalog background refresh (after boot, non-blocking).
+	catalogSvc.StartBackground()
+
+	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → RateLimit → AuthGate → FGAGate → EventStream → OTel.
 	var handler http.Handler = mux
 	handler = api.EventStreamMiddleware(db.SQL())(handler)
 	handler = fgaMiddleware.Gate(handler)
 	handler = api.AuthGate(cookieCfg, db.SQL())(handler)
+	handler = ratelimit.Middleware(rateLimiter, FromContext)(handler)
 	handler = AppGate(paths, &cfg.Server.AppAccess)(handler)
 	handler = SecurityHeaders(cfg.Server.SecurityHeaders, isSecure)(handler)
 	handler = RealIP(realIPCfg)(handler)

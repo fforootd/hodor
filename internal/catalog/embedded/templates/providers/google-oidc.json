@@ -1,0 +1,34 @@
+{
+  "type": "provider",
+  "version": "1.0.0",
+  "name": "Google OIDC",
+  "description": "Google identity provider with standard OpenID Connect configuration. Maps Google profile claims to Zitadel identity fields including email, name, and profile picture.",
+  "variables": {
+    "client_id": {
+      "type": "string",
+      "description": "Google OAuth 2.0 Client ID (from Google Cloud Console)"
+    },
+    "client_secret": {
+      "type": "string",
+      "description": "Google OAuth 2.0 Client Secret",
+      "sensitive": true
+    }
+  },
+  "payload": {
+    "display_name": "Google",
+    "type": "oidc",
+    "issuer": "https://accounts.google.com",
+    "client_id": "{{client_id}}",
+    "client_secret": "{{client_secret}}",
+    "scopes": ["openid", "profile", "email"],
+    "claim_mappings": {
+      "email": "claims.email",
+      "email_verified": "claims.email_verified",
+      "display_name": "claims.name",
+      "first_name": "claims.given_name",
+      "last_name": "claims.family_name",
+      "picture": "claims.picture",
+      "locale": "claims.locale"
+    }
+  }
+}

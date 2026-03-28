@@ -42,8 +42,11 @@
           <SidebarGroupContent>
             <SidebarMenu>
               <template v-for="(item, idx) in navItems" :key="item.type">
-                <!-- Optional visual separator -->
+                <!-- Optional visual separator with group label -->
                 <div v-if="item.separatorBefore && idx > 0" class="my-2 mx-2 border-t border-border/40" />
+                <div v-if="item.groupLabel" class="px-2 pt-1 pb-0.5">
+                  <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">{{ item.groupLabel }}</span>
+                </div>
                 <SidebarMenuItem>
                   <SidebarMenuButton as-child :data-active="isNavActive(item)">
                     <router-link :to="item.route">
@@ -259,7 +262,7 @@ import {
 import {
   Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow,
   Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
-  Bot, AppWindow, Activity, Calendar,
+  Bot, AppWindow, Activity, Calendar, ShieldCheck,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -350,6 +353,7 @@ interface NavItem {
   storage: string
   countable: boolean
   separatorBefore: boolean
+  groupLabel?: string
   count?: number
   aggregates?: string[]
 }
@@ -374,6 +378,7 @@ const iconMap: Record<string, any> = {
   org: Building2, rule: Zap, provider: Globe, session: Clock,
   event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
   overview: BarChart3, explore: Search, trace: Workflow,
+  authorization: ShieldCheck,
 }
 
 function getIcon(type: string) {
@@ -407,6 +412,7 @@ onMounted(async () => {
         route: itemRoute,
         countable: !!entry.countable,
         separatorBefore: !!entry.separator_before,
+        groupLabel: entry.group_label,
         aggregates: entry.aggregates,
       })
     }
@@ -455,8 +461,8 @@ const pageTitle = computed(() => {
   }
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',
-    'identity-detail': 'Identity Detail',
-    'identity-create': 'New Identity',
+    'identity-detail': 'Entity Detail',
+    'identity-create': 'New Entity',
     schemas: 'Schemas',
     'schema-detail': 'Schema Editor',
     providers: 'Providers',
@@ -466,6 +472,7 @@ const pageTitle = computed(() => {
     'obs-overview': 'Overview',
     'obs-explore': 'Explore',
     traces: 'Traces',
+    authorization: 'System Authorization',
   }
   return titles[route.name as string] || 'Console'
 })

@@ -15,6 +15,7 @@
       "storage": "virtual",
       "route": "/users",
       "countable": true,
+      "separator_before": true,
       "aggregates": ["human_user", "service_user", "ai_agent"]
     },
     "applications": {
@@ -109,6 +110,18 @@
         "authorization": { "model": "fga", "relations": ["member", "owner", "admin"] }
       }
     },
+    "action": {
+      "$ref": "schemas/action.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Actions",
+      "singular": "Action",
+      "path": "actions",
+      "icon": "⚡",
+      "sort_order": 10,
+      "storage": "entities",
+      "separator_before": true
+    },
     "provider": {
       "$ref": "schemas/provider.json",
       "version": "1.0",
@@ -117,20 +130,9 @@
       "singular": "Provider",
       "path": "providers",
       "icon": "🔗",
-      "sort_order": 4,
+      "sort_order": 11,
       "storage": "dedicated",
       "route": "/providers"
-    },
-    "rule": {
-      "$ref": "schemas/rule.json",
-      "version": "1.0",
-      "group": "nav",
-      "alias": "Rules",
-      "singular": "Rule",
-      "path": "rules",
-      "icon": "⚡",
-      "sort_order": 5,
-      "storage": "entities"
     },
     "schema": {
       "group": "nav",
@@ -138,7 +140,7 @@
       "singular": "Schema",
       "path": "schemas",
       "icon": "📐",
-      "sort_order": 6,
+      "sort_order": 12,
       "storage": "dedicated",
       "route": "/schemas"
     },
@@ -212,6 +214,17 @@
       "storage": "dedicated",
       "route": "/jobs",
       "separator_before": true
+    },
+    "authorization": {
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Authorization",
+      "singular": "Authorization",
+      "path": "authorization",
+      "icon": "🛡️",
+      "sort_order": 201,
+      "storage": "virtual",
+      "route": "/authorization"
     },
     "password_policy": {
       "$ref": "schemas/password_policy.json",
@@ -361,7 +374,8 @@
           "x-sensitive":   { "type": "boolean" },
           "x-hidden":      { "type": "boolean" },
           "x-editable":    { "type": "boolean" },
-          "x-source":      { "type": "string", "enum": ["admin", "user", "system", "sso"] }
+          "x-source":      { "type": "string", "enum": ["admin", "user", "system", "sso"] },
+          "x-unique":      { "oneOf": [{ "type": "string", "enum": ["instance", "org"] }, { "type": "boolean", "const": false }], "description": "Uniqueness scope: 'instance' = globally unique, 'org' = unique per org. Orthogonal to x-identifier." }
         }
       }
     }

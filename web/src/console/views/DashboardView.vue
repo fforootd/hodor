@@ -63,7 +63,7 @@ import { Users, FileJson, Globe, Activity } from 'lucide-vue-next'
 import { api } from '@/api/client'
 
 const stats = ref([
-  { label: 'Identities', value: '—', icon: Users, description: 'Total identities' },
+  { label: 'Entities', value: '—', icon: Users, description: 'Total entities' },
   { label: 'Schemas', value: '—', icon: FileJson, description: 'Active schemas' },
   { label: 'Providers', value: '—', icon: Globe, description: 'Configured providers' },
   { label: 'Events', value: '—', icon: Activity, description: 'Last 24 hours' },

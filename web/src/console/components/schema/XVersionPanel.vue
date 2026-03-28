@@ -25,6 +25,34 @@
       </div>
     </div>
 
+    <!-- Catalog origin info -->
+    <div v-if="catalogState" class="space-y-2">
+      <Separator class="my-1" />
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-muted-foreground">Origin</span>
+        <div class="flex items-center gap-1.5">
+          <Badge
+            :class="{
+              'bg-emerald-50 text-emerald-700 border-emerald-200': catalogState === 'linked',
+              'bg-yellow-50 text-yellow-700 border-yellow-200': catalogState === 'forked',
+              'bg-slate-50 text-slate-600 border-slate-200': catalogState === 'custom',
+            }"
+            variant="outline"
+            class="text-[10px]"
+          >
+            <Circle v-if="catalogState === 'linked'" class="size-2 mr-1 fill-emerald-500 text-emerald-500" />
+            <GitFork v-else-if="catalogState === 'forked'" class="size-2.5 mr-1" />
+            <Pencil v-else class="size-2.5 mr-1" />
+            {{ catalogState }}
+          </Badge>
+        </div>
+      </div>
+      <div v-if="catalogOriginId" class="flex items-center justify-between">
+        <span class="text-xs text-muted-foreground">Template</span>
+        <span class="text-xs font-mono text-primary truncate max-w-[140px]" :title="catalogOriginId">{{ catalogOriginId }}</span>
+      </div>
+    </div>
+
     <!-- Version history -->
     <div v-if="versions.length > 1">
       <Separator class="my-2" />
@@ -65,14 +93,14 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Circle, GitFork, Pencil } from 'lucide-vue-next'
 
-defineProps({
+const props = defineProps({
   schema: { type: Object, required: true },
   versions: { type: Array, default: () => [] },
   entityCount: { type: Number, default: -1 },
@@ -81,4 +109,12 @@ defineProps({
 defineEmits(['promote'])
 
 const historyOpen = ref(true)
+
+const catalogMeta = computed(() => {
+  const s = props.schema?.schema || props.schema
+  return s?._catalog || s?.['_catalog'] || null
+})
+
+const catalogState = computed(() => catalogMeta.value?.state || null)
+const catalogOriginId = computed(() => catalogMeta.value?.template_id || null)
 </script>

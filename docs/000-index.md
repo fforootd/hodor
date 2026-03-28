@@ -23,6 +23,8 @@
 | [012](adr/012-path-based-deployment.md) | Path-Based Deployment Architecture | Accepted | 2026-03-28 |
 | [013](adr/013-id-generation-strategy.md) | ID Generation — Replace Sonyflake with UUIDv7 | Proposed | 2026-03-28 |
 | [014](adr/014-performance-testing.md) | Performance Testing Strategy — vCPU Scaling | Proposed | 2026-03-28 |
+| [015](adr/015-actions-catalog.md) | Actions, Templates & Catalog | Proposed | 2026-03-28 |
+| [016](adr/016-uniqueness-constraints.md) | Schema-Driven Uniqueness & Identifier Resolution | Proposed | 2026-03-28 |
 
 ## Architecture
 
@@ -66,6 +68,10 @@ graph TD
     A005 --> A012[012 Path-Based Deployment]
     A013[013 UUIDv7 IDs]
     A014[014 Performance Testing]
+    A009 --> A015[015 Actions & Catalog]
+    A004 --> A015
+    A002 --> A016[016 Uniqueness]
+    A005 --> A016
 ```
 
 ## Conventions
@@ -74,4 +80,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 015
+- **Next ADR number**: 017

@@ -1,7 +1,6 @@
 package login
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // --- Flow API Handlers ---
@@ -119,28 +119,29 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 
-	var identityID string
-	var displayName string
-	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, COALESCE(display_name, identifier) FROM entities WHERE identifier = ? AND state = 'active'`,
-		identifier,
-	).Scan(&identityID, &displayName)
-	if err == sql.ErrNoRows {
-		writeErr(w, http.StatusNotFound, "account not found")
-		return
+	// Resolve identifier via unique_fields (ADR-016).
+	orgID := r.Header.Get("X-Org-Id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org")
 	}
+
+	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if resolved == nil {
+		writeErr(w, http.StatusNotFound, "account not found")
+		return
+	}
 
-	flow.IdentityID = identityID
+	flow.IdentityID = resolved.EntityID
 	flow.Identifier = identifier
-	flow.DisplayName = displayName
+	flow.DisplayName = resolved.DisplayName
 	flow.CurrentStep = StepAuthSelect
 	h.flows.Put(flow)
 
-	log.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, identityID)
+	log.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.EntityID)
 	writeJSON(w, flow.ToFlowStep())
 }
 

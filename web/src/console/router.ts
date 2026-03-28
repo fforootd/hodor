@@ -25,6 +25,7 @@ const router = createRouter({
     { path: '/observability', name: 'obs-overview', component: () => import('./views/observability/OverviewView.vue') },
     { path: '/observability/explore', name: 'obs-explore', component: () => import('./views/observability/ExploreView.vue') },
     { path: '/traces', name: 'traces', component: () => import('./views/observability/TracesView.vue') },
+    { path: '/authorization', name: 'authorization', component: () => import('./views/AuthorizationView.vue') },
   ],
 })
 

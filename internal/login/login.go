@@ -17,6 +17,7 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/notify"
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // Handler provides login-flow API endpoints.
@@ -190,20 +191,24 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var identityID string
-	var displayName string
-	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, COALESCE(display_name, identifier) FROM entities WHERE identifier = ? AND state = 'active'`,
-		identifier,
-	).Scan(&identityID, &displayName)
-	if err == sql.ErrNoRows {
-		writeErr(w, http.StatusNotFound, "account not found")
-		return
+	// Resolve identifier via unique_fields (ADR-016).
+	orgID := r.Header.Get("X-Org-Id")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org")
 	}
+
+	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if resolved == nil {
+		writeErr(w, http.StatusNotFound, "account not found")
+		return
+	}
+
+	identityID := resolved.EntityID
+	displayName := resolved.DisplayName
 
 	sid := id.NewLoginSession()
 	loginSessions[sid] = &loginSession{

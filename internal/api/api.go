@@ -20,6 +20,7 @@ import (
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // API holds the REST handlers and their dependencies.
@@ -79,6 +80,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Customer-facing FGA API
 	a.RegisterFGARoutes(mux)
+
+	// Hierarchical settings CRUD (ADR-009)
+	a.RegisterSettingsRoutes(mux)
 
 	// Dynamic OpenAPI
 	mux.HandleFunc("GET /openapi.json", a.openAPISpec)
@@ -215,6 +219,25 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce uniqueness via unique_fields table (ADR-016).
+	orgID := r.Header.Get("X-Org-Id")
+	if orgID == "" {
+		orgID = "1"
+	}
+	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, identityID, orgID, req.Identifier); err != nil {
+		if v, ok := err.(*uniqueness.Violation); ok {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "uniqueness_violation",
+				"field": v.Field,
+				"value": v.Value,
+				"scope": v.Scope,
+			})
+			return
+		}
+		writeError(w, http.StatusConflict, "identifier already exists")
+		return
+	}
+
 	// Insert capabilities.
 	for _, cap := range req.Capabilities {
 		_, err = tx.ExecContext(r.Context(),
@@ -240,6 +263,21 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.bus.Signal()
+
+	// Wire FGA: write ownership + org tuples for the new entity.
+	if svc := FGAService; svc != nil {
+		creatorID := r.Header.Get("X-Identity-Id")
+		if creatorID == "" {
+			creatorID = "admin" // fallback for bootstrap
+		}
+		orgID := r.Header.Get("X-Org-Id")
+		if orgID == "" {
+			orgID = "1" // default org
+		}
+		if err := svc.OnEntityCreated(r.Context(), identityID, creatorID, orgID); err != nil {
+			log.Printf("[fga] warn: failed to write entity tuples: %v", err)
+		}
+	}
 
 	resp := IdentityResponse{
 		ID:           identityID,
@@ -445,6 +483,14 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.bus.Signal()
+
+	// Wire FGA: clean up all tuples for deleted entity.
+	if svc := FGAService; svc != nil {
+		if err := svc.OnEntityDeleted(r.Context(), identityID); err != nil {
+			log.Printf("[fga] warn: failed to delete entity tuples: %v", err)
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

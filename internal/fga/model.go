@@ -297,7 +297,7 @@ func typeGroup() *openfgav1.TypeDefinition {
 				},
 				"owner":  directUser(),
 				"admin":  directUser(),
-				"member": directUserAndGroup(),
+				"member": directUser(),
 				// Permissions
 				"can_read":           noDirectRelation(),
 				"can_update":         noDirectRelation(),

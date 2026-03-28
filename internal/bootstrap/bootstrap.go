@@ -18,6 +18,7 @@ import (
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/schema"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // EnsureAdmin checks if any entities exist. If not, it creates a default
@@ -196,6 +197,16 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	_, _ = tx.ExecContext(ctx,
 		`INSERT INTO entity_indexes (entity_type, entity_id, field, value) VALUES ('identity', ?, 'display_name', 'Admin')`,
 		identityID)
+
+	// Enforce uniqueness (ADR-016): register identifier + email in unique_fields.
+	if err := uniqueness.EnforceFromIdentifier(ctx, tx, identityID, "1", username); err != nil {
+		log.Printf("WARN: bootstrap unique identifier: %v", err)
+	}
+	// Also register email at instance scope.
+	_ = uniqueness.Enforce(ctx, tx, identityID, "1",
+		[]uniqueness.FieldConstraint{{FieldName: "email", Scope: uniqueness.ScopeInstance}},
+		map[string]any{"email": email},
+	)
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)

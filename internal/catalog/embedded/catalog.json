@@ -1,0 +1,115 @@
+{
+  "version": "1.0",
+  "templates": [
+    {
+      "id": "rate-limit-by-path",
+      "type": "action",
+      "name": "Rate Limit by Path",
+      "description": "Apply different rate limits to specific API paths using expr conditions.",
+      "tags": ["security", "rate-limiting", "api"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/actions/rate-limit-by-path.json"
+    },
+    {
+      "id": "webhook-on-user-created",
+      "type": "action",
+      "name": "Webhook on User Created",
+      "description": "Send a webhook notification when a new user identity is created.",
+      "tags": ["webhook", "events", "integration"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/actions/webhook-on-user-created.json"
+    },
+    {
+      "id": "block-disposable-emails",
+      "type": "action",
+      "name": "Block Disposable Emails",
+      "description": "Reject sign-ups from disposable email providers like mailinator, guerrillamail, etc.",
+      "tags": ["security", "anti-fraud", "email"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/actions/block-disposable-emails.json"
+    },
+    {
+      "id": "google-oidc",
+      "type": "provider",
+      "name": "Google OIDC",
+      "description": "Google identity provider with standard claim mappings for email, name, and profile picture.",
+      "tags": ["oidc", "social-login", "google"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/providers/google-oidc.json"
+    },
+    {
+      "id": "entra-id",
+      "type": "provider",
+      "name": "Microsoft Entra ID",
+      "description": "Microsoft Entra ID (Azure AD) provider with tenant-aware OIDC configuration and claim mappings.",
+      "tags": ["oidc", "enterprise", "microsoft", "azure"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/providers/entra-id.json"
+    },
+    {
+      "id": "custom-oidc",
+      "type": "provider",
+      "name": "Custom OIDC Provider",
+      "description": "Generic OIDC provider template. Connect any OpenID Connect compliant identity provider.",
+      "tags": ["oidc", "generic", "custom"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/providers/custom-oidc.json"
+    },
+    {
+      "id": "github",
+      "type": "provider",
+      "name": "GitHub",
+      "description": "GitHub OAuth provider with user profile and email claim mappings.",
+      "tags": ["oauth", "social-login", "github", "developer"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/providers/github.json"
+    },
+    {
+      "id": "gitlab",
+      "type": "provider",
+      "name": "GitLab",
+      "description": "GitLab OIDC provider with profile and email claim mappings. Supports self-hosted instances.",
+      "tags": ["oidc", "social-login", "gitlab", "developer"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/providers/gitlab.json"
+    },
+    {
+      "id": "rbac-basic",
+      "type": "authorization",
+      "name": "Basic RBAC",
+      "description": "Role-based access control model with admin, editor, and viewer roles for organizations and documents.",
+      "tags": ["rbac", "authorization", "getting-started"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/authorization/rbac-basic.json"
+    },
+    {
+      "id": "passkey-first",
+      "type": "login_flow",
+      "name": "Passkey-First Login",
+      "description": "Modern passwordless login with passkeys as primary method and password fallback. Includes disposable email blocking.",
+      "tags": ["login", "passkey", "passwordless", "modern"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/login_flows/passkey-first.json"
+    },
+    {
+      "id": "sso-enterprise",
+      "type": "login_flow",
+      "name": "SSO Enterprise Login",
+      "description": "Enterprise SSO-only login. Users authenticate exclusively via corporate identity provider. No local passwords.",
+      "tags": ["login", "sso", "enterprise", "corporate"],
+      "version": "1.0.0",
+      "author": "zitadel",
+      "path": "templates/login_flows/sso-enterprise.json"
+    }
+  ]
+}

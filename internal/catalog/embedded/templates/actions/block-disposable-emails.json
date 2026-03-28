@@ -1,0 +1,25 @@
+{
+  "type": "action",
+  "version": "1.0.0",
+  "name": "Block Disposable Emails",
+  "description": "Reject sign-up attempts from known disposable email providers (mailinator, guerrillamail, tempmail, etc.). Reduces fraud and ensures real user email addresses.",
+  "variables": {
+    "custom_domains": {
+      "type": "string",
+      "description": "Comma-separated list of additional domains to block",
+      "default": ""
+    }
+  },
+  "payload": {
+    "display_name": "Block Disposable Emails",
+    "hook": "pre_auth",
+    "action_type": "expr",
+    "trigger": "true",
+    "config": {
+      "program": "let domain = request.identifier split '@' | last(); let blocked = ['mailinator.com','guerrillamail.com','tempmail.com','throwaway.email','yopmail.com','sharklasers.com','grr.la','guerrillamailblock.com','pokemail.net','spam4.me','dispostable.com','trashmail.com','10minutemail.com','getnada.com','maildrop.cc']; domain in blocked ? {\"action\": \"deny\", \"reason\": \"Disposable email addresses are not allowed\"} : {\"action\": \"allow\"}"
+    },
+    "priority": 10,
+    "enabled": true,
+    "fail_open": true
+  }
+}

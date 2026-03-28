@@ -100,6 +100,78 @@ export const schemaApi = {
     ),
   entityCount: (id: string) =>
     api.get<{ count: number }>(`/v1/schemas/${id}/identity-count`).then(r => r.count),
+  previewUpgrade: (type: string, newSchema: Record<string, any>, sampleSize = 10) =>
+    api.post<UpgradeReport>(`/v1/schemas/${encodeURIComponent(type)}/preview-upgrade`, {
+      new_schema: newSchema, sample_size: sampleSize,
+    }),
+}
+
+// --- Catalog (ADR-015) ---
+
+export interface CatalogTemplate {
+  id: string
+  name: string
+  type: string        // action, provider, login_flow, authorization
+  version: string
+  description: string
+  tags: string[]
+  source: string      // embedded | remote
+}
+
+export interface CatalogVariable {
+  type: string        // string, integer, boolean
+  description?: string
+  default?: any
+}
+
+export interface CatalogTemplateDetail {
+  template: CatalogTemplate
+  variables: Record<string, CatalogVariable>
+  payload: Record<string, any>
+}
+
+export interface UpgradeFieldChange {
+  path: string
+  change: string      // field_added, field_removed, type_changed, required_added, required_removed
+  description: string
+  severity: string    // info, warning, breaking
+  affected_estimate?: number
+}
+
+export interface UpgradeEntityResult {
+  id: string
+  display_name: string
+  status: string      // valid, warning, breaking
+  changes?: { path: string; issue: string; current_value: any; suggestion?: string }[]
+}
+
+export interface UpgradeReport {
+  schema_type: string
+  total_entities: number
+  sampled: number
+  impact: { valid: number; warnings: number; breaking: number }
+  field_changes: UpgradeFieldChange[]
+  sample_entities: UpgradeEntityResult[]
+}
+
+export const catalogApi = {
+  list: (type?: string, tag?: string) => {
+    const qs = new URLSearchParams()
+    if (type) qs.set('type', type)
+    if (tag) qs.set('tags', tag)
+    const q = qs.toString()
+    return api.get<{ templates: CatalogTemplate[]; total: number }>(
+      `/v1/catalog${q ? '?' + q : ''}`
+    ).then(r => r.templates || [])
+  },
+  get: (id: string) =>
+    api.get<CatalogTemplateDetail>(`/v1/catalog/${encodeURIComponent(id)}`),
+  install: (id: string, variables: Record<string, any>) =>
+    api.post<{ id: string; template_id: string; status: string }>(
+      `/v1/catalog/${encodeURIComponent(id)}/install`, { variables }
+    ),
+  refresh: () =>
+    api.post<{ status: string; new: number }>('/v1/catalog/refresh', {}),
 }
 
 export const sessionApi = {
@@ -196,3 +268,65 @@ export const analyticsApi = {
     api.get<Record<string, any>>('/v1/analytics/tables'),
 }
 
+// FGA (Fine-Grained Authorization) management
+export interface FGATuple {
+  user: string
+  relation: string
+  object: string
+}
+
+export interface FGAModelNode {
+  id: string
+  relations: string[]
+  permissions: string[]
+}
+
+export interface FGAModelEdge {
+  from: string
+  to: string
+  relation: string
+  kind: string
+}
+
+export interface FGACheckResult {
+  allowed: boolean
+  user: string
+  relation: string
+  object: string
+}
+
+export interface FGATestResult {
+  user: string
+  relation: string
+  object: string
+  expected: boolean
+  actual: boolean
+  pass: boolean
+  error?: string
+}
+
+export const fgaApi = {
+  getModel: () =>
+    api.get<{ schema_version: string; types: { type: string; relations: string[] }[] }>('/v1/fga/model'),
+  getModelGraph: () =>
+    api.get<{ nodes: FGAModelNode[]; edges: FGAModelEdge[] }>('/v1/fga/model/graph'),
+  check: (user: string, relation: string, object: string) =>
+    api.post<FGACheckResult>('/v1/fga/check', { user, relation, object }),
+  readTuples: (params?: { user?: string; relation?: string; object?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.user) qs.set('user', params.user)
+    if (params?.relation) qs.set('relation', params.relation)
+    if (params?.object) qs.set('object', params.object)
+    return api.get<{ tuples: FGATuple[] }>(`/v1/fga/tuples?${qs}`).then(r => r.tuples || [])
+  },
+  writeTuples: (tuples: FGATuple[]) =>
+    api.post<{ status: string; written: number }>('/v1/fga/tuples', { tuples }),
+  deleteTuples: (tuples: FGATuple[]) =>
+    api.delete<{ status: string; deleted: number }>('/v1/fga/tuples', { tuples }),
+  listObjects: (user: string, relation: string, type: string) =>
+    api.post<{ objects: string[] }>('/v1/fga/list-objects', { user, relation, type }),
+  expand: (relation: string, object: string) =>
+    api.post<{ tree: any }>('/v1/fga/expand', { relation, object }),
+  batchTest: (assertions: { user: string; relation: string; object: string; expected: boolean }[]) =>
+    api.post<{ results: FGATestResult[]; total: number; passed: number; failed: number }>('/v1/fga/test', { assertions }),
+}

@@ -1,0 +1,56 @@
+{
+  "type": "provider",
+  "version": "1.0.0",
+  "name": "Custom OIDC Provider",
+  "description": "Connect any OpenID Connect compliant identity provider. Configure the issuer URL, credentials, and claim mappings for your specific provider.",
+  "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider (shown on login screen)",
+      "default": "SSO"
+    },
+    "issuer_url": {
+      "type": "string",
+      "description": "OIDC Issuer URL (e.g. https://idp.example.com)"
+    },
+    "client_id": {
+      "type": "string",
+      "description": "OAuth 2.0 Client ID"
+    },
+    "client_secret": {
+      "type": "string",
+      "description": "OAuth 2.0 Client Secret",
+      "sensitive": true
+    },
+    "scopes": {
+      "type": "string",
+      "description": "Space-separated OAuth scopes",
+      "default": "openid profile email"
+    },
+    "email_claim": {
+      "type": "string",
+      "description": "Claim path for the user's email",
+      "default": "claims.email"
+    },
+    "name_claim": {
+      "type": "string",
+      "description": "Claim path for the user's display name",
+      "default": "claims.name"
+    }
+  },
+  "payload": {
+    "display_name": "{{provider_name}}",
+    "type": "oidc",
+    "issuer": "{{issuer_url}}",
+    "client_id": "{{client_id}}",
+    "client_secret": "{{client_secret}}",
+    "scopes": "{{scopes}}",
+    "claim_mappings": {
+      "email": "{{email_claim}}",
+      "display_name": "{{name_claim}}",
+      "first_name": "claims.given_name",
+      "last_name": "claims.family_name",
+      "picture": "claims.picture"
+    }
+  }
+}

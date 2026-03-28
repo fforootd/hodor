@@ -2,11 +2,11 @@
   "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "description": "Engine pipeline rule — an expr program bound to a pipeline stage.",
+  "description": "Pipeline action — an expr program bound to a pipeline hook that triggers on a condition.",
   "properties": {
     "display_name": {
       "type": "string",
-      "description": "Rule display name"
+      "description": "Action display name"
     },
     "description": {
       "type": "string"
@@ -15,7 +15,7 @@
       "type": "boolean",
       "default": true
     },
-    "stage": {
+    "hook": {
       "type": "string",
       "enum": [
         "on_request",
@@ -25,21 +25,21 @@
         "on_token",
         "on_event"
       ],
-      "description": "Pipeline stage"
+      "description": "Pipeline hook (attachment point)"
     },
     "priority": {
       "type": "integer",
       "default": 50,
       "minimum": 0,
       "maximum": 100,
-      "description": "Execution order within stage (lower = earlier)"
+      "description": "Execution order within hook (lower = earlier)"
     },
-    "condition": {
+    "trigger": {
       "type": "string",
       "default": "true",
-      "description": "Expr condition — rule only fires if this evaluates to true"
+      "description": "Expr condition — action only fires if this evaluates to true"
     },
-    "engine": {
+    "action_type": {
       "type": "string",
       "enum": [
         "expr",
@@ -50,11 +50,11 @@
         "fga",
         "built-in"
       ],
-      "description": "Engine type"
+      "description": "Action type (engine)"
     },
     "config": {
       "type": "object",
-      "description": "Engine-specific configuration"
+      "description": "Type-specific configuration"
     },
     "timeout_ms": {
       "type": "integer",
@@ -64,12 +64,20 @@
     "fail_open": {
       "type": "boolean",
       "default": false,
-      "description": "Allow request if rule errors (true) or block (false)"
+      "description": "Allow request if action errors (true) or block (false)"
+    },
+    "template_id": {
+      "type": "string",
+      "description": "Catalog template this action was installed from (for update tracking)"
+    },
+    "template_version": {
+      "type": "string",
+      "description": "Version of the catalog template when installed"
     }
   },
   "required": [
     "display_name",
-    "stage",
-    "engine"
+    "hook",
+    "action_type"
   ]
 }

@@ -124,6 +124,14 @@
       </ResizablePanel>
     </ResizablePanelGroup>
   </div>
+
+  <!-- Schema Upgrade Preview Sheet -->
+  <SchemaUpgradePreview
+    v-model:open="showUpgradePreview"
+    :schema-type="schema?.type || ''"
+    :proposed-schema="proposedSchema"
+    @confirm="confirmSave"
+  />
 </template>
 
 <script setup lang="ts">
@@ -132,6 +140,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { schemaApi, type Schema } from '@/api/resources'
 import SchemaAnnotationRenderer from '@/console/components/schema/SchemaAnnotationRenderer.vue'
+import SchemaUpgradePreview from '@/console/components/schema/SchemaUpgradePreview.vue'
 
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -387,7 +396,34 @@ function onQuickSettingChange() {
   } catch {}
 }
 
+// Upgrade preview state
+const showUpgradePreview = ref(false)
+const proposedSchema = ref<Record<string, any> | null>(null)
+
 async function saveSchema() {
+  if (!schema.value || jsonError.value) return
+
+  // If entities exist, show upgrade preview first
+  if (entityCount.value > 0 && dirty.value) {
+    try {
+      proposedSchema.value = JSON.parse(editorContent.value)
+      showUpgradePreview.value = true
+      return // Wait for user confirmation
+    } catch (e: any) {
+      saveError.value = e.message || 'Invalid JSON'
+      return
+    }
+  }
+
+  await commitSave()
+}
+
+async function confirmSave() {
+  showUpgradePreview.value = false
+  await commitSave()
+}
+
+async function commitSave() {
   if (!schema.value || jsonError.value) return
   saving.value = true
   saveSuccess.value = false

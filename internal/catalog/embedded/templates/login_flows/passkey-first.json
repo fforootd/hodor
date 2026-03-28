@@ -1,0 +1,54 @@
+{
+  "type": "login_flow",
+  "version": "1.0.0",
+  "name": "Passkey-First",
+  "description": "Modern passwordless login experience. Passkeys are the primary authentication method with password as fallback. Ideal for consumer apps that want to reduce password friction.",
+  "variables": {
+    "primary_color": {
+      "type": "string",
+      "description": "Brand color for the login screen",
+      "default": "#6366f1"
+    },
+    "heading_text": {
+      "type": "string",
+      "description": "Heading text shown on the login screen",
+      "default": "Welcome back"
+    },
+    "allow_registration": {
+      "type": "boolean",
+      "description": "Allow new users to self-register",
+      "default": true
+    },
+    "mfa_required": {
+      "type": "boolean",
+      "description": "Require MFA for password-based login",
+      "default": false
+    }
+  },
+  "payload": {
+    "display_name": "Passkey-First Login",
+    "login_policy": {
+      "preset": "passkey_first",
+      "passwordless_enabled": true,
+      "mfa_required": "{{mfa_required}}",
+      "registration_allowed": "{{allow_registration}}",
+      "external_idp_only": false
+    },
+    "auth_methods": {
+      "passkey":    { "enabled": true,  "interactive": true, "position": 0 },
+      "password":   { "enabled": true,  "interactive": true, "position": 1 },
+      "magic_link": { "enabled": false, "interactive": true, "position": 2 },
+      "sso":        { "enabled": true,  "interactive": true, "position": 3 }
+    },
+    "branding": {
+      "heading": "{{heading_text}}",
+      "colors": { "primary": "{{primary_color}}" }
+    },
+    "actions": [
+      {
+        "template_id": "block-disposable-emails",
+        "variables": {}
+      }
+    ]
+  }
+}
