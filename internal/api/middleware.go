@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/telemetry"
 )
 
 // publicRoutes returns the set of path prefixes/patterns that skip authentication.
@@ -102,8 +104,55 @@ func AuthGate(cookieCfg *session.CookieConfig, db *sql.DB) func(http.Handler) ht
 			r.Header.Set("X-Identity-Id", info.EntityID)
 			r.Header.Set("X-Session-Id", info.SessionID)
 			r.Header.Set("X-Token-Type", info.TokenType)
+			if info.OrgID != "" {
+				r.Header.Set("X-Org-Id", info.OrgID)
+			}
 
-			next.ServeHTTP(w, r)
+			// Inject session_id into context for tracing downstream
+			ctx := telemetry.WithSessionID(r.Context(), info.SessionID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+type responseWriterWrapper struct {
+	http.ResponseWriter
+
+	statusCode int
+}
+
+func (rw *responseWriterWrapper) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// EventStreamMiddleware logs authenticated API requests into the event stream.
+// It expects to be wrapped inside AuthGate so that the user identity is resolved.
+func EventStreamMiddleware(db *sql.DB) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			rw := &responseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
+			next.ServeHTTP(rw, r)
+
+			duration := time.Since(start).Milliseconds()
+
+			actorID := r.Header.Get("X-Identity-Id")
+			if actorID == "" {
+				// Don't log unauthenticated requests to the event stream
+				return
+			}
+
+			payload := map[string]any{
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"status":      rw.statusCode,
+				"duration_ms": duration,
+			}
+
+			// Context already has trace_id, span_id (from OTelMiddleware) and session_id (from AuthGate)
+			emitEventSimple(r.Context(), db, "api.request", actorID, "", "api", payload)
 		})
 	}
 }
@@ -128,12 +177,8 @@ func extractTokenFromRequest(r *http.Request, cookies *session.CookieConfig) str
 }
 
 // requireAdmin is middleware that checks for a valid session with the "admin" capability.
-// It supports both:
-//   - Cookie-based auth (browser UI): HMAC-signed session cookie
-//   - Bearer token auth (API clients): Authorization: Bearer <token>
-//
-// When AuthGate is active, identity info is already injected via X-Identity-Id.
-// This middleware additionally checks for admin capability.
+// DEPRECATED: FGA middleware (FGAGate) handles authorization for API routes.
+// Kept for backward compatibility with non-API routes (e.g., UI handlers).
 func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		identityID, err := a.resolveCallerIdentity(r)
@@ -159,6 +204,12 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r)
 	}
+}
+
+// noopMiddleware is a passthrough middleware that does nothing.
+// Used to replace requireAdmin in route registration when FGA handles authz.
+func noopMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return next
 }
 
 // requireSession is middleware that ensures a valid authenticated user.
@@ -198,6 +249,10 @@ func (a *API) resolveCallerIdentity(r *http.Request) (string, error) {
 	r.Header.Set("X-Identity-Id", info.EntityID)
 	r.Header.Set("X-Session-Id", info.SessionID)
 	r.Header.Set("X-Token-Type", info.TokenType)
+
+	// Notice: Downstream handlers might use context.
+	// Since this is called mid-flight inside requireAdmin, we don't recreate the request context here.
+	// AuthGate handles the primary session context injection.
 
 	return info.EntityID, nil
 }

@@ -1,105 +1,145 @@
 <template>
-  <div v-if="loading" class="loading">Loading schema…</div>
-  <div v-else-if="!schema" class="loading">Schema not found</div>
-  <div v-else class="editor-layout">
-    <!-- Annotation-Driven Sidebar -->
-    <aside class="sidebar">
-      <SchemaAnnotationRenderer
-        :parsed-schema="parsedSchemaJSON"
-        :schema-meta="schema"
-        :versions="versionHistory"
-        :entity-count="entityCount"
-        :promote-loading="promoteLoading"
-        :save-status="saveSuccess ? '✓ Created v' + newVersionNum : saveError || ''"
-        @promote="promoteThis"
-        @change="onQuickSettingChange"
-        @save="saveSchemaWithMsg"
-      />
-      <div class="sidebar-actions" v-if="dirty">
-        <button class="btn-diff" @click="showDiff = !showDiff">
-          {{ showDiff ? '← Editor' : 'Review changes' }}
-        </button>
-      </div>
-    </aside>
+  <div v-if="loading" class="flex h-64 items-center justify-center text-muted-foreground">
+    <Spinner class="mr-2" /> Loading schema…
+  </div>
+  <div v-else-if="!schema" class="flex h-64 items-center justify-center text-muted-foreground">
+    Schema not found
+  </div>
+  <div v-else class="flex flex-col" style="height: calc(100vh - 100px)">
+    <ResizablePanelGroup direction="horizontal" class="rounded-lg border bg-background">
+      <!-- Sidebar Panel -->
+      <ResizablePanel :default-size="25" :min-size="18" :max-size="40">
+        <SchemaAnnotationRenderer
+          :parsed-schema="parsedSchemaJSON"
+          :schema-meta="schema"
+          :versions="versionHistory"
+          :entity-count="entityCount"
+          :promote-loading="promoteLoading"
+          :save-status="saveSuccess ? '✓ Created v' + newVersionNum : saveError || ''"
+          @promote="promoteThis"
+          @change="onQuickSettingChange"
+          @save="saveSchemaWithMsg"
+        />
+      </ResizablePanel>
 
-    <!-- Editor Panel -->
-    <div class="editor-main">
-      <div class="editor-toolbar">
-        <span class="editor-title">{{ schema.id }}</span>
-        <span v-if="dirty" class="dirty-dot" title="Unsaved changes">●</span>
-        <div class="toolbar-right">
-          <button v-if="dirty" class="btn-diff-toolbar" :class="{ active: showDiff }" @click="showDiff = !showDiff">
-            {{ showDiff ? 'Editor' : 'Diff' }}
-          </button>
-          <button class="btn-copy" @click="copyToClipboard">Copy JSON</button>
-          <button class="btn-format" @click="formatJson">Format</button>
-        </div>
-      </div>
+      <ResizableHandle withHandle />
 
-      <!-- Diff View -->
-      <div v-if="showDiff && dirty" class="diff-container">
-        <div class="diff-header">
-          <span class="diff-stat">
-            <span class="diff-add">+{{ diffStats.added }}</span>
-            <span class="diff-del">−{{ diffStats.removed }}</span>
-            lines changed
-          </span>
-        </div>
-        <div class="diff-content">
-          <div v-for="(line, i) in diffLines" :key="i"
-               class="diff-line" :class="line.type">
-            <span class="diff-gutter">{{ line.num || '' }}</span>
-            <span class="diff-marker">{{ line.marker }}</span>
-            <span class="diff-text" v-html="line.html"></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Code Editor with Syntax Highlighting -->
-      <div v-else class="editor-container">
-        <div class="editor-scroll" ref="scrollEl" @scroll="syncScroll">
-          <!-- Line numbers gutter -->
-          <div class="line-gutter" ref="gutterEl">
-            <div v-for="(line, idx) in editorLines" :key="idx"
-                 class="line-num" :class="{ hidden: isLineHidden(idx) }">
-              <span v-if="foldableLines.has(idx)" class="fold-toggle"
-                    @click.stop="toggleFold(idx)">
-                {{ collapsedLines.has(idx) ? '▸' : '▾' }}
-              </span>
-              <span class="num-text">{{ idx + 1 }}</span>
+      <!-- Editor Panel -->
+      <ResizablePanel :default-size="75">
+        <div class="flex h-full flex-col">
+          <!-- Toolbar -->
+          <div class="flex items-center gap-2 border-b bg-muted/30 px-4 py-2">
+            <span class="text-sm font-mono font-medium truncate">{{ schema.id }}</span>
+            <Badge v-if="dirty" variant="outline" class="text-[10px] border-amber-300 bg-amber-50 text-amber-700 animate-pulse">
+              unsaved
+            </Badge>
+            <div class="ml-auto flex items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyToClipboard">
+                    <Copy class="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Copy JSON</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="formatJson">
+                    <AlignLeft class="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Format</TooltipContent>
+              </Tooltip>
             </div>
           </div>
-          <!-- Highlighted overlay (line-by-line for fold support) -->
-          <div class="highlight-layer" ref="highlightEl" aria-hidden="true">
-            <div v-for="(line, idx) in highlightedLines" :key="idx"
-                 class="hl-line" :class="{ hidden: isLineHidden(idx), 'fold-start': collapsedLines.has(idx) }">
-              <span v-html="line"></span>
-              <span v-if="collapsedLines.has(idx)" class="fold-placeholder">
-                ⋯ {{ foldRanges.get(idx) ? foldRanges.get(idx)![1] - foldRanges.get(idx)![0] : 0 }} lines
-              </span>
+
+          <!-- Tabs: Editor / Diff -->
+          <Tabs v-model="activeTab" class="flex flex-1 flex-col overflow-hidden">
+            <div class="border-b bg-muted/20 px-4">
+              <TabsList class="h-9 bg-transparent p-0">
+                <TabsTrigger value="editor" class="rounded-none border-b-2 border-transparent px-3 pb-2 pt-1.5 text-xs data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+                  Editor
+                </TabsTrigger>
+                <TabsTrigger value="diff" class="rounded-none border-b-2 border-transparent px-3 pb-2 pt-1.5 text-xs data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none" :disabled="!dirty">
+                  Diff
+                  <Badge v-if="dirty" variant="secondary" class="ml-1.5 text-[10px] px-1">
+                    +{{ diffStats.added }}/-{{ diffStats.removed }}
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
             </div>
+
+            <TabsContent value="editor" class="flex-1 m-0 overflow-hidden">
+              <vue-monaco-editor
+                v-model:value="editorContent"
+                language="json"
+                theme="vs"
+                :options="monacoOptions"
+                @mount="onEditorMount"
+                @change="onEditorChange"
+              />
+            </TabsContent>
+
+            <TabsContent value="diff" class="flex-1 m-0 overflow-hidden">
+              <div v-if="!dirty" class="flex h-full items-center justify-center text-muted-foreground text-sm">
+                No changes to show
+              </div>
+              <div v-else class="flex h-full flex-col overflow-hidden">
+                <div class="flex items-center gap-3 border-b px-4 py-2 bg-muted/20">
+                  <span class="text-xs text-muted-foreground">
+                    <span class="font-semibold text-emerald-600">+{{ diffStats.added }}</span>
+                    <span class="mx-1 text-muted-foreground/50">·</span>
+                    <span class="font-semibold text-red-600">−{{ diffStats.removed }}</span>
+                    <span class="ml-1">lines changed</span>
+                  </span>
+                </div>
+                <div class="flex-1 overflow-auto font-mono text-xs leading-relaxed">
+                  <div v-for="(line, i) in diffLines" :key="i"
+                    class="flex px-4 py-px"
+                    :class="{
+                      'bg-emerald-50 text-emerald-900': line.type === 'add',
+                      'bg-red-50 text-red-900': line.type === 'del',
+                    }"
+                  >
+                    <span class="w-10 shrink-0 text-right pr-3 select-none text-muted-foreground/50">{{ line.num || '' }}</span>
+                    <span class="w-4 shrink-0 text-center select-none font-semibold"
+                      :class="{
+                        'text-emerald-600': line.type === 'add',
+                        'text-red-600': line.type === 'del',
+                        'text-muted-foreground/30': line.type === 'ctx',
+                      }"
+                    >{{ line.marker }}</span>
+                    <span class="flex-1 whitespace-pre">{{ line.text }}</span>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <!-- JSON error bar -->
+          <div v-if="jsonError" class="border-t border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700 font-mono">
+            ⚠ {{ jsonError }}
           </div>
-          <!-- Transparent textarea (captures input) -->
-          <textarea
-            ref="editorEl"
-            v-model="editorContent"
-            class="code-editor"
-            spellcheck="false"
-            @input="onEditorChange"
-            @scroll="syncScroll"
-          ></textarea>
         </div>
-        <div v-if="jsonError" class="json-error">⚠ {{ jsonError }}</div>
-      </div>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { schemaApi, type Schema } from '@/api/resources'
 import SchemaAnnotationRenderer from '@/console/components/schema/SchemaAnnotationRenderer.vue'
+
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Spinner } from '@/components/ui/spinner'
+import { Copy, AlignLeft } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -113,17 +153,31 @@ const saving = ref(false)
 const saveSuccess = ref(false)
 const saveError = ref('')
 const entityCount = ref(-1)
-const showDiff = ref(false)
 const commitMessage = ref('')
 const newVersionNum = ref(0)
 const versionHistory = ref<Schema[]>([])
 const promoteLoading = ref(false)
+const activeTab = ref('editor')
 
-// Refs for scroll sync
-const scrollEl = ref<HTMLElement | null>(null)
-const gutterEl = ref<HTMLElement | null>(null)
-const highlightEl = ref<HTMLElement | null>(null)
-const editorEl = ref<HTMLTextAreaElement | null>(null)
+// Monaco editor options
+const monacoOptions = computed(() => ({
+  minimap: { enabled: false },
+  fontSize: 13,
+  lineNumbers: 'on' as const,
+  scrollBeyondLastLine: false,
+  wordWrap: 'off' as const,
+  tabSize: 2,
+  automaticLayout: true,
+  renderLineHighlight: 'all' as const,
+  bracketPairColorization: { enabled: true },
+  padding: { top: 8, bottom: 8 },
+  folding: true,
+  foldingStrategy: 'indentation' as const,
+  scrollbar: {
+    verticalScrollbarSize: 8,
+    horizontalScrollbarSize: 8,
+  },
+}))
 
 // Quick settings state
 const loginPreset = ref('identifier_first')
@@ -140,8 +194,6 @@ const brandHeading = ref('Welcome back')
 const brandPrimary = ref('#6366f1')
 
 const dirty = computed(() => editorContent.value !== originalContent.value)
-const editorLines = computed(() => editorContent.value.split('\n'))
-const lineCount = computed(() => editorLines.value.length)
 
 // Parsed schema JSON for annotation renderer
 const parsedSchemaJSON = computed(() => {
@@ -158,101 +210,31 @@ function saveSchemaWithMsg(msg: string) {
   saveSchema()
 }
 
-// --- Fold State ---
-const collapsedLines = ref(new Set<number>())
+// --- Monaco Mount ---
+let monacoInstance: any = null
 
-// Compute foldable line ranges: lines ending with { or [
-const foldRanges = computed(() => {
-  const ranges = new Map<number, [number, number]>()
-  const lines = editorLines.value
-  const stack: Array<{ line: number; char: string }> = []
-
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trimEnd()
-    // Check for opening braces/brackets (possibly followed by comma)
-    if (trimmed.endsWith('{') || trimmed.endsWith('[')) {
-      stack.push({ line: i, char: trimmed.endsWith('{') ? '}' : ']' })
-    }
-    // Check for closing braces/brackets
-    const lastChar = trimmed.replace(/,\s*$/, '').slice(-1)
-    if ((lastChar === '}' || lastChar === ']') && stack.length > 0) {
-      const top = stack[stack.length - 1]
-      if (lastChar === top.char && i > top.line) {
-        ranges.set(top.line, [top.line + 1, i])
-        stack.pop()
-      }
-    }
-  }
-  return ranges
-})
-
-const foldableLines = computed(() => new Set(foldRanges.value.keys()))
-
-function isLineHidden(idx: number): boolean {
-  for (const [start, [from, to]] of foldRanges.value) {
-    if (collapsedLines.value.has(start) && idx >= from && idx <= to) return true
-  }
-  return false
+function onEditorMount(editor: any, monaco: any) {
+  monacoInstance = monaco
+  // Configure JSON schema validation
+  monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+    validate: true,
+    allowComments: false,
+    trailingCommas: 'error',
+  })
 }
 
-function toggleFold(line: number) {
-  const next = new Set(collapsedLines.value)
-  if (next.has(line)) next.delete(line)
-  else next.add(line)
-  collapsedLines.value = next
-}
-
-interface FieldInfo {
-  name: string
-  identifier: boolean
-  sensitive: boolean
-  mfa: string
-}
-
-const schemaFields = computed<FieldInfo[]>(() => {
+function onEditorChange(value: string | undefined) {
+  if (value == null) return
+  jsonError.value = ''
+  saveSuccess.value = false
+  saveError.value = ''
   try {
-    const parsed = JSON.parse(editorContent.value)
-    const props = parsed?.properties || {}
-    return Object.entries(props).map(([name, def]: [string, any]) => ({
-      name,
-      identifier: def?.['x-auth']?.identifier || false,
-      sensitive: def?.['x-sensitive'] || false,
-      mfa: def?.['x-auth']?.mfa || '',
-    }))
-  } catch { return [] }
-})
-
-// --- Syntax Highlighting ---
-
-function highlightJSON(json: string): string {
-  return json.replace(
-    /("(?:x-[a-z][a-z0-9_-]*)")\s*:/g, // x-* annotation keys
-    '<span class="tok-annotation">$1</span>:'
-  ).replace(
-    /("(?!x-)[^"]*")\s*:/g, // regular keys (not already matched)
-    '<span class="tok-key">$1</span>:'
-  ).replace(
-    /:\s*("(?:\\.|[^"\\])*")/g, // string values
-    ': <span class="tok-string">$1</span>'
-  ).replace(
-    /:\s*(\d+(?:\.\d+)?)/g, // numbers
-    ': <span class="tok-number">$1</span>'
-  ).replace(
-    /:\s*(true|false)/g, // booleans
-    ': <span class="tok-bool">$1</span>'
-  ).replace(
-    /:\s*(null)/g, // null
-    ': <span class="tok-null">$1</span>'
-  )
+    JSON.parse(value)
+    syncSidebarFromJson(value)
+  } catch (e: any) {
+    jsonError.value = e.message?.replace('JSON.parse: ', '') || 'Invalid JSON'
+  }
 }
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-const highlightedLines = computed(() => {
-  return editorLines.value.map(line => highlightJSON(escapeHtml(line)))
-})
 
 // --- Diff Engine ---
 
@@ -260,7 +242,7 @@ interface DiffLine {
   type: 'add' | 'del' | 'ctx'
   num: number | null
   marker: string
-  html: string
+  text: string
 }
 
 function computeDiff(oldText: string, newText: string): DiffLine[] {
@@ -268,9 +250,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   const newLines = newText.split('\n')
   const result: DiffLine[] = []
 
-  // Simple LCS-based diff
   const m = oldLines.length, n = newLines.length
-  // For perf, use a simple O(mn) approach — schemas are small
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -280,7 +260,6 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
     }
   }
 
-  // Backtrack to build diff
   const rawDiff: Array<{ type: 'ctx' | 'del' | 'add'; text: string; lineNum: number }> = []
   let i = m, j = n
   while (i > 0 || j > 0) {
@@ -296,7 +275,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
     }
   }
 
-  // Convert to display format with context windowing (show 3 lines around changes)
+  // Context windowing: show 3 lines around changes
   const changeIndices = new Set<number>()
   rawDiff.forEach((d, idx) => {
     if (d.type !== 'ctx') {
@@ -310,7 +289,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   rawDiff.forEach((d, idx) => {
     if (!changeIndices.has(idx)) return
     if (lastShown >= 0 && idx - lastShown > 1) {
-      result.push({ type: 'ctx', num: null, marker: ' ', html: '<span class="diff-ellipsis">···</span>' })
+      result.push({ type: 'ctx', num: null, marker: ' ', text: '···' })
     }
     lastShown = idx
 
@@ -319,7 +298,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
       type: d.type,
       num: d.lineNum,
       marker: markers[d.type],
-      html: highlightJSON(escapeHtml(d.text)),
+      text: d.text,
     })
   })
 
@@ -335,18 +314,7 @@ const diffStats = computed(() => {
   }
 })
 
-// --- Scroll Sync ---
-
-function syncScroll() {
-  if (!editorEl.value || !highlightEl.value || !gutterEl.value) return
-  const st = editorEl.value.scrollTop
-  const sl = editorEl.value.scrollLeft
-  highlightEl.value.scrollTop = st
-  highlightEl.value.scrollLeft = sl
-  gutterEl.value.scrollTop = st
-}
-
-// --- Business Logic (unchanged) ---
+// --- Business Logic ---
 
 onMounted(async () => {
   const id = route.params.id as string
@@ -359,7 +327,6 @@ onMounted(async () => {
     syncSidebarFromJson(json)
 
     schemaApi.entityCount(id).then(c => { entityCount.value = c }).catch(() => {})
-    // Load version history for this type
     schemaApi.listByType(s.type).then(versions => { versionHistory.value = versions }).catch(() => {})
   } catch {
     schema.value = null
@@ -373,7 +340,6 @@ function syncSidebarFromJson(json: string) {
     const parsed = JSON.parse(json)
     const login = parsed?.['x-login'] || {}
     const branding = parsed?.['x-branding'] || {}
-    // Read from x-auth-methods (new) or x-login.auth_methods (legacy)
     const methods = parsed?.['x-auth-methods'] || login.auth_methods || {}
 
     loginPreset.value = login.preset || 'identifier_first'
@@ -391,24 +357,10 @@ function syncSidebarFromJson(json: string) {
   } catch {}
 }
 
-function onEditorChange() {
-  jsonError.value = ''
-  saveSuccess.value = false
-  saveError.value = ''
-  try {
-    JSON.parse(editorContent.value)
-    syncSidebarFromJson(editorContent.value)
-  } catch (e: any) {
-    jsonError.value = e.message?.replace('JSON.parse: ', '') || 'Invalid JSON'
-  }
-  nextTick(syncScroll)
-}
-
 function onQuickSettingChange() {
   try {
     const parsed = JSON.parse(editorContent.value)
 
-    // Write x-auth-methods (new format)
     if (!parsed['x-auth-methods']) parsed['x-auth-methods'] = {}
     const am = parsed['x-auth-methods']
     am.password = { ...(am.password || {}), enabled: authPassword.value, interactive: true }
@@ -419,15 +371,12 @@ function onQuickSettingChange() {
     am.api_key = { ...(am.api_key || {}), enabled: authAPIKey.value, interactive: false }
     am.client_cert = { ...(am.client_cert || {}), enabled: authClientCert.value, interactive: false }
 
-    // Write x-login (flow config only, no auth_methods)
     if (!parsed['x-login']) parsed['x-login'] = {}
     parsed['x-login'].preset = loginPreset.value
     parsed['x-login'].mfa_required = mfaRequired.value
     parsed['x-login'].registration_allowed = registrationAllowed.value
-    // Remove legacy auth_methods from x-login if present
     delete parsed['x-login'].auth_methods
 
-    // Update x-branding
     if (!parsed['x-branding']) parsed['x-branding'] = {}
     parsed['x-branding'].heading = brandHeading.value
     if (!parsed['x-branding'].colors) parsed['x-branding'].colors = {}
@@ -446,12 +395,10 @@ async function saveSchema() {
   try {
     const parsed = JSON.parse(editorContent.value)
     const updated = await schemaApi.update(schema.value.id, parsed, commitMessage.value)
-    // New version created — navigate to it
     newVersionNum.value = updated.version
     saveSuccess.value = true
     commitMessage.value = ''
-    showDiff.value = false
-    // Navigate to new version after brief delay
+    activeTab.value = 'editor'
     setTimeout(() => {
       router.push('/schemas/' + updated.id)
     }, 1500)
@@ -486,283 +433,3 @@ function copyToClipboard() {
   navigator.clipboard.writeText(editorContent.value)
 }
 </script>
-
-<style scoped>
-.loading { padding: 3rem; text-align: center; color: #9ca3af; }
-
-.editor-layout {
-  display: flex; gap: 0; min-height: calc(100vh - 140px);
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 280px; border-right: 1px solid #e5e7eb; padding: 1.25rem;
-  overflow-y: auto; display: flex; flex-direction: column; gap: 0; background: #fafbfc;
-}
-.sidebar-section { padding: 0.75rem 0; border-bottom: 1px solid #f0f1f3; }
-.sidebar-section:first-child { padding-top: 0; }
-.sidebar-section:last-of-type { border-bottom: none; }
-.sidebar-heading {
-  font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
-  color: #9ca3af; margin-bottom: 0.625rem;
-}
-
-.field-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-.field-label { font-size: 0.8125rem; color: #4b5563; }
-.field-value { font-size: 0.8125rem; color: #1a1a2e; font-weight: 500; }
-
-.version-badge {
-  font-size: 0.6875rem; font-weight: 600; padding: 0.125rem 0.5rem;
-  background: #f0f2ff; color: #6366f1; border-radius: 4px;
-}
-.impact-badge {
-  font-size: 0.75rem; font-weight: 600; padding: 0.125rem 0.5rem;
-  background: #f3f4f6; color: #6b7280; border-radius: 4px;
-}
-.impact-badge.warn { background: #fef3c7; color: #92400e; }
-
-.default-tag {
-  font-size: 0.5625rem; font-weight: 700; padding: 0.0625rem 0.375rem;
-  background: #ecfdf5; color: #059669; border-radius: 3px; text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.draft-tag {
-  font-size: 0.5625rem; font-weight: 700; padding: 0.0625rem 0.375rem;
-  background: #fef3c7; color: #92400e; border-radius: 3px; text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.version-list { margin-top: 0.75rem; }
-.version-list-title {
-  font-size: 0.6875rem; font-weight: 600; color: #9ca3af; text-transform: uppercase;
-  letter-spacing: 0.05em; margin-bottom: 0.375rem;
-}
-.version-item { padding: 0.25rem 0; }
-.version-item.active { background: #f0f2ff; border-radius: 4px; padding: 0.25rem 0.375rem; margin: 0 -0.375rem; }
-.version-item-link {
-  display: flex; align-items: center; gap: 0.375rem;
-  text-decoration: none; color: inherit; font-size: 0.8125rem;
-}
-.version-badge-sm {
-  font-size: 0.625rem; font-weight: 700; padding: 0 0.25rem;
-  background: #f0f2ff; color: #6366f1; border-radius: 3px;
-  font-family: 'SF Mono', monospace;
-}
-.default-dot { color: #059669; font-size: 0.625rem; }
-.version-item-msg { color: #6b7280; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.btn-promote {
-  width: 100%; margin-top: 0.75rem; padding: 0.375rem; border: 1px solid #c7d2fe;
-  border-radius: 6px; background: #f0f2ff; color: #6366f1; font-size: 0.8125rem;
-  font-weight: 600; font-family: inherit; cursor: pointer; transition: all 0.15s;
-}
-.btn-promote:hover { background: #e0e2ff; border-color: #6366f1; }
-.btn-promote:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.commit-msg-row { margin-bottom: 0.5rem; }
-.commit-input {
-  width: 100%; padding: 0.375rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px;
-  font-size: 0.8125rem; font-family: inherit; box-sizing: border-box;
-}
-.commit-input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
-
-.select-input {
-  flex: 1; max-width: 160px; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;
-  border-radius: 6px; font-size: 0.8125rem; font-family: inherit; background: #fff;
-}
-.select-input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
-
-.text-input {
-  flex: 1; max-width: 160px; padding: 0.25rem 0.5rem; border: 1px solid #d1d5db;
-  border-radius: 6px; font-size: 0.8125rem; font-family: inherit; background: #fff;
-}
-.text-input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
-
-.toggle-group { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
-.toggle-row {
-  display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: #374151;
-  cursor: pointer;
-}
-.toggle-row input[type="checkbox"] {
-  width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer;
-}
-.mfa-row { margin-top: 0.25rem; }
-
-.color-row { display: flex; align-items: center; gap: 0.5rem; }
-.color-input {
-  width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 6px;
-  cursor: pointer; padding: 0;
-}
-.mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem; color: #6b7280; }
-
-/* Fields list */
-.field-chip {
-  display: flex; align-items: center; gap: 0.375rem; padding: 0.25rem 0;
-}
-.field-name { font-size: 0.8125rem; color: #1a1a2e; font-weight: 500; }
-.chip-tag {
-  font-size: 0.5625rem; font-weight: 700; padding: 0.0625rem 0.375rem; border-radius: 3px;
-  text-transform: uppercase; letter-spacing: 0.04em;
-}
-.chip-tag.id { background: #dbeafe; color: #1d4ed8; }
-.chip-tag.sens { background: #fee2e2; color: #991b1b; }
-.chip-tag.mfa { background: #d1fae5; color: #065f46; }
-.empty-fields { font-size: 0.8125rem; color: #9ca3af; }
-
-.sidebar-actions { padding-top: 0.75rem; margin-top: auto; }
-.btn-save {
-  width: 100%; padding: 0.5rem; border: none; border-radius: 8px;
-  background: #6366f1; color: #fff; font-size: 0.875rem; font-weight: 600;
-  font-family: inherit; cursor: pointer; transition: background 0.15s;
-}
-.btn-save:hover:not(:disabled) { background: #4f46e5; }
-.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-diff {
-  width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 8px;
-  background: #fff; color: #4b5563; font-size: 0.8125rem; font-weight: 500;
-  font-family: inherit; cursor: pointer; transition: all 0.15s; margin-top: 0.5rem;
-}
-.btn-diff:hover { border-color: #6366f1; color: #6366f1; }
-.save-msg { display: block; margin-top: 0.5rem; font-size: 0.75rem; text-align: center; }
-.save-msg.success { color: #16a34a; }
-.save-msg.error { color: #ef4444; }
-
-/* Editor */
-.editor-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.editor-toolbar {
-  display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid #e5e7eb; background: #fafbfc;
-}
-.editor-title { font-size: 0.8125rem; font-weight: 600; color: #1a1a2e; font-family: 'SF Mono', monospace; }
-.dirty-dot { color: #f59e0b; font-size: 1rem; }
-.toolbar-right { margin-left: auto; display: flex; gap: 0.5rem; }
-.btn-copy, .btn-format, .btn-diff-toolbar {
-  padding: 0.25rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px;
-  background: #fff; font-size: 0.75rem; font-family: inherit; color: #4b5563;
-  cursor: pointer; transition: all 0.15s;
-}
-.btn-copy:hover, .btn-format:hover, .btn-diff-toolbar:hover { background: #f3f4f6; border-color: #9ca3af; }
-.btn-diff-toolbar.active { background: #f0f2ff; border-color: #6366f1; color: #6366f1; }
-
-/* Code Editor with Highlighting */
-.editor-container { flex: 1; position: relative; overflow: hidden; }
-.editor-scroll {
-  position: absolute; inset: 0; display: flex; overflow: auto;
-}
-
-/* Line number gutter */
-.line-gutter {
-  position: sticky; left: 0; z-index: 3;
-  min-width: 56px; padding: 1rem 0; background: #fafbfc;
-  border-right: 1px solid #e5e7eb; user-select: none;
-  overflow: hidden; pointer-events: auto;
-}
-.line-num {
-  display: flex; align-items: center; justify-content: flex-end; gap: 0;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 0.75rem; line-height: 1.65; height: calc(0.8125rem * 1.65);
-  padding-right: 0.5rem; color: #c4c7cc;
-}
-.line-num.hidden { display: none; }
-.num-text { min-width: 20px; text-align: right; }
-.fold-toggle {
-  cursor: pointer; font-size: 0.625rem; color: #9ca3af; width: 14px;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: color 0.1s;
-}
-.fold-toggle:hover { color: #6366f1; }
-
-/* Highlight layer (line-by-line for fold support) */
-.highlight-layer {
-  position: absolute; top: 0; left: 56px; right: 0; bottom: 0;
-  padding: 1rem 1.25rem; margin: 0;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 0.8125rem; line-height: 1.65;
-  white-space: pre; overflow: hidden; pointer-events: none;
-  background: transparent; border: none;
-}
-.hl-line { min-height: calc(0.8125rem * 1.65); }
-.hl-line.hidden { display: none; }
-.fold-placeholder {
-  color: #9ca3af; font-style: italic; font-size: 0.75rem;
-  background: #f3f4f6; border-radius: 3px; padding: 0.0625rem 0.375rem;
-  margin-left: 0.25rem; pointer-events: auto; cursor: pointer;
-}
-/* Transparent textarea on top */
-.code-editor {
-  position: absolute; top: 0; left: 56px; right: 0; bottom: 0;
-  padding: 1rem 1.25rem; border: none; resize: none;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 0.8125rem; line-height: 1.65;
-  color: transparent; caret-color: #1a1a2e;
-  background: transparent; z-index: 1;
-  tab-size: 2; white-space: pre; overflow: auto;
-}
-.code-editor:focus { outline: none; }
-.code-editor::selection { background: rgba(99, 102, 241, 0.15); }
-
-/* Syntax tokens */
-.hl-line { color: #4b5563; }
-.hl-line :deep(.tok-key) { color: #1a1a2e; font-weight: 500; }
-.hl-line :deep(.tok-annotation) { color: #d97706; font-weight: 600; }
-.hl-line :deep(.tok-string) { color: #059669; }
-.hl-line :deep(.tok-number) { color: #7c3aed; }
-.hl-line :deep(.tok-bool) { color: #2563eb; font-weight: 500; }
-.hl-line :deep(.tok-null) { color: #9ca3af; font-style: italic; }
-
-/* JSON error bar */
-.json-error {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  padding: 0.5rem 1.25rem; background: #fef2f2; color: #991b1b;
-  font-size: 0.75rem; border-top: 1px solid #fecaca; z-index: 3;
-}
-
-/* Diff View */
-.diff-container {
-  flex: 1; display: flex; flex-direction: column; overflow: hidden;
-}
-.diff-header {
-  padding: 0.5rem 1.25rem; border-bottom: 1px solid #e5e7eb; background: #fafbfc;
-}
-.diff-stat { font-size: 0.75rem; color: #6b7280; }
-.diff-add { color: #16a34a; font-weight: 600; margin-right: 0.375rem; }
-.diff-del { color: #dc2626; font-weight: 600; margin-right: 0.375rem; }
-
-.diff-content {
-  flex: 1; overflow: auto; padding: 0.5rem 0;
-  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8125rem;
-}
-.diff-line {
-  display: flex; line-height: 1.65; padding: 0 1rem;
-}
-.diff-line.add { background: #dcfce7; }
-.diff-line.del { background: #fee2e2; }
-.diff-line.ctx { background: transparent; }
-
-.diff-gutter {
-  min-width: 40px; text-align: right; padding-right: 0.75rem;
-  color: #c4c7cc; user-select: none;
-}
-.diff-marker {
-  min-width: 16px; text-align: center; user-select: none;
-  font-weight: 600;
-}
-.diff-line.add .diff-marker { color: #16a34a; }
-.diff-line.del .diff-marker { color: #dc2626; }
-.diff-line.ctx .diff-marker { color: #d1d5db; }
-
-.diff-text { flex: 1; white-space: pre; }
-.diff-line :deep(.tok-annotation) { color: #d97706; font-weight: 600; }
-.diff-line :deep(.tok-key) { color: #1a1a2e; }
-.diff-line :deep(.tok-string) { color: #059669; }
-.diff-line :deep(.tok-number) { color: #7c3aed; }
-.diff-line :deep(.tok-bool) { color: #2563eb; }
-
-:deep(.diff-ellipsis) {
-  color: #9ca3af; font-style: italic; user-select: none;
-}
-</style>

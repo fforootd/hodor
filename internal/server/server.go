@@ -191,8 +191,42 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// 2. Security headers.
 	isSecure := cfg.Server.TLSCert != "" || (cfg.Server.ExternalDomain != "" && cfg.Server.ExternalDomain != "localhost")
 
-	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → AuthGate → OTel.
+	// Initialise embedded OpenFGA (shares our SQLite/Postgres DB).
+	ctx := context.Background()
+	fgaSvc, err := fga.New(ctx, db.SQL(), db.Dialect())
+	if err != nil {
+		log.Fatalf("fga init: %v", err)
+	}
+
+	// Set the global FGA service reference for the API layer.
+	api.FGAService = fgaSvc
+
+	// Post-init FGA bootstrap: if admin exists but has no FGA tuples, seed them now.
+	// This handles the case where EnsureAdmin ran before FGA was initialized.
+	{
+		var adminID, orgID string
+		if err := db.SQL().QueryRowContext(ctx,
+			`SELECT id, org_id FROM entities WHERE identifier = 'admin' LIMIT 1`,
+		).Scan(&adminID, &orgID); err == nil && adminID != "" {
+			// Check if tuples already exist for this admin.
+			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:default")
+			if len(tuples) == 0 {
+				if err := fgaSvc.OnBootstrap(ctx, adminID, orgID); err != nil {
+					log.Printf("WARN: FGA post-init bootstrap failed: %v", err)
+				} else {
+					log.Printf("[fga] post-init bootstrap: admin=%s org=%s", adminID, orgID)
+				}
+			}
+		}
+	}
+
+	// Build FGA middleware.
+	fgaMiddleware := fga.NewMiddleware(fgaSvc)
+
+	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → FGAGate → AuthGate → EventStream → OTel.
 	var handler http.Handler = mux
+	handler = api.EventStreamMiddleware(db.SQL())(handler)
+	handler = fgaMiddleware.Gate(handler)
 	handler = api.AuthGate(cookieCfg, db.SQL())(handler)
 	handler = AppGate(paths, &cfg.Server.AppAccess)(handler)
 	handler = SecurityHeaders(cfg.Server.SecurityHeaders, isSecure)(handler)
@@ -213,6 +247,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		bus:       bus,
 		http:      httpSrv,
 		api:       restAPI,
+		fga:       fgaSvc,
 		analytics: analyticsEngine,
 	}
 }
@@ -225,15 +260,6 @@ func (s *Server) Handler() http.Handler {
 // ListenAndServe starts the HTTP server and blocks until shutdown.
 // It handles SIGTERM/SIGINT for graceful shutdown.
 func (s *Server) ListenAndServe() error {
-	ctx := context.Background()
-
-	// Initialise embedded OpenFGA (shares our SQLite/Postgres DB).
-	fgaSvc, err := fga.New(ctx, s.db.SQL(), s.db.Dialect())
-	if err != nil {
-		return fmt.Errorf("init fga: %w", err)
-	}
-	s.fga = fgaSvc
-
 	// Start job scheduler with registered jobs.
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	defer schedCancel()

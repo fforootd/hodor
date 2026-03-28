@@ -1,12 +1,12 @@
 <template>
-  <div class="space-y-6 max-w-[1400px]">
+  <div class="space-y-6">
     <div>
-      <h1 class="text-3xl font-bold tracking-tight">Sessions</h1>
+      <h1 class="text-2xl font-semibold tracking-tight">Sessions</h1>
       <p class="text-muted-foreground mt-1 text-sm">User authentication events ({{ activeCount }} active of {{ totalCount }} total)</p>
     </div>
 
     <!-- Stats Bar -->
-    <div class="flex items-center space-x-6 p-4 rounded-md border text-sm bg-card text-muted-foreground">
+    <div class="flex items-center gap-6 p-4 rounded-lg border text-sm bg-card text-muted-foreground">
       <div class="flex items-center space-x-2 text-green-700">
         <CheckCircle2 class="w-4 h-4" />
         <span class="font-medium">{{ activeCount }} active</span>
@@ -100,6 +100,52 @@
         </div>
       </template>
 
+      <template #expanded="{ row }">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+          <div class="space-y-1">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Session ID</span>
+            <code class="block rounded bg-muted px-2 py-1 text-xs font-mono break-all">{{ row.original.id }}</code>
+          </div>
+          <div class="space-y-1">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Entity ID</span>
+            <RouterLink 
+              :to="`/console/s/human_user/${row.original.entity_id || row.original.identity_id}`" 
+              class="block rounded bg-muted px-2 py-1 text-xs font-mono break-all text-primary hover:underline"
+            >{{ row.original.entity_id || row.original.identity_id || '—' }}</RouterLink>
+          </div>
+          <div class="space-y-1">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">IP Address</span>
+            <code class="block rounded bg-muted px-2 py-1 text-xs font-mono">{{ row.original.ip_address || '—' }}</code>
+          </div>
+          <div class="space-y-1">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">User Agent</span>
+            <p class="rounded bg-muted px-2 py-1 text-xs break-all">{{ row.original.user_agent || '—' }}</p>
+          </div>
+          <div class="space-y-1">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Created</span>
+            <p class="text-xs">{{ row.original.created_at ? new Date(row.original.created_at).toLocaleString() : '—' }}</p>
+          </div>
+          <div class="space-y-1">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Expires</span>
+            <p class="text-xs">{{ row.original.expires_at ? new Date(row.original.expires_at).toLocaleString() : '—' }}</p>
+          </div>
+          <div class="space-y-1" v-if="row.original.revoked_at">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Revoked</span>
+            <p class="text-xs text-destructive">{{ new Date(row.original.revoked_at).toLocaleString() }}</p>
+          </div>
+          <div class="space-y-1" v-if="row.original.auth_method">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Auth Method</span>
+            <div class="flex flex-wrap gap-1">
+              <Badge v-for="m in (Array.isArray(row.original.auth_method) ? row.original.auth_method : [row.original.auth_method])" :key="m" variant="outline" class="text-xs">{{ m }}</Badge>
+            </div>
+          </div>
+          <div class="space-y-1" v-if="row.original.geo">
+            <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Geo</span>
+            <p class="text-xs">{{ row.original.geo.city || '' }} {{ row.original.geo.country || '' }}</p>
+          </div>
+        </div>
+      </template>
+
       <template #pagination="{ table }">
         <DataTablePagination :table="table" />
       </template>
@@ -120,7 +166,7 @@ import { Popover, PopoverAnchor, PopoverTrigger, PopoverContent } from '@/compon
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { 
-  Key, Monitor, Search, 
+  Key, Monitor, Search, ChevronRight,
   CheckCircle2, XCircle, Clock, MoreHorizontal, Ban, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-vue-next'
 import { createColumnHelper } from '@tanstack/vue-table'
@@ -238,7 +284,13 @@ onMounted(async () => {
       sessionApi.list(),
       entityApi.list().catch(() => []) 
     ])
-    sessions.value = sessRes
+    
+    sessions.value = sessRes.map((s: Session) => {
+      let state = 'active'
+      if (s.revoked_at) state = 'revoked'
+      else if (s.expires_at && new Date(s.expires_at) < new Date()) state = 'expired'
+      return { ...s, state }
+    })
     
     const dict: Record<string, {name: string, identifier: string}> = {}
     for (const ent of entitiesRes) {
@@ -255,8 +307,27 @@ onMounted(async () => {
 })
 
 async function revoke(id: string) {
-  await sessionApi.revoke(id)
-  sessions.value = sessions.value.filter(s => s.id !== id)
+  try {
+    await sessionApi.revoke(id)
+    const index = sessions.value.findIndex(s => s.id === id)
+    if (index !== -1) {
+      const newSessions = [...sessions.value]
+      newSessions[index] = {
+        ...newSessions[index],
+        state: 'revoked',
+        revoked_at: new Date().toISOString()
+      }
+      sessions.value = newSessions
+    }
+  } catch (err) {
+    console.error("Failed to revoke session", err)
+    // Refresh to sync state if we got a 404 because it was already revoked
+    const sessRes = await sessionApi.list()
+    sessions.value = sessRes.map((s: Session) => ({
+      ...s,
+      state: s.revoked_at ? 'revoked' : (s.expires_at && new Date(s.expires_at) < new Date() ? 'expired' : 'active')
+    }))
+  }
 }
 
 function formatDateOnly(ts?: string) { 
@@ -287,6 +358,23 @@ const columns = [
     meta: { class: 'w-12 border-r-0' },
     enableSorting: false,
     enableHiding: false,
+  }),
+  columnHelper.display({
+    id: 'expander',
+    header: () => null,
+    cell: ({ row }) => h('button', {
+      class: 'p-1 rounded-md hover:bg-muted transition-all',
+      onClick: (e: Event) => { e.stopPropagation(); row.toggleExpanded() },
+    }, [
+      h(ChevronRight, { class: `w-4 h-4 text-muted-foreground transition-transform duration-200 ${row.getIsExpanded() ? 'rotate-90' : ''}` })
+    ]),
+    meta: { class: 'w-8 px-0' },
+    enableSorting: false,
+    enableHiding: false,
+  }),
+  columnHelper.accessor('id', {
+    header: 'Session ID',
+    cell: info => h('span', { class: 'text-sm font-mono text-muted-foreground truncate max-w-[120px] inline-block', title: info.getValue() }, info.getValue() || '—'),
   }),
   columnHelper.accessor(row => row.identifier || row.entity_id || row.identity_id, {
     id: 'user',
@@ -381,11 +469,11 @@ const columns = [
     id: 'actions',
     header: () => null,
     cell: ({ row }) => h('div', { class: 'flex items-center space-x-1 justify-end' }, [
-      h('button', {
+      row.original.state === 'active' ? h('button', {
         class: 'text-red-500 hover:text-red-700 flex items-center justify-center p-1.5 rounded-md hover:bg-red-50 transition-colors',
         title: 'Revoke',
         onClick: () => revoke(row.original.id)
-      }, [h(XCircle, { class: 'w-4 h-4' })]),
+      }, [h(XCircle, { class: 'w-4 h-4' })]) : null,
       h(DropdownMenu, {}, () => [
         h(DropdownMenuTrigger, { asChild: true }, () => 
           h('button', { class: 'text-muted-foreground hover:text-foreground hover:bg-muted p-1.5 rounded-md transition-colors' }, [
@@ -393,8 +481,23 @@ const columns = [
           ])
         ),
         h(DropdownMenuContent, { align: 'end' }, () => [
-          h(DropdownMenuItem, { class: 'text-destructive font-medium cursor-pointer', onClick: () => revoke(row.original.id) }, () => 'Revoke Session'),
-          h(DropdownMenuItem, { class: 'cursor-pointer' }, () => 'View Audit Log')
+          row.original.state === 'active' ? h(DropdownMenuItem, { class: 'text-destructive font-medium cursor-pointer', onClick: () => revoke(row.original.id) }, () => 'Revoke Session') : null,
+          h(DropdownMenuItem, { asChild: true, class: 'cursor-pointer' }, () => 
+            h(RouterLink, { 
+              to: {
+                path: '/events',
+                query: { session_id: row.original.id }
+              }
+            }, () => 'View Events')
+          ),
+          h(DropdownMenuItem, { asChild: true, class: 'cursor-pointer' }, () => 
+            h(RouterLink, { 
+              to: {
+                path: '/traces',
+                query: { id: row.original.id }
+              }
+            }, () => 'View Traces')
+          )
         ])
       ])
     ]),

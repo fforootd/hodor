@@ -1,0 +1,321 @@
+<template>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Applications</h1>
+        <p class="text-sm text-muted-foreground">
+          Manage OIDC and SAML applications{{ totalCount > 0 ? ` (${totalCount} total)` : '' }}
+        </p>
+      </div>
+      <Button as-child>
+        <router-link to="/s/app/new">
+          <Plus class="mr-2 size-4" />
+          New Application
+        </router-link>
+      </Button>
+    </div>
+
+    <!-- OIDC Discovery panel -->
+    <Card class="bg-muted/50">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-sm font-medium">OIDC Discovery</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-2">
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-muted-foreground w-20">Issuer</span>
+          <code
+            class="cursor-pointer rounded bg-primary/10 px-2 py-0.5 text-sm font-mono text-primary hover:bg-primary/20 transition-colors"
+            @click="copy(issuer)"
+          >{{ issuer }}</code>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-muted-foreground w-20">Discovery</span>
+          <code
+            class="cursor-pointer rounded bg-primary/10 px-2 py-0.5 text-sm font-mono text-primary hover:bg-primary/20 transition-colors"
+            @click="copy(issuer + '/.well-known/openid-configuration')"
+          >{{ issuer }}/.well-known/openid-configuration</code>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Tabs -->
+    <Tabs :default-value="activeTab" @update:model-value="(val: any) => activeTab = String(val)">
+      <TabsList>
+        <TabsTrigger value="all">
+          All
+          <Badge v-if="totalCount > 0" variant="secondary" class="ml-1.5 text-xs px-1.5 py-0">{{ totalCount }}</Badge>
+        </TabsTrigger>
+        <TabsTrigger value="app">
+          <AppWindow class="mr-1.5 size-3.5" />
+          OIDC
+          <Badge v-if="typeCounts.app" variant="secondary" class="ml-1.5 text-xs px-1.5 py-0">{{ typeCounts.app }}</Badge>
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+
+    <DataTable
+      :columns="columns as any"
+      :data="filteredApps"
+      v-model:rowSelection="selectedRows"
+    >
+      <template #toolbar="{ table }">
+        <div class="flex items-center justify-between w-full mb-4">
+          <div class="w-full max-w-lg relative">
+            <div class="relative w-full">
+              <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
+              <Input
+                placeholder="Search applications…"
+                class="pl-9 bg-background w-full relative z-0"
+                :model-value="globalSearch"
+                @update:model-value="val => applySearchQuery(String(val), table)"
+              />
+            </div>
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" class="ml-auto">
+                View <ChevronDown class="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuCheckboxItem
+                v-for="column in table.getAllColumns().filter((col: any) => col.getCanHide())"
+                :key="column.id"
+                class="capitalize"
+                :checked="table.getState().columnVisibility[column.id] !== false"
+                @update:checked="(val: boolean) => column.toggleVisibility(!!val)"
+              >
+                {{ column.id.replace('_', ' ') }}
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </template>
+
+      <template #pagination="{ table }">
+        <DataTablePagination :table="table" />
+      </template>
+    </DataTable>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted, computed, h, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { type Identity, metaSchemaApi } from '@/api/resources'
+import { api } from '@/api/client'
+import DataTable from '@/components/ui/data-table/DataTable.vue'
+import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
+import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuCheckboxItem,
+} from '@/components/ui/dropdown-menu'
+import {
+  Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
+  CheckCircle2, Ban, AppWindow,
+} from 'lucide-vue-next'
+import { createColumnHelper } from '@tanstack/vue-table'
+
+interface AppWithType extends Identity {
+  _schemaType?: string
+}
+
+const activeTab = ref('all')
+const allApps = ref<AppWithType[]>([])
+const selectedRows = ref({})
+const globalSearch = ref('')
+const issuer = window.location.origin
+
+const appTypes = ['app'] // Future: add 'app_saml' when SAML is implemented
+
+// Computed
+const typeCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const item of allApps.value) {
+    const t = item._schemaType || 'unknown'
+    counts[t] = (counts[t] || 0) + 1
+  }
+  return counts
+})
+
+const totalCount = computed(() => allApps.value.length)
+
+const filteredApps = computed(() => {
+  if (activeTab.value === 'all') return allApps.value
+  return allApps.value.filter(i => i._schemaType === activeTab.value)
+})
+
+// Search
+let activeTable: any = null
+
+function applySearchQuery(query: string, table: any) {
+  if (table) activeTable = table
+  globalSearch.value = query
+  const filters: { id: string; value: string }[] = []
+  if (query.trim()) {
+    filters.push({ id: 'identifier', value: query.trim() })
+  }
+  if (activeTable) {
+    activeTable.setColumnFilters(filters)
+  }
+}
+
+function getSortIcon(column: any) {
+  const isSorted = column.getIsSorted()
+  if (isSorted === 'asc') return ArrowUp
+  if (isSorted === 'desc') return ArrowDown
+  return ArrowUpDown
+}
+
+function copy(text: string) { navigator.clipboard.writeText(text) }
+
+// Data loading
+onMounted(async () => {
+  let typePathMap: Record<string, string> = {}
+  try {
+    const meta = await metaSchemaApi.get()
+    const catalog = meta['x-catalog'] || {}
+    for (const typeName of appTypes) {
+      const entry = catalog[typeName]
+      if (entry?.path) {
+        typePathMap[typeName] = entry.path
+      }
+    }
+  } catch { /* fallback */ }
+
+  const orgId = localStorage.getItem('zitadel_org')
+  const qs = orgId ? `?org_id=${orgId}` : ''
+
+  const results = await Promise.allSettled(
+    appTypes.map(async (typeName) => {
+      const path = typePathMap[typeName] || typeName
+      const data = await api.get<any>(`/v1/${path}${qs}`)
+      return (data.items || []).map((item: any) => ({ ...item, _schemaType: typeName }))
+    })
+  )
+
+  const merged: AppWithType[] = []
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      merged.push(...result.value)
+    }
+  }
+  allApps.value = merged
+})
+
+watch(activeTab, () => {
+  if (activeTable) {
+    activeTable.setColumnFilters([])
+    globalSearch.value = ''
+  }
+})
+
+function getField(item: Identity, field: string): string {
+  try {
+    const d = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {})
+    return d[field] || ''
+  } catch { return '' }
+}
+
+function formatUris(item: Identity): string {
+  try {
+    const d = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {})
+    const uris = d.redirect_uris || []
+    if (uris.length === 0) return '—'
+    if (uris.length === 1) return uris[0]
+    return `${uris[0]} +${uris.length - 1} more`
+  } catch { return '—' }
+}
+
+const columnHelper = createColumnHelper<AppWithType>()
+
+const columns = computed(() => [
+  columnHelper.display({
+    id: 'select',
+    header: ({ table }) => h(Checkbox, {
+      checked: table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate' as any),
+      'onUpdate:checked': (val: boolean) => table.toggleAllPageRowsSelected(!!val),
+      ariaLabel: 'Select all',
+    }),
+    cell: ({ row }) => h(Checkbox, {
+      checked: row.getIsSelected(),
+      'onUpdate:checked': (val: boolean) => row.toggleSelected(!!val),
+      ariaLabel: 'Select row',
+    }),
+    meta: { class: 'w-12 border-r-0' },
+    enableSorting: false,
+    enableHiding: false,
+  }),
+  columnHelper.accessor('identifier', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
+    }, () => ['Client ID', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => h(RouterLink, {
+      to: `/identities/${info.row.original.id}`,
+      class: 'font-mono text-sm text-primary hover:underline'
+    }, () => info.getValue()),
+  }),
+  columnHelper.accessor(row => getField(row, 'client_name') || getField(row, 'display_name') || row.display_name || '—', {
+    id: 'display_name',
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
+    }, () => ['Name', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => h('span', { class: 'text-sm' }, info.getValue()),
+  }),
+  columnHelper.display({
+    id: 'app_type',
+    header: 'Type',
+    cell: ({ row }) => h(Badge, { variant: 'outline', class: 'text-xs uppercase' }, () => getField(row.original, 'app_type') || 'OIDC'),
+  }),
+  columnHelper.display({
+    id: 'redirect_uris',
+    header: 'Redirect URIs',
+    cell: ({ row }) => h('span', { class: 'text-sm text-muted-foreground truncate max-w-[300px] inline-block' }, formatUris(row.original)),
+  }),
+  columnHelper.accessor('state', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
+    }, () => ['Status', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => {
+      const state = info.getValue() as string
+      let colorClass = 'text-green-700 bg-green-100 border-green-200'
+      let Icon = CheckCircle2
+      if (state === 'deactivated' || state === 'locked') {
+        colorClass = 'text-red-700 bg-red-100 border-red-200'
+        Icon = Ban
+      }
+      return h(Badge, { variant: 'outline', class: `font-normal flex items-center space-x-1 ${colorClass} capitalize whitespace-nowrap` }, () => [
+        h(Icon, { class: 'w-3 h-3 mr-1 shrink-0' }),
+        h('span', state),
+      ])
+    },
+  }),
+  columnHelper.accessor('created_at', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
+    }, () => ['Created', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => {
+      if (!info.getValue()) return h('span', '—')
+      const d = new Date(info.getValue())
+      return h('div', { class: 'flex flex-col text-sm whitespace-nowrap' }, [
+        h('span', d.toLocaleDateString()),
+        h('span', { class: 'text-xs text-muted-foreground' }, d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+      ])
+    },
+  }),
+])
+</script>

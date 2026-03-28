@@ -48,53 +48,75 @@
       </Card>
     </div>
 
-    <!-- Event Type Breakdown -->
-    <Card>
-      <CardHeader>
-        <CardTitle>Event Breakdown</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div class="flex items-center gap-2 mb-4">
-          <Search class="size-4 text-muted-foreground" />
-          <Input v-model="eventFilter" placeholder="Filter events..." class="max-w-sm" />
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Event Type</TableHead>
-              <TableHead class="text-right">Count</TableHead>
-              <TableHead class="w-32">Trend</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow v-for="row in filteredEvents" :key="row.event_type">
-              <TableCell>
-                <div class="flex items-center gap-2">
-                  <div class="size-2 rounded-full" :style="{ backgroundColor: row.color }" />
-                  <span class="font-medium">{{ row.event_type }}</span>
-                </div>
-              </TableCell>
-              <TableCell class="text-right font-mono">{{ formatNumber(row.count) }}</TableCell>
-              <TableCell>
-                <div class="h-6 flex items-end gap-0.5">
-                  <div
-                    v-for="(v, i) in row.sparkline"
-                    :key="i"
-                    class="flex-1 rounded-t transition-all"
-                    :style="{ height: `${v}%`, backgroundColor: row.color }"
-                  />
-                </div>
-              </TableCell>
-            </TableRow>
-            <TableRow v-if="!filteredEvents.length">
-              <TableCell colspan="3" class="text-center text-muted-foreground py-8">
-                No events found.
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <!-- Reports Grid -->
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
+      <!-- Top Operations -->
+      <Card class="overflow-hidden border-muted">
+        <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Operations</CardTitle>
+          <RouterLink to="/observability/explore" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div v-for="(item, i) in topOperations" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
+            <span class="text-xs font-mono truncate pr-4 text-foreground/80 group-hover:text-foreground">{{ item.name }}</span>
+            <div class="flex items-center gap-3 w-1/3 justify-end shrink-0">
+              <span class="text-xs font-medium">{{ formatNumber(item.count) }}</span>
+              <div class="w-20 lg:w-24 h-1.5 bg-muted/50 rounded-full overflow-hidden flex justify-start"><div class="h-full bg-blue-500 rounded-full" :style="{ width: `${(item.count / maxOperationCount) * 100}%` }"></div></div>
+            </div>
+          </div>
+          <div v-if="!topOperations.length" class="p-8 text-center text-xs text-muted-foreground">No operations recorded</div>
+        </CardContent>
+      </Card>
+
+      <!-- Top Users -->
+      <Card class="overflow-hidden border-muted">
+        <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Users</CardTitle>
+          <RouterLink to="/identities" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div v-for="(item, i) in topUsers" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
+            <span class="text-xs font-mono truncate pr-4 text-foreground/80 group-hover:text-foreground" :title="item.name">{{ item.name }}</span>
+            <div class="flex items-center gap-3 w-1/3 justify-end shrink-0">
+              <span class="text-xs font-medium">{{ formatNumber(item.count) }}</span>
+              <div class="w-20 lg:w-24 h-1.5 bg-muted/50 rounded-full overflow-hidden flex justify-start"><div class="h-full bg-blue-500 rounded-full" :style="{ width: `${(item.count / maxUserCount) * 100}%` }"></div></div>
+            </div>
+          </div>
+          <div v-if="!topUsers.length" class="p-8 text-center text-xs text-muted-foreground">No user activity recorded</div>
+        </CardContent>
+      </Card>
+
+      <!-- Top IPs -->
+      <Card class="overflow-hidden border-muted">
+        <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top IPs</CardTitle>
+          <RouterLink to="/sessions" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div v-for="(item, i) in topIps" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
+            <span class="text-xs font-mono truncate pr-4 text-foreground/80 group-hover:text-foreground">{{ item.name }}</span>
+            <div class="flex items-center gap-3 w-1/3 justify-end shrink-0">
+              <span class="text-xs font-medium">{{ formatNumber(item.count) }}</span>
+              <div class="w-20 lg:w-24 h-1.5 bg-muted/50 rounded-full overflow-hidden flex justify-start"><div class="h-full bg-blue-500 rounded-full" :style="{ width: `${(item.count / maxIpCount) * 100}%` }"></div></div>
+            </div>
+          </div>
+          <div v-if="!topIps.length" class="p-8 text-center text-xs text-muted-foreground">No IP data recorded</div>
+        </CardContent>
+      </Card>
+
+      <!-- Top Countries -->
+      <Card class="overflow-hidden border-muted">
+        <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Countries</CardTitle>
+          <span class="text-[11px] text-muted-foreground/50">View all &rarr;</span>
+        </CardHeader>
+        <CardContent class="p-0 flex items-center justify-center min-h-[140px]">
+          <div class="p-8 text-center text-xs text-muted-foreground flex flex-col items-center">
+            No country data recorded
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   </div>
 </template>
 <script setup lang="ts">
@@ -102,19 +124,16 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Activity, Users, KeyRound, Shield, Search } from 'lucide-vue-next'
 import { api } from '@/api/client'
+import { RouterLink } from 'vue-router'
 
 const timeRange = ref('12h')
-const eventFilter = ref('')
 
 // Generate realistic sparkline data
 function sparkline(count: number = 12): number[] {
   return Array.from({ length: count }, () => 20 + Math.random() * 80)
 }
-
-const colors = ['hsl(12, 76%, 61%)', 'hsl(173, 58%, 39%)', 'hsl(197, 37%, 24%)', 'hsl(43, 74%, 66%)', 'hsl(27, 87%, 67%)', 'hsl(260, 60%, 55%)', 'hsl(340, 75%, 55%)']
 
 const metrics = ref([
   { label: 'Auth Requests', value: 0, change: 0, icon: Activity, sparkline: sparkline() },
@@ -123,14 +142,15 @@ const metrics = ref([
   { label: 'Failed Logins', value: 0, change: 0, icon: Shield, sparkline: sparkline() },
 ])
 
-interface EventRow { event_type: string; count: number; color: string; sparkline: number[] }
-const eventRows = ref<EventRow[]>([])
+interface ReportItem { name: string; count: number }
 
-const filteredEvents = computed(() => {
-  const f = eventFilter.value.toLowerCase()
-  if (!f) return eventRows.value
-  return eventRows.value.filter(e => e.event_type.toLowerCase().includes(f))
-})
+const topOperations = ref<ReportItem[]>([])
+const topUsers = ref<ReportItem[]>([])
+const topIps = ref<ReportItem[]>([])
+
+const maxOperationCount = computed(() => Math.max(...topOperations.value.map(o => o.count), 1))
+const maxUserCount = computed(() => Math.max(...topUsers.value.map(o => o.count), 1))
+const maxIpCount = computed(() => Math.max(...topIps.value.map(o => o.count), 1))
 
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
@@ -155,40 +175,81 @@ async function fetchCount(sql: string): Promise<number> {
     const res = await api.post<any>('/v1/analytics/query', { sql });
     if (res.error || !res.rows || res.rows.length === 0) return 0;
     const r = res.rows[0];
-    return Number(Object.values(r)[0] || 0);
+    // Zipped extraction to support arrays
+    const rawVal = Array.isArray(r) ? r[0] : Object.values(r)[0];
+    return Number(rawVal || 0);
   } catch {
     return 0;
   }
 }
 
+async function fetchTimestamps(sql: string): Promise<number[]> {
+  try {
+    const res = await api.post<any>('/v1/analytics/query', { sql, limit: 10000 });
+    if (res.error || !res.rows) return [];
+    return res.rows.map((r: any) => {
+      const ts = Array.isArray(r) ? r[0] : Object.values(r)[0];
+      return new Date(ts).getTime();
+    });
+  } catch {
+    return [];
+  }
+}
+
+function generateBuckets(timestamps: number[], bucketCount: number, startMs: number, endMs: number): number[] {
+  const buckets = new Array(bucketCount).fill(0);
+  const interval = (endMs - startMs) / bucketCount;
+  if (interval <= 0) return buckets;
+
+  let maxCount = 0;
+  for (const ts of timestamps) {
+    if (ts < startMs || ts > endMs) continue;
+    const idx = Math.min(bucketCount - 1, Math.floor((ts - startMs) / interval));
+    buckets[idx]++;
+    if (buckets[idx] > maxCount) maxCount = buckets[idx];
+  }
+
+  // Convert to percentage (min 5% for visibility if > 0)
+  return buckets.map(count => {
+    if (count === 0) return 0;
+    return Math.max(5, Math.round((count / maxCount) * 100));
+  });
+}
+
 async function fetchData() {
   const curTime = getThreshold(timeRange.value, 1)
   const prevTime = getThreshold(timeRange.value, 2)
+  const startMs = new Date(curTime).getTime()
+  const endMs = new Date().getTime()
+  const bucketCount = timeRange.value === '1h' ? 12 : timeRange.value === '24h' ? 24 : timeRange.value === '7d' ? 14 : timeRange.value === '30d' ? 30 : 12;
   
   try {
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-    // Fire all big queries concurrently using the actual database schema columns (event_type, created_at, revoked_at)
     const [
-      authCur, authPrev,
-      sessCur, sessPrev,
-      tokCur, tokPrev,
-      failCur, failPrev,
-      eventBreakdown
+      authPrev,
+      sessPrev,
+      tokPrev,
+      failPrev,
+      authTs,
+      sessTs,
+      tokTs,
+      failTs,
+      opsRes, usersRes, ipsRes
     ] = await Promise.all([
-      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${curTime}'`),
       fetchCount(`SELECT COUNT(*) FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      
-      fetchCount(`SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${curTime}'`),
       fetchCount(`SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      
-      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${curTime}'`),
       fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      
-      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${curTime}'`),
       fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
       
-      api.post<any>('/v1/analytics/query', { sql: `SELECT event_type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' GROUP BY event_type ORDER BY count DESC LIMIT 20` })
+      fetchTimestamps(`SELECT created_at FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${curTime}'`),
+      fetchTimestamps(`SELECT created_at FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${curTime}'`),
+      fetchTimestamps(`SELECT created_at FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${curTime}'`),
+      fetchTimestamps(`SELECT created_at FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${curTime}'`),
+      
+      api.post<any>('/v1/analytics/query', { sql: `SELECT event_type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND event_type != '' GROUP BY event_type ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(actor_id, ''), 'Anonymous'), COUNT(*) as count FROM events WHERE created_at >= '${curTime}' GROUP BY actor_id ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT ip_address, COUNT(*) as count FROM sessions WHERE created_at >= '${curTime}' AND ip_address IS NOT NULL AND ip_address != '' GROUP BY ip_address ORDER BY count DESC LIMIT 8` })
     ]);
 
     const computeChange = (cur: number, prev: number) => {
@@ -197,28 +258,37 @@ async function fetchData() {
       return Math.round(((cur - prev) / prev) * 100);
     }
 
-    metrics.value[0].value = authCur
-    metrics.value[0].change = computeChange(authCur, authPrev)
+    metrics.value[0].value = authTs.length
+    metrics.value[0].change = computeChange(authTs.length, authPrev)
+    metrics.value[0].sparkline = generateBuckets(authTs, bucketCount, startMs, endMs)
 
-    metrics.value[1].value = sessCur
-    metrics.value[1].change = computeChange(sessCur, sessPrev)
+    metrics.value[1].value = sessTs.length
+    metrics.value[1].change = computeChange(sessTs.length, sessPrev)
+    metrics.value[1].sparkline = generateBuckets(sessTs, bucketCount, startMs, endMs)
 
-    metrics.value[2].value = tokCur
-    metrics.value[2].change = computeChange(tokCur, tokPrev)
+    metrics.value[2].value = tokTs.length
+    metrics.value[2].change = computeChange(tokTs.length, tokPrev)
+    metrics.value[2].sparkline = generateBuckets(tokTs, bucketCount, startMs, endMs)
 
-    metrics.value[3].value = failCur
-    metrics.value[3].change = computeChange(failCur, failPrev)
+    metrics.value[3].value = failTs.length
+    metrics.value[3].change = computeChange(failTs.length, failPrev)
+    metrics.value[3].sparkline = generateBuckets(failTs, bucketCount, startMs, endMs)
 
-    if (eventBreakdown && eventBreakdown.rows) {
-      eventRows.value = eventBreakdown.rows.map((r: any, i: number) => ({
-        event_type: Object.values(r)[0] || 'unknown',
-        count: Number(Object.values(r)[1] || 0),
-        color: colors[i % colors.length],
-        sparkline: sparkline(), // Visual mock kept due to dialect complexity
-      }))
-    } else {
-      eventRows.value = []
+    // Parse analytics response supporting the 2D array Rows structure
+    const parseList = (res: any) => {
+      if (res && res.rows) {
+        return res.rows.map((r: any) => ({
+          name: Array.isArray(r) ? r[0] : Object.values(r)[0],
+          count: Number(Array.isArray(r) ? r[1] : Object.values(r)[1])
+        }));
+      }
+      return [];
     }
+    
+    topOperations.value = parseList(opsRes);
+    topUsers.value = parseList(usersRes);
+    topIps.value = parseList(ipsRes);
+    
   } catch (err) {
     console.error("Failed to load overview data:", err)
   }

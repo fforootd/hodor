@@ -244,6 +244,10 @@ func (h *Handler) handleLoginPassword(w http.ResponseWriter, r *http.Request) {
 
 	valid, err := h.passwords.CheckPassword(r.Context(), sess.IdentityID, req.Password)
 	if err != nil || !valid {
+		h.api.EmitAuthEvent(r.Context(), "auth.login_failed", sess.IdentityID, map[string]any{
+			"reason":           "invalid_password",
+			"login_session_id": sess.ID,
+		})
 		writeJSON(w, map[string]any{"error": "invalid_password"})
 		return
 	}

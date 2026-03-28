@@ -7,7 +7,10 @@ const router = createRouter({
   history: createWebHistory(basePath + '/console'),
   routes: [
     { path: '/', name: 'dashboard', component: () => import('./views/DashboardView.vue') },
-    // Dynamic schema-type identity list: /s/human_user, /s/app, /s/ai_agent, etc.
+    // Unified aggregate views
+    { path: '/users', name: 'users', component: () => import('./views/UnifiedUsersView.vue') },
+    { path: '/applications', name: 'applications', component: () => import('./views/UnifiedAppsView.vue') },
+    // Dynamic schema-type identity list: /s/human_user, /s/app, /s/ai_agent, etc. (backward compat)
     { path: '/s/:schemaType', name: 'schema-identities', component: () => import('./views/IdentityListView.vue'), props: true },
     // Shared identity detail/create
     { path: '/s/:schemaType/new', name: 'identity-create', component: () => import('./views/IdentityCreateView.vue'), props: true },

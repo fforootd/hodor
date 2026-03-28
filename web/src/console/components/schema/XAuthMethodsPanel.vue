@@ -1,17 +1,17 @@
 <template>
-  <div class="sidebar-section">
-    <h4 class="sidebar-heading">Auth Methods</h4>
-    <div class="toggle-group">
-      <label class="toggle-row" v-for="m in methodsList" :key="m.key">
-        <input type="checkbox" v-model="m.enabled" @change="emit('change')" />
-        <span>{{ m.label }}</span>
-      </label>
+  <div class="space-y-3">
+    <div v-for="m in methodsList" :key="m.key" class="flex items-center justify-between">
+      <Label :for="'method-' + m.key" class="text-sm font-normal cursor-pointer">{{ m.label }}</Label>
+      <Switch :id="'method-' + m.key" :checked="m.enabled" @update:checked="val => { m.enabled = val; emit('change') }" />
     </div>
+    <p v-if="!methodsList.length" class="text-xs text-muted-foreground">No non-interactive auth methods configured</p>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -29,7 +29,6 @@ const labelMap = {
   sso: 'SSO',
 }
 
-// Only show non-interactive methods (interactive ones go in XLoginPanel)
 const methodsList = ref(
   Object.entries(props.config || {})
     .filter(([, v]) => !v.interactive)

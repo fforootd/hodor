@@ -21,7 +21,7 @@
       </SidebarHeader>
 
       <SidebarContent>
-        <!-- Dashboard (always shown) -->
+        <!-- Dashboard (always first) -->
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -37,23 +37,29 @@
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <!-- Catalog-driven nav -->
-        <SidebarGroup v-for="group in navGroups" :key="group.key">
-          <SidebarGroupLabel>{{ group.label }}</SidebarGroupLabel>
+        <!-- Flat catalog-driven nav -->
+        <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem v-for="item in group.items" :key="item.type">
-                <SidebarMenuButton as-child :data-active="isNavActive(item)">
-                  <router-link :to="item.route">
-                    <component :is="getIcon(item.type)" class="size-4" />
-                    <span>{{ item.label }}</span>
-                  </router-link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              <template v-for="(item, idx) in navItems" :key="item.type">
+                <!-- Optional visual separator -->
+                <div v-if="item.separatorBefore && idx > 0" class="my-2 mx-2 border-t border-border/40" />
+                <SidebarMenuItem>
+                  <SidebarMenuButton as-child :data-active="isNavActive(item)">
+                    <router-link :to="item.route">
+                      <component :is="getIcon(item.type)" class="size-4" />
+                      <span>{{ item.label }}</span>
+                      <span
+                        v-if="item.count !== undefined && item.count > 0"
+                        class="ml-auto text-xs text-muted-foreground tabular-nums"
+                      >{{ item.count }}</span>
+                    </router-link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </template>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-
       </SidebarContent>
 
       <SidebarFooter>
@@ -159,7 +165,7 @@
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
 
-          <!-- API search results (shown when user has typed a query) -->
+          <!-- API search results -->
           <CommandGroup v-if="searchResults.length" heading="Search Results">
             <CommandItem
               v-for="r in searchResults"
@@ -175,7 +181,7 @@
             </CommandItem>
           </CommandGroup>
 
-          <!-- Navigation shortcuts (shown when palette opens without query) -->
+          <!-- Navigation shortcuts -->
           <template v-if="!commandQuery">
             <CommandGroup heading="Navigation">
               <CommandItem value="nav-dashboard" @select="navigateTo('/')">
@@ -183,7 +189,7 @@
                 <span>Dashboard</span>
               </CommandItem>
               <CommandItem
-                v-for="item in allNavItems"
+                v-for="item in navItems"
                 :key="item.type"
                 :value="`nav-${item.type}`"
                 @select="navigateTo(item.route)"
@@ -198,6 +204,10 @@
                 <Users class="mr-2 size-4 shrink-0" />
                 <span>Create User</span>
               </CommandItem>
+              <CommandItem value="action-create-app" @select="navigateTo('/s/app/new')">
+                <AppWindow class="mr-2 size-4 shrink-0" />
+                <span>Create Application</span>
+              </CommandItem>
               <CommandItem value="action-schemas" @select="navigateTo('/schemas')">
                 <FileJson class="mr-2 size-4 shrink-0" />
                 <span>View Schemas</span>
@@ -205,10 +215,6 @@
               <CommandItem value="action-events" @select="navigateTo('/events')">
                 <Activity class="mr-2 size-4 shrink-0" />
                 <span>View Audit Log</span>
-              </CommandItem>
-              <CommandItem value="action-providers" @select="navigateTo('/providers')">
-                <Globe class="mr-2 size-4 shrink-0" />
-                <span>Manage Providers</span>
               </CommandItem>
             </CommandGroup>
           </template>
@@ -226,13 +232,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { searchApi, metaSchemaApi, orgApi, type SearchResult } from '@/api/resources'
+import { searchApi, metaSchemaApi, orgApi, countsApi, type SearchResult } from '@/api/resources'
 import { Toaster } from '@/components/ui/sonner'
 
 // shadcn components
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
-  SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
+  SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
   SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
@@ -251,15 +257,14 @@ import {
 
 // Lucide icons
 import {
-  Shield, LayoutDashboard, Users, KeyRound, Boxes, Globe, Settings, FileJson, Workflow,
+  Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow,
   Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
-  Bot, AppWindow, Activity, BookOpen, Calendar,
+  Bot, AppWindow, Activity, Calendar,
 } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
 
-// Base path for navigation links (injected at runtime by the server)
 const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
 
 // ─── Org Switcher ───
@@ -284,11 +289,6 @@ const showCommandPalette = ref(false)
 const searchResults = ref<SearchResult[]>([])
 const commandQuery = ref('')
 let debounceTimer: ReturnType<typeof setTimeout>
-
-// Flat list of all nav items for the palette
-const allNavItems = computed(() =>
-  navGroups.value.flatMap(g => g.items)
-)
 
 function onCommandSearch(e: Event) {
   const query = (e.target as HTMLInputElement).value
@@ -341,18 +341,35 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => document.addEventListener('keydown', handleKeydown))
 onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 
-// ─── Catalog-driven Nav ───
-interface NavItem { type: string; label: string; icon: string; route: string; sortOrder: number; storage: string }
-interface NavGroup { key: string; label: string; sortOrder: number; items: NavItem[] }
-const navGroups = ref<NavGroup[]>([])
+// ─── Flat catalog-driven nav ───
+interface NavItem {
+  type: string
+  label: string
+  route: string
+  sortOrder: number
+  storage: string
+  countable: boolean
+  separatorBefore: boolean
+  count?: number
+  aggregates?: string[]
+}
+
+const navItems = ref<NavItem[]>([])
+const entityCounts = ref<Record<string, number>>({})
 
 function isNavActive(item: NavItem): boolean {
   const r = route
+  // Virtual aggregate routes: /users, /applications
+  if (item.route === '/users') return r.name === 'users'
+  if (item.route === '/applications') return r.name === 'applications'
+  // Schema-type routes
   if (item.storage === 'entities') return r.params.schemaType === item.type
-  return r.name === item.type || r.name === item.type + 's' || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
+  // Dedicated routes
+  return r.name === item.type || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
 }
 
 const iconMap: Record<string, any> = {
+  users: Users, applications: AppWindow,
   human_user: Users, service_user: KeyRound, ai_agent: Bot, app: AppWindow,
   org: Building2, rule: Zap, provider: Globe, session: Clock,
   event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
@@ -360,7 +377,7 @@ const iconMap: Record<string, any> = {
 }
 
 function getIcon(type: string) {
-  return iconMap[type] || Boxes
+  return iconMap[type] || Database
 }
 
 onMounted(async () => {
@@ -368,38 +385,50 @@ onMounted(async () => {
   try {
     const meta = await metaSchemaApi.get()
     const catalog = meta['x-catalog'] || {}
-    const groups = meta['x-groups'] || {}
 
-    const groupMap: Record<string, NavGroup> = {}
-    for (const [groupKey, groupDef] of Object.entries(groups) as [string, any][]) {
-      if (groupDef.nav === 'hidden') continue
-      groupMap[groupKey] = {
-        key: groupKey,
-        label: groupDef.label || groupKey,
-        sortOrder: groupDef.sort_order ?? 99,
-        items: [],
-      }
-    }
-
+    const items: NavItem[] = []
     for (const [typeName, entry] of Object.entries(catalog) as [string, any][]) {
       if (entry.nav === 'hidden') continue
-      const groupKey = entry.group
-      if (!groupMap[groupKey]) continue
 
-      const item: NavItem = {
+      let itemRoute: string
+      if (entry.route) {
+        itemRoute = entry.route
+      } else if (entry.storage === 'entities') {
+        itemRoute = `/s/${typeName}`
+      } else {
+        itemRoute = `/${entry.path}`
+      }
+
+      items.push({
         type: typeName,
         label: entry.alias || typeName,
-        icon: entry.icon || '◇',
         sortOrder: entry.sort_order ?? 99,
         storage: entry.storage || 'entities',
-        route: entry.storage === 'entities' ? `/s/${typeName}` : (entry.route || `/${entry.path}`),
-      }
-      groupMap[groupKey].items.push(item)
+        route: itemRoute,
+        countable: !!entry.countable,
+        separatorBefore: !!entry.separator_before,
+        aggregates: entry.aggregates,
+      })
     }
 
-    navGroups.value = Object.values(groupMap)
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map(g => ({ ...g, items: g.items.sort((a, b) => a.sortOrder - b.sortOrder) }))
+    navItems.value = items.sort((a, b) => a.sortOrder - b.sortOrder)
+  } catch { /* ignore */ }
+
+  // Fetch counts for badges
+  try {
+    entityCounts.value = await countsApi.get()
+
+    // Apply counts to nav items
+    for (const item of navItems.value) {
+      if (!item.countable) continue
+
+      if (item.aggregates && item.aggregates.length > 0) {
+        // Virtual aggregate: sum counts of child types
+        item.count = item.aggregates.reduce((sum, t) => sum + (entityCounts.value[t] || 0), 0)
+      } else {
+        item.count = entityCounts.value[item.type] || 0
+      }
+    }
   } catch { /* ignore */ }
 
   // Fetch orgs
@@ -417,10 +446,11 @@ onMounted(async () => {
 })
 
 const pageTitle = computed(() => {
+  if (route.name === 'users') return 'Users'
+  if (route.name === 'applications') return 'Applications'
   if (route.params.schemaType) {
     const st = route.params.schemaType as string
-    const allItems = navGroups.value.flatMap(g => g.items)
-    const entry = allItems.find(e => e.type === st)
+    const entry = navItems.value.find(e => e.type === st)
     return entry?.label || st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + 's'
   }
   const titles: Record<string, string> = {
@@ -433,7 +463,6 @@ const pageTitle = computed(() => {
     sessions: 'Sessions',
     events: 'Events',
     jobs: 'Jobs',
-    analytics: 'Analytics',
     'obs-overview': 'Overview',
     'obs-explore': 'Explore',
     traces: 'Traces',

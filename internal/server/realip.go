@@ -63,18 +63,15 @@ func ParseTrustedProxies(cidrs []string) ([]*net.IPNet, error) {
 //   - True-Client-IP (Akamai/Cloudflare)
 //   - JP3A-Client-ID, JP3A-Session-ID, JP3A-Device-Fingerprint
 func RealIP(cfg *RealIPConfig) func(http.Handler) http.Handler {
-	if cfg == nil || len(cfg.TrustedCIDRs) == 0 {
-		// No trusted proxies configured: pass through unchanged.
-		return func(next http.Handler) http.Handler { return next }
-	}
-
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Parse the direct connection IP.
+			// Always parse and strip the port from the direct connection network address,
+			// ensuring r.RemoteAddr is consistently a raw IP across all handlers.
 			remoteIP := extractIP(r.RemoteAddr)
+			r.RemoteAddr = remoteIP
 
 			// Only trust proxy headers if the direct connection is from a trusted proxy.
-			if isTrusted(remoteIP, cfg.TrustedCIDRs) {
+			if cfg != nil && len(cfg.TrustedCIDRs) > 0 && isTrusted(remoteIP, cfg.TrustedCIDRs) {
 				clientIP := resolveClientIP(r, cfg)
 				if clientIP != "" {
 					r.RemoteAddr = clientIP

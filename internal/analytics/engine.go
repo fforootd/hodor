@@ -50,8 +50,18 @@ type TableInfo struct {
 
 // Column describes a column.
 type Column struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name string   `json:"name"`
+	Type string   `json:"type"`
+	Ref  *RefInfo `json:"ref,omitempty"`
+}
+
+// RefInfo describes a foreign key relationship to another entity or table.
+// Mirrors x-ref annotations from the JSON schemas.
+type RefInfo struct {
+	Resource string `json:"resource"`
+	Display  string `json:"display,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Inverse  string `json:"inverse,omitempty"`
 }
 
 // OLTPBackend queries the OLTP database directly (SQLite or Postgres).
@@ -255,6 +265,21 @@ func (e *Engine) handleTables(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tables": tables})
 }
 
+// schemaRefs defines foreign key relationship metadata per table+column.
+// This mirrors the x-ref annotations declared in the JSON schemas under
+// internal/schema/schemas/*.json. Kept here as a static map to avoid
+// parsing JSON at runtime.
+var schemaRefs = map[string]map[string]*RefInfo{
+	"events": {
+		"actor_id":     {Resource: "entities", Display: "display_name", Path: "/console/s/{type}/{id}", Inverse: "events?actor_id={id}"},
+		"aggregate_id": {Resource: "entities", Display: "identifier", Path: "/console/s/{type}/{id}"},
+		"session_id":   {Resource: "sessions", Display: "id", Path: "/console/sessions"},
+	},
+	"sessions": {
+		"entity_id": {Resource: "entities", Display: "display_name", Path: "/console/s/{type}/{id}", Inverse: "sessions?entity_id={id}"},
+	},
+}
+
 func (e *Engine) handleSchema(w http.ResponseWriter, r *http.Request) {
 	tables, err := e.backend.Tables(r.Context())
 	if err != nil {
@@ -263,9 +288,16 @@ func (e *Engine) handleSchema(w http.ResponseWriter, r *http.Request) {
 	}
 	schema := make(map[string]interface{})
 	for _, t := range tables {
-		cols := make([]map[string]string, len(t.Columns))
+		tableRefs := schemaRefs[t.Name]
+		cols := make([]map[string]interface{}, len(t.Columns))
 		for i, c := range t.Columns {
-			cols[i] = map[string]string{"name": c.Name, "type": c.Type}
+			col := map[string]interface{}{"name": c.Name, "type": c.Type}
+			if tableRefs != nil {
+				if ref, ok := tableRefs[c.Name]; ok {
+					col["ref"] = ref
+				}
+			}
+			cols[i] = col
 		}
 		schema[t.Name] = map[string]interface{}{
 			"columns":   cols,

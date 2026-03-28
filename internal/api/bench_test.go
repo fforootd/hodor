@@ -47,7 +47,7 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 	if err != nil {
 		b.Fatalf("open db: %v", err)
 	}
-	if err := database.EnsureSchema(db); err != nil {
+	if err := database.Migrate(db); err != nil {
 		b.Fatalf("migrate: %v", err)
 	}
 	if err := bootstrap.EnsureAdmin(b.Context(), db, ""); err != nil {

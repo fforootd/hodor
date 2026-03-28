@@ -22,8 +22,8 @@ func emitGCEvent(ctx context.Context, db *database.DB, bus *eventbus.Bus, eventT
 		payloadJSON = string(b)
 	}
 	_, _ = db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', datetime('now'))`,
+		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', '', '', datetime('now'))`,
 		eventID, eventType, payloadJSON)
 	bus.Signal()
 }

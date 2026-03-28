@@ -8,7 +8,7 @@
         </AvatarFallback>
       </Avatar>
       <div class="flex-1">
-        <h1 class="text-2xl font-bold tracking-tight">{{ identity.display_name || identity.identifier }}</h1>
+        <h1 class="text-2xl font-semibold tracking-tight">{{ identity.display_name || identity.identifier }}</h1>
         <p class="text-sm text-muted-foreground">
           {{ identity.identifier }} ·
           <Badge
@@ -227,6 +227,65 @@
       </Card>
     </template>
 
+    <!-- ═══ RELATED ACTIVITY ═══ -->
+    <template v-if="!editing">
+      <Card>
+        <CardHeader class="pb-3">
+          <CardTitle class="text-sm flex items-center gap-2">
+            <Activity class="size-4 text-muted-foreground" />
+            Related Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <RouterLink
+              :to="{ path: '/events', query: { session_id: undefined } }"
+              @click.prevent="router.push({ path: '/observability/explore', query: { table: 'events', func: 'NONE', mcol: '*', filters: JSON.stringify([{ col: 'actor_id', op: '=', val: identity?.id }]) } })"
+              class="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors group cursor-pointer"
+            >
+              <div class="p-2 rounded-md bg-primary/10 text-primary">
+                <FileJson class="size-4" />
+              </div>
+              <div>
+                <p class="text-sm font-medium group-hover:text-primary transition-colors">Events</p>
+                <p class="text-xs text-muted-foreground">Activity by this actor</p>
+              </div>
+              <ExternalLink class="size-3 ml-auto opacity-0 group-hover:opacity-50 transition-opacity" />
+            </RouterLink>
+
+            <RouterLink
+              :to="{ path: '/sessions', query: {} }"
+              @click.prevent="router.push({ path: '/observability/explore', query: { table: 'sessions', func: 'NONE', mcol: '*', filters: JSON.stringify([{ col: 'entity_id', op: '=', val: identity?.id }]) } })"
+              class="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors group cursor-pointer"
+            >
+              <div class="p-2 rounded-md bg-green-500/10 text-green-600">
+                <Key class="size-4" />
+              </div>
+              <div>
+                <p class="text-sm font-medium group-hover:text-primary transition-colors">Sessions</p>
+                <p class="text-xs text-muted-foreground">Active sessions for this identity</p>
+              </div>
+              <ExternalLink class="size-3 ml-auto opacity-0 group-hover:opacity-50 transition-opacity" />
+            </RouterLink>
+
+            <RouterLink
+              :to="{ path: '/observability/traces' }"
+              class="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors group"
+            >
+              <div class="p-2 rounded-md bg-amber-500/10 text-amber-600">
+                <Activity class="size-4" />
+              </div>
+              <div>
+                <p class="text-sm font-medium group-hover:text-primary transition-colors">Traces</p>
+                <p class="text-xs text-muted-foreground">Distributed trace chains</p>
+              </div>
+              <ExternalLink class="size-3 ml-auto opacity-0 group-hover:opacity-50 transition-opacity" />
+            </RouterLink>
+          </div>
+        </CardContent>
+      </Card>
+    </template>
+
     <Button variant="link" as-child class="px-0 text-muted-foreground">
       <router-link :to="backRoute">← Back to {{ displayMeta.alias || 'list' }}</router-link>
     </Button>
@@ -236,7 +295,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { entityApi, magicLinkApi, schemaApi, metaSchemaApi, type Identity } from '@/api/resources'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
@@ -250,7 +309,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Mail, Pencil, Trash2, X } from 'lucide-vue-next'
+import { ArrowLeft, Mail, Pencil, Trash2, X, Activity, FileJson, Key, ExternalLink } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()

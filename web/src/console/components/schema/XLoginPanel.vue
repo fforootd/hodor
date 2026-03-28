@@ -1,34 +1,51 @@
 <template>
-  <div class="sidebar-section">
-    <h4 class="sidebar-heading">Login Flow</h4>
-    <div class="field-row">
-      <span class="field-label">Preset</span>
-      <select v-model="preset" class="select-input" @change="emit('change')">
-        <option value="identifier_first">Identifier first</option>
-        <option value="passkey_first">Passkey first</option>
-        <option value="sso_only">SSO only</option>
-        <option value="custom">Custom</option>
-      </select>
+  <div class="space-y-4">
+    <div class="space-y-2">
+      <Label class="text-xs font-medium text-muted-foreground">Preset</Label>
+      <Select v-model="preset" @update:model-value="emit('change')">
+        <SelectTrigger class="h-8 text-xs">
+          <SelectValue placeholder="Select preset" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="identifier_first">Identifier first</SelectItem>
+          <SelectItem value="passkey_first">Passkey first</SelectItem>
+          <SelectItem value="sso_only">SSO only</SelectItem>
+          <SelectItem value="custom">Custom</SelectItem>
+        </SelectContent>
+      </Select>
     </div>
-    <div class="toggle-group">
-      <label class="toggle-row" v-for="m in methods" :key="m.key">
-        <input type="checkbox" v-model="m.enabled" @change="emit('change')" />
-        <span>{{ m.label }}</span>
-      </label>
+
+    <Separator />
+
+    <div class="space-y-3">
+      <Label class="text-xs font-medium text-muted-foreground">Auth Methods</Label>
+      <div v-for="m in methods" :key="m.key" class="flex items-center justify-between">
+        <Label :for="'auth-' + m.key" class="text-sm font-normal cursor-pointer">{{ m.label }}</Label>
+        <Switch :id="'auth-' + m.key" :checked="m.enabled" @update:checked="val => { m.enabled = val; emit('change') }" />
+      </div>
     </div>
-    <label class="toggle-row mfa-row">
-      <input type="checkbox" v-model="mfaRequired" @change="emit('change')" />
-      <span>Require MFA</span>
-    </label>
-    <label class="toggle-row">
-      <input type="checkbox" v-model="registrationAllowed" @change="emit('change')" />
-      <span>Allow registration</span>
-    </label>
+
+    <Separator />
+
+    <div class="space-y-3">
+      <div class="flex items-center justify-between">
+        <Label for="mfa-required" class="text-sm font-normal cursor-pointer">Require MFA</Label>
+        <Switch id="mfa-required" :checked="mfaRequired" @update:checked="val => { mfaRequired = val; emit('change') }" />
+      </div>
+      <div class="flex items-center justify-between">
+        <Label for="registration" class="text-sm font-normal cursor-pointer">Allow registration</Label>
+        <Switch id="registration" :checked="registrationAllowed" @update:checked="val => { registrationAllowed = val; emit('change') }" />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const props = defineProps({
   config: { type: Object, required: true },

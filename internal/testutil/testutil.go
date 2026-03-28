@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/bootstrap"
 	"github.com/zitadel/zitadel/internal/config"
 	"github.com/zitadel/zitadel/internal/crypto"
@@ -50,7 +51,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := database.EnsureSchema(db); err != nil {
+	if err := database.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -82,6 +83,16 @@ func NewTestServer(t *testing.T) *TestServer {
 	db.SQL().QueryRow(`SELECT org_id FROM entities WHERE identifier = 'admin' LIMIT 1`).Scan(&orgID)
 	if orgID == "" {
 		orgID = "0" // fallback
+	}
+
+	// FGA bootstrap: server is now started, seed tuples for the admin.
+	// (EnsureAdmin runs before server.New, so api.FGAService was nil at that time.)
+	if fgaSvc := api.FGAService; fgaSvc != nil {
+		var adminID string
+		db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin' LIMIT 1`).Scan(&adminID)
+		if adminID != "" {
+			_ = fgaSvc.OnBootstrap(t.Context(), adminID, orgID)
+		}
 	}
 
 	return &TestServer{

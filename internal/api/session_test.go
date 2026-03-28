@@ -34,9 +34,12 @@ func TestSession_AdminCanListAndRevoke(t *testing.T) {
 	}
 
 	// 3. Verify it's revoked
-	code, _ = srv.GetWithBearer("/v1/sessions/"+sessionID, adminToken)
-	if code == 200 {
-		t.Fatalf("expected session to be revoked (not found/inactive), got 200")
+	code, body = srv.GetWithBearer("/v1/sessions/"+sessionID, adminToken)
+	if code != 200 {
+		t.Fatalf("expected session to be returned (200), got %d", code)
+	}
+	if body["revoked_at"] == nil || body["revoked_at"] == "" {
+		t.Fatalf("expected session to have revoked_at populated, got: %v", body["revoked_at"])
 	}
 }
 

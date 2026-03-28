@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,8 +53,6 @@ func TestPostgresMigrations(t *testing.T) {
 		t.Fatalf("failed to get connection string: %s", err)
 	}
 
-	// The wait strategy already waits for 2 occurrences of the ready log.
-
 	// Connect to Postgres
 	db, err := database.Open(connString)
 	if err != nil {
@@ -67,13 +64,34 @@ func TestPostgresMigrations(t *testing.T) {
 		t.Fatalf("expected postgres dialect, got %s", db.Dialect())
 	}
 
-	// schema.sql is SQLite-only — EnsureSchema should return a clear error.
-	err = database.EnsureSchema(db)
-	if err == nil {
-		t.Fatal("expected error running SQLite DDL against Postgres")
+	// With Goose migrations, Postgres should now work.
+	err = database.Migrate(db)
+	if err != nil {
+		t.Fatalf("Migrate (postgres) failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "SQLite-only") {
-		t.Fatalf("expected SQLite-only error, got: %v", err)
+
+	// Verify core tables exist.
+	var tableName string
+	err = db.SQL().QueryRow("SELECT tablename FROM pg_tables WHERE tablename = 'entities' AND schemaname = 'public'").Scan(&tableName)
+	if err != nil {
+		t.Fatalf("entities table not found in postgres: %v", err)
 	}
-	t.Logf("correctly rejected Postgres migration: %v", err)
+
+	// Verify settings table from migration 00002.
+	err = db.SQL().QueryRow("SELECT tablename FROM pg_tables WHERE tablename = 'settings' AND schemaname = 'public'").Scan(&tableName)
+	if err != nil {
+		t.Fatalf("settings table not found in postgres: %v", err)
+	}
+
+	// Verify goose version tracking.
+	var version int64
+	err = db.SQL().QueryRow("SELECT version_id FROM goose_db_version ORDER BY id DESC LIMIT 1").Scan(&version)
+	if err != nil {
+		t.Fatalf("goose version not found: %v", err)
+	}
+	if version < 2 {
+		t.Errorf("expected goose version >= 2, got %d", version)
+	}
+
+	t.Logf("Postgres migration successful: goose version=%d", version)
 }

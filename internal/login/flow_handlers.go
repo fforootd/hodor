@@ -171,6 +171,10 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 	ok, _, err := h.passwords.Verify(hash, password)
 	if err != nil || !ok {
+		h.api.EmitAuthEvent(r.Context(), "auth.login_failed", flow.IdentityID, map[string]any{
+			"reason":  "invalid_password",
+			"flow_id": flow.ID,
+		})
 		writeErr(w, http.StatusUnauthorized, "invalid_password")
 		return
 	}

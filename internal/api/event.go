@@ -20,6 +20,10 @@ type EventResponse struct {
 	ActorType     string `json:"actor_type"`
 	AggregateID   string `json:"aggregate_id"`
 	AggregateType string `json:"aggregate_type"`
+	SessionID     string `json:"session_id,omitempty"`
+	TraceID       string `json:"trace_id,omitempty"`
+	SpanID        string `json:"span_id,omitempty"`
+	ParentSpanID  string `json:"parent_span_id,omitempty"`
 	Payload       any    `json:"payload,omitempty"`
 	Metadata      any    `json:"metadata,omitempty"`
 	CreatedAt     string `json:"created_at"`
@@ -50,7 +54,7 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `SELECT id, event_type, org_id, actor_id, actor_type,
-	                 aggregate_id, aggregate_type, payload, metadata, created_at
+	                 aggregate_id, aggregate_type, payload, metadata, created_at, session_id, trace_id, span_id, parent_span_id
 	          FROM events WHERE id > ?`
 	args := []any{cursor}
 
@@ -65,6 +69,10 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	if aggID := r.URL.Query().Get("aggregate_id"); aggID != "" {
 		query += ` AND aggregate_id = ?`
 		args = append(args, aggID)
+	}
+	if sessionID := r.URL.Query().Get("session_id"); sessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sessionID)
 	}
 	if types := r.URL.Query().Get("types"); types != "" {
 		typeList := strings.Split(types, ",")
@@ -97,12 +105,25 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var evt EventResponse
 		var payloadStr, metadataStr string
+		var sessionID, traceID, spanID, parentSpanID *string
 		if err := rows.Scan(
 			&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
 			&evt.AggregateID, &evt.AggregateType,
-			&payloadStr, &metadataStr, &evt.CreatedAt,
+			&payloadStr, &metadataStr, &evt.CreatedAt, &sessionID, &traceID, &spanID, &parentSpanID,
 		); err != nil {
 			continue
+		}
+		if sessionID != nil {
+			evt.SessionID = *sessionID
+		}
+		if traceID != nil {
+			evt.TraceID = *traceID
+		}
+		if spanID != nil {
+			evt.SpanID = *spanID
+		}
+		if parentSpanID != nil {
+			evt.ParentSpanID = *parentSpanID
 		}
 		json.Unmarshal([]byte(payloadStr), &evt.Payload)
 		json.Unmarshal([]byte(metadataStr), &evt.Metadata)

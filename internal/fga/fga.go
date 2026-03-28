@@ -22,6 +22,7 @@ type Service struct {
 	srv     *server.Server
 	db      *sql.DB
 	storeID string // internal _system store
+	modelID string // current authorization model ID
 }
 
 // New initialises the OpenFGA engine on the provided *sql.DB.
@@ -36,7 +37,8 @@ func New(ctx context.Context, db *sql.DB, dialect string) (*Service, error) {
 
 	// 2. Create the SQLite/Postgres datastore.
 	ds, err := sqliteds.NewWithDB(db, &sqlcommon.Config{
-		MaxTypesPerModelField: 100,
+		MaxTuplesPerWriteField: 100,
+		MaxTypesPerModelField:  100,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fga: create datastore: %w", err)
@@ -80,7 +82,8 @@ func (s *Service) SystemStoreID() string {
 // Check evaluates whether (user, relation, object) is authorised.
 func (s *Service) Check(ctx context.Context, user, relation, object string) (bool, error) {
 	resp, err := s.srv.Check(ctx, &openfgav1.CheckRequest{
-		StoreId: s.storeID,
+		StoreId:              s.storeID,
+		AuthorizationModelId: s.modelID,
 		TupleKey: &openfgav1.CheckRequestTupleKey{
 			User:     user,
 			Relation: relation,
@@ -125,6 +128,54 @@ func (s *Service) DeleteTuple(ctx context.Context, user, relation, object string
 		},
 	})
 	return err
+}
+
+// ReadTuples reads relationship tuples matching the given filter.
+// Any of user, relation, object can be empty to act as a wildcard.
+func (s *Service) ReadTuples(ctx context.Context, user, relation, object string) ([]map[string]string, error) {
+	tupleKey := &openfgav1.ReadRequestTupleKey{}
+	if user != "" {
+		tupleKey.User = user
+	}
+	if relation != "" {
+		tupleKey.Relation = relation
+	}
+	if object != "" {
+		tupleKey.Object = object
+	}
+
+	resp, err := s.srv.Read(ctx, &openfgav1.ReadRequest{
+		StoreId:  s.storeID,
+		TupleKey: tupleKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fga: read tuples: %w", err)
+	}
+
+	var result []map[string]string
+	for _, t := range resp.GetTuples() {
+		result = append(result, map[string]string{
+			"user":     t.GetKey().GetUser(),
+			"relation": t.GetKey().GetRelation(),
+			"object":   t.GetKey().GetObject(),
+		})
+	}
+	return result, nil
+}
+
+// Expand returns the userset tree for a relation on an object.
+func (s *Service) Expand(ctx context.Context, relation, object string) (any, error) {
+	resp, err := s.srv.Expand(ctx, &openfgav1.ExpandRequest{
+		StoreId: s.storeID,
+		TupleKey: &openfgav1.ExpandRequestTupleKey{
+			Relation: relation,
+			Object:   object,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fga: expand: %w", err)
+	}
+	return resp.GetTree(), nil
 }
 
 // ---- internal helpers ----
@@ -202,6 +253,29 @@ func runMigrations(db *sql.DB, dialect string) error {
 		}
 	}
 
+	// Create the goose version table expected by OpenFGA's readiness check.
+	// OpenFGA's datastore verifies goose_db_version >= 5 before allowing operations.
+	gooseDDL := `
+	CREATE TABLE IF NOT EXISTS goose_db_version (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		version_id INTEGER NOT NULL,
+		is_applied INTEGER NOT NULL,
+		tstamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := db.Exec(gooseDDL); err != nil {
+		return fmt.Errorf("create goose_db_version table: %w", err)
+	}
+
+	// Insert version 5 if not already present (idempotent).
+	var count int
+	_ = db.QueryRow("SELECT COUNT(*) FROM goose_db_version WHERE version_id = 5").Scan(&count)
+	if count == 0 {
+		_, err := db.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (5, 1)")
+		if err != nil {
+			return fmt.Errorf("insert goose version: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -231,7 +305,8 @@ func (s *Service) ensureSystemStore(ctx context.Context) error {
 }
 
 // ensureAuthModel writes the Zitadel authorization model (idempotent).
-// Model defines: user, org (admin/member), identity (owner, org-admin permissions).
+// Uses the full model from model.go: user, instance, org, entity, app,
+// group, settings, session with hierarchical role inheritance.
 func (s *Service) ensureAuthModel(ctx context.Context) error {
 	// Check if a model already exists.
 	models, err := s.srv.ReadAuthorizationModels(ctx, &openfgav1.ReadAuthorizationModelsRequest{
@@ -242,141 +317,21 @@ func (s *Service) ensureAuthModel(ctx context.Context) error {
 		return fmt.Errorf("read auth models: %w", err)
 	}
 	if len(models.GetAuthorizationModels()) > 0 {
+		s.modelID = models.GetAuthorizationModels()[0].GetId()
 		return nil // model already loaded
 	}
 
-	// Write the Zitadel authorization model.
-	_, err = s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
-		StoreId:       s.storeID,
-		SchemaVersion: "1.1",
-		TypeDefinitions: []*openfgav1.TypeDefinition{
-			// type user — represents any identity acting as a subject
-			{
-				Type:      "user",
-				Metadata:  &openfgav1.Metadata{},
-				Relations: map[string]*openfgav1.Userset{},
-			},
-			// type org — organization with admin and member roles
-			{
-				Type: "org",
-				Metadata: &openfgav1.Metadata{
-					Relations: map[string]*openfgav1.RelationMetadata{
-						"admin": {
-							DirectlyRelatedUserTypes: []*openfgav1.RelationReference{
-								{Type: "user"},
-							},
-						},
-						"member": {
-							DirectlyRelatedUserTypes: []*openfgav1.RelationReference{
-								{Type: "user"},
-							},
-						},
-					},
-				},
-				Relations: map[string]*openfgav1.Userset{
-					"admin": {Userset: &openfgav1.Userset_This{}},
-					"member": {
-						Userset: &openfgav1.Userset_Union{
-							Union: &openfgav1.Usersets{
-								Child: []*openfgav1.Userset{
-									{Userset: &openfgav1.Userset_This{}},
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "admin"},
-									}},
-								},
-							},
-						},
-					},
-				},
-			},
-			// type identity — the core resource with owner/admin/org relations
-			{
-				Type: "identity",
-				Metadata: &openfgav1.Metadata{
-					Relations: map[string]*openfgav1.RelationMetadata{
-						"owner": {
-							DirectlyRelatedUserTypes: []*openfgav1.RelationReference{
-								{Type: "user"},
-							},
-						},
-						"org": {
-							DirectlyRelatedUserTypes: []*openfgav1.RelationReference{
-								{Type: "org"},
-							},
-						},
-						"admin":              {},
-						"can_read":           {},
-						"can_edit_profile":   {},
-						"can_revoke_session": {},
-						"can_delete":         {},
-					},
-				},
-				Relations: map[string]*openfgav1.Userset{
-					"owner": {Userset: &openfgav1.Userset_This{}},
-					"org":   {Userset: &openfgav1.Userset_This{}},
-					"admin": {
-						Userset: &openfgav1.Userset_TupleToUserset{
-							TupleToUserset: &openfgav1.TupleToUserset{
-								Tupleset:        &openfgav1.ObjectRelation{Relation: "org"},
-								ComputedUserset: &openfgav1.ObjectRelation{Relation: "admin"},
-							},
-						},
-					},
-					"can_read": {
-						Userset: &openfgav1.Userset_Union{
-							Union: &openfgav1.Usersets{
-								Child: []*openfgav1.Userset{
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "owner"},
-									}},
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "admin"},
-									}},
-								},
-							},
-						},
-					},
-					"can_edit_profile": {
-						Userset: &openfgav1.Userset_Union{
-							Union: &openfgav1.Usersets{
-								Child: []*openfgav1.Userset{
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "owner"},
-									}},
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "admin"},
-									}},
-								},
-							},
-						},
-					},
-					"can_revoke_session": {
-						Userset: &openfgav1.Userset_Union{
-							Union: &openfgav1.Usersets{
-								Child: []*openfgav1.Userset{
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "owner"},
-									}},
-									{Userset: &openfgav1.Userset_ComputedUserset{
-										ComputedUserset: &openfgav1.ObjectRelation{Relation: "admin"},
-									}},
-								},
-							},
-						},
-					},
-					"can_delete": {
-						Userset: &openfgav1.Userset_ComputedUserset{
-							ComputedUserset: &openfgav1.ObjectRelation{Relation: "admin"},
-						},
-					},
-				},
-			},
-		},
+	// Write the full Zitadel authorization model.
+	resp, err := s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
+		StoreId:         s.storeID,
+		SchemaVersion:   "1.1",
+		TypeDefinitions: ZitadelModel(),
 	})
 	if err != nil {
 		return fmt.Errorf("write auth model: %w", err)
 	}
 
-	log.Printf("[fga] authorization model loaded (org → admin/member, identity → owner/admin/can_*)")
+	s.modelID = resp.GetAuthorizationModelId()
+	log.Printf("[fga] authorization model loaded (user, instance, org, entity, app, group, settings, session)")
 	return nil
 }

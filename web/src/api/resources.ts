@@ -56,9 +56,15 @@ export interface Event {
   id: string
   event_type: string
   actor_id: string
+  actor_type?: string
   aggregate_id: string
   aggregate_type: string
+  session_id?: string
+  trace_id?: string
+  span_id?: string
+  parent_span_id?: string
   payload: Record<string, unknown>
+  metadata?: Record<string, unknown>
   created_at: string
 }
 
@@ -102,10 +108,11 @@ export const sessionApi = {
 }
 
 export const eventApi = {
-  list: (params?: { type?: string; limit?: number }) => {
+  list: (params?: { type?: string; limit?: number; session_id?: string }) => {
     const qs = new URLSearchParams()
     if (params?.type) qs.set('type', params.type)
     if (params?.limit) qs.set('limit', String(params.limit))
+    if (params?.session_id) qs.set('session_id', params.session_id)
     return api.get<ListResponse<Event>>(`/v1/events?${qs}`).then(r => r.items || [])
   },
 }
@@ -146,6 +153,11 @@ export interface Org {
 
 export const orgApi = {
   list: () => api.get<ListResponse<Org>>('/v1/orgs').then(r => r.items || []),
+}
+
+// Batch counts for sidebar badges
+export const countsApi = {
+  get: () => api.get<Record<string, number>>('/v1/counts'),
 }
 
 // Provider management

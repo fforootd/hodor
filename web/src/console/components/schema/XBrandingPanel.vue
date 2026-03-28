@@ -1,22 +1,32 @@
 <template>
-  <div class="sidebar-section">
-    <h4 class="sidebar-heading">Branding</h4>
-    <div class="field-row">
-      <span class="field-label">Heading</span>
-      <input type="text" v-model="heading" class="text-input" @input="emit('change')" />
+  <div class="space-y-3">
+    <div class="space-y-1.5">
+      <Label for="brand-heading" class="text-xs font-medium text-muted-foreground">Heading</Label>
+      <Input id="brand-heading" v-model="heading" class="h-8 text-sm" @input="emit('change')" />
     </div>
-    <div class="field-row">
-      <span class="field-label">Primary</span>
-      <div class="color-row">
-        <input type="color" v-model="primary" class="color-input" @input="emit('change')" />
-        <span class="mono" style="font-size:0.75rem">{{ primary }}</span>
-      </div>
+    <div class="space-y-1.5">
+      <Label class="text-xs font-medium text-muted-foreground">Primary Color</Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" class="h-8 w-full justify-start gap-2 text-xs font-normal">
+            <span class="size-4 rounded border" :style="{ background: primary }" />
+            <span class="font-mono text-muted-foreground">{{ primary }}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent class="w-auto p-3" align="start">
+          <input type="color" v-model="primary" class="size-32 cursor-pointer border-0 p-0" @input="emit('change')" />
+        </PopoverContent>
+      </Popover>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const props = defineProps({
   config: { type: Object, required: true },

@@ -5,7 +5,7 @@
         <router-link :to="`/s/${schemaType}`"><ArrowLeft class="size-4" /></router-link>
       </Button>
       <div>
-        <h1 class="text-2xl font-bold tracking-tight">Create {{ currentLabel }}</h1>
+        <h1 class="text-2xl font-semibold tracking-tight">Create {{ currentLabel }}</h1>
         <p class="text-muted-foreground text-sm">Fill in the details below or switch to JSON mode.</p>
       </div>
     </div>

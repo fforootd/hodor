@@ -218,7 +218,16 @@
             <TableBody>
               <TableRow v-for="(row, ri) in filteredRows" :key="ri">
                 <TableCell v-for="col in columns" :key="col" class="font-mono text-xs">
-                  {{ row[col] }}
+                  <template v-if="getColRef(col) && row[col]">
+                    <RouterLink
+                      :to="resolveRefLink(getColRef(col), row)"
+                      class="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      {{ row[col] }}
+                      <ExternalLink class="size-3 opacity-50" />
+                    </RouterLink>
+                  </template>
+                  <template v-else>{{ row[col] }}</template>
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -240,7 +249,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -248,7 +257,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Play, FileJson, BarChart3, TrendingUp, Search, Database } from 'lucide-vue-next'
+import { Play, FileJson, BarChart3, TrendingUp, Search, Database, ExternalLink } from 'lucide-vue-next'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { api } from '@/api/client'
 import { VisXYContainer, VisLine, VisArea, VisAxis, VisStackedBar } from '@unovis/vue'
@@ -399,6 +408,39 @@ function addFilter() {
 }
 function removeFilter(i: number) {
   visFilters.value.splice(i, 1)
+}
+
+// --- x-ref helpers: make FK columns clickable ---
+
+/** Look up x-ref metadata for a column in the current query's table schema. */
+function getColRef(colName: string): any | null {
+  // Find which table this column belongs to by checking all schemas.
+  for (const [, tableSchema] of Object.entries(schemas.value)) {
+    const cols = (tableSchema as any)?.columns || []
+    const col = cols.find((c: any) => c.name === colName && c.ref)
+    if (col) return col.ref
+  }
+  return null
+}
+
+/** Resolve an x-ref path template into a Vue Router path. */
+function resolveRefLink(refInfo: any, row: Record<string, any>): string {
+  if (!refInfo?.resource) return '#'
+
+  // For entity references, navigate to the identity detail page.
+  if (refInfo.resource === 'entities') {
+    const id = row[Object.keys(row).find(k => k.endsWith('_id') && row[k]) || ''] || ''
+    const type = row['actor_type'] || row['aggregate_type'] || 'human_user'
+    return `/console/s/${type}/${id}`
+  }
+
+  // For session references, link to sessions view.
+  if (refInfo.resource === 'sessions') {
+    const sessionId = row['session_id'] || ''
+    return `/console/sessions?id=${sessionId}`
+  }
+
+  return '#'
 }
 
 const chartData = computed(() => {

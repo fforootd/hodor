@@ -19,6 +19,7 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/telemetry"
 )
 
 // API holds the REST handlers and their dependencies.
@@ -34,27 +35,29 @@ func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API
 }
 
 // RegisterRoutes mounts all REST API routes on the given mux.
+// Authorization is handled by the FGA middleware (FGAGate) in the
+// server middleware chain — individual routes no longer wrap requireAdmin.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
-	// Identity CRUD — write routes require admin.
-	mux.HandleFunc("POST /v1/entities", a.requireAdmin(a.createIdentity))
+	// Identity CRUD — FGA middleware handles authz.
+	mux.HandleFunc("POST /v1/entities", a.createIdentity)
 	mux.HandleFunc("GET /v1/entities", a.listIdentities)
 	mux.HandleFunc("GET /v1/entities/{id}", a.getIdentity)
-	mux.HandleFunc("PATCH /v1/entities/{id}", a.requireAdmin(a.updateIdentity))
-	mux.HandleFunc("DELETE /v1/entities/{id}", a.requireAdmin(a.deleteIdentity))
+	mux.HandleFunc("PATCH /v1/entities/{id}", a.updateIdentity)
+	mux.HandleFunc("DELETE /v1/entities/{id}", a.deleteIdentity)
 
-	// Schema CRUD (write = admin-only, read = public)
-	mux.HandleFunc("POST /v1/schemas", a.requireAdmin(a.createSchema))
+	// Schema CRUD
+	mux.HandleFunc("POST /v1/schemas", a.createSchema)
 	mux.HandleFunc("GET /v1/schemas", a.listSchemas)
 	mux.HandleFunc("GET /v1/schemas/$meta", a.getMetaSchema)
 	mux.HandleFunc("GET /v1/schemas/{id}", a.getSchema)
-	mux.HandleFunc("PATCH /v1/schemas/{id}", a.requireAdmin(a.updateSchema))
-	mux.HandleFunc("POST /v1/schemas/{id}/promote", a.requireAdmin(a.promoteSchema))
+	mux.HandleFunc("PATCH /v1/schemas/{id}", a.updateSchema)
+	mux.HandleFunc("POST /v1/schemas/{id}/promote", a.promoteSchema)
 	mux.HandleFunc("GET /v1/schemas/{id}/diff", a.diffSchema)
 	mux.HandleFunc("POST /v1/schemas/{id}/preview", a.previewSchema)
 	mux.HandleFunc("GET /v1/schemas/{id}/identity-count", a.schemaIdentityCount)
 
 	// Session CRUD
-	a.RegisterSessionRoutes(mux, a.requireAdmin)
+	a.RegisterSessionRoutes(mux, noopMiddleware)
 
 	// PAT (Personal Access Token) management
 	a.RegisterPATRoutes(mux)
@@ -74,6 +77,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Import & bulk operations
 	a.RegisterBulkRoutes(mux)
 
+	// Customer-facing FGA API
+	a.RegisterFGARoutes(mux)
+
 	// Dynamic OpenAPI
 	mux.HandleFunc("GET /openapi.json", a.openAPISpec)
 
@@ -81,6 +87,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/zitadel-identity-schema", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/v1/schemas/$meta", http.StatusPermanentRedirect)
 	})
+
+	// Batch entity counts for sidebar badges
+	mux.HandleFunc("GET /v1/counts", a.entityCounts)
 
 	// Schema-driven route aliases (e.g. /v1/users → entities?schema_type=human_user)
 	a.registerAliasRoutes(mux)
@@ -104,10 +113,10 @@ func (a *API) registerAliasRoutes(mux *http.ServeMux) {
 		prefix := "/v1/" + entry.Path
 
 		mux.HandleFunc("GET "+prefix, a.aliasHandler(st, a.listIdentities))
-		mux.HandleFunc("POST "+prefix, a.requireAdmin(a.aliasHandler(st, a.createIdentity)))
+		mux.HandleFunc("POST "+prefix, a.aliasHandler(st, a.createIdentity))
 		mux.HandleFunc("GET "+prefix+"/{id}", a.getIdentity)
-		mux.HandleFunc("PATCH "+prefix+"/{id}", a.requireAdmin(a.updateIdentity))
-		mux.HandleFunc("DELETE "+prefix+"/{id}", a.requireAdmin(a.deleteIdentity))
+		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
+		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
 
 		log.Printf("[alias] registered /v1/%s → entities (type=%s)", entry.Path, st)
 	}
@@ -932,6 +941,45 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// entityCounts returns entity counts per schema type for sidebar badges.
+// GET /v1/counts → { "human_user": 8, "service_user": 3, ... }
+func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
+	counts := make(map[string]int)
+
+	// Count entities by schema type.
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT s.type, COUNT(*) FROM entities i
+		 JOIN schemas s ON i.schema_id = s.id
+		 GROUP BY s.type`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var schemaType string
+			var count int
+			if rows.Scan(&schemaType, &count) == nil {
+				counts[schemaType] = count
+			}
+		}
+		_ = rows.Err()
+	}
+
+	// Count providers separately (dedicated table).
+	var providerCount int
+	if err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM providers`).Scan(&providerCount); err == nil {
+		counts["provider"] = providerCount
+	}
+
+	// Count orgs separately (dedicated table, org_id on entities).
+	var orgCount int
+	if err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(DISTINCT org_id) FROM entities WHERE org_id > 0`).Scan(&orgCount); err == nil {
+		counts["org"] = orgCount
+	}
+
+	writeJSON(w, http.StatusOK, counts)
+}
+
 // getMetaSchema returns the canonical Zitadel identity schema meta-schema.
 func (a *API) getMetaSchema(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/schema+json")
@@ -1309,10 +1357,14 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
+	traceID := telemetry.TraceIDFromContext(ctx)
+	spanID := telemetry.SpanIDFromContext(ctx)
+	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
+	sessionID := telemetry.SessionIDFromContext(ctx)
 	tx.ExecContext(ctx,
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', '', '', datetime('now'))`,
-		eventID, eventType, actorID, aggregateID, aggregateType, payloadJSON)
+		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
 }
 
 // EmitAuthEvent is an exported helper for the UI to emit auth-related events.
@@ -1323,10 +1375,14 @@ func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID strin
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
+	traceID := telemetry.TraceIDFromContext(ctx)
+	spanID := telemetry.SpanIDFromContext(ctx)
+	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
+	sessionID := telemetry.SessionIDFromContext(ctx)
 	a.db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, '0', ?, '', ?, 'auth', ?, '{}', '', '', datetime('now'))`,
-		eventID, eventType, actorID, actorID, payloadJSON)
+		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, actorID, actorID, payloadJSON, traceID, spanID, parentSpanID, sessionID)
 	a.bus.Signal()
 }
 
@@ -1340,10 +1396,14 @@ func emitEventSimple(ctx context.Context, db interface {
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
+	traceID := telemetry.TraceIDFromContext(ctx)
+	spanID := telemetry.SpanIDFromContext(ctx)
+	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
+	sessionID := telemetry.SessionIDFromContext(ctx)
 	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, session_id, created_at)
-		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', '', '', datetime('now'))`,
-		eventIDVal, eventType, actorID, aggregateID, aggregateType, payloadJSON)
+		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
+		 VALUES (?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
+		eventIDVal, eventType, actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
 }
 
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).

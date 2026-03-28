@@ -10,14 +10,21 @@
     },
     "entity_id": {
       "type": "string",
-      "description": "Authenticated identity"
+      "description": "Authenticated identity",
+      "x-ref": {
+        "resource": "entities",
+        "display": "display_name",
+        "path": "/console/s/{type}/{id}",
+        "inverse": "sessions?entity_id={id}"
+      }
     },
     "org_id": {
       "type": "string"
     },
     "token_hash": {
       "type": "string",
-      "description": "Session token identifier hash"
+      "description": "Session token identifier hash",
+      "x-sensitive": true
     },
     "auth_method": {
       "type": "string",
@@ -40,6 +47,10 @@
     },
     "user_agent": {
       "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Contextual session metadata"
     },
     "geo": {
       "type": "object",

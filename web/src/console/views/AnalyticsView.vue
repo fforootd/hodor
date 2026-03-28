@@ -1,116 +1,165 @@
 <template>
-  <div class="analytics-page">
-    <div class="analytics-header">
-      <h2>📊 Analytics</h2>
-      <p class="subtitle">Query your audit events, entities, and sessions with SQL</p>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Analytics</h1>
+        <p class="text-sm text-muted-foreground">Query your audit events, entities, and sessions with SQL.</p>
+      </div>
     </div>
 
     <!-- SQL Editor -->
-    <div class="editor-section">
-      <div class="editor-toolbar">
-        <span class="editor-label">SQL Query</span>
-        <div class="toolbar-right">
-          <select v-model="selectedTemplate" @change="applyTemplate" class="template-select">
-            <option value="">— Templates —</option>
-            <option v-for="t in templates" :key="t.name" :value="t.sql">{{ t.name }}</option>
-          </select>
-          <button class="btn-run" @click="runQuery" :disabled="running">
+    <Card>
+      <CardHeader class="flex flex-row items-center justify-between space-y-0 py-3 border-b bg-muted/20">
+        <CardTitle class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">SQL Query</CardTitle>
+        <div class="flex items-center gap-2">
+          <Select v-model="selectedTemplate" @update:model-value="(val: any) => applyTemplate(String(val))">
+            <SelectTrigger class="w-[180px] h-8 text-xs">
+              <SelectValue placeholder="— Templates —" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="t in templates" :key="t.name" :value="t.sql">{{ t.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" @click="runQuery" :disabled="running">
             {{ running ? '⏳ Running…' : '▶ Run Query' }}
-          </button>
+          </Button>
         </div>
-      </div>
-      <div class="monaco-wrap" :style="{ height: editorHeight + 'px' }">
-        <vue-monaco-editor
-          v-model:value="sql"
-          language="sql"
-          theme="vs"
-          :options="editorOptions"
-          @mount="onEditorMount"
-        />
-      </div>
-      <div class="editor-resize" @mousedown="startResize">⋯</div>
-    </div>
+      </CardHeader>
+      <CardContent class="p-0">
+        <div class="monaco-wrap" :style="{ height: editorHeight + 'px' }">
+          <vue-monaco-editor
+            v-model:value="sql"
+            language="sql"
+            theme="vs"
+            :options="editorOptions"
+            @mount="onEditorMount"
+          />
+        </div>
+      </CardContent>
+      <div class="text-center cursor-ns-resize text-muted-foreground/40 hover:text-primary text-sm py-0.5 select-none bg-muted/20 border-t" @mousedown="startResize">⋯</div>
+    </Card>
 
     <!-- Error -->
-    <div v-if="error" class="error-banner">{{ error }}</div>
+    <div v-if="error" class="p-4 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive text-sm font-mono">{{ error }}</div>
 
     <!-- Stats bar -->
-    <div v-if="result" class="stats-bar">
-      <span>{{ result.row_count }} rows</span>
+    <div v-if="result" class="flex items-center gap-4 p-4 rounded-lg border text-sm bg-card text-muted-foreground">
+      <span class="font-medium text-foreground">{{ result.row_count }} rows</span>
       <span>·</span>
       <span>{{ result.execution_ms }}ms</span>
       <span>·</span>
       <span>{{ result.columns.length }} columns</span>
-      <span class="spacer" />
-      <button class="btn-chart" :class="{ active: showChart }" @click="showChart = !showChart">
+      <div class="flex-1" />
+      <Button variant="outline" size="sm" :class="showChart ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''" @click="showChart = !showChart">
         📈 Chart
-      </button>
-      <button class="btn-export" @click="exportCSV">⬇ CSV</button>
+      </Button>
+      <Button variant="outline" size="sm" @click="exportCSV">⬇ CSV</Button>
     </div>
 
-    <!-- Chart (ECharts placeholder — renders bar chart from first two columns) -->
-    <div v-if="showChart && result && result.rows.length" class="chart-section">
-      <div class="chart-config">
-        <label>X Axis:
-          <select v-model="chartX">
-            <option v-for="(col, i) in result.columns" :key="i" :value="i">{{ col }}</option>
-          </select>
-        </label>
-        <label>Y Axis:
-          <select v-model="chartY">
-            <option v-for="(col, i) in result.columns" :key="i" :value="i">{{ col }}</option>
-          </select>
-        </label>
-        <label>Type:
-          <select v-model="chartType">
-            <option value="bar">Bar</option>
-            <option value="line">Line</option>
-            <option value="pie">Pie</option>
-          </select>
-        </label>
-      </div>
-      <div class="chart-container">
+    <!-- Chart -->
+    <Card v-if="showChart && result && result.rows.length">
+      <CardHeader class="pb-3">
+        <div class="flex items-center gap-4 text-sm text-muted-foreground">
+          <label class="flex items-center gap-1.5">
+            X Axis:
+            <Select v-model="chartXStr">
+              <SelectTrigger class="w-[140px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="(col, i) in result.columns" :key="i" :value="String(i)">{{ col }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            Y Axis:
+            <Select v-model="chartYStr">
+              <SelectTrigger class="w-[140px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="(col, i) in result.columns" :key="i" :value="String(i)">{{ col }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label class="flex items-center gap-1.5">
+            Type:
+            <Select v-model="chartType">
+              <SelectTrigger class="w-[100px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bar">Bar</SelectItem>
+                <SelectItem value="line">Line</SelectItem>
+                <SelectItem value="pie">Pie</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+      </CardHeader>
+      <CardContent>
         <canvas ref="chartCanvas"></canvas>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
 
     <!-- Results table -->
-    <div v-if="result" class="results-section">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th v-for="(col, i) in result.columns" :key="i" @click="sortBy(i)" class="sortable">
-                {{ col }}
-                <span v-if="sortCol === i" class="sort-indicator">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, ri) in sortedRows" :key="ri">
-              <td v-for="(cell, ci) in row" :key="ci" :class="{ num: isNumeric(cell) }">
-                {{ formatCell(cell) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Card v-if="result">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-sm">Query Results</CardTitle>
+      </CardHeader>
+      <CardContent class="p-0">
+        <div class="overflow-auto max-h-[480px]">
+          <Table>
+            <TableHeader class="bg-muted/30 sticky top-0 z-10">
+              <TableRow>
+                <TableHead
+                  v-for="(col, i) in result.columns"
+                  :key="i"
+                  class="cursor-pointer select-none hover:text-primary whitespace-nowrap"
+                  @click="sortBy(i)"
+                >
+                  {{ col }}
+                  <span v-if="sortCol === i" class="ml-1">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="(row, ri) in sortedRows" :key="ri">
+                <TableCell
+                  v-for="(cell, ci) in row"
+                  :key="ci"
+                  class="max-w-[300px] truncate"
+                  :class="isNumeric(cell) ? 'font-mono text-right text-primary' : ''"
+                >
+                  {{ formatCell(cell) }}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- Available tables -->
-    <div v-if="tables.length" class="tables-section">
-      <h3>Available Tables</h3>
-      <div class="table-cards">
-        <div v-for="t in tables" :key="t.name" class="table-card" @click="insertTable(t.name)">
-          <div class="table-card-name">{{ t.name }}</div>
-          <div class="table-card-meta">{{ t.row_count }} rows · {{ t.file_count }} files</div>
-          <div class="table-card-cols" v-if="t.columns">
-            <span v-for="c in t.columns.slice(0, 6)" :key="c.name" class="col-chip">
-              {{ c.name }} <small>{{ c.type }}</small>
-            </span>
-            <span v-if="t.columns.length > 6" class="col-chip more">+{{ t.columns.length - 6 }}</span>
-          </div>
-        </div>
+    <div v-if="tables.length" class="space-y-3">
+      <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Available Tables</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Card
+          v-for="t in tables" :key="t.name"
+          class="cursor-pointer transition-colors hover:border-primary/50"
+          @click="insertTable(t.name)"
+        >
+          <CardContent class="p-4">
+            <div class="font-semibold font-mono text-sm">{{ t.name }}</div>
+            <div class="text-xs text-muted-foreground mt-1">{{ t.row_count }} rows · {{ t.file_count }} files</div>
+            <div class="flex flex-wrap gap-1 mt-2" v-if="t.columns">
+              <Badge v-for="c in t.columns.slice(0, 6)" :key="c.name" variant="secondary" class="text-[10px] font-mono font-normal">
+                {{ c.name }} <small class="text-muted-foreground/60 ml-0.5">{{ c.type }}</small>
+              </Badge>
+              <Badge v-if="t.columns.length > 6" variant="outline" class="text-[10px] font-mono text-primary">+{{ t.columns.length - 6 }}</Badge>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   </div>
@@ -120,6 +169,11 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { api } from '@/api/client'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface QueryResult {
   columns: string[]
@@ -144,8 +198,10 @@ const error = ref('')
 const running = ref(false)
 const tables = ref<TableInfo[]>([])
 const showChart = ref(false)
-const chartX = ref(0)
-const chartY = ref(1)
+const chartXStr = ref('0')
+const chartYStr = ref('1')
+const chartX = computed({ get: () => Number(chartXStr.value), set: v => { chartXStr.value = String(v) } })
+const chartY = computed({ get: () => Number(chartYStr.value), set: v => { chartYStr.value = String(v) } })
 const chartType = ref('bar')
 const sortCol = ref(-1)
 const sortDir = ref<'asc' | 'desc'>('desc')
@@ -177,7 +233,6 @@ const editorOptions = {
 
 function onEditorMount(editor: any, monaco: any) {
   editorInstance = editor
-  // Register SQL completion provider with table/column names
   loadTablesIntoAutocomplete(monaco)
 }
 
@@ -224,8 +279,8 @@ async function runQuery() {
     } else {
       result.value = data
       if (data.columns.length >= 2) {
-        chartX.value = 0
-        chartY.value = 1
+        chartXStr.value = '0'
+        chartYStr.value = '1'
       }
     }
   } catch (e: any) {
@@ -235,9 +290,9 @@ async function runQuery() {
   }
 }
 
-function applyTemplate() {
-  if (selectedTemplate.value) {
-    sql.value = selectedTemplate.value
+function applyTemplate(val: string) {
+  if (val) {
+    sql.value = val
     selectedTemplate.value = ''
   }
 }
@@ -304,7 +359,7 @@ function exportCSV() {
   URL.revokeObjectURL(url)
 }
 
-// Simple canvas chart rendering (no ECharts dependency for POC)
+// Simple canvas chart rendering
 watch([() => showChart.value, () => chartX.value, () => chartY.value, () => chartType.value, () => result.value], () => {
   if (showChart.value && result.value && chartCanvas.value) {
     nextTick(() => renderChart())
@@ -457,103 +512,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.analytics-page { max-width: 1200px; }
-.analytics-header { margin-bottom: 1.25rem; }
-.analytics-header h2 { font-size: 1.25rem; font-weight: 700; color: #1a1a2e; }
-.subtitle { font-size: 0.8125rem; color: #6b7280; margin-top: 0.25rem; }
-
-.editor-section {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
-  margin-bottom: 1rem;
+.monaco-wrap {
+  border-bottom: 1px solid hsl(var(--border));
 }
-.editor-toolbar {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.5rem 0.75rem; background: #f8f9fa; border-bottom: 1px solid #e5e7eb;
-}
-.editor-label { font-size: 0.75rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-.toolbar-right { display: flex; gap: 0.5rem; align-items: center; }
-.template-select {
-  padding: 0.25rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px;
-  font-size: 0.75rem; color: #6b7280; background: #fff;
-}
-.btn-run {
-  padding: 0.375rem 1rem; border: none; border-radius: 8px; background: #6366f1;
-  color: #fff; font-size: 0.8125rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
-}
-.btn-run:hover { opacity: 0.9; }
-.btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.monaco-wrap { border-bottom: 1px solid #e5e7eb; }
-.editor-resize {
-  text-align: center; cursor: ns-resize; color: #d1d5db; font-size: 1rem;
-  padding: 2px 0; user-select: none; background: #f8f9fa;
-}
-.editor-resize:hover { color: #6366f1; }
-
-.error-banner {
-  padding: 0.75rem 1rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
-  color: #dc2626; font-size: 0.8125rem; margin-bottom: 1rem; font-family: monospace;
-}
-
-.stats-bar {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.5rem 0.75rem; background: #f3f4f6; border-radius: 8px; margin-bottom: 1rem;
-  font-size: 0.75rem; color: #6b7280;
-}
-.spacer { flex: 1; }
-.btn-chart, .btn-export {
-  padding: 0.25rem 0.625rem; border: 1px solid #d1d5db; border-radius: 6px;
-  background: #fff; color: #6b7280; font-size: 0.6875rem; cursor: pointer; transition: all 0.15s;
-}
-.btn-chart:hover, .btn-export:hover { border-color: #6366f1; color: #6366f1; }
-.btn-chart.active { background: #6366f1; color: #fff; border-color: #6366f1; }
-
-.chart-section {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem;
-  margin-bottom: 1rem;
-}
-.chart-config {
-  display: flex; gap: 1rem; margin-bottom: 0.75rem; font-size: 0.75rem; color: #6b7280;
-}
-.chart-config select { margin-left: 0.25rem; padding: 0.125rem 0.375rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.75rem; }
-.chart-container { width: 100%; }
-
-.results-section {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
-  margin-bottom: 1rem;
-}
-.table-wrap { overflow-x: auto; max-height: 480px; overflow-y: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
-thead { position: sticky; top: 0; z-index: 1; }
-th {
-  background: #f8f9fa; padding: 0.5rem 0.75rem; text-align: left; font-weight: 600;
-  color: #4b5563; border-bottom: 2px solid #e5e7eb; white-space: nowrap;
-}
-th.sortable { cursor: pointer; user-select: none; }
-th.sortable:hover { color: #6366f1; }
-.sort-indicator { margin-left: 0.25rem; }
-td {
-  padding: 0.375rem 0.75rem; border-bottom: 1px solid #f3f4f6; color: #1a1a2e;
-  max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-td.num { font-family: 'SF Mono', monospace; text-align: right; color: #6366f1; }
-tr:hover td { background: #fafafe; }
-
-.tables-section { margin-bottom: 2rem; }
-.tables-section h3 { font-size: 0.8125rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
-.table-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; }
-.table-card {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem;
-  cursor: pointer; transition: all 0.15s;
-}
-.table-card:hover { border-color: #a5b4fc; box-shadow: 0 2px 8px rgba(99,102,241,.1); }
-.table-card-name { font-size: 0.9375rem; font-weight: 700; color: #1a1a2e; font-family: 'SF Mono', monospace; }
-.table-card-meta { font-size: 0.75rem; color: #9ca3af; margin-top: 0.25rem; }
-.table-card-cols { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
-.col-chip {
-  font-size: 0.6875rem; padding: 0.125rem 0.375rem; background: #f3f4f6; border-radius: 4px;
-  color: #6b7280; font-family: 'SF Mono', monospace;
-}
-.col-chip small { color: #9ca3af; margin-left: 0.125rem; }
-.col-chip.more { background: #eff6ff; color: #6366f1; }
 </style>

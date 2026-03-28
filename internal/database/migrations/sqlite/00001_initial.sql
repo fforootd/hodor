@@ -1,6 +1,6 @@
--- Zitadel POC Schema — single-file DDL (SQLite)
--- This replaces the 7 individual goose migration files (00001–00007).
--- All statements use IF NOT EXISTS for idempotent re-runs.
+-- +goose Up
+-- Zitadel baseline schema — SQLite
+-- Migrated from monolithic schema.sql to Goose.
 
 -- ============================================================================
 -- ENTITIES — the universal identity table (ADR-001)
@@ -63,27 +63,26 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 
 -- ============================================================================
 -- TOKENS — unified credential store (session, PAT, opaque)
--- Stripe-style prefixed tokens: zit_ses_, zit_pat_, zit_opq_
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tokens (
     id          TEXT PRIMARY KEY,
-    type        TEXT NOT NULL,              -- 'session', 'pat', 'opaque'
-    token_hash  TEXT NOT NULL UNIQUE,       -- SHA-256 of the full prefixed token
-    entity_id   TEXT REFERENCES entities(id) ON DELETE CASCADE,  -- nullable: service tokens, pre-auth
-    session_id  TEXT REFERENCES sessions(id) ON DELETE CASCADE,  -- nullable: only for session tokens
-    name        TEXT,                       -- human label for PATs: "CI token", "dev-admin"
-    scopes      TEXT NOT NULL DEFAULT '[]', -- JSON array: ["admin", "read"]
-    expires_at  TEXT,                       -- NULL = never expires
+    type        TEXT NOT NULL,
+    token_hash  TEXT NOT NULL UNIQUE,
+    entity_id   TEXT REFERENCES entities(id) ON DELETE CASCADE,
+    session_id  TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    name        TEXT,
+    scopes      TEXT NOT NULL DEFAULT '[]',
+    expires_at  TEXT,
     last_used   TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    revoked_at  TEXT                        -- NULL = active
+    revoked_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_tokens_entity ON tokens(entity_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
 
 -- ============================================================================
--- EVENTS — append-only event log (the queue IS the table)
+-- EVENTS — append-only event log
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
     id             TEXT PRIMARY KEY,
@@ -97,6 +96,7 @@ CREATE TABLE IF NOT EXISTS events (
     metadata       TEXT DEFAULT '{}',
     trace_id       TEXT DEFAULT '',
     span_id        TEXT DEFAULT '',
+    parent_span_id TEXT DEFAULT '',
     session_id     TEXT DEFAULT '',
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -106,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_type, aggreg
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 
 -- ============================================================================
--- DOMAINS — external domain → org mapping
+-- DOMAINS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS domains (
     domain      TEXT PRIMARY KEY,
@@ -120,7 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_domains_org ON domains(org_id);
 CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 
 -- ============================================================================
--- NOTIFICATION TEMPLATES — per-org, per-language
+-- NOTIFICATION TEMPLATES
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS notification_templates (
     id       TEXT PRIMARY KEY,
@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS notification_templates (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_tpl_unique ON notification_templates(org_id, channel, event, language);
 
 -- ============================================================================
--- MAGIC TOKENS — single-use tokens for magic link auth
+-- MAGIC TOKENS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS magic_tokens (
     token       TEXT PRIMARY KEY,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS magic_tokens (
 );
 
 -- ============================================================================
--- CONSUMER CURSORS — async worker position tracking
+-- CONSUMER CURSORS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS consumer_cursors (
     consumer_name TEXT PRIMARY KEY,
@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS consumer_cursors (
 );
 
 -- ============================================================================
--- JOBS — background worker registrations
+-- JOBS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS jobs (
     name         TEXT PRIMARY KEY,
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 -- ============================================================================
--- RETENTION POLICIES — per-event-type TTLs
+-- RETENTION POLICIES
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS retention_policies (
     id            TEXT PRIMARY KEY,
@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 );
 
 -- ============================================================================
--- INSTANCES — virtual identity systems (top-level isolation)
+-- INSTANCES
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS instances (
     id         TEXT PRIMARY KEY,
@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS instances (
 );
 
 -- ============================================================================
--- ORGS — groupings within an instance
+-- ORGS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS orgs (
     id          TEXT PRIMARY KEY,
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS orgs (
 CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
 
 -- ============================================================================
--- GROUPS — RBAC grouping within an org
+-- GROUPS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS groups (
     id         TEXT PRIMARY KEY,
@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS groups (
 CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
 
 -- ============================================================================
--- SCHEMAS — JSON Schema registry per org/type
+-- SCHEMAS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS schemas (
     id         TEXT PRIMARY KEY,
@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS schemas (
     schema     TEXT NOT NULL,
     version    INTEGER DEFAULT 1,
     is_default BOOLEAN DEFAULT false,
-    visibility TEXT NOT NULL DEFAULT 'private', -- 'private', 'public', 'authenticated'
+    visibility TEXT NOT NULL DEFAULT 'private',
     message    TEXT DEFAULT '',
     created_by TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -242,7 +242,7 @@ CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_defaul
 CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
 
 -- ============================================================================
--- ENTITY INDEXES — promoted fields for O(log N) lookups
+-- ENTITY INDEXES
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS entity_indexes (
     entity_type TEXT NOT NULL,
@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS entity_indexes (
 CREATE INDEX IF NOT EXISTS idx_ei_lookup ON entity_indexes(entity_type, field, value);
 
 -- ============================================================================
--- PROVIDERS — external identity sources (OIDC, SAML, SCIM)
+-- PROVIDERS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS providers (
     id              TEXT PRIMARY KEY,
@@ -273,7 +273,7 @@ CREATE TABLE IF NOT EXISTS providers (
 CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 
 -- ============================================================================
--- LINKED ACCOUNTS — user ↔ external provider links
+-- LINKED ACCOUNTS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS linked_accounts (
     id             TEXT PRIMARY KEY,
@@ -290,7 +290,7 @@ CREATE INDEX IF NOT EXISTS idx_linked_identity ON linked_accounts(entity_id);
 CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_accounts(provider_id, external_sub);
 
 -- ============================================================================
--- SSO STATES — ephemeral OIDC authorization flow state
+-- SSO STATES
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sso_states (
     state         TEXT PRIMARY KEY,
@@ -302,7 +302,7 @@ CREATE TABLE IF NOT EXISTS sso_states (
 );
 
 -- ============================================================================
--- OIDC AUTH REQUESTS — ephemeral authorization requests (ADR-004)
+-- OIDC AUTH REQUESTS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS oidc_auth_requests (
     id                    TEXT PRIMARY KEY,
@@ -321,7 +321,7 @@ CREATE TABLE IF NOT EXISTS oidc_auth_requests (
 );
 
 -- ============================================================================
--- OIDC CODES — authorization codes → request mapping
+-- OIDC CODES
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS oidc_codes (
     code       TEXT PRIMARY KEY,
@@ -330,7 +330,7 @@ CREATE TABLE IF NOT EXISTS oidc_codes (
 );
 
 -- ============================================================================
--- OIDC TOKENS — opaque access tokens
+-- OIDC TOKENS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS oidc_tokens (
     id               TEXT PRIMARY KEY,
@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS oidc_refresh_tokens (
 );
 
 -- ============================================================================
--- OIDC SIGNING KEYS — RSA keys for JWT signing
+-- OIDC SIGNING KEYS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS oidc_signing_keys (
     id          TEXT PRIMARY KEY,
@@ -372,14 +372,11 @@ CREATE TABLE IF NOT EXISTS oidc_signing_keys (
 -- ============================================================================
 -- SEED DATA
 -- ============================================================================
-
--- Default jobs
 INSERT OR IGNORE INTO jobs (name, display_name, description, cron) VALUES
     ('lake_writer', 'Lake Writer', 'Drains events from OLTP buffer to Parquet files', '*/1 * * * *'),
     ('session_gc',  'Session GC',  'Cleans revoked and expired sessions',             '*/15 * * * *'),
     ('event_gc',    'Event GC',    'Deletes OLTP events past retention (shipped to lake)', '0 * * * *');
 
--- Default retention policies (higher priority = matched first)
 INSERT OR IGNORE INTO retention_policies (event_pattern, oltp_ttl, lake_ttl, priority) VALUES
     ('auth.login_failure', '30d', '365d', 100),
     ('auth.*',             '14d', '365d', 90),
@@ -388,9 +385,35 @@ INSERT OR IGNORE INTO retention_policies (event_pattern, oltp_ttl, lake_ttl, pri
     ('event.*',            '3d',  '30d',  60),
     ('*',                  '14d', '365d', 0);
 
--- Default instance and org
 INSERT OR IGNORE INTO instances (id, name, created_at, updated_at)
     VALUES ('inst_default', 'default', datetime('now'), datetime('now'));
 
 INSERT OR IGNORE INTO orgs (id, instance_id, name, created_at, updated_at)
     VALUES ('org_default', 'inst_default', 'default', datetime('now'), datetime('now'));
+
+-- +goose Down
+DROP TABLE IF EXISTS oidc_signing_keys;
+DROP TABLE IF EXISTS oidc_refresh_tokens;
+DROP TABLE IF EXISTS oidc_tokens;
+DROP TABLE IF EXISTS oidc_codes;
+DROP TABLE IF EXISTS oidc_auth_requests;
+DROP TABLE IF EXISTS sso_states;
+DROP TABLE IF EXISTS linked_accounts;
+DROP TABLE IF EXISTS providers;
+DROP TABLE IF EXISTS entity_indexes;
+DROP TABLE IF EXISTS schemas;
+DROP TABLE IF EXISTS groups;
+DROP TABLE IF EXISTS orgs;
+DROP TABLE IF EXISTS instances;
+DROP TABLE IF EXISTS retention_policies;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS consumer_cursors;
+DROP TABLE IF EXISTS magic_tokens;
+DROP TABLE IF EXISTS notification_templates;
+DROP TABLE IF EXISTS domains;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS tokens;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS entity_credentials;
+DROP TABLE IF EXISTS entity_capabilities;
+DROP TABLE IF EXISTS entities;

@@ -1,19 +1,19 @@
 <template>
-  <div class="sidebar-section">
-    <h4 class="sidebar-heading">Fields</h4>
-    <div v-for="f in fields" :key="f.name" class="field-item">
-      <span class="field-name">{{ f.name }}</span>
-      <span v-if="f.isIdentifier" class="mini-badge id">ID</span>
-      <span v-if="f.isSensitive" class="mini-badge pii">PII</span>
-      <span v-if="f.hasMfa" class="mini-badge mfa">MFA</span>
-      <span v-if="f.hasClaimMapping" class="mini-badge claim">⇄</span>
+  <div class="space-y-2">
+    <div v-for="f in fields" :key="f.name" class="flex items-center gap-1.5 py-0.5">
+      <span class="text-sm font-medium truncate">{{ f.name }}</span>
+      <Badge v-if="f.isIdentifier" variant="secondary" class="text-[10px] px-1.5 bg-blue-100 text-blue-700 border-blue-200">ID</Badge>
+      <Badge v-if="f.isSensitive" variant="secondary" class="text-[10px] px-1.5 bg-red-100 text-red-700 border-red-200">PII</Badge>
+      <Badge v-if="f.hasMfa" variant="secondary" class="text-[10px] px-1.5 bg-emerald-100 text-emerald-700 border-emerald-200">MFA</Badge>
+      <Badge v-if="f.hasClaimMapping" variant="outline" class="text-[10px] px-1.5">⇄</Badge>
     </div>
-    <div v-if="!fields.length" class="field-empty">No fields defined</div>
+    <p v-if="!fields.length" class="text-xs text-muted-foreground">No fields defined</p>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { Badge } from '@/components/ui/badge'
 
 const props = defineProps({
   schema: { type: Object, required: true },

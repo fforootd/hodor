@@ -18,22 +18,35 @@
     },
     "aggregate_id": {
       "type": "string",
-      "description": "ID of the aggregate"
+      "description": "ID of the affected aggregate",
+      "x-ref": {
+        "resource": "entities",
+        "display": "identifier",
+        "path": "/console/s/{type}/{id}"
+      }
     },
     "org_id": {
       "type": "string"
     },
     "actor_id": {
       "type": "string",
-      "description": "Identity that caused the event"
+      "description": "Entity that caused the event",
+      "x-ref": {
+        "resource": "entities",
+        "display": "display_name",
+        "path": "/console/s/{type}/{id}",
+        "inverse": "events?actor_id={id}"
+      }
     },
     "actor_type": {
       "type": "string",
       "enum": [
         "human",
         "service",
-        "system"
-      ]
+        "system",
+        "agent"
+      ],
+      "description": "Kind of entity that triggered the event"
     },
     "payload": {
       "type": "object",
@@ -44,10 +57,25 @@
       "description": "Contextual metadata (IP, user-agent, geo)"
     },
     "trace_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Distributed trace identifier for causal chain grouping"
+    },
+    "span_id": {
+      "type": "string",
+      "description": "Span identifier within the trace"
+    },
+    "parent_span_id": {
+      "type": "string",
+      "description": "Parent span for trace tree reconstruction"
     },
     "session_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Session that produced this event",
+      "x-ref": {
+        "resource": "sessions",
+        "display": "id",
+        "path": "/console/sessions"
+      }
     },
     "created_at": {
       "type": "string",

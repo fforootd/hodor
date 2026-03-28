@@ -27,6 +27,7 @@ type TokenInfo struct {
 	EntityID  string   // The identity this token belongs to ("" if nullable)
 	SessionID string   // Only for session tokens
 	TokenType string   // "session", "pat", "opaque"
+	OrgID     string   // The org_id from the entity
 	Scopes    []string // Future: fine-grained scopes
 }
 
@@ -73,8 +74,9 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.entity_id, t.session_id FROM tokens t
+		`SELECT t.entity_id, t.session_id, COALESCE(e.org_id, 0) FROM tokens t
 		 JOIN sessions s ON t.session_id = s.id
+		 LEFT JOIN entities e ON t.entity_id = e.id
 		 WHERE t.token_hash = ?
 		   AND t.type = 'session'
 		   AND t.revoked_at IS NULL
@@ -82,7 +84,7 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 		   AND s.expires_at > datetime('now')
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
 		h,
-	).Scan(&info.EntityID, &info.SessionID)
+	).Scan(&info.EntityID, &info.SessionID, &info.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid session token")
 	}
@@ -101,13 +103,14 @@ func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenIn
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT entity_id FROM tokens
-		 WHERE token_hash = ?
-		   AND type = 'pat'
-		   AND revoked_at IS NULL
-		   AND (expires_at IS NULL OR expires_at > datetime('now'))`,
+		`SELECT t.entity_id, COALESCE(e.org_id, 0) FROM tokens t
+		 LEFT JOIN entities e ON t.entity_id = e.id
+		 WHERE t.token_hash = ?
+		   AND t.type = 'pat'
+		   AND t.revoked_at IS NULL
+		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
 		h,
-	).Scan(&info.EntityID)
+	).Scan(&info.EntityID, &info.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid PAT")
 	}

@@ -22,7 +22,7 @@ func benchDB(b *testing.B) *sql.DB {
 	if err != nil {
 		b.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := Migrate(db); err != nil {
 		b.Fatalf("schema: %v", err)
 	}
 	b.Cleanup(func() {

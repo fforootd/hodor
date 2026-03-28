@@ -14,13 +14,14 @@ import (
 // --- Session types ---
 
 type SessionResponse struct {
-	ID         string `json:"id"`
-	IdentityID string `json:"entity_id"`
-	OrgID      string `json:"org_id"`
-	UserAgent  string `json:"user_agent,omitempty"`
-	IPAddress  string `json:"ip_address,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	ExpiresAt  string `json:"expires_at"`
+	ID         string  `json:"id"`
+	IdentityID string  `json:"entity_id"`
+	OrgID      string  `json:"org_id"`
+	UserAgent  string  `json:"user_agent,omitempty"`
+	IPAddress  string  `json:"ip_address,omitempty"`
+	CreatedAt  string  `json:"created_at"`
+	ExpiresAt  string  `json:"expires_at"`
+	RevokedAt  *string `json:"revoked_at,omitempty"`
 }
 
 type CreateSessionRequest struct {
@@ -160,12 +161,12 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	identityID, _ := r.URL.Query().Get("entity_id"), ""
 	limit := 50
 
-	query := `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
-	          FROM sessions WHERE revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
+	query := `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+	          FROM sessions ORDER BY created_at DESC LIMIT ?`
 	args := []any{limit}
 	if identityID != "" {
-		query = `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
-		         FROM sessions WHERE entity_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?`
+		query = `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+		         FROM sessions WHERE entity_id = ? ORDER BY created_at DESC LIMIT ?`
 		args = []any{identityID, limit}
 	}
 
@@ -179,7 +180,7 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	var sessions []SessionResponse
 	for rows.Next() {
 		var s SessionResponse
-		rows.Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt)
+		rows.Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -249,8 +250,8 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 func (a *API) loadSession(ctx context.Context, sessionID string) (SessionResponse, error) {
 	var s SessionResponse
 	err := a.db.SQL().QueryRowContext(ctx,
-		`SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at
-		 FROM sessions WHERE id = ? AND revoked_at IS NULL`, sessionID,
-	).Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt)
+		`SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+		 FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
 	return s, err
 }

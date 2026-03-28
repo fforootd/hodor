@@ -79,7 +79,7 @@ const table = useVueTable({
       <slot name="toolbar" :table="table" />
     </div>
 
-    <div class="rounded-md border bg-white shadow-sm overflow-hidden" :data-state="JSON.stringify(table.getState())" style="--table-reactive: 1">
+    <div class="rounded-md border bg-card shadow-sm overflow-hidden" :data-state="JSON.stringify(table.getState())" style="--table-reactive: 1">
       <Table>
         <TableHeader class="bg-muted/30">
           <TableRow v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">

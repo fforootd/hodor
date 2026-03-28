@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/id"
@@ -214,6 +215,25 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	// Seed the default console OIDC client (public SPA, no secret).
 	if err := seedConsoleClient(ctx, db); err != nil {
 		log.Printf("WARN: seed console client: %v", err)
+	}
+
+	// Bootstrap FGA tuples: admin → instance:owner, org parent, org owner.
+	if fgaSvc := api.FGAService; fgaSvc != nil {
+		// Use org_id from the admin entity (numeric, matches middleware resolution).
+		var orgID string
+		err := db.SQL().QueryRowContext(ctx,
+			`SELECT org_id FROM entities WHERE identifier = ? LIMIT 1`,
+			username,
+		).Scan(&orgID)
+		if err != nil || orgID == "" {
+			log.Printf("WARN: could not find org_id for FGA bootstrap: %v", err)
+		} else {
+			if err := fgaSvc.OnBootstrap(ctx, identityID, orgID); err != nil {
+				log.Printf("WARN: FGA bootstrap tuples failed: %v", err)
+			} else {
+				log.Printf("[fga] bootstrap tuples written: admin=%s org=%s", identityID, orgID)
+			}
+		}
 	}
 
 	return nil
