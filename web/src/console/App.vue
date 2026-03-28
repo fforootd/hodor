@@ -1,4 +1,5 @@
 <template>
+  <Toaster position="top-right" :expand="true" rich-colors />
   <SidebarProvider>
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -226,6 +227,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { searchApi, metaSchemaApi, orgApi, type SearchResult } from '@/api/resources'
+import { Toaster } from '@/components/ui/sonner'
 
 // shadcn components
 import {
