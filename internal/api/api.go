@@ -1096,160 +1096,20 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	pattern := "%" + q + "%"
 	var results []SearchResult
 
-	// Search entities by identifier, display_name
-	idRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, identifier, display_name, state FROM entities
-		 WHERE identifier LIKE ? OR display_name LIKE ?
-		 ORDER BY id DESC LIMIT ?`,
-		pattern, pattern, limit)
-	if err == nil {
-		defer idRows.Close()
-		for idRows.Next() {
-			var id int64
-			var ident, displayName, state string
-			var dn sql.NullString
-			if err := idRows.Scan(&id, &ident, &dn, &state); err != nil {
-				continue
-			}
-			if dn.Valid {
-				displayName = dn.String
-			}
-			results = append(results, SearchResult{
-				ResourceType: "identity",
-				ID:           strconv.FormatInt(id, 10),
-				Title:        ident,
-				Subtitle:     displayName + " · " + state,
-				Link:         fmt.Sprintf("/console/identities/%d", id),
-			})
-		}
-		if err := idRows.Err(); err == nil {
-			idRows.Close()
-		}
-	}
-
-	// Search entity_indexes (profile fields like email, display_name, etc.)
-	eiRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT DISTINCT ei.entity_id, e.identifier, e.display_name, ei.field, ei.value
-		 FROM entity_indexes ei
-		 JOIN entities e ON ei.entity_id = e.id
-		 WHERE ei.value LIKE ?
-		 LIMIT ?`,
-		pattern, limit)
-	if err == nil {
-		defer eiRows.Close()
-		seen := map[string]bool{}
-		for eiRows.Next() {
-			var entityID int64
-			var ident, field, value string
-			var dn sql.NullString
-			if err := eiRows.Scan(&entityID, &ident, &dn, &field, &value); err != nil {
-				continue
-			}
-			idStr := strconv.FormatInt(entityID, 10)
-			if seen[idStr] {
-				continue
-			}
-			seen[idStr] = true
-			displayName := ""
-			if dn.Valid {
-				displayName = dn.String
-			}
-			results = append(results, SearchResult{
-				ResourceType: "identity",
-				ID:           idStr,
-				Title:        ident,
-				Subtitle:     fmt.Sprintf("%s: %s · %s", field, value, displayName),
-				Link:         fmt.Sprintf("/console/identities/%d", entityID),
-			})
-		}
-		if err := eiRows.Err(); err == nil {
-			eiRows.Close()
-		}
-	}
-
-	// Search schemas by type or id
-	schRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, type FROM schemas WHERE id LIKE ? OR type LIKE ? LIMIT ?`,
-		pattern, pattern, limit)
-	if err == nil {
-		defer schRows.Close()
-		for schRows.Next() {
-			var schemaID, schemaType string
-			if err := schRows.Scan(&schemaID, &schemaType); err != nil {
-				continue
-			}
-			results = append(results, SearchResult{
-				ResourceType: "schema",
-				ID:           schemaID,
-				Title:        schemaType,
-				Subtitle:     schemaID,
-				Link:         "/console/schemas",
-			})
-		}
-		if err := schRows.Err(); err == nil {
-			schRows.Close()
-		}
-	}
-
-	// Search events by event_type
-	evtRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, event_type, created_at FROM events WHERE event_type LIKE ? ORDER BY id DESC LIMIT ?`,
-		pattern, limit)
-	if err == nil {
-		defer evtRows.Close()
-		for evtRows.Next() {
-			var evtID int64
-			var evtType, createdAt string
-			if err := evtRows.Scan(&evtID, &evtType, &createdAt); err != nil {
-				continue
-			}
-			results = append(results, SearchResult{
-				ResourceType: "event",
-				ID:           strconv.FormatInt(evtID, 10),
-				Title:        evtType,
-				Subtitle:     createdAt,
-				Link:         "/console/events",
-			})
-		}
-		if err := evtRows.Err(); err == nil {
-			evtRows.Close()
-		}
-	}
-
-	// Search providers by name
-	provRows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, protocol, template FROM providers
-		 WHERE name LIKE ? OR template LIKE ?
-		 ORDER BY name LIMIT ?`,
-		pattern, pattern, limit)
-	if err == nil {
-		defer provRows.Close()
-		for provRows.Next() {
-			var provID, name, protocol, tmpl string
-			if err := provRows.Scan(&provID, &name, &protocol, &tmpl); err != nil {
-				continue
-			}
-			results = append(results, SearchResult{
-				ResourceType: "provider",
-				ID:           provID,
-				Title:        name,
-				Subtitle:     protocol + " · " + tmpl,
-				Link:         "/console/providers",
-			})
-		}
-		if err := provRows.Err(); err == nil {
-			provRows.Close()
-		}
-	}
+	results = append(results, a.searchEntities(r, pattern, limit)...)
+	results = append(results, a.searchEntityIndexes(r, pattern, limit)...)
+	results = append(results, a.searchSchemas(r, pattern, limit)...)
+	results = append(results, a.searchEvents(r, pattern, limit)...)
+	results = append(results, a.searchProviders(r, pattern, limit)...)
 
 	// Deduplicate entities (may appear from both direct + index search)
 	seen := map[string]bool{}
 	var deduped []SearchResult
-	for _, r := range results {
-		key := r.ResourceType + ":" + r.ID
+	for _, res := range results {
+		key := res.ResourceType + ":" + res.ID
 		if !seen[key] {
 			seen[key] = true
-			deduped = append(deduped, r)
+			deduped = append(deduped, res)
 		}
 	}
 
@@ -1258,6 +1118,157 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		"query":   q,
 		"count":   len(deduped),
 	})
+}
+
+func (a *API) searchEntities(r *http.Request, pattern string, limit int) []SearchResult {
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, identifier, display_name, state FROM entities
+		 WHERE identifier LIKE ? OR display_name LIKE ?
+		 ORDER BY id DESC LIMIT ?`,
+		pattern, pattern, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var results []SearchResult
+	for rows.Next() {
+		var id int64
+		var ident, displayName, state string
+		var dn sql.NullString
+		if err := rows.Scan(&id, &ident, &dn, &state); err != nil {
+			continue
+		}
+		if dn.Valid {
+			displayName = dn.String
+		}
+		results = append(results, SearchResult{
+			ResourceType: "identity",
+			ID:           strconv.FormatInt(id, 10),
+			Title:        ident,
+			Subtitle:     displayName + " · " + state,
+			Link:         fmt.Sprintf("/console/identities/%d", id),
+		})
+	}
+	return results
+}
+
+func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []SearchResult {
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT DISTINCT ei.entity_id, e.identifier, e.display_name, ei.field, ei.value
+		 FROM entity_indexes ei
+		 JOIN entities e ON ei.entity_id = e.id
+		 WHERE ei.value LIKE ?
+		 LIMIT ?`,
+		pattern, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	var results []SearchResult
+	for rows.Next() {
+		var entityID int64
+		var ident, field, value string
+		var dn sql.NullString
+		if err := rows.Scan(&entityID, &ident, &dn, &field, &value); err != nil {
+			continue
+		}
+		idStr := strconv.FormatInt(entityID, 10)
+		if seen[idStr] {
+			continue
+		}
+		seen[idStr] = true
+		displayName := ""
+		if dn.Valid {
+			displayName = dn.String
+		}
+		results = append(results, SearchResult{
+			ResourceType: "identity",
+			ID:           idStr,
+			Title:        ident,
+			Subtitle:     fmt.Sprintf("%s: %s · %s", field, value, displayName),
+			Link:         fmt.Sprintf("/console/identities/%d", entityID),
+		})
+	}
+	return results
+}
+
+func (a *API) searchSchemas(r *http.Request, pattern string, limit int) []SearchResult {
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, type FROM schemas WHERE id LIKE ? OR type LIKE ? LIMIT ?`,
+		pattern, pattern, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var results []SearchResult
+	for rows.Next() {
+		var schemaID, schemaType string
+		if err := rows.Scan(&schemaID, &schemaType); err != nil {
+			continue
+		}
+		results = append(results, SearchResult{
+			ResourceType: "schema",
+			ID:           schemaID,
+			Title:        schemaType,
+			Subtitle:     schemaID,
+			Link:         "/console/schemas",
+		})
+	}
+	return results
+}
+
+func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchResult {
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, event_type, created_at FROM events WHERE event_type LIKE ? ORDER BY id DESC LIMIT ?`,
+		pattern, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var results []SearchResult
+	for rows.Next() {
+		var evtID int64
+		var evtType, createdAt string
+		if err := rows.Scan(&evtID, &evtType, &createdAt); err != nil {
+			continue
+		}
+		results = append(results, SearchResult{
+			ResourceType: "event",
+			ID:           strconv.FormatInt(evtID, 10),
+			Title:        evtType,
+			Subtitle:     createdAt,
+			Link:         "/console/events",
+		})
+	}
+	return results
+}
+
+func (a *API) searchProviders(r *http.Request, pattern string, limit int) []SearchResult {
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, name, protocol, template FROM providers
+		 WHERE name LIKE ? OR template LIKE ?
+		 ORDER BY name LIMIT ?`,
+		pattern, pattern, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var results []SearchResult
+	for rows.Next() {
+		var provID, name, protocol, tmpl string
+		if err := rows.Scan(&provID, &name, &protocol, &tmpl); err != nil {
+			continue
+		}
+		results = append(results, SearchResult{
+			ResourceType: "provider",
+			ID:           provID,
+			Title:        name,
+			Subtitle:     protocol + " · " + tmpl,
+			Link:         "/console/providers",
+		})
+	}
+	return results
 }
 
 func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID int64, dataJSON string) {

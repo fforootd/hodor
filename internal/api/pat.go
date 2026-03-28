@@ -148,6 +148,10 @@ func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
 		p.LastUsed = lastUsed
 		pats = append(pats, p)
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "row iteration failed")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, ListResponse{Items: pats})
 }

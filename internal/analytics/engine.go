@@ -124,6 +124,9 @@ func (b *OLTPBackend) Query(ctx context.Context, rawSQL string, limit int) (*Que
 		}
 		resultRows = append(resultRows, vals)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
 	if resultRows == nil {
 		resultRows = [][]interface{}{}
 	}
@@ -141,7 +144,7 @@ func (b *OLTPBackend) Query(ctx context.Context, rawSQL string, limit int) (*Que
 func (b *OLTPBackend) Tables(ctx context.Context) ([]TableInfo, error) {
 	// The tables we expose for analytics queries.
 	analyticsTable := []string{"events", "entities", "sessions"}
-	var tables []TableInfo
+	tables := make([]TableInfo, 0, len(analyticsTable))
 
 	for _, name := range analyticsTable {
 		info := TableInfo{Name: name}
@@ -194,6 +197,9 @@ func (b *OLTPBackend) getColumns(ctx context.Context, table string) []Column {
 				cols = append(cols, c)
 			}
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 	return cols
 }
