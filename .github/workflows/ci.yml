@@ -87,25 +87,113 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test -race -count=1 -timeout 240s ./...
+        run: |
+          go test -race -count=1 -timeout 240s -cover -json ./... > test-results.json 2>&1 || true
+          # Fail if any tests failed (go test -json outputs Action: fail)
+          if grep -q '"Action":"fail"' test-results.json; then
+            cat test-results.json | jq -r 'select(.Action=="output") | .Output // empty' | head -100
+            exit 1
+          fi
+
+      - name: Go test summary
+        if: always()
+        run: |
+          echo "## Go Test Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract per-package results and coverage from JSON output.
+          TOTAL=0
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          # Build a package results table.
+          echo "| Package | Result | Duration | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|----------|----------|" >> $GITHUB_STEP_SUMMARY
+
+          # Process package-level pass/fail events.
+          jq -r 'select(.Test == null and (.Action == "pass" or .Action == "fail" or .Action == "skip")) |
+            [.Package, .Action, (.Elapsed | tostring)] | @tsv' test-results.json | \
+          while IFS=$'\t' read -r pkg action elapsed; do
+            # Extract coverage % from output lines for this package.
+            cov=$(jq -r --arg pkg "$pkg" \
+              'select(.Package == $pkg and .Action == "output" and (.Output | test("coverage:"))) |
+              .Output' test-results.json | grep -oP 'coverage: \K[0-9.]+%' | tail -1)
+            cov=${cov:-"—"}
+
+            # Format result with emoji.
+            case "$action" in
+              pass)    result="✅ pass"; PASSED=$((PASSED+1)) ;;
+              fail)    result="❌ fail"; FAILED=$((FAILED+1)) ;;
+              skip)    result="⏭️ skip"; SKIPPED=$((SKIPPED+1)) ;;
+            esac
+            TOTAL=$((TOTAL+1))
+
+            # Shorten package path for readability.
+            short_pkg=$(echo "$pkg" | sed 's|github.com/zitadel/zitadel/||')
+
+            echo "| \`$short_pkg\` | $result | ${elapsed}s | $cov |" >> $GITHUB_STEP_SUMMARY
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall summary line.
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$FAILED" -gt 0 ]; then
+            echo "❌ **$FAILED failed**, $PASSED passed, $SKIPPED skipped out of $TOTAL packages" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **All $PASSED packages passed** ($SKIPPED skipped)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Fuzz (10s each)
         run: |
+          FUZZ_RESULTS=""
+          run_fuzz() {
+            local name="$1" pkg="$2"
+            echo "::group::$name"
+            if go test -fuzz "$name" -fuzztime 10s "$pkg" 2>&1; then
+              FUZZ_RESULTS="${FUZZ_RESULTS}| \`${name}\` | \`$(echo $pkg | sed 's|./||')\` | ✅ pass | 10s |\n"
+            else
+              FUZZ_RESULTS="${FUZZ_RESULTS}| \`${name}\` | \`$(echo $pkg | sed 's|./||')\` | ❌ fail | 10s |\n"
+            fi
+            echo "::endgroup::"
+          }
+
           # Login layer
-          go test -fuzz FuzzParseIDTokenClaims -fuzztime 10s ./internal/login/
-          go test -fuzz FuzzMapClaims -fuzztime 10s ./internal/login/
+          run_fuzz FuzzParseIDTokenClaims ./internal/login/
+          run_fuzz FuzzMapClaims ./internal/login/
           # API layer
-          go test -fuzz FuzzAPIJSON -fuzztime 10s ./internal/api/
-          go test -fuzz FuzzSessionToken -fuzztime 10s ./internal/api/
-          go test -fuzz FuzzBearerTokenResolution -fuzztime 10s ./internal/api/
-          go test -fuzz FuzzCookieTokenResolution -fuzztime 10s ./internal/api/
-          go test -fuzz FuzzXIdentityIdHeader -fuzztime 10s ./internal/api/
+          run_fuzz FuzzAPIJSON ./internal/api/
+          run_fuzz FuzzSessionToken ./internal/api/
+          run_fuzz FuzzBearerTokenResolution ./internal/api/
+          run_fuzz FuzzCookieTokenResolution ./internal/api/
+          run_fuzz FuzzXIdentityIdHeader ./internal/api/
           # Session layer
-          go test -fuzz FuzzCookieVerify -fuzztime 10s ./internal/session/
-          go test -fuzz FuzzCookieSign -fuzztime 10s ./internal/session/
-          go test -fuzz FuzzCookieSignVerifyRoundTrip -fuzztime 10s ./internal/session/
+          run_fuzz FuzzCookieVerify ./internal/session/
+          run_fuzz FuzzCookieSign ./internal/session/
+          run_fuzz FuzzCookieSignVerifyRoundTrip ./internal/session/
           # Auth layer
-          go test -fuzz FuzzExtractHash -fuzztime 10s ./internal/auth/
+          run_fuzz FuzzExtractHash ./internal/auth/
+          run_fuzz FuzzPasswordHash ./internal/auth/
+
+          # Write fuzz summary.
+          echo "$FUZZ_RESULTS" >> /tmp/fuzz-results.txt
+
+      - name: Fuzz summary
+        if: always()
+        run: |
+          echo "## Fuzz Test Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | Package | Result | Duration |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          if [ -f /tmp/fuzz-results.txt ]; then
+            cat /tmp/fuzz-results.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| — | — | ⚠️ not run | — |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
 
   test-web:
     name: Test Web
@@ -120,7 +208,69 @@ jobs:
       - run: npm ci
 
       - name: Vitest
-        run: npm test -w web
+        run: |
+          cd web
+          npx vitest run --reporter=default --reporter=json --outputFile=test-results.json 2>&1 || true
+          # Fail on actual test failures (exit handled below after summary).
+          if [ -f test-results.json ]; then
+            FAILURES=$(jq '.numFailedTests' test-results.json)
+            if [ "$FAILURES" -gt 0 ]; then
+              npx vitest run 2>&1
+              exit 1
+            fi
+          fi
+
+      - name: Web test summary
+        if: always()
+        run: |
+          echo "## Vitest Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ ! -f web/test-results.json ]; then
+            echo "⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          cd web
+
+          # Overall stats.
+          TOTAL=$(jq '.numTotalTests' test-results.json)
+          PASSED=$(jq '.numPassedTests' test-results.json)
+          FAILED=$(jq '.numFailedTests' test-results.json)
+          SUITES_TOTAL=$(jq '.numTotalTestSuites' test-results.json)
+          SUITES_PASSED=$(jq '.numPassedTestSuites' test-results.json)
+          DURATION=$(jq '[.testResults[].perfStats.runtime] | add / 1000 | . * 100 | round / 100' test-results.json)
+
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$FAILED" -gt 0 ]; then
+            echo "❌ **$FAILED failed**, $PASSED passed out of $TOTAL tests ($SUITES_PASSED/$SUITES_TOTAL suites)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **All $PASSED tests passed** ($SUITES_PASSED/$SUITES_TOTAL suites, ${DURATION}s)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Per-suite details.
+          echo "| Suite | Tests | Duration | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          jq -r '.testResults[] |
+            (.name | split("/") | last) as $file |
+            (.assertionResults | length) as $count |
+            ((.perfStats.runtime / 1000 * 100 | round) / 100 | tostring) as $dur |
+            (if (.numFailingTests // 0) > 0 then "❌ fail" else "✅ pass" end) as $res |
+            "| `\($file)` | \($count) | \($dur)s | \($res) |"
+          ' test-results.json >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # List individual failures (if any).
+          FAIL_DETAILS=$(jq -r '.testResults[].assertionResults[] | select(.status == "failed") |
+            "- ❌ **\(.ancestorTitles | join(" > ")) > \(.title)**\n  \(.failureMessages[0] // "" | split("\n")[0])"' test-results.json)
+          if [ -n "$FAIL_DETAILS" ]; then
+            echo "### Failures" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$FAIL_DETAILS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ─── Postgres Integration ────────────────────────────────
   test-postgres:
@@ -140,7 +290,49 @@ jobs:
           cache: true
 
       - name: Postgres integration tests
-        run: go test -v -count=1 -timeout 300s ./internal/database/...
+        run: |
+          go test -v -count=1 -timeout 300s -cover -json ./internal/database/... > test-results.json 2>&1 || true
+          if grep -q '"Action":"fail"' test-results.json; then
+            cat test-results.json | jq -r 'select(.Action=="output") | .Output // empty' | head -50
+            exit 1
+          fi
+
+      - name: Postgres test summary
+        if: always()
+        run: |
+          echo "## Postgres ${{ matrix.postgres-version }} Test Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ ! -f test-results.json ]; then
+            echo "⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          PASSED=$(jq -r 'select(.Test == null and .Action == "pass") | .Package' test-results.json | wc -l | tr -d ' ')
+          FAILED=$(jq -r 'select(.Test == null and .Action == "fail") | .Package' test-results.json | wc -l | tr -d ' ')
+
+          echo "| Package | Result | Duration | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|----------|----------|" >> $GITHUB_STEP_SUMMARY
+
+          jq -r 'select(.Test == null and (.Action == "pass" or .Action == "fail")) |
+            [.Package, .Action, (.Elapsed | tostring)] | @tsv' test-results.json | \
+          while IFS=$'\t' read -r pkg action elapsed; do
+            cov=$(jq -r --arg pkg "$pkg" \
+              'select(.Package == $pkg and .Action == "output" and (.Output | test("coverage:"))) |
+              .Output' test-results.json | grep -oP 'coverage: \K[0-9.]+%' | tail -1)
+            cov=${cov:-"—"}
+            short_pkg=$(echo "$pkg" | sed 's|github.com/zitadel/zitadel/||')
+            result=$([ "$action" = "pass" ] && echo "✅ pass" || echo "❌ fail")
+            echo "| \`$short_pkg\` | $result | ${elapsed}s | $cov |" >> $GITHUB_STEP_SUMMARY
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$FAILED" -gt 0 ]; then
+            echo "❌ **$FAILED failed**, $PASSED passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **All $PASSED packages passed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
 
   # ─── Release (goreleaser, main only) ─────────────────────
   release:
