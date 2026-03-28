@@ -1,8 +1,8 @@
 package api_test
 
 import (
-"os"
-"testing"
+	"os"
+	"testing"
 )
 
 func TestFuzzTempDir(t *testing.T) {
