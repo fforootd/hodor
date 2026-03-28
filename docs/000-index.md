@@ -9,17 +9,20 @@
 
 | # | Title | Status | Date |
 |---|---|---|---|
-| [001](001-rest-over-connectrpc.md) | REST+JSON over ConnectRPC | Accepted | 2026-03-26 |
-| [002](002-schema-driven-login.md) | Schema-Driven Identity, Auth, and Login Flows | Accepted | 2026-03-26 |
-| [003](003-auth-methods-meta-schema.md) | Unified Auth Methods and Meta-Schema Validation | Accepted | 2026-03-26 |
-| [004](004-apps-as-identities-oidc.md) | Apps as Identities — OIDC Provider | Proposed | 2026-03-27 |
-| [005](005-unified-data-model.md) | Unified Data Model — Schemas, Orgs, Config Cascade | Accepted | 2026-03-27 |
-| [006](006-entity-naming-model.md) | Entity Naming Model — Schema-as-Ontology | Proposed | 2026-03-27 |
-| [007](007-schema-engine-interaction.md) | Schema ↔ Engine Interaction Model | Proposed | 2026-03-27 |
-| [008](008-meta-schema-catalog.md) | Meta Schema as Entity Catalog | Proposed | 2026-03-27 |
-| [009](009-settings-engine-pipeline.md) | Hierarchical Settings & Engine Pipeline | Proposed | 2026-03-27 |
-| [010](010-analytics-two-tier.md) | Identity Observability — Three Domains & Two Data Paths | Proposed | 2026-03-27 |
-| [011](011-security-testing-philosophy.md) | Security Testing Philosophy — OWASP-Grounded | Accepted | 2026-03-27 |
+| [001](adr/001-rest-over-connectrpc.md) | REST+JSON over ConnectRPC | Accepted | 2026-03-26 |
+| [002](adr/002-schema-driven-login.md) | Schema-Driven Identity, Auth, and Login Flows | Accepted | 2026-03-26 |
+| [003](adr/003-auth-methods-meta-schema.md) | Unified Auth Methods and Meta-Schema Validation | Accepted | 2026-03-26 |
+| [004](adr/004-apps-as-identities-oidc.md) | Apps as Identities — OIDC Provider | Proposed | 2026-03-27 |
+| [005](adr/005-unified-data-model.md) | Unified Data Model — Schemas, Orgs, Config Cascade | Accepted | 2026-03-27 |
+| [006](adr/006-entity-naming-model.md) | Entity Naming Model — Schema-as-Ontology | Proposed | 2026-03-27 |
+| [007](adr/007-schema-engine-interaction.md) | Schema ↔ Engine Interaction Model | Proposed | 2026-03-27 |
+| [008](adr/008-meta-schema-catalog.md) | Meta Schema as Entity Catalog | Proposed | 2026-03-27 |
+| [009](adr/009-settings-engine-pipeline.md) | Hierarchical Settings & Engine Pipeline | Proposed | 2026-03-27 |
+| [010](adr/010-analytics-two-tier.md) | Identity Observability — Three Domains & Two Data Paths | Proposed | 2026-03-27 |
+| [011](adr/011-security-testing-philosophy.md) | Security Testing Philosophy — OWASP-Grounded | Accepted | 2026-03-27 |
+| [012](adr/012-path-based-deployment.md) | Path-Based Deployment Architecture | Accepted | 2026-03-28 |
+| [013](adr/013-id-generation-strategy.md) | ID Generation — Replace Sonyflake with UUIDv7 | Proposed | 2026-03-28 |
+| [014](adr/014-performance-testing.md) | Performance Testing Strategy — vCPU Scaling | Proposed | 2026-03-28 |
 
 ## Architecture
 
@@ -60,11 +63,15 @@ graph TD
     A006 --> A010
     A002 --> A011[011 Security Testing]
     A003 --> A011
+    A005 --> A012[012 Path-Based Deployment]
+    A013[013 UUIDv7 IDs]
+    A014[014 Performance Testing]
 ```
 
 ## Conventions
 
+- **ADR location**: All ADRs live in `docs/adr/`
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 012
+- **Next ADR number**: 015
