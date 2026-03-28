@@ -17,11 +17,52 @@ const stubComponents = {
   TableRow: { template: '<tr class="table-row"><slot /></tr>' },
   TableHead: { template: '<th><slot /></th>' },
   TableCell: { template: '<td class="table-cell"><slot /></td>' },
+  Input: { template: '<input class="input" />' },
+  Checkbox: { template: '<input type="checkbox" class="checkbox" />' },
+  DataTable: {
+    props: ['columns', 'data', 'rowSelection'],
+    template: `<div class="data-table">
+      <slot name="toolbar" :table="mockTable" />
+      <template v-if="data && data.length">
+        <div v-for="(row, i) in data" :key="i" class="table-row">
+          <span class="cell-identifier">{{ row.identifier }}</span>
+          <span class="cell-display">{{ row.display_name }}</span>
+          <span class="badge">{{ row.state }}</span>
+        </div>
+      </template>
+      <div v-else class="empty-state">No results found.</div>
+      <slot name="pagination" :table="mockTable" />
+    </div>`,
+    setup() {
+      const mockTable = {
+        getAllColumns: () => [],
+        getState: () => ({ columnVisibility: {} }),
+        setColumnFilters: () => {},
+        getIsAllPageRowsSelected: () => false,
+        getIsSomePageRowsSelected: () => false,
+        toggleAllPageRowsSelected: () => {},
+      }
+      return { mockTable }
+    },
+  },
+  DataTablePagination: { template: '<div class="pagination" />' },
+  DropdownMenu: { template: '<div class="dropdown"><slot /></div>' },
+  DropdownMenuTrigger: { template: '<div class="dropdown-trigger"><slot /></div>' },
+  DropdownMenuContent: { template: '<div class="dropdown-content"><slot /></div>' },
+  DropdownMenuCheckboxItem: { template: '<div class="dropdown-item"><slot /></div>' },
 }
 
-// Stub lucide icons.
+// Stub lucide icons — must include every export used by the view.
 vi.mock('lucide-vue-next', () => ({
   Plus: { template: '<span class="icon-plus" />' },
+  Search: { template: '<span class="icon-search" />' },
+  ChevronDown: { template: '<span class="icon-chevron-down" />' },
+  ArrowUpDown: { template: '<span class="icon-arrow-updown" />' },
+  ArrowUp: { template: '<span class="icon-arrow-up" />' },
+  ArrowDown: { template: '<span class="icon-arrow-down" />' },
+  CheckCircle2: { template: '<span class="icon-check" />' },
+  XCircle: { template: '<span class="icon-xcircle" />' },
+  Ban: { template: '<span class="icon-ban" />' },
 }))
 
 /** Create a mock Response compatible with the api client. */
@@ -80,7 +121,7 @@ describe('IdentityListView', () => {
     const wrapper = await mountView(() =>
       Promise.resolve(mockResponse({ items: [] })),
     )
-    expect(wrapper.text()).toContain('No human users found')
+    expect(wrapper.text()).toContain('No results found.')
     expect(wrapper.text()).toContain('0 human users total')
   })
 
