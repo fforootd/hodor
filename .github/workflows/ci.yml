@@ -153,7 +153,7 @@ jobs:
           run_fuzz() {
             local name="$1" pkg="$2"
             echo "::group::$name"
-            if go test -fuzz "$name" -fuzztime 10s "$pkg" 2>&1; then
+            if go test -fuzz "^${name}$" -fuzztime 10s "$pkg" 2>&1; then
               FUZZ_RESULTS="${FUZZ_RESULTS}| \`${name}\` | \`$(echo $pkg | sed 's|./||')\` | ✅ pass | 10s |\n"
             else
               FUZZ_RESULTS="${FUZZ_RESULTS}| \`${name}\` | \`$(echo $pkg | sed 's|./||')\` | ❌ fail | 10s |\n"
