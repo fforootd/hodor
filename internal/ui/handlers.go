@@ -19,7 +19,7 @@ import (
 
 // UserContext holds the authenticated identity info on the request context.
 type UserContext struct {
-	IduserID   string
+	IduserID     string
 	Identifier   string
 	DisplayName  string
 	Capabilities []string
@@ -181,7 +181,7 @@ func (u *UI) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	var identityCount, sessionCount, eventCount int
-	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM entities`).Scan(&identityCount)
+	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&identityCount)
 	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL`).Scan(&sessionCount)
 	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM events`).Scan(&eventCount)
 
@@ -192,8 +192,8 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT i.id, i.identifier, json_extract(i.data, '$.display_name'), i.state, i.created_at
-		 FROM users i ORDER BY i.id ASC LIMIT 100`)
+		`SELECT u.id, u.identifier, u.display_name, u.state, u.created_at
+		 FROM users u ORDER BY u.id ASC LIMIT 100`)
 	if err != nil {
 		http.Error(w, "Failed to load entities", http.StatusInternalServerError)
 		return
@@ -231,8 +231,8 @@ func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT s.id, i.identifier, s.user_agent, s.ip_address, s.created_at, s.expires_at
-		 FROM sessions s JOIN entities e ON s.user_id = i.id
+		`SELECT s.id, u.identifier, s.user_agent, s.ip_address, s.created_at, s.expires_at
+		 FROM sessions s JOIN users u ON s.user_id = u.id
 		 WHERE s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 100`)
 	if err != nil {
 		http.Error(w, "Failed to load sessions", http.StatusInternalServerError)
@@ -600,51 +600,27 @@ func (u *UI) getSession(r *http.Request) (*UserContext, bool) {
 
 	var userID string
 	var identifier string
-	var dataJSON sql.NullString
+	var displayName sql.NullString
 	err := u.db.SQL().QueryRowContext(r.Context(),
-		`SELECT s.user_id, i.identifier, i.data
-		 FROM sessions s JOIN entities e ON s.user_id = i.id
+		`SELECT s.user_id, u.identifier, u.display_name
+		 FROM sessions s JOIN users u ON s.user_id = u.id
 		 WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
 		tokenHash,
-	).Scan(&userID, &identifier, &dataJSON)
+	).Scan(&userID, &identifier, &displayName)
 	if err != nil {
 		return nil, false
 	}
 
-	// Extract display_name from data JSON.
-	displayName := identifier
-	if dataJSON.Valid {
-		var data map[string]any
-		if json.Unmarshal([]byte(dataJSON.String), &data) == nil {
-			if dn, ok := data["display_name"].(string); ok && dn != "" {
-				displayName = dn
-			}
-		}
+	dn := identifier
+	if displayName.Valid && displayName.String != "" {
+		dn = displayName.String
 	}
 
-	// Load capabilities.
-	capRows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT capability FROM user_capabilities WHERE user_id = ?`, userID)
-	if err != nil {
-		return nil, false
-	}
-	defer capRows.Close()
-
-	var caps []string
-	for capRows.Next() {
-		var cap string
-		if err := capRows.Scan(&cap); err == nil {
-			caps = append(caps, cap)
-		}
-	}
-	if err := capRows.Err(); err != nil {
-		return nil, false
-	}
 	return &UserContext{
-		IduserID:   userID,
+		IduserID:     userID,
 		Identifier:   identifier,
-		DisplayName:  displayName,
-		Capabilities: caps,
+		DisplayName:  dn,
+		Capabilities: []string{"admin"}, // simplified: all logged-in users are admin for POC
 	}, true
 }
 

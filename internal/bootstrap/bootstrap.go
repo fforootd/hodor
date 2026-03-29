@@ -180,11 +180,6 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 		return fmt.Errorf("insert admin user: %w", err)
 	}
 
-	// Promote display_name to resource_indexes.
-	_, _ = tx.ExecContext(ctx,
-		`INSERT INTO resource_indexes (resource_type, resource_id, field, value) VALUES ('user', ?, 'display_name', 'Admin')`,
-		userID)
-
 	// Enforce uniqueness (ADR-016): register identifier + email in unique_fields.
 	if err := uniqueness.EnforceFromIdentifier(ctx, tx, userID, "1", username); err != nil {
 		logging.Printf("WARN: bootstrap unique identifier: %v", err)

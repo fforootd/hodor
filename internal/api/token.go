@@ -24,7 +24,7 @@ const (
 
 // TokenInfo carries the resolved identity of a token holder.
 type TokenInfo struct {
-	UserID  string   // The identity this token belongs to ("" if nullable)
+	UserID    string   // The identity this token belongs to ("" if nullable)
 	SessionID string   // Only for session tokens
 	TokenType string   // "session", "pat", "opaque"
 	OrgID     string   // The org_id from the entity
@@ -74,9 +74,9 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.user_id, t.session_id, COALESCE(e.org_id, 0) FROM tokens t
+		`SELECT t.user_id, t.session_id, COALESCE(u.org_id, '0') FROM tokens t
 		 JOIN sessions s ON t.session_id = s.id
-		 LEFT JOIN entities e ON t.user_id = e.id
+		 LEFT JOIN users u ON t.user_id = u.id
 		 WHERE t.token_hash = ?
 		   AND t.type = 'session'
 		   AND t.revoked_at IS NULL
@@ -103,8 +103,8 @@ func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenIn
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.user_id, COALESCE(e.org_id, 0) FROM tokens t
-		 LEFT JOIN entities e ON t.user_id = e.id
+		`SELECT t.user_id, COALESCE(u.org_id, '0') FROM tokens t
+		 LEFT JOIN users u ON t.user_id = u.id
 		 WHERE t.token_hash = ?
 		   AND t.type = 'pat'
 		   AND t.revoked_at IS NULL

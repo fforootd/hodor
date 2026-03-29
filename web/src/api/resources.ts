@@ -127,7 +127,7 @@ async function unwrapItems<T>(promise: Promise<any>): Promise<T[]> {
 }
 
 // ------------------------------------------------------------------
-// User API (type-specific, replaces generic entityApi)
+// User API — unified CRUD for all user types (human_user, service_user, ai_agent)
 // ------------------------------------------------------------------
 export const userApi = {
   list: (): Promise<IdentityResponse[]> => unwrapItems<IdentityResponse>(listUsers()),
@@ -137,9 +137,6 @@ export const userApi = {
   delete: (id: string): Promise<void> => unwrap<void>(deleteUser({ path: { id } })),
   setPassword: (id: string, password: string): Promise<void> => unwrap<void>(setUserPasswordFn({ path: { id }, body: { password } })),
 }
-
-// Backward-compatible alias — views still import entityApi.
-export const entityApi = userApi
 
 // ------------------------------------------------------------------
 // Schema API

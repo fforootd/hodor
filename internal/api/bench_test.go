@@ -77,8 +77,8 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 	for i := 0; i < seedCount; i++ {
 		ids[i] = id.New()
 		tx.Exec(
-			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
-			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
+			`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, 'human', 'active', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("bench-user-%d", i), fmt.Sprintf("Bench User %d", i), now, now)
 	}
 	if err := tx.Commit(); err != nil {

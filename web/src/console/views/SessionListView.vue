@@ -110,7 +110,7 @@
           <div class="space-y-1">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Entity ID</span>
             <RouterLink 
-              :to="`/console/s/human_user/${row.original.entity_id || row.original.identity_id}`" 
+              :to="`/users/${row.original.entity_id || row.original.identity_id}`" 
               class="block rounded bg-muted px-2 py-1 text-xs font-mono break-all text-primary hover:underline"
             >{{ row.original.entity_id || row.original.identity_id || '—' }}</RouterLink>
           </div>
@@ -158,7 +158,7 @@
 import { ref, onMounted, computed, h } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink, useRoute } from 'vue-router'
-import { sessionApi, entityApi, type Session } from '@/api/resources'
+import { sessionApi, userApi, type Session } from '@/api/resources'
 import type { IdentityResponse } from '@zitadel/client-js'
 
 /** Session with a computed state field and optional server-side extras. */
@@ -297,7 +297,7 @@ onMounted(async () => {
   try { 
     const [sessRes, entitiesRes] = await Promise.all([
       sessionApi.list(),
-      entityApi.list().catch(() => []) 
+      userApi.list().catch(() => []) 
     ])
     
     sessions.value = sessRes.map((s: Session) => {
@@ -411,7 +411,7 @@ const columns = [
       return h('div', { class: 'flex items-center space-x-3 py-1' }, [
         h('div', { class: 'p-1.5 bg-muted rounded-md shrink-0' }, [h(Key, { class: 'w-4 h-4 text-muted-foreground' })]),
         h('div', { class: 'flex flex-col min-w-0 max-w-[200px]' }, [
-          h(RouterLink, { to: `/identities/${entityId}`, class: 'text-sm font-medium hover:underline truncate' }, () => displayName),
+          h(RouterLink, { to: `/users/${entityId}`, class: 'text-sm font-medium hover:underline truncate' }, () => displayName),
           h('span', { class: 'text-xs text-muted-foreground truncate', title: displaySub }, displaySub)
         ])
       ])

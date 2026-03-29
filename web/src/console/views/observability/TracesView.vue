@@ -157,7 +157,7 @@
               <!-- Trace Metadata -->
               <div class="flex flex-wrap gap-4">
                 <!-- Identity Card -->
-                <RouterLink v-if="trace.identity" :to="`/identities/${trace.identity.id}`" 
+                <RouterLink v-if="trace.identity" :to="`/users/${trace.identity.id}`" 
                             class="flex items-center gap-3 bg-card hover:bg-muted/40 transition-colors rounded-lg border hover:border-primary/50 cursor-pointer px-4 py-3 shadow-xs">
                   <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <User class="w-5 h-5 text-primary" />
@@ -256,7 +256,7 @@
                           <RouterLink v-if="span.session_id" to="/console/sessions" class="truncate text-primary hover:underline" @click.stop>{{ span.session_id }}</RouterLink>
                           <span v-else>—</span>
                           <span class="text-muted-foreground" v-if="span.actor_id">Actor ID</span>
-                          <RouterLink v-if="span.actor_id" :to="`/identities/${span.actor_id}`" class="truncate text-primary hover:underline" @click.stop>{{ span.actor_id }}</RouterLink>
+                          <RouterLink v-if="span.actor_id" :to="`/users/${span.actor_id}`" class="truncate text-primary hover:underline" @click.stop>{{ span.actor_id }}</RouterLink>
                         </div>
                       </div>
                       <div v-if="span.payloadStr !== '{}'" class="border rounded-md bg-muted/20 overflow-hidden">
@@ -288,7 +288,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Search, Workflow, AlertCircle, Zap, Loader2, Clock, Globe, Key, FileJson, Server, Activity, User } from 'lucide-vue-next'
 import { api } from '@/api/client'
-import { entityApi, type Identity } from '@/api/resources'
+import { userApi, type Identity } from '@/api/resources'
 import type { AcceptableValue } from 'reka-ui'
 
 const route = useRoute()
@@ -579,7 +579,7 @@ async function resolveIdentity(actorId: string): Promise<Identity | null> {
   if (identityCache.value[actorId] !== undefined) return identityCache.value[actorId]
 
   try {
-    const identity = await entityApi.get(actorId)
+    const identity = await userApi.get(actorId)
     identityCache.value[actorId] = identity
     return identity
   } catch {

@@ -363,7 +363,7 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// linked_accounts cascade via FK — no manual cleanup needed.
+	// linked_identities cascade via FK — no manual cleanup needed.
 
 	emitEventSimple(r.Context(), a.db.SQL(), "provider.deleted", "", pid, "provider", map[string]any{"provider_id": pid})
 	a.bus.Signal()

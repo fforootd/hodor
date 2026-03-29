@@ -427,11 +427,11 @@ function getColRef(colName: string): any | null {
 function resolveRefLink(refInfo: any, row: Record<string, any>): string {
   if (!refInfo?.resource) return '#'
 
-  // For entity references, navigate to the identity detail page.
-  if (refInfo.resource === 'entities') {
+  // For user references, navigate to the identity detail page.
+  if (refInfo.resource === 'users' || refInfo.resource === 'entities') {
     const id = row[Object.keys(row).find(k => k.endsWith('_id') && row[k]) || ''] || ''
     const type = row['actor_type'] || row['aggregate_type'] || 'human_user'
-    return `/console/s/${type}/${id}`
+    return `/users/${id}`
   }
 
   // For session references, link to sessions view.

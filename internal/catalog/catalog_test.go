@@ -35,20 +35,74 @@ func setupTestDB(t *testing.T) *sql.DB {
 		created_by TEXT DEFAULT '',
 		created_at TEXT NOT NULL DEFAULT (datetime('now'))
 	)`)
-	db.Exec(`CREATE TABLE entities (
-		id TEXT PRIMARY KEY,
-		schema_id TEXT DEFAULT '',
-		identifier TEXT NOT NULL DEFAULT '',
-		display_name TEXT NOT NULL DEFAULT '',
-		data TEXT NOT NULL DEFAULT '{}',
-		org_id TEXT NOT NULL DEFAULT '',
-		created_at TEXT,
-		updated_at TEXT
+	db.Exec(`CREATE TABLE users (
+		id            TEXT PRIMARY KEY,
+		org_id        TEXT NOT NULL DEFAULT '1',
+		identifier    TEXT NOT NULL DEFAULT '',
+		display_name  TEXT DEFAULT '',
+		user_type     TEXT NOT NULL DEFAULT 'human',
+		state         TEXT NOT NULL DEFAULT 'active',
+		schema_id     TEXT DEFAULT '',
+		metadata      TEXT DEFAULT '{}',
+		created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+		UNIQUE(org_id, identifier)
 	)`)
-	db.Exec(`CREATE TABLE catalog_cache (
-		key TEXT PRIMARY KEY,
+	db.Exec(`CREATE TABLE actions (
+		id           TEXT PRIMARY KEY,
+		org_id       TEXT NOT NULL DEFAULT '1',
+		name         TEXT NOT NULL DEFAULT '',
+		hook         TEXT NOT NULL DEFAULT 'on_event',
+		action_type  TEXT NOT NULL DEFAULT 'expr',
+		trigger_expr TEXT DEFAULT 'true',
+		config       TEXT NOT NULL DEFAULT '{}',
+		priority     INTEGER DEFAULT 0,
+		enabled      BOOLEAN DEFAULT 1,
+		fail_open    BOOLEAN DEFAULT 0,
+		timeout_ms   INTEGER DEFAULT 5000,
+		schema_id    TEXT DEFAULT '',
+		metadata     TEXT DEFAULT '{}',
+		created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	db.Exec(`CREATE TABLE login_flows (
+		id         TEXT PRIMARY KEY,
+		org_id     TEXT NOT NULL DEFAULT '1',
+		name       TEXT NOT NULL DEFAULT '',
+		preset     TEXT DEFAULT 'identifier_first',
+		steps      TEXT NOT NULL DEFAULT '[]',
+		config     TEXT NOT NULL DEFAULT '{}',
+		is_default BOOLEAN DEFAULT 0,
+		enabled    BOOLEAN DEFAULT 1,
+		schema_id  TEXT DEFAULT '',
+		metadata   TEXT DEFAULT '{}',
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	db.Exec(`CREATE TABLE providers (
+		id              TEXT PRIMARY KEY,
+		org_id          TEXT NOT NULL DEFAULT '1',
+		name            TEXT NOT NULL DEFAULT '',
+		protocol        TEXT NOT NULL DEFAULT 'oidc',
+		template        TEXT NOT NULL DEFAULT 'custom',
+		config          TEXT NOT NULL DEFAULT '{}',
+		claim_overrides TEXT NOT NULL DEFAULT '{}',
+		auto_register   BOOLEAN NOT NULL DEFAULT 1,
+		enabled         BOOLEAN NOT NULL DEFAULT 1,
+		display_order   INTEGER NOT NULL DEFAULT 0,
+		schema_id       TEXT DEFAULT '',
+		metadata        TEXT DEFAULT '{}',
+		created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+		UNIQUE(org_id, name)
+	)`)
+	db.Exec(`CREATE TABLE cache (
+		namespace TEXT NOT NULL DEFAULT 'default',
+		key TEXT NOT NULL,
 		data TEXT NOT NULL,
-		fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+		expires_at TEXT,
+		fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+		PRIMARY KEY (namespace, key)
 	)`)
 
 	// Seed schemas for common types.
@@ -99,8 +153,8 @@ func seedTestEntities(t *testing.T, db *sql.DB) {
 
 	for _, u := range users {
 		dataJSON, _ := json.Marshal(u.data)
-		db.Exec(`INSERT INTO users (id, schema_id, identifier, display_name, data, org_id, created_at, updated_at)
-			VALUES (?, 'human_user_v1', ?, ?, ?, '', datetime('now'), datetime('now'))`,
+		db.Exec(`INSERT INTO users (id, schema_id, identifier, display_name, metadata, org_id, created_at, updated_at)
+			VALUES (?, 'human_user_v1', ?, ?, ?, '1', datetime('now'), datetime('now'))`,
 			u.id, u.name, u.name, string(dataJSON))
 	}
 }
@@ -315,7 +369,7 @@ func TestService_Install(t *testing.T) {
 
 	// Verify entity was created.
 	var schemaID, dataJSON string
-	err = db.QueryRow(`SELECT schema_id, data FROM users WHERE id = ?`, userID).Scan(&schemaID, &dataJSON)
+	err = db.QueryRow(`SELECT schema_id, metadata FROM actions WHERE id = ?`, userID).Scan(&schemaID, &dataJSON)
 	if err != nil {
 		t.Fatalf("query entity: %v", err)
 	}
@@ -347,7 +401,7 @@ func TestService_Install_WithDefaults(t *testing.T) {
 	}
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM actions WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -371,7 +425,7 @@ func TestService_Install_LoginFlow(t *testing.T) {
 	}
 
 	var schemaID, dataJSON string
-	db.QueryRow(`SELECT schema_id, data FROM users WHERE id = ?`, userID).Scan(&schemaID, &dataJSON)
+	db.QueryRow(`SELECT schema_id, metadata FROM login_flows WHERE id = ?`, userID).Scan(&schemaID, &dataJSON)
 
 	if schemaID != "login_flow_v1" {
 		t.Errorf("schema_id = %q, want login_flow_v1", schemaID)
@@ -409,7 +463,7 @@ func TestService_Install_SSOEnterprise(t *testing.T) {
 	}
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM login_flows WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -442,7 +496,7 @@ func TestInstall_HasCatalogMetadata(t *testing.T) {
 	}
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM providers WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -478,7 +532,7 @@ func TestCatalogState_Linked(t *testing.T) {
 	})
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM actions WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -496,7 +550,7 @@ func TestCatalogState_Forked(t *testing.T) {
 	userID, _ := svc.Install(context.Background(), "rate-limit-by-path", nil)
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM actions WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -529,7 +583,7 @@ func TestCatalogState_ForkedLoginFlow(t *testing.T) {
 	userID, _ := svc.Install(context.Background(), "passkey-first", nil)
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM login_flows WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -1122,11 +1176,11 @@ func BenchmarkCatalogState(b *testing.B) {
 	for _, st := range []string{"action", "provider", "authorization", "login_flow", "fga_model"} {
 		db.Exec(`INSERT OR IGNORE INTO schemas (id, type, is_default) VALUES (?, ?, true)`, st+"_v1", st)
 	}
-	db.Exec(`CREATE TABLE IF NOT EXISTS entities (id TEXT PRIMARY KEY, schema_id TEXT DEFAULT '', identifier TEXT DEFAULT '', display_name TEXT DEFAULT '', data TEXT DEFAULT '{}', org_id TEXT DEFAULT '', created_at TEXT, updated_at TEXT)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY, org_id TEXT DEFAULT '1', name TEXT DEFAULT '', hook TEXT DEFAULT 'on_event', action_type TEXT DEFAULT 'expr', trigger_expr TEXT DEFAULT 'true', config TEXT DEFAULT '{}', priority INTEGER DEFAULT 0, enabled BOOLEAN DEFAULT 1, fail_open BOOLEAN DEFAULT 0, timeout_ms INTEGER DEFAULT 5000, schema_id TEXT DEFAULT '', metadata TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`)
 	userID, _ := svc.Install(context.Background(), "rate-limit-by-path", nil)
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
+	db.QueryRow(`SELECT metadata FROM actions WHERE id = ?`, userID).Scan(&dataJSON)
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
 
@@ -1139,7 +1193,7 @@ func BenchmarkCatalogState(b *testing.B) {
 func setupBenchDB(b *testing.B) *sql.DB {
 	b.Helper()
 	db, _ := sql.Open("sqlite", ":memory:")
-	db.Exec(`CREATE TABLE catalog_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL, fetched_at TEXT NOT NULL DEFAULT (datetime('now')))`)
+	db.Exec(`CREATE TABLE cache (namespace TEXT NOT NULL DEFAULT 'default', key TEXT NOT NULL, data TEXT NOT NULL, expires_at TEXT, fetched_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (namespace, key))`)
 	b.Cleanup(func() { db.Close() })
 	return db
 }

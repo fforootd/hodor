@@ -121,25 +121,19 @@ func extractTokenFromRequest(r *http.Request, cookies *session.CookieConfig) str
 // Kept for backward compatibility with non-API routes (e.g., UI handlers).
 func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, err := a.resolveCallerIdentity(r)
+		callerID, err := a.resolveCallerIdentity(r)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
 
-		// Check for admin capability.
-		var adminCap int
-		err = a.db.SQL().QueryRowContext(r.Context(),
-			`SELECT 1 FROM user_capabilities WHERE user_id = ? AND capability = 'admin'`,
-			userID,
-		).Scan(&adminCap)
-		if err == sql.ErrNoRows {
-			writeError(w, http.StatusForbidden, "admin capability required")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "authorization check failed")
-			return
+		// Use FGA to check admin access when available.
+		if svc := FGAService; svc != nil {
+			allowed, err := svc.Check(r.Context(), "user:"+callerID, "admin", "instance:default")
+			if err != nil || !allowed {
+				writeError(w, http.StatusForbidden, "admin access required")
+				return
+			}
 		}
 
 		next(w, r)

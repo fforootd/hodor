@@ -3,7 +3,7 @@
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Analytics</h1>
-        <p class="text-sm text-muted-foreground">Query your audit events, entities, and sessions with SQL.</p>
+        <p class="text-sm text-muted-foreground">Query your audit events, users, and sessions with SQL.</p>
       </div>
     </div>
 
@@ -214,7 +214,7 @@ const templates = [
   { name: 'Event counts by type', sql: "SELECT event_type, COUNT(*) as cnt\nFROM events\nGROUP BY event_type\nORDER BY cnt DESC\nLIMIT 20" },
   { name: 'Recent events', sql: "SELECT event_type, actor_id, identifier, created_at\nFROM events\nORDER BY event_id DESC\nLIMIT 50" },
   { name: 'Logins per hour', sql: "SELECT strftime(created_at, '%Y-%m-%d %H:00') as hour, COUNT(*) as logins\nFROM events\nWHERE event_type LIKE '%login%'\nGROUP BY hour\nORDER BY hour DESC\nLIMIT 24" },
-  { name: 'Entity counts by type', sql: "SELECT schema_type, COUNT(*) as cnt\nFROM entities\nGROUP BY schema_type\nORDER BY cnt DESC" },
+  { name: 'User counts by type', sql: "SELECT user_type, COUNT(*) as cnt\nFROM users\nGROUP BY user_type\nORDER BY cnt DESC" },
   { name: 'Failed auth attempts', sql: "SELECT identifier, reason, ip_address, created_at\nFROM events\nWHERE event_type = 'auth.login_failed'\nORDER BY event_id DESC\nLIMIT 50" },
   { name: 'Active sessions', sql: "SELECT * FROM sessions LIMIT 50" },
 ]

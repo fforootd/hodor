@@ -28,8 +28,8 @@ func createTestIdentity(t *testing.T, db *database.DB) string {
 	t.Helper()
 	userID := id.New()
 	_, err := db.SQL().Exec(
-		`INSERT INTO users (id, org_id, identifier, state, profile, metadata, created_at, updated_at)
-		 VALUES (?, '1', 'test@example.com', 'active', '{"display_name":"Test User"}', '{}', datetime('now'), datetime('now'))`,
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+		 VALUES (?, '1', 'test@example.com', 'Test User', 'human', 'active', '{}', datetime('now'), datetime('now'))`,
 		userID,
 	)
 	if err != nil {

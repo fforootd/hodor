@@ -72,9 +72,9 @@ func TestPostgresMigrations(t *testing.T) {
 
 	// Verify core tables exist.
 	var tableName string
-	err = db.SQL().QueryRow("SELECT tablename FROM pg_tables WHERE tablename = 'entities' AND schemaname = 'public'").Scan(&tableName)
+	err = db.SQL().QueryRow("SELECT tablename FROM pg_tables WHERE tablename = 'users' AND schemaname = 'public'").Scan(&tableName)
 	if err != nil {
-		t.Fatalf("entities table not found in postgres: %v", err)
+		t.Fatalf("users table not found in postgres: %v", err)
 	}
 
 	// Verify settings table from migration 00002.
@@ -89,8 +89,8 @@ func TestPostgresMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("goose version not found: %v", err)
 	}
-	if version < 2 {
-		t.Errorf("expected goose version >= 2, got %d", version)
+	if version < 1 {
+		t.Errorf("expected goose version >= 1, got %d", version)
 	}
 
 	t.Logf("Postgres migration successful: goose version=%d", version)

@@ -83,27 +83,27 @@ type BrandingConfig struct {
 
 // CaptchaConfig represents x-captcha on the login flow schema.
 type CaptchaConfig struct {
-	Provider  string   `json:"provider"`            // "altcha" | "hcaptcha" | "recaptcha" | "turnstile"
-	Mode      string   `json:"mode"`                // "invisible" | "checkbox" | "floating"
-	On        []string `json:"on"`                  // ["register", "forgot_password", "login"]
-	Algorithm string   `json:"algorithm,omitempty"` // "SHA-256" | "SHA-384" | "SHA-512" (Altcha PoW hash)
+	Provider  string   `json:"provider"`             // "altcha" | "hcaptcha" | "recaptcha" | "turnstile"
+	Mode      string   `json:"mode"`                 // "invisible" | "checkbox" | "floating"
+	On        []string `json:"on"`                   // ["register", "forgot_password", "login"]
+	Algorithm string   `json:"algorithm,omitempty"`  // "SHA-256" | "SHA-384" | "SHA-512" (Altcha PoW hash)
 	MaxNumber int      `json:"max_number,omitempty"` // PoW difficulty range (default: 100000)
-	SiteKey   string   `json:"site_key,omitempty"`  // for third-party providers
+	SiteKey   string   `json:"site_key,omitempty"`   // for third-party providers
 	SecretKey string   `json:"secret_key,omitempty"` // server-side only, never sent to client
-	Threshold float64  `json:"threshold,omitempty"` // score threshold for score-based providers
+	Threshold float64  `json:"threshold,omitempty"`  // score threshold for score-based providers
 }
 
 // FingerprintConfig represents x-fingerprint on the login flow schema.
 type FingerprintConfig struct {
-	Enabled  bool     `json:"enabled"`            // enable browser fingerprinting
-	Provider string   `json:"provider"`           // "thumbmarkjs" (extensible)
-	Persist  bool     `json:"persist"`            // persist visitor ID across sessions
-	On       []string `json:"on,omitempty"`       // ["login", "register"] — when to collect
+	Enabled  bool     `json:"enabled"`      // enable browser fingerprinting
+	Provider string   `json:"provider"`     // "thumbmarkjs" (extensible)
+	Persist  bool     `json:"persist"`      // persist visitor ID across sessions
+	On       []string `json:"on,omitempty"` // ["login", "register"] — when to collect
 }
 
 // RateLimitConfig represents x-rate-limit on the login flow schema.
 type RateLimitConfig struct {
-	MaxAttempts    int `json:"max_attempts"`    // per IP per window
+	MaxAttempts    int `json:"max_attempts"` // per IP per window
 	WindowSeconds  int `json:"window_seconds"`
 	LockoutSeconds int `json:"lockout_seconds"`
 }
@@ -116,9 +116,9 @@ type LoginFlowRef struct {
 
 // LoginFlowConfig is the fully extracted config from a login flow schema.
 type LoginFlowConfig struct {
-	Ref         LoginFlowRef    `json:"ref"`
-	Login       LoginConfig     `json:"login"`
-	Branding    BrandingConfig  `json:"branding"`
+	Ref         LoginFlowRef       `json:"ref"`
+	Login       LoginConfig        `json:"login"`
+	Branding    BrandingConfig     `json:"branding"`
 	Captcha     *CaptchaConfig     `json:"captcha,omitempty"`
 	Fingerprint *FingerprintConfig `json:"fingerprint,omitempty"`
 	RateLimit   *RateLimitConfig   `json:"rate_limit,omitempty"`
@@ -316,7 +316,7 @@ func captchaActiveForStep(cc *CaptchaConfig, step StepType) bool {
 	if cc == nil {
 		return false
 	}
-	stepName := ""
+	var stepName string
 	switch step {
 	case StepIdentifier, StepAuthSelect, StepPassword:
 		stepName = "login"
@@ -341,7 +341,7 @@ func fingerprintActiveForStep(fp *FingerprintConfig, step StepType) bool {
 	if len(fp.On) == 0 {
 		return true // collect on all steps if no filter specified
 	}
-	stepName := ""
+	var stepName string
 	switch step {
 	case StepIdentifier, StepAuthSelect, StepPassword:
 		stepName = "login"
@@ -700,7 +700,7 @@ type Flow struct {
 	ID           string
 	SchemaConfig *SchemaAuthConfig
 	CurrentStep  StepType
-	IduserID   string
+	IduserID     string
 	Identifier   string
 	DisplayName  string
 	Verified     bool

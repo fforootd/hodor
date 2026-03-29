@@ -294,7 +294,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { entityApi, magicLinkApi, schemaApi, metaSchemaApi, type Identity } from '@/api/resources'
+import { userApi, magicLinkApi, schemaApi, metaSchemaApi, type Identity } from '@/api/resources'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -410,8 +410,8 @@ async function save() {
       for (const [k, v] of Object.entries(editForm.profile)) { if (v.trim()) profile[k] = v.trim() }
       payload = { display_name: editForm.display_name.trim(), state: editForm.state, profile }
     }
-    await entityApi.update(identity.value.id, payload as any)
-    identity.value = await entityApi.get(route.params.id as string)
+    await userApi.update(identity.value.id, payload as any)
+    identity.value = await userApi.get(route.params.id as string)
     editing.value = false
     message.value = 'Updated successfully'; messageType.value = 'success'
   } catch (e: any) {
@@ -435,7 +435,7 @@ async function deleteIdentity() {
   if (!identity.value) return
   deleting.value = true
   try {
-    await entityApi.delete(identity.value.id)
+    await userApi.delete(identity.value.id)
     router.push(backRoute.value)
   } catch (e: any) {
     showDeleteConfirm.value = false
@@ -446,7 +446,7 @@ async function deleteIdentity() {
 
 onMounted(async () => {
   try {
-    identity.value = await entityApi.get(route.params.id as string)
+    identity.value = await userApi.get(route.params.id as string)
     const schemaName = (identity.value as any)?.schema_name
     if (schemaName) {
       const allSchemas = await schemaApi.list()

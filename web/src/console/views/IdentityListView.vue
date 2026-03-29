@@ -306,7 +306,7 @@ const columns = computed(() => {
         onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
       }, () => ['Identifier', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
       cell: info => h(RouterLink, {
-        to: `/identities/${info.row.original.id}`,
+        to: `/users/${info.row.original.id}`,
         class: isApp ? 'font-mono text-sm text-primary hover:underline' : 'font-medium hover:underline'
       }, () => info.getValue()),
     }),

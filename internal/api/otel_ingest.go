@@ -140,7 +140,7 @@ func (a *API) ingestOTelTraces(w http.ResponseWriter, r *http.Request) {
 	// ── Protection 3: Flow-scoped validation ──
 	// The X-Flow-ID header must reference an active flow that we issued.
 	// This prevents arbitrary writes — you can only submit traces for flows you started.
-	flowID := r.Header.Get("X-Flow-ID")
+	flowID := r.Header.Get("X-Flow-Id")
 	// Note: flow validation is optional — we log unlinked traces but don't reject.
 	// This allows OTel auto-instrumentation (document load, etc.) to work even
 	// before a flow is created.

@@ -72,7 +72,7 @@
       <Card class="overflow-hidden border-muted">
         <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
           <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Users</CardTitle>
-          <RouterLink to="/identities" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+          <RouterLink to="/users" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
         </CardHeader>
         <CardContent class="p-0">
           <div v-for="(item, i) in topUsers" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">

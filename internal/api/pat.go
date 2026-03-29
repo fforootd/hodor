@@ -15,14 +15,14 @@ import (
 
 type CreatePATRequest struct {
 	UserID string   `json:"user_id"`
-	Name     string   `json:"name"`
-	Scopes   []string `json:"scopes,omitempty"`
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type CreatePATResponse struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	UserID  string   `json:"user_id"`
+	UserID    string   `json:"user_id"`
 	Token     string   `json:"token"` // Only returned on creation — never again.
 	Scopes    []string `json:"scopes"`
 	CreatedAt string   `json:"created_at"`
@@ -31,7 +31,7 @@ type CreatePATResponse struct {
 type PATResponse struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	UserID  string   `json:"user_id"`
+	UserID    string   `json:"user_id"`
 	Scopes    []string `json:"scopes"`
 	LastUsed  *string  `json:"last_used,omitempty"`
 	CreatedAt string   `json:"created_at"`
@@ -95,15 +95,15 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.EmitAuthEvent(r.Context(), "pat.created", req.UserID, map[string]any{
-		"token_id":  tokenID,
-		"name":      req.Name,
-		"user_id": req.UserID,
+		"token_id": tokenID,
+		"name":     req.Name,
+		"user_id":  req.UserID,
 	})
 
 	httputil.WriteJSON(w, http.StatusCreated, CreatePATResponse{
 		ID:        tokenID,
 		Name:      req.Name,
-		UserID:  req.UserID,
+		UserID:    req.UserID,
 		Token:     rawToken,
 		Scopes:    req.Scopes,
 		CreatedAt: now,

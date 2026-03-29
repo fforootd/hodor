@@ -18,7 +18,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 	// Create minimal schema.
 	_, err = db.Exec(`
-		CREATE TABLE entities (
+		CREATE TABLE users (
 			id           TEXT PRIMARY KEY,
 			org_id       TEXT NOT NULL DEFAULT '0',
 			identifier   TEXT NOT NULL DEFAULT '',
@@ -29,13 +29,13 @@ func setupTestDB(t *testing.T) *sql.DB {
 			created_at   TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 		);
-		CREATE UNIQUE INDEX idx_entities_identifier ON entities(org_id, identifier);
+		CREATE UNIQUE INDEX idx_users_identifier ON users(org_id, identifier);
 
 		CREATE TABLE unique_fields (
 			scope_id         TEXT NOT NULL DEFAULT '',
 			field_name       TEXT NOT NULL,
 			normalized_value TEXT NOT NULL,
-			user_id        TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+			user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			UNIQUE(scope_id, field_name, normalized_value)
 		);
 		CREATE INDEX idx_unique_fields_entity ON unique_fields(user_id);

@@ -56,7 +56,7 @@ func (s *Service) FetchTemplate(ctx context.Context, tpl *Template) (*TemplatePa
 	// Try DB cache first.
 	var cached string
 	err := s.db.QueryRow(
-		`SELECT data FROM catalog_cache WHERE key = ?`, "template:"+tpl.ID,
+		`SELECT data FROM cache WHERE namespace = 'catalog' AND key = ?`, "template:"+tpl.ID,
 	).Scan(&cached)
 	if err == nil {
 		var payload TemplatePayload
@@ -73,7 +73,7 @@ func (s *Service) FetchTemplate(ctx context.Context, tpl *Template) (*TemplatePa
 
 	// Cache in DB.
 	s.db.Exec(
-		`INSERT OR REPLACE INTO catalog_cache (key, data, fetched_at) VALUES (?, ?, datetime('now'))`,
+		`INSERT OR REPLACE INTO cache (namespace, key, data, fetched_at) VALUES ('catalog', (?, ?, datetime('now'))`,
 		"template:"+tpl.ID, string(data),
 	)
 

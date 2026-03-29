@@ -16,20 +16,20 @@ import (
 // --- Session types ---
 
 type SessionResponse struct {
-	ID         string  `json:"id"`
-	IduserID string  `json:"user_id"`
-	OrgID      string  `json:"org_id"`
-	UserAgent  string  `json:"user_agent,omitempty"`
-	IPAddress  string  `json:"ip_address,omitempty"`
-	CreatedAt  string  `json:"created_at"`
-	ExpiresAt  string  `json:"expires_at"`
-	RevokedAt  *string `json:"revoked_at,omitempty"`
+	ID        string  `json:"id"`
+	IduserID  string  `json:"user_id"`
+	OrgID     string  `json:"org_id"`
+	UserAgent string  `json:"user_agent,omitempty"`
+	IPAddress string  `json:"ip_address,omitempty"`
+	CreatedAt string  `json:"created_at"`
+	ExpiresAt string  `json:"expires_at"`
+	RevokedAt *string `json:"revoked_at,omitempty"`
 }
 
 type CreateSessionRequest struct {
-	IduserID string `json:"user_id"`
-	UserAgent  string `json:"user_agent,omitempty"`
-	IPAddress  string `json:"ip_address,omitempty"`
+	IduserID  string `json:"user_id"`
+	UserAgent string `json:"user_agent,omitempty"`
+	IPAddress string `json:"ip_address,omitempty"`
 }
 
 type CreateSessionResponse struct {
@@ -210,7 +210,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	}
 
 	emitEvent(ctx, tx, "session.created", userID, sessionID, "session", map[string]any{
-		"user_id":  userID,
+		"user_id":    userID,
 		"user_agent": userAgent,
 		"ip_address": ipAddress,
 	})
@@ -223,13 +223,13 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 
 	return &CreateSessionResponse{
 		Session: SessionResponse{
-			ID:         sessionID,
-			IduserID: userID,
-			OrgID:      "org_default",
-			UserAgent:  userAgent,
-			IPAddress:  ipAddress,
-			CreatedAt:  now.Format(time.RFC3339),
-			ExpiresAt:  expiresAt.Format(time.RFC3339),
+			ID:        sessionID,
+			IduserID:  userID,
+			OrgID:     "org_default",
+			UserAgent: userAgent,
+			IPAddress: ipAddress,
+			CreatedAt: now.Format(time.RFC3339),
+			ExpiresAt: expiresAt.Format(time.RFC3339),
 		},
 		Token: rawToken,
 	}, nil
@@ -330,7 +330,7 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 
 	emitEvent(ctx, tx, "session.revoked", revokedIduserID, sessionID, "session", map[string]any{
 		"user_id": revokedIduserID,
-		"reason":    "api_revoke",
+		"reason":  "api_revoke",
 	})
 
 	if err := tx.Commit(); err != nil {

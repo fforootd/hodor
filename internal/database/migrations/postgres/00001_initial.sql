@@ -1,5 +1,6 @@
 -- +goose Up
--- Zitadel baseline schema — PostgreSQL (ADR-022: dedicated resource tables)
+-- Zitadel baseline schema — PostgreSQL (ADR-022: dedicated resource tables, consolidated)
+-- 22 tables total. See docs/adr/022-dedicated-resource-tables.md
 
 -- ============================================================================
 -- INSTANCES
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS orgs (
 CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
 
 -- ============================================================================
--- SCHEMAS
+-- SCHEMAS — registry for validation, UI generation, engine bindings
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS schemas (
     id         TEXT PRIMARY KEY,
@@ -48,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_defaul
 CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
 
 -- ============================================================================
--- USERS
+-- USERS — all identity types (human, service, machine)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
@@ -68,19 +69,19 @@ CREATE INDEX IF NOT EXISTS idx_users_type ON users(user_type);
 CREATE INDEX IF NOT EXISTS idx_users_state ON users(state);
 
 -- ============================================================================
--- USER CREDENTIALS
+-- CREDENTIALS — typed credentials (password, passkey, otp, jwt_profile, etc.)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS user_credentials (
-    id              TEXT PRIMARY KEY,
-    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    credential_type TEXT NOT NULL,
-    credential_data JSONB DEFAULT '{}',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS credentials (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,         -- 'password', 'passkey', 'otp', 'jwt_profile'
+    data       JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_creds_user ON user_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_creds_user ON credentials(user_id);
 
 -- ============================================================================
--- PROVIDERS
+-- PROVIDERS — SSO / IdP configurations
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS providers (
     id              TEXT PRIMARY KEY,
@@ -102,7 +103,7 @@ CREATE TABLE IF NOT EXISTS providers (
 CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 
 -- ============================================================================
--- APPS
+-- APPS — OIDC/API client applications
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS apps (
     id             TEXT PRIMARY KEY,
@@ -123,7 +124,7 @@ CREATE TABLE IF NOT EXISTS apps (
 CREATE INDEX IF NOT EXISTS idx_apps_org ON apps(org_id);
 
 -- ============================================================================
--- ACTIONS
+-- ACTIONS — event-driven hooks and automations
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS actions (
     id          TEXT PRIMARY KEY,
@@ -144,7 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_actions_org ON actions(org_id);
 CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
 
 -- ============================================================================
--- LOGIN FLOWS
+-- LOGIN FLOWS — login flow configurations
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS login_flows (
     id         TEXT PRIMARY KEY,
@@ -162,9 +163,9 @@ CREATE TABLE IF NOT EXISTS login_flows (
 CREATE INDEX IF NOT EXISTS idx_lf_org ON login_flows(org_id);
 
 -- ============================================================================
--- LINKED ACCOUNTS
+-- LINKED IDENTITIES — external IdP account links
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS linked_accounts (
+CREATE TABLE IF NOT EXISTS linked_identities (
     id             TEXT PRIMARY KEY,
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider_id    TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
@@ -175,38 +176,45 @@ CREATE TABLE IF NOT EXISTS linked_accounts (
     last_used_at   TIMESTAMPTZ,
     UNIQUE(provider_id, external_sub)
 );
-CREATE INDEX IF NOT EXISTS idx_linked_user ON linked_accounts(user_id);
-CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_accounts(provider_id, external_sub);
+CREATE INDEX IF NOT EXISTS idx_linked_user ON linked_identities(user_id);
+CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_identities(provider_id, external_sub);
 
 -- ============================================================================
 -- SESSIONS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sessions (
-    id         TEXT PRIMARY KEY,
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    org_id     TEXT NOT NULL DEFAULT '0',
-    token_hash TEXT NOT NULL,
-    user_agent TEXT,
-    ip_address TEXT,
-    metadata   JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    revoked_at TIMESTAMPTZ
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    org_id         TEXT NOT NULL DEFAULT '1',
+    token_hash     TEXT NOT NULL DEFAULT '',
+    user_agent     TEXT DEFAULT '',
+    ip_address     TEXT DEFAULT '',
+    metadata       JSONB DEFAULT '{}',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at     TIMESTAMPTZ,
+    revoked_at     TIMESTAMPTZ,
+    fingerprint    TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 
 -- ============================================================================
--- TOKENS
+-- TOKENS — all token types: PAT, session, magic_link, oidc_access, oidc_refresh
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS tokens (
     id         TEXT PRIMARY KEY,
-    type       TEXT NOT NULL,
-    token_hash TEXT NOT NULL UNIQUE,
+    type       TEXT NOT NULL,       -- 'pat', 'session', 'magic_link', 'oidc_access', 'oidc_refresh'
+    token_hash TEXT NOT NULL,
     user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
     session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
-    name       TEXT,
-    scopes     JSONB NOT NULL DEFAULT '[]',
+    client_id  TEXT DEFAULT '',
+    name       TEXT DEFAULT '',
+    scopes     JSONB DEFAULT '[]',
+    audience   TEXT DEFAULT '',
+    subject    TEXT DEFAULT '',
+    amr        TEXT DEFAULT '',
+    auth_time  TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
     last_used  TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -215,9 +223,51 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_tokens_user ON tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_type ON tokens(type);
 
 -- ============================================================================
--- EVENTS
+-- AUTH STATES — transient authentication flow state (SSO, OIDC, magic links)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS auth_states (
+    id                    TEXT PRIMARY KEY,
+    type                  TEXT NOT NULL,     -- 'sso', 'oidc_auth', 'magic_link', 'registration'
+    state                 TEXT DEFAULT '',
+    user_id               TEXT DEFAULT '',
+    client_id             TEXT DEFAULT '',
+    redirect_uri          TEXT DEFAULT '',
+    scopes                TEXT DEFAULT '',
+    nonce                 TEXT DEFAULT '',
+    response_type         TEXT DEFAULT 'code',
+    code_challenge        TEXT DEFAULT '',
+    code_challenge_method TEXT DEFAULT '',
+    pkce_verifier         TEXT DEFAULT '',
+    provider_id           TEXT DEFAULT '',
+    code                  TEXT DEFAULT '',
+    step                  TEXT DEFAULT '',
+    done                  BOOLEAN DEFAULT FALSE,
+    auth_time             TIMESTAMPTZ,
+    expires_at            TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_states_type ON auth_states(type);
+CREATE INDEX IF NOT EXISTS idx_auth_states_code ON auth_states(code) WHERE code != '';
+CREATE INDEX IF NOT EXISTS idx_auth_states_state ON auth_states(state) WHERE state != '';
+
+-- ============================================================================
+-- KEYS — cryptographic keys (OIDC signing, etc.)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS keys (
+    id          TEXT PRIMARY KEY,
+    type        TEXT NOT NULL DEFAULT 'oidc_signing',
+    algorithm   TEXT NOT NULL DEFAULT 'RS256',
+    private_key BYTEA NOT NULL,
+    expires_at  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_keys_type ON keys(type);
+
+-- ============================================================================
+-- EVENTS — audit log / event stream
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
     id             TEXT PRIMARY KEY,
@@ -228,13 +278,16 @@ CREATE TABLE IF NOT EXISTS events (
     actor_type     TEXT,
     aggregate_id   TEXT,
     aggregate_type TEXT,
+    resource_type  TEXT,
     payload        JSONB DEFAULT '{}',
     metadata       JSONB DEFAULT '{}',
     trace_id       TEXT DEFAULT '',
     span_id        TEXT DEFAULT '',
     parent_span_id TEXT DEFAULT '',
     session_id     TEXT DEFAULT '',
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    sequence       BIGINT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    shipped_at     TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
@@ -243,7 +296,7 @@ CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_type, aggreg
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 
 -- ============================================================================
--- DOMAINS
+-- DOMAINS — verified domain ownership
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS domains (
     domain      TEXT PRIMARY KEY,
@@ -257,18 +310,49 @@ CREATE INDEX IF NOT EXISTS idx_domains_org ON domains(org_id);
 CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 
 -- ============================================================================
--- MAGIC TOKENS
+-- UNIQUE FIELDS — cross-type uniqueness enforcement (ADR-016)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS magic_tokens (
-    token      TEXT PRIMARY KEY,
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    used_at    TIMESTAMPTZ,
-    session_id TEXT
+CREATE TABLE IF NOT EXISTS unique_fields (
+    scope_id         TEXT NOT NULL DEFAULT '',
+    field_name       TEXT NOT NULL,
+    normalized_value TEXT NOT NULL,
+    resource_type    TEXT NOT NULL DEFAULT '',
+    user_id          TEXT NOT NULL,
+    UNIQUE(scope_id, field_name, normalized_value)
 );
+CREATE INDEX IF NOT EXISTS idx_unique_fields_resource ON unique_fields(user_id);
+CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
 
 -- ============================================================================
--- CONSUMER CURSORS
+-- SETTINGS — instance/org/user-scoped configuration
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS settings (
+    id         TEXT PRIMARY KEY,
+    type       TEXT NOT NULL,
+    scope      TEXT NOT NULL DEFAULT 'instance',
+    scope_id   TEXT NOT NULL DEFAULT '',
+    data       JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(type, scope, scope_id)
+);
+CREATE INDEX IF NOT EXISTS idx_settings_type ON settings(type, scope);
+
+-- ============================================================================
+-- CACHE — generic key/value cache with namespace (replaces catalog_cache)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS cache (
+    namespace  TEXT NOT NULL DEFAULT 'default',
+    key        TEXT NOT NULL,
+    data       JSONB NOT NULL,
+    expires_at TIMESTAMPTZ,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (namespace, key)
+);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires_at) WHERE expires_at IS NOT NULL;
+
+-- ============================================================================
+-- CONSUMER CURSORS — event consumer offsets
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS consumer_cursors (
     consumer_name TEXT PRIMARY KEY,
@@ -277,7 +361,7 @@ CREATE TABLE IF NOT EXISTS consumer_cursors (
 );
 
 -- ============================================================================
--- JOBS
+-- JOBS — scheduled task registry
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS jobs (
     name         TEXT PRIMARY KEY,
@@ -295,7 +379,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 -- ============================================================================
--- RETENTION POLICIES
+-- RETENTION POLICIES — event lifecycle management
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS retention_policies (
     id            TEXT PRIMARY KEY,
@@ -304,136 +388,6 @@ CREATE TABLE IF NOT EXISTS retention_policies (
     lake_ttl      TEXT NOT NULL,
     priority      INTEGER DEFAULT 0,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- SETTINGS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS settings (
-    id         TEXT PRIMARY KEY,
-    type       TEXT NOT NULL,
-    scope      TEXT NOT NULL DEFAULT 'instance',
-    scope_id   TEXT NOT NULL DEFAULT '',
-    data       JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(type, scope, scope_id)
-);
-CREATE INDEX IF NOT EXISTS idx_settings_type ON settings(type, scope);
-
--- ============================================================================
--- CATALOG CACHE
--- ============================================================================
-CREATE TABLE IF NOT EXISTS catalog_cache (
-    key        TEXT PRIMARY KEY,
-    data       JSONB NOT NULL,
-    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- UNIQUE FIELDS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS unique_fields (
-    scope_id         TEXT NOT NULL DEFAULT '',
-    field_name       TEXT NOT NULL,
-    normalized_value TEXT NOT NULL,
-    resource_type    TEXT NOT NULL DEFAULT '',
-    resource_id      TEXT NOT NULL,
-    UNIQUE(scope_id, field_name, normalized_value)
-);
-CREATE INDEX IF NOT EXISTS idx_unique_fields_resource ON unique_fields(resource_id);
-CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
-
--- ============================================================================
--- RESOURCE INDEXES
--- ============================================================================
-CREATE TABLE IF NOT EXISTS resource_indexes (
-    resource_type TEXT NOT NULL,
-    resource_id   TEXT NOT NULL,
-    field         TEXT NOT NULL,
-    value         TEXT NOT NULL,
-    PRIMARY KEY (resource_type, resource_id, field)
-);
-CREATE INDEX IF NOT EXISTS idx_ri_lookup ON resource_indexes(resource_type, field, value);
-
--- ============================================================================
--- SSO STATES
--- ============================================================================
-CREATE TABLE IF NOT EXISTS sso_states (
-    state         TEXT PRIMARY KEY,
-    provider_id   TEXT NOT NULL,
-    pkce_verifier TEXT NOT NULL,
-    nonce         TEXT NOT NULL,
-    redirect_uri  TEXT DEFAULT '',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- OIDC AUTH REQUESTS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS oidc_auth_requests (
-    id                    TEXT PRIMARY KEY,
-    client_id             TEXT NOT NULL,
-    redirect_uri          TEXT NOT NULL,
-    scopes                TEXT NOT NULL DEFAULT '',
-    state                 TEXT DEFAULT '',
-    nonce                 TEXT DEFAULT '',
-    response_type         TEXT DEFAULT 'code',
-    code_challenge        TEXT DEFAULT '',
-    code_challenge_method TEXT DEFAULT '',
-    user_id               TEXT DEFAULT '',
-    auth_time             TIMESTAMPTZ,
-    done                  BOOLEAN DEFAULT FALSE,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- OIDC CODES
--- ============================================================================
-CREATE TABLE IF NOT EXISTS oidc_codes (
-    code       TEXT PRIMARY KEY,
-    request_id TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- OIDC TOKENS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS oidc_tokens (
-    id               TEXT PRIMARY KEY,
-    application_id   TEXT NOT NULL,
-    subject          TEXT NOT NULL,
-    audience         TEXT NOT NULL DEFAULT '',
-    scopes           TEXT NOT NULL DEFAULT '',
-    refresh_token_id TEXT DEFAULT '',
-    expiration       TIMESTAMPTZ NOT NULL,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- OIDC REFRESH TOKENS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS oidc_refresh_tokens (
-    id             TEXT PRIMARY KEY,
-    token          TEXT NOT NULL UNIQUE,
-    application_id TEXT NOT NULL,
-    user_id        TEXT NOT NULL,
-    audience       TEXT NOT NULL DEFAULT '',
-    scopes         TEXT NOT NULL DEFAULT '',
-    auth_time      TIMESTAMPTZ NOT NULL,
-    amr            TEXT DEFAULT '',
-    access_token   TEXT NOT NULL,
-    expiration     TIMESTAMPTZ NOT NULL
-);
-
--- ============================================================================
--- OIDC SIGNING KEYS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS oidc_signing_keys (
-    id          TEXT PRIMARY KEY,
-    algorithm   TEXT NOT NULL DEFAULT 'RS256',
-    private_key BYTEA NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================================
@@ -465,31 +419,25 @@ VALUES ('org_default', 'inst_default', 'default', NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- +goose Down
-DROP TABLE IF EXISTS oidc_signing_keys;
-DROP TABLE IF EXISTS oidc_refresh_tokens;
-DROP TABLE IF EXISTS oidc_tokens;
-DROP TABLE IF EXISTS oidc_codes;
-DROP TABLE IF EXISTS oidc_auth_requests;
-DROP TABLE IF EXISTS sso_states;
-DROP TABLE IF EXISTS resource_indexes;
-DROP TABLE IF EXISTS unique_fields;
-DROP TABLE IF EXISTS catalog_cache;
+DROP TABLE IF EXISTS retention_policies;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS consumer_cursors;
+DROP TABLE IF EXISTS cache;
 DROP TABLE IF EXISTS settings;
-DROP TABLE IF EXISTS linked_accounts;
-DROP TABLE IF EXISTS magic_tokens;
+DROP TABLE IF EXISTS unique_fields;
+DROP TABLE IF EXISTS domains;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS keys;
+DROP TABLE IF EXISTS auth_states;
 DROP TABLE IF EXISTS tokens;
 DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS linked_identities;
 DROP TABLE IF EXISTS login_flows;
 DROP TABLE IF EXISTS actions;
 DROP TABLE IF EXISTS apps;
 DROP TABLE IF EXISTS providers;
-DROP TABLE IF EXISTS user_credentials;
+DROP TABLE IF EXISTS credentials;
 DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS domains;
-DROP TABLE IF EXISTS events;
-DROP TABLE IF EXISTS retention_policies;
-DROP TABLE IF EXISTS jobs;
-DROP TABLE IF EXISTS consumer_cursors;
 DROP TABLE IF EXISTS schemas;
 DROP TABLE IF EXISTS orgs;
 DROP TABLE IF EXISTS instances;

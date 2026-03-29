@@ -50,19 +50,6 @@ func (a *API) registerOpenAPIOperations() {
 		StatusCode: 204, Security: true,
 	})
 
-	// ─── Service Accounts ─────────────────────────────────────
-	a.spec.Add(OpenAPIOperation{
-		Method: "GET", Path: "/v1/service-accounts", ID: "listServiceAccounts",
-		Summary: "List service accounts", Tags: []string{"Service Accounts"},
-		Response: ListResponse{}, QueryParams: listParams, Security: true,
-	})
-	a.spec.Add(OpenAPIOperation{
-		Method: "POST", Path: "/v1/service-accounts", ID: "createServiceAccount",
-		Summary: "Create a service account", Tags: []string{"Service Accounts"},
-		Request: UserRequest{}, Response: UserResponse{},
-		StatusCode: 201, Security: true,
-	})
-
 	// ─── Schemas ───────────────────────────────────────────────
 	a.spec.Add(OpenAPIOperation{
 		Method: "GET", Path: "/v1/schemas", ID: "listSchemas",

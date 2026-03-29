@@ -4,7 +4,7 @@
 # WARNING: These credentials are for LOCAL DEVELOPMENT ONLY.
 # Never commit production tokens to version control.
 
-entities:
+users:
   - identifier: admin
     display_name: Admin
     type: human_user_v1

@@ -70,7 +70,7 @@ func (p *Passwords) SetPassword(ctx context.Context, userID string, plain string
 
 	// Delete existing password credential if any.
 	_, err = tx.ExecContext(ctx,
-		`DELETE FROM user_credentials WHERE user_id = ? AND credential_type = 'password'`,
+		`DELETE FROM credentials WHERE user_id = ? AND type = 'password'`,
 		userID,
 	)
 	if err != nil {
@@ -79,10 +79,10 @@ func (p *Passwords) SetPassword(ctx context.Context, userID string, plain string
 
 	credID := id.New()
 
-	// Store the encoded hash as credential_data JSON.
+	// Store the encoded hash as data JSON.
 	credJSON := EncodeCredentialJSON(encoded)
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO user_credentials (id, user_id, credential_type, credential_data)
+		`INSERT INTO credentials (id, user_id, type, data)
 		 VALUES (?, ?, 'password', ?)`,
 		credID, userID, credJSON,
 	)
@@ -101,8 +101,8 @@ func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain stri
 	var credJSON string
 	var credID string
 	err := p.db.SQL().QueryRowContext(ctx,
-		`SELECT id, credential_data FROM user_credentials
-		 WHERE user_id = ? AND credential_type = 'password'`,
+		`SELECT id, data FROM credentials
+		 WHERE user_id = ? AND type = 'password'`,
 		userID,
 	).Scan(&credID, &credJSON)
 	if err == sql.ErrNoRows {
@@ -112,7 +112,7 @@ func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain stri
 		return false, fmt.Errorf("load password: %w", err)
 	}
 
-	// Extract hash from credential_data JSON.
+	// Extract hash from data JSON.
 	encoded := DecodeCredentialJSON(credJSON)
 	if encoded == "" {
 		return false, fmt.Errorf("invalid password credential data")
@@ -130,7 +130,7 @@ func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain stri
 	if updated != "" {
 		updatedJSON := EncodeCredentialJSON(updated)
 		_, _ = p.db.SQL().ExecContext(ctx,
-			`UPDATE user_credentials SET credential_data = ? WHERE id = ?`,
+			`UPDATE credentials SET data = ? WHERE id = ?`,
 			updatedJSON, credID,
 		)
 	}
@@ -138,13 +138,13 @@ func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain stri
 	return true, nil
 }
 
-// EncodeCredentialJSON wraps a hash string into the canonical credential_data
+// EncodeCredentialJSON wraps a hash string into the canonical data
 // JSON format: {"hash":"<hash>"}.
 func EncodeCredentialJSON(hash string) string {
 	return fmt.Sprintf(`{"hash":"%s"}`, hash)
 }
 
-// DecodeCredentialJSON extracts the hash value from credential_data JSON.
+// DecodeCredentialJSON extracts the hash value from data JSON.
 // Expected format: {"hash":"$argon2id$..."}.
 func DecodeCredentialJSON(credJSON string) string {
 	const prefix = `{"hash":"`

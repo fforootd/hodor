@@ -227,12 +227,12 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 	case "action":
 		hook, _ := resolved["hook"].(string)
 		actionType, _ := resolved["action_type"].(string)
-		trigger, _ := resolved["trigger"].(string)
+		triggerExpr, _ := resolved["trigger"].(string)
 		configJSON, _ := json.Marshal(resolved["config"])
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO actions (id, org_id, name, hook, action_type, trigger, config, schema_id, metadata, created_at, updated_at)
+			`INSERT INTO actions (id, org_id, name, hook, action_type, trigger_expr, config, schema_id, metadata, created_at, updated_at)
 			 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, displayName, hook, actionType, trigger,
+			resourceID, displayName, hook, actionType, triggerExpr,
 			string(configJSON), schemaID, string(dataJSON),
 		)
 	case "login_flow":
@@ -306,7 +306,7 @@ func (s *Service) loadTemplatePayload(tpl *Template) (*TemplatePayload, error) {
 		// Try DB cache first.
 		var cached string
 		err = s.db.QueryRow(
-			`SELECT data FROM catalog_cache WHERE key = ?`, "template:"+tpl.ID,
+			`SELECT data FROM cache WHERE namespace = 'catalog' AND key = ?`, "template:"+tpl.ID,
 		).Scan(&cached)
 		if err == nil {
 			data = []byte(cached)
@@ -335,7 +335,7 @@ func (s *Service) loadTemplatePayload(tpl *Template) (*TemplatePayload, error) {
 func (s *Service) loadFromDBCache() *Index {
 	var data string
 	err := s.db.QueryRow(
-		`SELECT data FROM catalog_cache WHERE key = 'remote_index'`,
+		`SELECT data FROM cache WHERE namespace = 'catalog' AND key = 'remote_index'`,
 	).Scan(&data)
 	if err != nil {
 		return nil
@@ -360,7 +360,7 @@ func (s *Service) CacheToDB(idx *Index) {
 		return
 	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO catalog_cache (key, data, fetched_at) VALUES ('remote_index', ?, datetime('now'))`,
+		`INSERT OR REPLACE INTO cache (namespace, key, data, fetched_at) VALUES ('catalog', 'remote_index', ?, datetime('now'))`,
 		string(data),
 	)
 	if err != nil {

@@ -112,7 +112,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, h, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { type Identity, metaSchemaApi } from '@/api/resources'
+import { type Identity } from '@/api/resources'
 import { api } from '@/api/client'
 import CreateUserWizard from '@/console/components/CreateUserWizard.vue'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
@@ -201,54 +201,39 @@ function getSortIcon(column: any) {
   return ArrowUpDown
 }
 
-// Data loading
-const identityTypes = ['human_user', 'service_user', 'ai_agent']
+// Map user_type DB values to schema type keys used for tabs
+const userTypeMap: Record<string, string> = {
+  human: 'human_user',
+  service: 'service_user',
+  ai: 'ai_agent',
+}
 
-async function loadIdentities() {
+async function loadUsers() {
   loading.value = true
-  // Resolve paths from meta schema
-  let typePathMap: Record<string, string> = {}
-  try {
-    const meta = await metaSchemaApi.get() as any
-    const catalog = meta['x-catalog'] || {}
-    for (const typeName of identityTypes) {
-      const entry = catalog[typeName]
-      if (entry?.path) {
-        typePathMap[typeName] = entry.path
-      }
-    }
-  } catch { /* fallback to defaults */ }
-
-  // Parallel fetch all identity types
   const orgId = localStorage.getItem('zitadel_org')
   const qs = orgId ? `?org_id=${orgId}` : ''
 
-  const results = await Promise.allSettled(
-    identityTypes.map(async (typeName) => {
-      const path = typePathMap[typeName] || typeName
-      const data = await api.get<any>(`/v1/${path}${qs}`)
-      return (data.items || []).map((item: any) => ({ ...item, _schemaType: typeName }))
-    })
-  )
-
-  const merged: IdentityWithType[] = []
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      merged.push(...result.value)
-    }
+  try {
+    const data = await api.get<any>(`/v1/users${qs}`)
+    allIdentities.value = (data.items || []).map((item: any) => ({
+      ...item,
+      _schemaType: userTypeMap[item.user_type] || item.user_type || 'human_user',
+    }))
+  } catch (e) {
+    console.error('Failed to load users:', e)
+    allIdentities.value = []
   }
 
-  allIdentities.value = merged
   loading.value = false
 }
 
 onMounted(async () => {
-  await loadIdentities()
+  await loadUsers()
 })
 
 const onUserCreated = async (id: string) => {
   // optionally navigate or just refresh
-  await loadIdentities()
+  await loadUsers()
 }
 
 // Watch tab changes to reset search
@@ -298,7 +283,7 @@ const columns = computed(() => [
       onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
     }, () => ['Identifier', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
     cell: info => h(RouterLink, {
-      to: `/identities/${info.row.original.id}`,
+      to: `/users/${info.row.original.id}`,
       class: 'font-medium hover:underline'
     }, () => info.getValue()),
   }),

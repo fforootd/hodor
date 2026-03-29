@@ -105,8 +105,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // registerEntityRoutes reads the x-catalog from the meta schema and registers
-// /v1/{path} routes for each entity type. Each route injects schema_type
-// automatically, so consumers don't need to pass it.
+// /v1/{path} routes for each entity type.
 func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	catalog, err := schema.Catalog()
 	if err != nil {
@@ -114,43 +113,40 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 		return
 	}
 
-	for typeName, entry := range catalog {
-		if entry.Storage != "users" || entry.Path == "" {
-			continue // Skip system views (sessions, events, jobs).
-		}
+	// Unified /v1/users — all user types (human_user, service_user, ai_agent)
+	// in one endpoint. IDs are globally unique across all user types.
+	mux.HandleFunc("GET /v1/users", a.listUsers)
+	mux.HandleFunc("POST /v1/users", a.createUser)
+	mux.HandleFunc("GET /v1/users/{id}", a.getUser)
+	mux.HandleFunc("PATCH /v1/users/{id}", a.updateUser)
+	mux.HandleFunc("DELETE /v1/users/{id}", a.deleteUser)
+	mux.HandleFunc("POST /v1/users/{id}/password", a.setEntityPassword)
+	logging.Printf("[api] registered /v1/users (all user types)")
 
-		st := typeName
+	// Generic CRUD routes for other dedicated resource tables.
+	resourceTables := map[string]string{
+		"action":     "actions",
+		"org":        "orgs",
+		"app":        "apps",
+		"login_flow": "login_flows",
+	}
+
+	for typeName, tableName := range resourceTables {
+		entry, ok := catalog[typeName]
+		if !ok || entry.Path == "" {
+			continue
+		}
 		prefix := "/v1/" + entry.Path
+		tbl := tableName
 
-		// Collection routes — inject schema_type for list/create.
-		mux.HandleFunc("GET "+prefix, a.typeHandler(st, a.listIdentities))
-		mux.HandleFunc("POST "+prefix, a.typeHandler(st, a.createIdentity))
+		mux.HandleFunc("GET "+prefix, a.listResource(tbl))
+		mux.HandleFunc("GET "+prefix+"/{id}", a.getResource(tbl))
 
-		// Resource routes — {id} routes are type-agnostic (fetch by ID).
-		// GET/PATCH/DELETE work the same regardless of type since IDs are globally unique.
-		mux.HandleFunc("GET "+prefix+"/{id}", a.getIdentity)
-		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
-		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
-		mux.HandleFunc("POST "+prefix+"/{id}/password", a.typeHandler(st, a.setEntityPassword))
-
-		logging.Printf("[api] registered /v1/%s (type=%s)", entry.Path, st)
+		logging.Printf("[api] registered /v1/%s (table=%s)", entry.Path, tbl)
 	}
 }
 
-// typeHandler wraps a handler to inject schema_type into query params.
-// This ensures list/create operations are scoped to the correct entity type.
-func (a *API) typeHandler(schemaType string, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if q.Get("schema_type") == "" {
-			q.Set("schema_type", schemaType)
-			r.URL.RawQuery = q.Encode()
-		}
-		next(w, r)
-	}
-}
-
-// --- Identity types ---
+// --- User types ---
 
 type UserRequest struct {
 	SchemaID     string   `json:"schema_id,omitempty"`
@@ -167,6 +163,7 @@ type UserResponse struct {
 	OrgID        string   `json:"org_id"`
 	Identifier   string   `json:"identifier"`
 	DisplayName  string   `json:"display_name,omitempty"`
+	UserType     string   `json:"user_type"`
 	State        string   `json:"state"`
 	Profile      any      `json:"profile,omitempty"`
 	Metadata     any      `json:"metadata,omitempty"`
@@ -190,7 +187,7 @@ type ErrorResponse struct {
 
 // --- Identity handlers ---
 
-func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
+func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	var req UserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
@@ -204,15 +201,6 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	userID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	profileJSON := "{}"
-	if req.Profile != nil {
-		b, err := json.Marshal(req.Profile)
-		if err != nil {
-			httputil.WriteError(w, http.StatusBadRequest, "invalid profile field")
-			return
-		}
-		profileJSON = string(b)
-	}
 
 	// TODO: validate data against schema if req.SchemaID is set
 
@@ -229,11 +217,27 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 			metadataJSON = string(b)
 		}
 	}
+	// If profile data was provided, merge it into metadata.
+	if req.Profile != nil && metadataJSON == "{}" {
+		if b, err := json.Marshal(req.Profile); err == nil {
+			metadataJSON = string(b)
+		}
+	}
+
+	userType := "human"
+	if req.SchemaID != "" {
+		// Derive type from schema if available.
+		var schemaType string
+		a.db.SQL().QueryRow(`SELECT type FROM schemas WHERE id = ?`, req.SchemaID).Scan(&schemaType)
+		if schemaType == "service_user" || schemaType == "ai_agent" {
+			userType = schemaType
+		}
+	}
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'active', ?, ?, ?, ?, ?)`,
-		userID, req.Identifier, req.DisplayName, req.SchemaID, profileJSON, metadataJSON, now, now,
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+		userID, req.Identifier, req.DisplayName, userType, req.SchemaID, metadataJSON, now, now,
 	)
 	if err != nil {
 		// Do not swallow the actual SQL error message!
@@ -265,19 +269,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert capabilities.
-	for _, cap := range req.Capabilities {
-		_, err = tx.ExecContext(r.Context(),
-			`INSERT INTO user_capabilities (user_id, capability) VALUES (?, ?)`,
-			userID, cap)
-		if err != nil {
-			httputil.WriteError(w, http.StatusInternalServerError, "failed to add capability")
-			return
-		}
-	}
-
-	// Promote indexed fields.
-	promoteIndexes(r.Context(), tx, "identity", userID, profileJSON)
+	// Capabilities handled by FGA — no-op for user_capabilities table.
 
 	// Emit event.
 	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
@@ -320,23 +312,23 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusCreated, resp)
 }
 
-func (a *API) getIdentity(w http.ResponseWriter, r *http.Request) {
+func (a *API) getUser(w http.ResponseWriter, r *http.Request) {
 	userID, err := parseID(r, "id")
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	resp, err := a.loadIdentity(r, userID)
+	resp, err := a.loadUser(r, userID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusNotFound, "identity not found")
+		httputil.WriteError(w, http.StatusNotFound, "user not found")
 		return
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
+func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
@@ -359,7 +351,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	// Build query dynamically based on filters.
 	var where []string
 	var args []any
-	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.state, i.profile, i.metadata, i.data, i.created_at, i.updated_at
+	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.user_type, i.state, i.metadata, i.created_at, i.updated_at
 		 FROM users i`
 	if schemaType != "" {
 		baseSelect += ` JOIN schemas s ON i.schema_id = s.id`
@@ -382,30 +374,29 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var identities []UserResponse
+	var users []UserResponse
 	for rows.Next() {
-		ident, err := scanIdentityRow(rows)
+		user, err := scanUserRow(rows)
 		if err != nil {
 			continue
 		}
-		// Load capabilities.
-		ident.Capabilities = a.loadCapabilities(r, ident.ID)
-		identities = append(identities, ident)
+		user.Capabilities = a.loadCapabilities(r, user.ID)
+		users = append(users, user)
 	}
 
 	var nextCursor string
-	if len(identities) > limit {
-		identities = identities[:limit]
-		nextCursor = identities[len(identities)-1].ID
+	if len(users) > limit {
+		users = users[:limit]
+		nextCursor = users[len(users)-1].ID
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{
-		Items:      identities,
+		Items:      users,
 		NextCursor: nextCursor,
 	})
 }
 
-func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
+func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 	userID, err := parseID(r, "id")
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
@@ -434,13 +425,7 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "state = ?")
 		args = append(args, req.State)
 	}
-	if req.Profile != nil {
-		profileJSON, _ := json.Marshal(req.Profile)
-		setClauses = append(setClauses, "profile = ?")
-		args = append(args, string(profileJSON))
-		// Re-promote indexes.
-		promoteIndexes(r.Context(), tx, "identity", userID, string(profileJSON))
-	}
+	// Profile updates are handled via the JSON merge below.
 	if req.DisplayName != "" {
 		setClauses = append(setClauses, "display_name = ?")
 		args = append(args, req.DisplayName)
@@ -470,11 +455,11 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 
 	a.bus.Signal()
 
-	resp, _ := a.loadIdentity(r, userID)
+	resp, _ := a.loadUser(r, userID)
 	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
+func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
 	userID, err := parseID(r, "id")
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
@@ -487,9 +472,6 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-
-	// Clean up promoted indexes.
-	_, _ = tx.ExecContext(r.Context(), `DELETE FROM resource_indexes WHERE entity_type = 'identity' AND user_id = ?`, userID)
 
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {
@@ -988,10 +970,10 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 	var dataStr, currentSchemaStr sql.NullString
 	var identifier string
 	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
+		`SELECT i.identifier, COALESCE(i.metadata, '{}'), COALESCE(sc.schema, '{}')
 		 FROM users i
 		 LEFT JOIN schemas sc ON i.schema_id = sc.id
-		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
+		 WHERE i.identifier = ? OR i.id = ?`,
 		req.UserID, req.UserID,
 	).Scan(&identifier, &dataStr, &currentSchemaStr)
 	if err != nil {
@@ -1089,115 +1071,148 @@ func validateSchemaAnnotations(schemaJSON []byte) string {
 		return "invalid JSON"
 	}
 
-	// Validate x-auth-methods keys.
-	if authMethodsRaw, ok := raw["x-auth-methods"]; ok {
-		var methods map[string]any
-		if json.Unmarshal(authMethodsRaw, &methods) != nil {
-			return "x-auth-methods must be an object"
-		}
-		allowed := map[string]bool{
-			"password": true, "passkey": true, "magic_link": true,
-			"sso": true, "pat": true, "api_key": true, "client_cert": true,
-		}
-		for key := range methods {
-			if !allowed[key] {
-				return fmt.Sprintf("unknown auth method %q in x-auth-methods; allowed: password, passkey, magic_link, sso, pat, api_key, client_cert", key)
-			}
+	if msg := validateAuthMethods(raw); msg != "" {
+		return msg
+	}
+	if msg := validateCaptcha(raw); msg != "" {
+		return msg
+	}
+	if msg := validateFingerprint(raw); msg != "" {
+		return msg
+	}
+	if msg := validateRateLimit(raw); msg != "" {
+		return msg
+	}
+	if msg := validateLoginFlow(raw); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+func validateAuthMethods(raw map[string]json.RawMessage) string {
+	authMethodsRaw, ok := raw["x-auth-methods"]
+	if !ok {
+		return ""
+	}
+	var methods map[string]any
+	if json.Unmarshal(authMethodsRaw, &methods) != nil {
+		return "x-auth-methods must be an object"
+	}
+	allowed := map[string]bool{
+		"password": true, "passkey": true, "magic_link": true,
+		"sso": true, "pat": true, "api_key": true, "client_cert": true,
+	}
+	for key := range methods {
+		if !allowed[key] {
+			return fmt.Sprintf("unknown auth method %q in x-auth-methods; allowed: password, passkey, magic_link, sso, pat, api_key, client_cert", key)
 		}
 	}
+	return ""
+}
 
-	// Validate x-captcha keys.
-	if captchaRaw, ok := raw["x-captcha"]; ok {
-		var captcha map[string]any
-		if json.Unmarshal(captchaRaw, &captcha) != nil {
-			return "x-captcha must be an object"
-		}
-		allowed := map[string]bool{
-			"provider": true, "mode": true, "difficulty": true,
-			"algorithm": true, "steps": true, "site_key": true, "secret_key": true,
-		}
-		for key := range captcha {
-			if !allowed[key] {
-				return fmt.Sprintf("unknown key %q in x-captcha; allowed: provider, mode, difficulty, algorithm, steps, site_key, secret_key", key)
-			}
-		}
-		// Validate provider value.
-		if p, ok := captcha["provider"].(string); ok {
-			validProviders := map[string]bool{
-				"altcha": true, "hcaptcha": true, "recaptcha": true, "turnstile": true, "none": true,
-			}
-			if !validProviders[p] {
-				return fmt.Sprintf("unknown captcha provider %q; allowed: altcha, hcaptcha, recaptcha, turnstile, none", p)
-			}
-		}
-		// Validate mode value.
-		if m, ok := captcha["mode"].(string); ok {
-			validModes := map[string]bool{"always": true, "risk_based": true, "never": true}
-			if !validModes[m] {
-				return fmt.Sprintf("unknown captcha mode %q; allowed: always, risk_based, never", m)
-			}
+func validateCaptcha(raw map[string]json.RawMessage) string {
+	captchaRaw, ok := raw["x-captcha"]
+	if !ok {
+		return ""
+	}
+	var captcha map[string]any
+	if json.Unmarshal(captchaRaw, &captcha) != nil {
+		return "x-captcha must be an object"
+	}
+	allowed := map[string]bool{
+		"provider": true, "mode": true, "difficulty": true,
+		"algorithm": true, "steps": true, "site_key": true, "secret_key": true,
+	}
+	for key := range captcha {
+		if !allowed[key] {
+			return fmt.Sprintf("unknown key %q in x-captcha; allowed: provider, mode, difficulty, algorithm, steps, site_key, secret_key", key)
 		}
 	}
-
-	// Validate x-fingerprint keys.
-	if fpRaw, ok := raw["x-fingerprint"]; ok {
-		var fp map[string]any
-		if json.Unmarshal(fpRaw, &fp) != nil {
-			return "x-fingerprint must be an object"
+	if p, ok := captcha["provider"].(string); ok {
+		validProviders := map[string]bool{
+			"altcha": true, "hcaptcha": true, "recaptcha": true, "turnstile": true, "none": true,
 		}
-		allowed := map[string]bool{
-			"enabled": true, "provider": true, "persist": true, "steps": true,
-		}
-		for key := range fp {
-			if !allowed[key] {
-				return fmt.Sprintf("unknown key %q in x-fingerprint; allowed: enabled, provider, persist, steps", key)
-			}
-		}
-		if p, ok := fp["provider"].(string); ok {
-			if p != "thumbmarkjs" && p != "built_in" {
-				return fmt.Sprintf("unknown fingerprint provider %q; allowed: thumbmarkjs, built_in", p)
-			}
+		if !validProviders[p] {
+			return fmt.Sprintf("unknown captcha provider %q; allowed: altcha, hcaptcha, recaptcha, turnstile, none", p)
 		}
 	}
-
-	// Validate x-rate-limit keys.
-	if rlRaw, ok := raw["x-rate-limit"]; ok {
-		var rl map[string]any
-		if json.Unmarshal(rlRaw, &rl) != nil {
-			return "x-rate-limit must be an object"
-		}
-		allowed := map[string]bool{
-			"max_attempts": true, "window_seconds": true, "lockout_seconds": true, "scope": true,
-		}
-		for key := range rl {
-			if !allowed[key] {
-				return fmt.Sprintf("unknown key %q in x-rate-limit; allowed: max_attempts, window_seconds, lockout_seconds, scope", key)
-			}
-		}
-		if s, ok := rl["scope"].(string); ok {
-			validScopes := map[string]bool{"ip": true, "identifier": true, "fingerprint": true}
-			if !validScopes[s] {
-				return fmt.Sprintf("unknown rate limit scope %q; allowed: ip, identifier, fingerprint", s)
-			}
+	if m, ok := captcha["mode"].(string); ok {
+		validModes := map[string]bool{"always": true, "risk_based": true, "never": true}
+		if !validModes[m] {
+			return fmt.Sprintf("unknown captcha mode %q; allowed: always, risk_based, never", m)
 		}
 	}
+	return ""
+}
 
-	// Validate x-login-flow keys.
-	if lfRaw, ok := raw["x-login-flow"]; ok {
-		var lf map[string]any
-		if json.Unmarshal(lfRaw, &lf) != nil {
-			return "x-login-flow must be an object"
-		}
-		allowed := map[string]bool{
-			"flow_id": true, "inherit": true, "override": true,
-		}
-		for key := range lf {
-			if !allowed[key] {
-				return fmt.Sprintf("unknown key %q in x-login-flow; allowed: flow_id, inherit, override", key)
-			}
+func validateFingerprint(raw map[string]json.RawMessage) string {
+	fpRaw, ok := raw["x-fingerprint"]
+	if !ok {
+		return ""
+	}
+	var fp map[string]any
+	if json.Unmarshal(fpRaw, &fp) != nil {
+		return "x-fingerprint must be an object"
+	}
+	allowed := map[string]bool{
+		"enabled": true, "provider": true, "persist": true, "steps": true,
+	}
+	for key := range fp {
+		if !allowed[key] {
+			return fmt.Sprintf("unknown key %q in x-fingerprint; allowed: enabled, provider, persist, steps", key)
 		}
 	}
+	if p, ok := fp["provider"].(string); ok {
+		if p != "thumbmarkjs" && p != "built_in" {
+			return fmt.Sprintf("unknown fingerprint provider %q; allowed: thumbmarkjs, built_in", p)
+		}
+	}
+	return ""
+}
 
+func validateRateLimit(raw map[string]json.RawMessage) string {
+	rlRaw, ok := raw["x-rate-limit"]
+	if !ok {
+		return ""
+	}
+	var rl map[string]any
+	if json.Unmarshal(rlRaw, &rl) != nil {
+		return "x-rate-limit must be an object"
+	}
+	allowed := map[string]bool{
+		"max_attempts": true, "window_seconds": true, "lockout_seconds": true, "scope": true,
+	}
+	for key := range rl {
+		if !allowed[key] {
+			return fmt.Sprintf("unknown key %q in x-rate-limit; allowed: max_attempts, window_seconds, lockout_seconds, scope", key)
+		}
+	}
+	if s, ok := rl["scope"].(string); ok {
+		validScopes := map[string]bool{"ip": true, "identifier": true, "fingerprint": true}
+		if !validScopes[s] {
+			return fmt.Sprintf("unknown rate limit scope %q; allowed: ip, identifier, fingerprint", s)
+		}
+	}
+	return ""
+}
+
+func validateLoginFlow(raw map[string]json.RawMessage) string {
+	lfRaw, ok := raw["x-login-flow"]
+	if !ok {
+		return ""
+	}
+	var lf map[string]any
+	if json.Unmarshal(lfRaw, &lf) != nil {
+		return "x-login-flow must be an object"
+	}
+	allowed := map[string]bool{
+		"flow_id": true, "inherit": true, "override": true,
+	}
+	for key := range lf {
+		if !allowed[key] {
+			return fmt.Sprintf("unknown key %q in x-login-flow; allowed: flow_id, inherit, override", key)
+		}
+	}
 	return ""
 }
 
@@ -1215,71 +1230,46 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-func (a *API) loadIdentity(r *http.Request, userID string) (UserResponse, error) {
+func (a *API) loadUser(r *http.Request, userID string) (UserResponse, error) {
 	var resp UserResponse
-	var displayName, profileStr, metaStr, dataStr sql.NullString
+	var displayName, metaStr sql.NullString
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at
+		`SELECT id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at
 		 FROM users WHERE id = ?`, userID,
-	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
-		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
+	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.UserType, &resp.State,
+		&metaStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		return resp, err
 	}
 	if displayName.Valid {
 		resp.DisplayName = displayName.String
 	}
-	if profileStr.Valid {
-		json.Unmarshal([]byte(profileStr.String), &resp.Profile)
-	}
 	if metaStr.Valid {
 		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)
-	}
-	if dataStr.Valid {
-		json.Unmarshal([]byte(dataStr.String), &resp.Data)
 	}
 	resp.Capabilities = a.loadCapabilities(r, userID)
 	return resp, nil
 }
 
-func (a *API) loadCapabilities(r *http.Request, userID string) []string {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT capability FROM user_capabilities WHERE user_id = ?`, userID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var caps []string
-	for rows.Next() {
-		var c string
-		rows.Scan(&c)
-		caps = append(caps, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return caps
+func (a *API) loadCapabilities(_ *http.Request, _ string) []string {
+	// POC: capabilities are derived from FGA, not a table.
+	// Return ["admin"] for all authenticated users for backward compat.
+	return []string{"admin"}
 }
 
-func scanIdentityRow(rows *sql.Rows) (UserResponse, error) {
+func scanUserRow(rows *sql.Rows) (UserResponse, error) {
 	var resp UserResponse
-	var displayName, profileStr, metaStr, dataStr sql.NullString
-	err := rows.Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
-		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
+	var displayName, metaStr sql.NullString
+	err := rows.Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.UserType, &resp.State,
+		&metaStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		return resp, err
 	}
 	if displayName.Valid {
 		resp.DisplayName = displayName.String
 	}
-	if profileStr.Valid {
-		json.Unmarshal([]byte(profileStr.String), &resp.Profile)
-	}
 	if metaStr.Valid {
 		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)
-	}
-	if dataStr.Valid {
-		json.Unmarshal([]byte(dataStr.String), &resp.Data)
 	}
 	return resp, nil
 }
@@ -1295,6 +1285,154 @@ func parseID(r *http.Request, name string) (string, error) {
 // writeError wraps httputil.WriteError with the API's ErrorResponse format.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	httputil.WriteJSON(w, status, ErrorResponse{Error: msg, Code: status})
+}
+
+// --- Generic Resource Handlers ---
+
+// listResource returns a handler that lists rows from a dedicated table.
+// Returns all columns as JSON objects.
+func (a *API) listResource(table string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+				limit = n
+			}
+		}
+		cursor := r.URL.Query().Get("cursor")
+
+		// Discover columns dynamically so we don't need per-table column lists.
+		colsQuery := fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
+		colRows, err := a.db.SQL().QueryContext(r.Context(), colsQuery)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		var colNames []string
+		for colRows.Next() {
+			var c string
+			if err := colRows.Scan(&c); err == nil {
+				colNames = append(colNames, c)
+			}
+		}
+		defer colRows.Close()
+		if err := colRows.Err(); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		if len(colNames) == 0 {
+			httputil.WriteError(w, http.StatusInternalServerError, "no columns found")
+			return
+		}
+
+		query := fmt.Sprintf(`SELECT %s FROM %s WHERE id > ? ORDER BY id ASC LIMIT ?`,
+			strings.Join(colNames, ", "), table)
+		rows, err := a.db.SQL().QueryContext(r.Context(), query, cursor, limit+1)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		defer rows.Close()
+
+		var items []map[string]any
+		for rows.Next() {
+			values := make([]any, len(colNames))
+			ptrs := make([]any, len(colNames))
+			for i := range values {
+				ptrs[i] = &values[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				continue
+			}
+			row := make(map[string]any, len(colNames))
+			for i, col := range colNames {
+				row[col] = values[i]
+			}
+			items = append(items, row)
+		}
+		if err := rows.Err(); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+
+		var nextCursor string
+		if len(items) > limit {
+			items = items[:limit]
+			nextCursor = fmt.Sprint(items[len(items)-1]["id"])
+		}
+
+		httputil.WriteJSON(w, http.StatusOK, ListResponse{
+			Items:      items,
+			NextCursor: nextCursor,
+		})
+	}
+}
+
+// getResource returns a handler that fetches a single row by ID from a dedicated table.
+func (a *API) getResource(table string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseID(r, "id")
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+			return
+		}
+
+		// Discover columns dynamically.
+		colsQuery := fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
+		colRows, err := a.db.SQL().QueryContext(r.Context(), colsQuery)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		var colNames []string
+		for colRows.Next() {
+			var c string
+			if err := colRows.Scan(&c); err == nil {
+				colNames = append(colNames, c)
+			}
+		}
+		defer colRows.Close()
+		if err := colRows.Err(); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+
+		query := fmt.Sprintf(`SELECT %s FROM %s WHERE id = ?`,
+			strings.Join(colNames, ", "), table)
+		rows, err := a.db.SQL().QueryContext(r.Context(), query, id)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		defer rows.Close()
+
+		if !rows.Next() {
+			httputil.WriteError(w, http.StatusNotFound, "not found")
+			return
+		}
+
+		values := make([]any, len(colNames))
+		ptrs := make([]any, len(colNames))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "scan failed")
+			return
+		}
+
+		if err := rows.Err(); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+
+		row := make(map[string]any, len(colNames))
+		for i, col := range colNames {
+			row[col] = values[i]
+		}
+
+		httputil.WriteJSON(w, http.StatusOK, row)
+	}
 }
 
 // --- Universal Search ---
@@ -1325,7 +1463,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	results := make([]SearchResult, 0, limit*5)
 
 	results = append(results, a.searchEntities(r, pattern, limit)...)
-	results = append(results, a.searchEntityIndexes(r, pattern, limit)...)
+
 	results = append(results, a.searchSchemas(r, pattern, limit)...)
 	results = append(results, a.searchEvents(r, pattern, limit)...)
 	results = append(results, a.searchProviders(r, pattern, limit)...)
@@ -1350,7 +1488,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) searchEntities(r *http.Request, pattern string, limit int) []SearchResult {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, identifier, display_name, state FROM entities
+		`SELECT id, identifier, display_name, state FROM users
 		 WHERE identifier LIKE ? OR display_name LIKE ?
 		 ORDER BY id DESC LIMIT ?`,
 		pattern, pattern, limit)
@@ -1375,50 +1513,6 @@ func (a *API) searchEntities(r *http.Request, pattern string, limit int) []Searc
 			Title:        ident,
 			Subtitle:     displayName + " · " + state,
 			Link:         "/admin/entities/" + id + "/edit",
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return results
-}
-
-func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []SearchResult {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT DISTINCT ei.user_id, e.identifier, e.display_name, ei.field, ei.value
-		 FROM resource_indexes ei
-		 JOIN entities e ON ei.user_id = e.id
-		 WHERE ei.value LIKE ?
-		 LIMIT ?`,
-		pattern, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	seen := map[string]bool{}
-	var results []SearchResult
-	for rows.Next() {
-		var userID string
-		var ident, field, value string
-		var dn sql.NullString
-		if err := rows.Scan(&userID, &ident, &dn, &field, &value); err != nil {
-			continue
-		}
-		idStr := userID
-		if seen[idStr] {
-			continue
-		}
-		seen[idStr] = true
-		displayName := ""
-		if dn.Valid {
-			displayName = dn.String
-		}
-		results = append(results, SearchResult{
-			ResourceType: "identity",
-			ID:           idStr,
-			Title:        ident,
-			Subtitle:     fmt.Sprintf("%s: %s · %s", field, value, displayName),
-			Link:         "/admin/entities/" + userID + "/edit",
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1486,25 +1580,20 @@ func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchR
 
 func (a *API) searchProviders(r *http.Request, pattern string, limit int) []SearchResult {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT e.id, e.identifier, e.data FROM users e
-		 JOIN schemas s ON e.schema_id = s.id
-		 WHERE s.type = 'provider' AND (e.identifier LIKE ? OR e.display_name LIKE ?)
-		 ORDER BY e.identifier LIMIT ?`,
-		pattern, pattern, limit)
+		`SELECT id, name, protocol, template FROM providers
+		 WHERE name LIKE ?
+		 ORDER BY name LIMIT ?`,
+		pattern, limit)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 	var results []SearchResult
 	for rows.Next() {
-		var provID, name, dataStr string
-		if err := rows.Scan(&provID, &name, &dataStr); err != nil {
+		var provID, name, protocol, tmpl string
+		if err := rows.Scan(&provID, &name, &protocol, &tmpl); err != nil {
 			continue
 		}
-		var data map[string]any
-		json.Unmarshal([]byte(dataStr), &data)
-		protocol, _ := data["protocol"].(string)
-		tmpl, _ := data["template"].(string)
 		results = append(results, SearchResult{
 			ResourceType: "provider",
 			ID:           provID,
@@ -1517,24 +1606,6 @@ func (a *API) searchProviders(r *http.Request, pattern string, limit int) []Sear
 		return nil
 	}
 	return results
-}
-
-func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, userID string, dataJSON string) {
-	_, _ = tx.ExecContext(ctx,
-		`DELETE FROM resource_indexes WHERE entity_type = ? AND user_id = ?`,
-		entityType, userID)
-
-	var data map[string]any
-	if json.Unmarshal([]byte(dataJSON), &data) != nil {
-		return
-	}
-	for field, val := range data {
-		if strVal, ok := val.(string); ok && strVal != "" {
-			_, _ = tx.ExecContext(ctx,
-				`INSERT OR REPLACE INTO resource_indexes (entity_type, user_id, field, value) VALUES (?, ?, ?, ?)`,
-				entityType, userID, field, strVal)
-		}
-	}
 }
 
 func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggregateID string, aggregateType string, payload map[string]any) {
@@ -1625,7 +1696,7 @@ func eventCategory(eventType string) string {
 
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).
 func (a *API) GetIdentityByID(r *http.Request, userID string) (UserResponse, error) {
-	return a.loadIdentity(r, userID)
+	return a.loadUser(r, userID)
 }
 
 // CreateUserInternal is an exported helper for the UI to create an identity.
@@ -1633,10 +1704,10 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 	userID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	profileJSON := "{}"
+	metadataJSON := "{}"
 	if req.Profile != nil {
 		b, _ := json.Marshal(req.Profile)
-		profileJSON = string(b)
+		metadataJSON = string(b)
 	}
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
@@ -1646,20 +1717,13 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'active', ?, '{}', ?, ?)`,
-		userID, req.Identifier, req.DisplayName, profileJSON, now, now)
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, 'human', 'active', ?, ?, ?)`,
+		userID, req.Identifier, req.DisplayName, metadataJSON, now, now)
 	if err != nil {
 		return UserResponse{}, fmt.Errorf("insert: %w", err)
 	}
 
-	for _, cap := range req.Capabilities {
-		tx.ExecContext(r.Context(),
-			`INSERT INTO user_capabilities (user_id, capability) VALUES (?, ?)`,
-			userID, cap)
-	}
-
-	promoteIndexes(r.Context(), tx, "identity", userID, profileJSON)
 	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
 		"identifier": req.Identifier,
 	})
@@ -1692,10 +1756,9 @@ func (a *API) UpdateUserInternal(r *http.Request, userID string, req UserRequest
 		args = append(args, req.State)
 	}
 	if req.Profile != nil {
-		profileJSON, _ := json.Marshal(req.Profile)
-		setClauses = append(setClauses, "profile = ?")
-		args = append(args, string(profileJSON))
-		promoteIndexes(r.Context(), tx, "identity", userID, string(profileJSON))
+		metadataJSON, _ := json.Marshal(req.Profile)
+		setClauses = append(setClauses, "metadata = ?")
+		args = append(args, string(metadataJSON))
 	}
 	args = append(args, userID)
 
@@ -1715,7 +1778,7 @@ func (a *API) UpdateUserInternal(r *http.Request, userID string, req UserRequest
 	}
 	a.bus.Signal()
 
-	return a.loadIdentity(r, userID)
+	return a.loadUser(r, userID)
 }
 
 // DeleteIdentityInternal is an exported helper for the UI to delete an identity.
@@ -1726,7 +1789,6 @@ func (a *API) DeleteIdentityInternal(r *http.Request, userID string) error {
 	}
 	defer tx.Rollback()
 
-	tx.ExecContext(r.Context(), `DELETE FROM resource_indexes WHERE entity_type = 'identity' AND user_id = ?`, userID)
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)

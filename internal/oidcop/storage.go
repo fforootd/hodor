@@ -46,42 +46,38 @@ func (s *Storage) Health(_ context.Context) error {
 // ---------- Client ----------
 
 func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.Client, error) {
-	var dataJSON, schemaJSON sql.NullString
+	var metadataJSON, schemaJSON sql.NullString
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT i.data, COALESCE(sc.schema, '{}')
-		 FROM users i
-		 LEFT JOIN schemas sc ON i.schema_id = sc.id
-		 WHERE i.identifier = ? AND i.state = 'active'`,
+		`SELECT COALESCE(a.metadata, '{}'), COALESCE(sc.schema, '{}')
+		 FROM apps a
+		 LEFT JOIN schemas sc ON a.schema_id = sc.id
+		 WHERE a.client_id = ? AND a.state = 'active'`,
 		clientID,
-	).Scan(&dataJSON, &schemaJSON)
+	).Scan(&metadataJSON, &schemaJSON)
 	if err != nil {
 		return nil, fmt.Errorf("client not found: %w", err)
 	}
 
-	return ClientFromIdentity(clientID, dataJSON.String, schemaJSON.String)
+	return ClientFromIdentity(clientID, metadataJSON.String, schemaJSON.String)
 }
 
 func (s *Storage) AuthorizeClientIDSecret(ctx context.Context, clientID, clientSecret string) error {
-	// Look up the identity and its credential.
-	var credData string
+	// Check client_secret against the apps table.
+	var storedHash string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT ic.credential_data FROM user_credentials ic
-		 JOIN entities e ON ic.user_id = e.id
-		 WHERE e.identifier = ? AND ic.credential_type = 'client_secret'`,
+		`SELECT client_secret FROM apps WHERE client_id = ? AND state = 'active'`,
 		clientID,
-	).Scan(&credData)
+	).Scan(&storedHash)
 	if err != nil {
 		return fmt.Errorf("client not found or no secret configured")
 	}
 
-	// Decode the stored hash from credential JSON and verify using passwap.
-	encoded := auth.DecodeCredentialJSON(credData)
-	if encoded == "" {
-		return fmt.Errorf("invalid credential data")
+	if storedHash == "" {
+		return fmt.Errorf("no client secret configured")
 	}
 
 	passwords := auth.NewPasswords(s.db)
-	ok, _, err := passwords.Verify(encoded, clientSecret)
+	ok, _, err := passwords.Verify(storedHash, clientSecret)
 	if err != nil || !ok {
 		return fmt.Errorf("invalid client secret")
 	}
@@ -122,8 +118,8 @@ func (s *Storage) CreateAuthRequest(ctx context.Context, authReq *oidc.AuthReque
 	}
 
 	_, err := s.db.SQL().ExecContext(ctx,
-		`INSERT INTO oidc_auth_requests (id, client_id, redirect_uri, scopes, state, nonce, response_type, code_challenge, code_challenge_method, user_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO auth_states (id, type, client_id, redirect_uri, scopes, state, nonce, response_type, code_challenge, code_challenge_method, user_id, expires_at)
+		 VALUES (?, 'oidc_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'))`,
 		id, authReq.ClientID, authReq.RedirectURI,
 		strings.Join(authReq.Scopes, " "),
 		authReq.State, authReq.Nonce,
@@ -144,7 +140,7 @@ func (s *Storage) AuthRequestByID(ctx context.Context, id string) (op.AuthReques
 func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRequest, error) {
 	var requestID string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT request_id FROM oidc_codes WHERE code = ?`, code,
+		`SELECT id FROM auth_states WHERE code = ? AND type = 'oidc_auth'`, code,
 	).Scan(&requestID)
 	if err != nil {
 		return nil, fmt.Errorf("code invalid or expired")
@@ -154,21 +150,20 @@ func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRe
 
 func (s *Storage) SaveAuthCode(ctx context.Context, id string, code string) error {
 	_, err := s.db.SQL().ExecContext(ctx,
-		`INSERT INTO oidc_codes (code, request_id) VALUES (?, ?)`, code, id,
+		`UPDATE auth_states SET code = ? WHERE id = ?`, code, id,
 	)
 	return err
 }
 
 func (s *Storage) DeleteAuthRequest(ctx context.Context, id string) error {
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM oidc_codes WHERE request_id = ?`, id)
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM oidc_auth_requests WHERE id = ?`, id)
+	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM auth_states WHERE id = ?`, id)
 	return nil
 }
 
 // CompleteAuthRequest is called by the login flow after successful authentication.
 func (s *Storage) CompleteAuthRequest(ctx context.Context, requestID, userID string) error {
 	_, err := s.db.SQL().ExecContext(ctx,
-		`UPDATE oidc_auth_requests SET user_id = ?, done = 1, auth_time = datetime('now') WHERE id = ?`,
+		`UPDATE auth_states SET user_id = ?, done = 1, auth_time = datetime('now') WHERE id = ?`,
 		userID, requestID,
 	)
 	return err
@@ -185,7 +180,7 @@ func (s *Storage) authRequestFromRow(ctx context.Context, id string) (*AuthReque
 	err := s.db.SQL().QueryRowContext(ctx,
 		`SELECT client_id, redirect_uri, scopes, state, nonce, response_type,
 		        code_challenge, code_challenge_method, user_id, auth_time, done
-		 FROM oidc_auth_requests WHERE id = ?`, id,
+		 FROM auth_states WHERE id = ?`, id,
 	).Scan(&clientID, &redirectURI, &scopesStr, &state, &nonce, &responseType,
 		&cc, &ccm, &userID, &authTimeStr, &done)
 	if err != nil {
@@ -231,10 +226,11 @@ func (s *Storage) CreateAccessToken(ctx context.Context, request op.TokenRequest
 	tokenID := uuid.NewString()
 	expiration := time.Now().Add(5 * time.Minute)
 
+	tokenHash := tokenID // for OIDC access tokens, the ID is the lookup key
 	_, err := s.db.SQL().ExecContext(ctx,
-		`INSERT INTO oidc_tokens (id, application_id, subject, audience, scopes, expiration)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		tokenID, applicationID, request.GetSubject(),
+		`INSERT INTO tokens (id, type, token_hash, user_id, application_id, audience, scopes, expires_at)
+		 VALUES (?, 'oidc_access', ?, ?, ?, ?, ?, ?)`,
+		tokenID, tokenHash, request.GetSubject(), applicationID,
 		strings.Join(request.GetAudience(), " "),
 		strings.Join(request.GetScopes(), " "),
 		expiration.Format(time.RFC3339),
@@ -256,10 +252,11 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 	expiration := time.Now().Add(5 * time.Minute)
 
 	// Access token
+	tokenHash := tokenID
 	_, err := s.db.SQL().ExecContext(ctx,
-		`INSERT INTO oidc_tokens (id, application_id, subject, audience, scopes, refresh_token_id, expiration)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		tokenID, applicationID, request.GetSubject(),
+		`INSERT INTO tokens (id, type, token_hash, user_id, application_id, audience, scopes, refresh_token_id, expires_at)
+		 VALUES (?, 'oidc_access', ?, ?, ?, ?, ?, ?, ?)`,
+		tokenID, tokenHash, request.GetSubject(), applicationID,
 		strings.Join(request.GetAudience(), " "),
 		strings.Join(request.GetScopes(), " "),
 		refreshTokenID, expiration.Format(time.RFC3339),
@@ -271,11 +268,10 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 	// Refresh token (if new, or renew existing)
 	if currentRefreshToken != "" {
 		// Delete old refresh token
-		_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM oidc_refresh_tokens WHERE token = ?`, currentRefreshToken)
+		_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh'`, currentRefreshToken)
 	}
 
 	refreshExpiration := time.Now().Add(24 * time.Hour)
-	// Get auth time from request if available
 	var authTimeStr string
 	if ar, ok := request.(*AuthRequest); ok {
 		authTimeStr = ar.AuthTime.Format(time.RFC3339)
@@ -286,9 +282,9 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 	}
 
 	_, err = s.db.SQL().ExecContext(ctx,
-		`INSERT INTO oidc_refresh_tokens (id, token, application_id, user_id, audience, scopes, auth_time, access_token, expiration)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		refreshTokenID, refreshTokenID, applicationID, request.GetSubject(),
+		`INSERT INTO tokens (id, type, token_hash, user_id, application_id, audience, scopes, auth_time, refresh_token_id, expires_at)
+		 VALUES (?, 'oidc_refresh', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		refreshTokenID, refreshTokenID, request.GetSubject(), applicationID,
 		strings.Join(request.GetAudience(), " "),
 		strings.Join(request.GetScopes(), " "),
 		authTimeStr,
@@ -309,8 +305,8 @@ func (s *Storage) TokenRequestByRefreshToken(ctx context.Context, refreshToken s
 		authTimeStr, expirationStr                        string
 	)
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT id, application_id, user_id, audience, scopes, auth_time, expiration
-		 FROM oidc_refresh_tokens WHERE token = ?`, refreshToken,
+		`SELECT id, application_id, user_id, audience, scopes, auth_time, expires_at
+		 FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh'`, refreshToken,
 	).Scan(&id, &applicationID, &userID, &audienceStr, &scopesStr, &authTimeStr, &expirationStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token")
@@ -355,16 +351,16 @@ func (r *RefreshTokenRequest) SetCurrentScopes(scopes []string) { r.Scopes = sco
 
 func (s *Storage) RevokeToken(ctx context.Context, tokenIDOrToken string, userID string, clientID string) *oidc.Error {
 	// Try as access token ID
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM oidc_tokens WHERE id = ? AND application_id = ?`, tokenIDOrToken, clientID)
+	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM tokens WHERE id = ? AND application_id = ? AND type = 'oidc_access'`, tokenIDOrToken, clientID)
 	// Try as refresh token
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM oidc_refresh_tokens WHERE token = ? AND application_id = ?`, tokenIDOrToken, clientID)
+	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM tokens WHERE token_hash = ? AND application_id = ? AND type = 'oidc_refresh'`, tokenIDOrToken, clientID)
 	return nil
 }
 
 func (s *Storage) GetRefreshTokenInfo(ctx context.Context, clientID string, token string) (string, string, error) {
 	var userID, id string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT user_id, id FROM oidc_refresh_tokens WHERE token = ?`, token,
+		`SELECT user_id, id FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh'`, token,
 	).Scan(&userID, &id)
 	if err != nil {
 		return "", "", op.ErrInvalidRefreshToken
@@ -374,9 +370,9 @@ func (s *Storage) GetRefreshTokenInfo(ctx context.Context, clientID string, toke
 
 func (s *Storage) TerminateSession(ctx context.Context, userID string, clientID string) error {
 	_, _ = s.db.SQL().ExecContext(ctx,
-		`DELETE FROM oidc_tokens WHERE subject = ? AND application_id = ?`, userID, clientID)
+		`DELETE FROM tokens WHERE user_id = ? AND application_id = ? AND type = 'oidc_access'`, userID, clientID)
 	_, _ = s.db.SQL().ExecContext(ctx,
-		`DELETE FROM oidc_refresh_tokens WHERE user_id = ? AND application_id = ?`, userID, clientID)
+		`DELETE FROM tokens WHERE user_id = ? AND application_id = ? AND type = 'oidc_refresh'`, userID, clientID)
 	return nil
 }
 
@@ -423,7 +419,7 @@ func (s *Storage) getOrCreateSigningKey(ctx context.Context) (*signingKeyData, e
 	var id string
 	var keyBytes []byte
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT id, private_key FROM oidc_signing_keys ORDER BY created_at DESC LIMIT 1`,
+		`SELECT id, key_data FROM keys WHERE type = 'oidc_signing' ORDER BY created_at DESC LIMIT 1`,
 	).Scan(&id, &keyBytes)
 	if err == nil {
 		pk, err := x509.ParsePKCS1PrivateKey(keyBytes)
@@ -442,7 +438,7 @@ func (s *Storage) getOrCreateSigningKey(ctx context.Context) (*signingKeyData, e
 	keyDER := x509.MarshalPKCS1PrivateKey(key)
 
 	_, err = s.db.SQL().ExecContext(ctx,
-		`INSERT INTO oidc_signing_keys (id, algorithm, private_key) VALUES (?, 'RS256', ?)`,
+		`INSERT INTO keys (id, type, algorithm, key_data) VALUES (?, 'oidc_signing', 'RS256', ?)`,
 		id, keyDER,
 	)
 	if err != nil {
@@ -467,7 +463,7 @@ func (s *Storage) SetUserinfoFromToken(ctx context.Context, userinfo *oidc.UserI
 	var expirationStr string
 	var scopesStr string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT scopes, expiration FROM oidc_tokens WHERE id = ?`, tokenID,
+		`SELECT scopes, expires_at FROM tokens WHERE id = ? AND type = 'oidc_access'`, tokenID,
 	).Scan(&scopesStr, &expirationStr)
 	if err != nil {
 		return fmt.Errorf("token invalid")
@@ -483,12 +479,12 @@ func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, user
 	var identifier string
 	var dataJSON, schemaJSON sql.NullString
 
-	// Load identity data + schema in one query.
+	// Load user metadata + schema in one query.
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
-		 FROM users i
-		 LEFT JOIN schemas sc ON i.schema_id = sc.id
-		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
+		`SELECT u.identifier, COALESCE(u.metadata, '{}'), COALESCE(sc.schema, '{}')
+		 FROM users u
+		 LEFT JOIN schemas sc ON u.schema_id = sc.id
+		 WHERE u.identifier = ? OR u.id = ?`,
 		userID, userID,
 	).Scan(&identifier, &dataJSON, &schemaJSON)
 	if err != nil {
@@ -501,24 +497,6 @@ func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, user
 	}
 	if data == nil {
 		data = make(map[string]any)
-	}
-
-	// Also check profile column for legacy data.
-	var profileJSON sql.NullString
-	_ = s.db.SQL().QueryRowContext(ctx,
-		`SELECT profile FROM users WHERE identifier = ? OR CAST(id AS TEXT) = ?`,
-		userID, userID,
-	).Scan(&profileJSON)
-	if profileJSON.Valid {
-		var profile map[string]any
-		if json.Unmarshal([]byte(profileJSON.String), &profile) == nil {
-			// Merge: data takes priority, profile is fallback.
-			for k, v := range profile {
-				if _, exists := data[k]; !exists {
-					data[k] = v
-				}
-			}
-		}
 	}
 
 	// Get schema-driven claim map.
@@ -591,7 +569,7 @@ func parseLocale(s string) language.Tag {
 func (s *Storage) SetIntrospectionFromToken(ctx context.Context, introspection *oidc.IntrospectionResponse, tokenID, subject, clientID string) error {
 	var expirationStr, scopesStr, applicationID string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT scopes, expiration, application_id FROM oidc_tokens WHERE id = ?`, tokenID,
+		`SELECT scopes, expires_at, application_id FROM tokens WHERE id = ? AND type = 'oidc_access'`, tokenID,
 	).Scan(&scopesStr, &expirationStr, &applicationID)
 	if err != nil {
 		return fmt.Errorf("token invalid")

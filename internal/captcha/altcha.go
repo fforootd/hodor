@@ -19,11 +19,11 @@ import (
 
 // Challenge is sent to the client for PoW solving.
 type Challenge struct {
-	Algorithm string `json:"algorithm"`  // "SHA-256"
-	Challenge string `json:"challenge"`  // hex-encoded HMAC(salt || number)
-	Salt      string `json:"salt"`       // random salt
-	MaxNumber int    `json:"maxnumber"`  // upper bound for brute-force search
-	Signature string `json:"signature"`  // HMAC of challenge for server-side verification
+	Algorithm string `json:"algorithm"` // "SHA-256"
+	Challenge string `json:"challenge"` // hex-encoded HMAC(salt || number)
+	Salt      string `json:"salt"`      // random salt
+	MaxNumber int    `json:"maxnumber"` // upper bound for brute-force search
+	Signature string `json:"signature"` // HMAC of challenge for server-side verification
 }
 
 // Solution is received from the client after solving the PoW.

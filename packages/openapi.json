@@ -184,9 +184,6 @@
       },
       "CreatePATRequest": {
         "properties": {
-          "entity_id": {
-            "type": "string"
-          },
           "name": {
             "type": "string"
           },
@@ -195,10 +192,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "user_id": {
+            "type": "string"
           }
         },
         "required": [
-          "entity_id",
+          "user_id",
           "name"
         ],
         "type": "object"
@@ -207,9 +207,6 @@
         "properties": {
           "created_at": {
             "format": "date-time",
-            "type": "string"
-          },
-          "entity_id": {
             "type": "string"
           },
           "id": {
@@ -226,12 +223,15 @@
           },
           "token": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string"
           }
         },
         "required": [
           "id",
           "name",
-          "entity_id",
+          "user_id",
           "token",
           "scopes",
           "created_at"
@@ -267,18 +267,18 @@
       },
       "CreateSessionRequest": {
         "properties": {
-          "entity_id": {
-            "type": "string"
-          },
           "ip_address": {
             "type": "string"
           },
           "user_agent": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string"
           }
         },
         "required": [
-          "entity_id"
+          "user_id"
         ],
         "type": "object"
       },
@@ -287,9 +287,6 @@
           "session": {
             "properties": {
               "created_at": {
-                "type": "string"
-              },
-              "entity_id": {
                 "type": "string"
               },
               "expires_at": {
@@ -308,6 +305,9 @@
                 "type": "string"
               },
               "user_agent": {
+                "type": "string"
+              },
+              "user_id": {
                 "type": "string"
               }
             },
@@ -676,79 +676,6 @@
         ],
         "type": "object"
       },
-      "IdentityRequest": {
-        "properties": {
-          "capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "identifier": {
-            "type": "string"
-          },
-          "metadata": {},
-          "profile": {},
-          "schema_id": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "identifier"
-        ],
-        "type": "object"
-      },
-      "IdentityResponse": {
-        "properties": {
-          "capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "data": {},
-          "display_name": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "identifier": {
-            "type": "string"
-          },
-          "metadata": {},
-          "org_id": {
-            "type": "string"
-          },
-          "profile": {},
-          "state": {
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "org_id",
-          "identifier",
-          "state",
-          "created_at",
-          "updated_at"
-        ],
-        "type": "object"
-      },
       "ImportRequest": {
         "properties": {
           "entities": {
@@ -778,12 +705,9 @@
             },
             "type": "array"
           },
-          "linked_accounts": {
+          "linked_identities": {
             "items": {
               "properties": {
-                "entity_identifier": {
-                  "type": "string"
-                },
                 "external_email": {
                   "type": "string"
                 },
@@ -791,6 +715,9 @@
                   "type": "string"
                 },
                 "provider_name": {
+                  "type": "string"
+                },
+                "user_identifier": {
                   "type": "string"
                 }
               },
@@ -929,12 +856,12 @@
       },
       "PreviewSchemaRequest": {
         "properties": {
-          "entity_id": {
+          "user_id": {
             "type": "string"
           }
         },
         "required": [
-          "entity_id"
+          "user_id"
         ],
         "type": "object"
       },
@@ -1188,9 +1115,6 @@
             "format": "date-time",
             "type": "string"
           },
-          "entity_id": {
-            "type": "string"
-          },
           "expires_at": {
             "format": "date-time",
             "type": "string"
@@ -1210,18 +1134,21 @@
           },
           "user_agent": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string"
           }
         },
         "required": [
           "id",
-          "entity_id",
+          "user_id",
           "org_id",
           "created_at",
           "expires_at"
         ],
         "type": "object"
       },
-      "SetEntityPasswordRequest": {
+      "SetUserPasswordRequest": {
         "properties": {
           "password": {
             "type": "string"
@@ -1265,37 +1192,6 @@
         "required": [
           "status"
         ],
-        "type": "object"
-      },
-      "UpdateIdentityRequest": {
-        "properties": {
-          "capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "data": {
-            "additionalProperties": {},
-            "type": "object"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "identifier": {
-            "type": "string"
-          },
-          "profile": {
-            "additionalProperties": {},
-            "type": "object"
-          },
-          "schema_id": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          }
-        },
         "type": "object"
       },
       "UpdateProfileRequest": {
@@ -1350,6 +1246,114 @@
           },
           "schema": {}
         },
+        "type": "object"
+      },
+      "UpdateUserRequest": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "profile": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UserRequest": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "metadata": {},
+          "profile": {},
+          "schema_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "type": "object"
+      },
+      "UserResponse": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {},
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "metadata": {},
+          "org_id": {
+            "type": "string"
+          },
+          "profile": {},
+          "state": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "org_id",
+          "identifier",
+          "user_type",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
         "type": "object"
       }
     },
@@ -3108,100 +3112,6 @@
         ]
       }
     },
-    "/v1/service-accounts": {
-      "get": {
-        "operationId": "listServiceAccounts",
-        "parameters": [
-          {
-            "description": "Pagination cursor",
-            "in": "query",
-            "name": "cursor",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Max results (default 50)",
-            "in": "query",
-            "name": "limit",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Filter by org",
-            "in": "query",
-            "name": "org_id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Filter by state",
-            "in": "query",
-            "name": "state",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListResponse"
-                }
-              }
-            },
-            "description": "List service accounts"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List service accounts",
-        "tags": [
-          "Service Accounts"
-        ]
-      },
-      "post": {
-        "operationId": "createServiceAccount",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IdentityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IdentityResponse"
-                }
-              }
-            },
-            "description": "Create a service account"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Create a service account",
-        "tags": [
-          "Service Accounts"
-        ]
-      }
-    },
     "/v1/sessions": {
       "get": {
         "operationId": "listSessions",
@@ -3525,7 +3435,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IdentityRequest"
+                "$ref": "#/components/schemas/UserRequest"
               }
             }
           },
@@ -3536,7 +3446,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IdentityResponse"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             },
@@ -3601,7 +3511,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IdentityResponse"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             },
@@ -3635,7 +3545,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateIdentityRequest"
+                "$ref": "#/components/schemas/UpdateUserRequest"
               }
             }
           },
@@ -3646,7 +3556,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IdentityResponse"
+                  "$ref": "#/components/schemas/UserResponse"
                 }
               }
             },
@@ -3682,7 +3592,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetEntityPasswordRequest"
+                "$ref": "#/components/schemas/SetUserPasswordRequest"
               }
             }
           },
@@ -3750,9 +3660,6 @@
     },
     {
       "name": "Search"
-    },
-    {
-      "name": "Service Accounts"
     },
     {
       "name": "Sessions"

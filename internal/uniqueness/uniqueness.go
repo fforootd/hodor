@@ -163,7 +163,7 @@ func Release(ctx context.Context, tx *sql.Tx, userID string) error {
 
 // ResolvedEntity is the result of an identifier resolution.
 type ResolvedEntity struct {
-	UserID    string
+	UserID      string
 	DisplayName string
 	OrgID       string
 }
@@ -176,12 +176,12 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 	// Phase 1: Instance-scoped match (globally unique identifiers).
 	var result ResolvedEntity
 	err := db.QueryRowContext(ctx,
-		`SELECT uf.user_id, COALESCE(e.display_name, e.identifier), e.org_id
+		`SELECT uf.user_id, COALESCE(u.display_name, u.identifier), u.org_id
 		 FROM unique_fields uf
-		 JOIN entities e ON e.id = uf.user_id
+		 JOIN users u ON u.id = uf.user_id
 		 WHERE uf.normalized_value = ?
 		   AND uf.scope_id = ''
-		   AND e.state = 'active'
+		   AND u.state = 'active'
 		 LIMIT 1`, normalized,
 	).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 	if err == nil {
@@ -194,12 +194,12 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 	// Phase 2: Org-scoped match (if org context is available).
 	if orgID != "" {
 		err = db.QueryRowContext(ctx,
-			`SELECT uf.user_id, COALESCE(e.display_name, e.identifier), e.org_id
+			`SELECT uf.user_id, COALESCE(u.display_name, u.identifier), u.org_id
 			 FROM unique_fields uf
-			 JOIN entities e ON e.id = uf.user_id
+			 JOIN users u ON u.id = uf.user_id
 			 WHERE uf.normalized_value = ?
 			   AND uf.scope_id = ?
-			   AND e.state = 'active'
+			   AND u.state = 'active'
 			 LIMIT 1`, normalized, orgID,
 		).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 		if err == nil {

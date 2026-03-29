@@ -461,8 +461,8 @@ const pageTitle = computed(() => {
   }
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',
-    'identity-detail': 'Entity Detail',
-    'identity-create': 'New Entity',
+    'user-detail': 'User Detail',
+    'identity-create': 'New User',
     schemas: 'Schemas',
     'schema-detail': 'Schema Editor',
     providers: 'Providers',

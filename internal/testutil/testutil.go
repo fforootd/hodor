@@ -136,8 +136,8 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) string {
 
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'active', '{}', '{}', ?, ?)`,
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'human', 'active', '{}', ?, ?)`,
 		userID, ts.OrgID, identifier, displayName, now, now)
 	if err != nil {
 		ts.t.Fatalf("insert identity: %v", err)

@@ -197,7 +197,7 @@ func TestBulkImport_WithProviders(t *testing.T) {
 		"users": []map[string]any{
 			{"identifier": "linked@test.com", "display_name": "Linked User"},
 		},
-		"linked_accounts": []map[string]any{
+		"linked_identities": []map[string]any{
 			{"user_identifier": "linked@test.com", "provider_name": "Test OIDC", "external_sub": "ext-123"},
 		},
 		"on_conflict": "skip",

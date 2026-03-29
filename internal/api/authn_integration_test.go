@@ -96,9 +96,9 @@ func TestBearer_ValidPAT(t *testing.T) {
 
 	// Create a PAT via the API.
 	code, body = srv.PostJSONWithCookie("/v1/pats", map[string]any{
-		"name":      "test-pat",
+		"name":    "test-pat",
 		"user_id": adminID,
-		"scopes":    []string{"admin"},
+		"scopes":  []string{"admin"},
 	}, adminToken)
 	if code != 201 {
 		t.Fatalf("expected 201 creating PAT, got %d: %v", code, body)

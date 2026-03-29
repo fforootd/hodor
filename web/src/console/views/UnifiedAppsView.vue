@@ -259,7 +259,7 @@ const columns = computed(() => [
       onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
     }, () => ['Client ID', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
     cell: info => h(RouterLink, {
-      to: `/identities/${info.row.original.id}`,
+      to: `/users/${info.row.original.id}`,
       class: 'font-mono text-sm text-primary hover:underline'
     }, () => info.getValue()),
   }),

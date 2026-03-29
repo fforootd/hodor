@@ -240,8 +240,8 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 
 	// Store token.
 	_, err = h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO magic_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
-		token, userID, expiresAt.Format(time.RFC3339),
+		`INSERT INTO tokens (id, type, token_hash, user_id, expires_at) VALUES (?, 'magic_link', ?, ?, ?)`,
+		token, token, userID, expiresAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to store token")
@@ -283,10 +283,10 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	var expiresAt, identifier string
 	var usedAt sql.NullString
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT mt.user_id, mt.expires_at, mt.used_at, i.identifier
-		 FROM magic_tokens mt
-		 JOIN entities e ON i.id = mt.user_id
-		 WHERE mt.token = ?`, token,
+		`SELECT t.user_id, t.expires_at, t.last_used, u.identifier
+		 FROM tokens t
+		 JOIN users u ON u.id = t.user_id
+		 WHERE t.token_hash = ? AND t.type = 'magic_link'`, token,
 	).Scan(&userID, &expiresAt, &usedAt, &identifier)
 
 	if err == sql.ErrNoRows {
@@ -330,7 +330,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Mark as used.
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE magic_tokens SET used_at = datetime('now') WHERE token = ?`, token)
+		`UPDATE tokens SET last_used = datetime('now') WHERE token_hash = ? AND type = 'magic_link'`, token)
 
 	// Activate identity if pending (registration flow).
 	_, _ = h.db.SQL().ExecContext(r.Context(),
@@ -345,7 +345,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Link session to token.
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE magic_tokens SET session_id = ? WHERE token = ?`, sessResp.Session.ID, token)
+		`UPDATE tokens SET session_id = ? WHERE token_hash = ? AND type = 'magic_link'`, sessResp.Session.ID, token)
 
 	// Set session cookie (HMAC-signed).
 	session.SetSessionCookie(w, sessResp.Token, h.cookies)

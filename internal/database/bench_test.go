@@ -41,8 +41,8 @@ func seedIdentities(b *testing.B, db *sql.DB, n int) []string {
 	for i := 0; i < n; i++ {
 		ids[i] = id.New()
 		tx.Exec(
-			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
-			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
+			`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, 'human', 'active', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("user-%d", i), fmt.Sprintf("User %d", i), now, now)
 	}
 	if err := tx.Commit(); err != nil {
@@ -95,8 +95,8 @@ func BenchmarkDBInsertIdentity(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		newID := id.New()
 		_, err := db.Exec(
-			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
-			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
+			`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, 'human', 'active', '{}', ?, ?)`,
 			newID, fmt.Sprintf("bench-insert-%d", i), fmt.Sprintf("Bench Insert %d", i), now, now)
 		if err != nil {
 			b.Fatalf("insert: %v", err)
@@ -135,7 +135,7 @@ func BenchmarkDBListIdentities(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		offset := benchRandN(seedSize - 50)
 		rows, err := db.Query(
-			`SELECT id, identifier, display_name, state, created_at FROM entities
+			`SELECT id, identifier, display_name, state, created_at FROM users
 			 ORDER BY created_at DESC LIMIT 50 OFFSET ?`, offset)
 		if err != nil {
 			b.Fatalf("list: %v", err)
@@ -274,8 +274,8 @@ func BenchmarkDBConcurrentMixed(b *testing.B) {
 				// 20% writes
 				newID := id.New()
 				db.Exec(
-					`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
-					 VALUES (?, '0', ?, 'Bench Mixed', 'active', '{}', '{}', '{}', datetime('now'), datetime('now'))`,
+					`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+					 VALUES (?, '1', ?, 'Bench Mixed', 'human', 'active', '{}', datetime('now'), datetime('now'))`,
 					newID, fmt.Sprintf("mixed-%s", newID))
 			} else {
 				// 80% reads

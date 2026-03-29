@@ -15,8 +15,8 @@ import (
 // ImportRequest is the body for POST /v1/import.
 type ImportRequest struct {
 	Providers      []ImportProvider      `json:"providers,omitempty"`
-	Entities       []ImportEntity        `json:"entities,omitempty"`
-	LinkedAccounts []ImportLinkedAccount `json:"linked_accounts,omitempty"`
+	Entities       []ImportEntity        `json:"users,omitempty"`
+	LinkedAccounts []ImportLinkedAccount `json:"linked_identities,omitempty"`
 	OnConflict     string                `json:"on_conflict"` // skip (default), fail, update
 }
 
@@ -44,7 +44,7 @@ type ImportEntity struct {
 // ImportLinkedAccount links an identity to a provider.
 type ImportLinkedAccount struct {
 	IdentityIdentifier string `json:"user_identifier"` // resolves to identity ID
-	ProviderName       string `json:"provider_name"`     // resolves to provider ID
+	ProviderName       string `json:"provider_name"`   // resolves to provider ID
 	ExternalSub        string `json:"external_sub"`
 	ExternalEmail      string `json:"external_email,omitempty"`
 }
@@ -166,11 +166,10 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: "name required"}
 	}
 
-	// Check conflict in entities table.
+	// Check conflict in providers table.
 	var existing string
 	err := tx.QueryRowContext(r.Context(),
-		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
-		 WHERE s.type = 'provider' AND e.identifier = ?`, p.Name).Scan(&existing)
+		`SELECT id FROM providers WHERE name = ?`, p.Name).Scan(&existing)
 	if err == nil {
 		if onConflict == "skip" {
 			return ImportResult{Index: idx, Resource: "provider", Status: "skipped", ID: existing, Reason: "name exists"}
@@ -202,21 +201,14 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 		autoReg = *p.AutoRegister
 	}
 
-	data := map[string]any{
-		"protocol":        p.Protocol,
-		"template":        p.Template,
-		"config":          configMap,
-		"claim_overrides": overrideMap,
-		"auto_register":   autoReg,
-		"enabled":         true,
-		"display_order":   0,
-	}
-	dataJSON, _ := json.Marshal(data)
+	configJSON, _ := json.Marshal(configMap)
+	overrideJSON, _ := json.Marshal(overrideMap)
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
-		 VALUES (?, '1', 'provider_v1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
-		provID, p.Name, p.Name, string(dataJSON))
+		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, '1', ?, ?, ?, ?, ?, ?, 1, 0, 'provider_v1', '{}', datetime('now'), datetime('now'))`,
+		provID, p.Name, p.Protocol, p.Template,
+		string(configJSON), string(overrideJSON), autoReg)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: err.Error()}
 	}
@@ -234,15 +226,15 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	err := tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		if onConflict == "update" {
-			// Upsert: update display_name and profile.
-			profileJSON := "{}"
+			// Upsert: update display_name and metadata.
+			metadataJSON := "{}"
 			if ident.Profile != nil {
 				b, _ := json.Marshal(ident.Profile)
-				profileJSON = string(b)
+				metadataJSON = string(b)
 			}
 			tx.ExecContext(r.Context(),
-				`UPDATE users SET display_name = ?, profile = ?, data = ?, updated_at = datetime('now') WHERE id = ?`,
-				ident.DisplayName, profileJSON, profileJSON, existingID)
+				`UPDATE users SET display_name = ?, metadata = ?, updated_at = datetime('now') WHERE id = ?`,
+				ident.DisplayName, metadataJSON, existingID)
 			return ImportResult{Index: idx, Resource: "identity", Status: "updated", ID: existingID}
 		}
 		if onConflict == "skip" {
@@ -262,16 +254,16 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 		schemaID = "human_user_v1"
 	}
 
-	profileJSON := "{}"
+	metadataJSON := "{}"
 	if ident.Profile != nil {
 		b, _ := json.Marshal(ident.Profile)
-		profileJSON = string(b)
+		metadataJSON = string(b)
 	}
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))`,
-		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON, profileJSON)
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, 'human', ?, ?, ?, datetime('now'), datetime('now'))`,
+		newID, ident.Identifier, ident.DisplayName, state, schemaID, metadataJSON)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}
@@ -284,7 +276,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(r.Context(),
-				`INSERT INTO user_credentials (id, user_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				`INSERT INTO credentials (id, user_id, type, data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)
 		}
 	}
@@ -300,11 +292,10 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "identity not found: " + la.IdentityIdentifier}
 	}
 
-	// Resolve provider by name from entities table.
+	// Resolve provider by name from providers table.
 	var providerID string
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
-		 WHERE s.type = 'provider' AND e.identifier = ?`, la.ProviderName).Scan(&providerID)
+		`SELECT id FROM providers WHERE name = ?`, la.ProviderName).Scan(&providerID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "provider not found: " + la.ProviderName}
 	}
@@ -312,7 +303,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 	// Check conflict.
 	var existingLinkID string
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
+		`SELECT id FROM linked_identities WHERE provider_id = ? AND external_sub = ?`,
 		providerID, la.ExternalSub).Scan(&existingLinkID)
 	if err == nil {
 		if onConflict == "skip" {
@@ -323,7 +314,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 
 	linkID := id.New()
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO linked_accounts (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
 		linkID, userID, providerID, la.ExternalSub, la.ExternalEmail)
 	if err != nil {

@@ -179,10 +179,10 @@ func TestResolveFlowConfig(t *testing.T) {
 	}
 
 	flowConfig := &LoginFlowConfig{
-		Ref:     LoginFlowRef{UserSchema: "human_user", Version: ">=1"},
-		Login:   LoginConfig{Preset: "passkey_first", MFARequired: true},
-		Branding: BrandingConfig{Heading: "Custom Login", Layout: "split"},
-		Captcha: &CaptchaConfig{Provider: "altcha", On: []string{"login"}},
+		Ref:         LoginFlowRef{UserSchema: "human_user", Version: ">=1"},
+		Login:       LoginConfig{Preset: "passkey_first", MFARequired: true},
+		Branding:    BrandingConfig{Heading: "Custom Login", Layout: "split"},
+		Captcha:     &CaptchaConfig{Provider: "altcha", On: []string{"login"}},
 		Fingerprint: &FingerprintConfig{Enabled: true, Provider: "thumbmarkjs"},
 	}
 

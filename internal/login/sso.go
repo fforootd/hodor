@@ -96,9 +96,9 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 
 	// Store state in database.
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO sso_states (state, provider_id, pkce_verifier, nonce, redirect_uri, created_at)
-		 VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-		state, providerID, pkceVerifier, nonce, h.baseURL+"/v1/auth/sso/callback",
+		`INSERT INTO auth_states (id, type, state, provider_id, pkce_verifier, nonce, redirect_uri, expires_at, created_at)
+		 VALUES (?, 'sso', ?, ?, ?, ?, ?, datetime('now', '+10 minutes'), datetime('now'))`,
+		state, state, providerID, pkceVerifier, nonce, h.baseURL+"/v1/auth/sso/callback",
 	)
 
 	// Build authorize URL.
@@ -143,7 +143,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Look up state.
 	var providerID, pkceVerifier, nonce string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT provider_id, pkce_verifier, nonce FROM sso_states WHERE state = ?`, state,
+		`SELECT provider_id, pkce_verifier, nonce FROM auth_states WHERE state = ?`, state,
 	).Scan(&providerID, &pkceVerifier, &nonce)
 	if err != nil {
 		logging.Printf("[sso] state lookup failed: %v", err)
@@ -152,7 +152,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete used state.
-	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM sso_states WHERE state = ?`, state)
+	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM auth_states WHERE state = ?`, state)
 
 	// Load provider from providers table.
 	var provConfigStr, provOverridesStr string
@@ -258,7 +258,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	// Check if already linked.
 	var userID string
 	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT user_id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
+		`SELECT user_id FROM linked_identities WHERE provider_id = ? AND external_sub = ?`,
 		providerID, externalSub,
 	).Scan(&userID)
 
@@ -266,7 +266,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 		// Already linked — update last_used_at and raw_claims.
 		claimsJSON, _ := json.Marshal(claims)
 		_, _ = h.db.SQL().ExecContext(ctx,
-			`UPDATE linked_accounts SET last_used_at = datetime('now'), raw_claims = ?, external_email = ? WHERE provider_id = ? AND external_sub = ?`,
+			`UPDATE linked_identities SET last_used_at = datetime('now'), raw_claims = ?, external_email = ? WHERE provider_id = ? AND external_sub = ?`,
 			string(claimsJSON), externalEmail, providerID, externalSub,
 		)
 		return userID, nil
@@ -314,7 +314,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	linkID := id.New()
 	claimsJSON, _ := json.Marshal(claims)
 	_, err = h.db.SQL().ExecContext(ctx,
-		`INSERT INTO linked_accounts (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
 		linkID, newID, providerID, externalSub, externalEmail, string(claimsJSON),
 	)

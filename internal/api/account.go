@@ -37,13 +37,13 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 	userID := callerIduserID(r)
 
 	// Load identity.
-	var identifier, displayName, state, profile, schemaID, createdAt, updatedAt string
+	var identifier, displayName, state, metadata, schemaID, createdAt, updatedAt string
 	var orgID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT identifier, COALESCE(display_name,''), state, COALESCE(profile,'{}'),
+		`SELECT identifier, COALESCE(display_name,''), state, COALESCE(metadata,'{}'),
 		        org_id, COALESCE(schema_id,''), created_at, updated_at
 		 FROM users WHERE id = ?`, userID,
-	).Scan(&identifier, &displayName, &state, &profile, &orgID, &schemaID, &createdAt, &updatedAt)
+	).Scan(&identifier, &displayName, &state, &metadata, &orgID, &schemaID, &createdAt, &updatedAt)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
@@ -51,7 +51,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Parse profile JSON.
 	var profileMap map[string]any
-	json.Unmarshal([]byte(profile), &profileMap)
+	json.Unmarshal([]byte(metadata), &profileMap)
 
 	// Load schema to get field permissions.
 	var schemaJSON, schemaType string
@@ -106,10 +106,10 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load current identity data.
-	var currentProfile, schemaID string
+	var currentMetadata, schemaID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(profile,'{}'), COALESCE(schema_id,'') FROM users WHERE id = ?`, userID,
-	).Scan(&currentProfile, &schemaID)
+		`SELECT COALESCE(metadata,'{}'), COALESCE(schema_id,'') FROM users WHERE id = ?`, userID,
+	).Scan(&currentMetadata, &schemaID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
@@ -142,7 +142,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Merge profile updates.
 	var existingProfile map[string]any
-	json.Unmarshal([]byte(currentProfile), &existingProfile)
+	json.Unmarshal([]byte(currentMetadata), &existingProfile)
 	if existingProfile == nil {
 		existingProfile = make(map[string]any)
 	}
@@ -172,7 +172,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		changedFields = append(changedFields, "display_name")
 	}
 
-	updates = append(updates, "profile = ?")
+	updates = append(updates, "metadata = ?")
 	args = append(args, string(profileBytes))
 	args = append(args, userID)
 

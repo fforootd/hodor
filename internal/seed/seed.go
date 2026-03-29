@@ -50,7 +50,7 @@ type SeedIdentity struct {
 	Capabilities   []string            `yaml:"capabilities"` // NEW: ["admin", "password"]
 	PATs           []SeedPAT           `yaml:"pats"`         // NEW: personal access tokens
 	OnConflict     string              `yaml:"on_conflict"`  // NEW: "skip" (default), "warn", "update"
-	LinkedAccounts []SeedLinkedAccount `yaml:"linked_accounts"`
+	LinkedAccounts []SeedLinkedAccount `yaml:"linked_identities"`
 }
 
 // SeedPAT defines a personal access token to seed for an identity.
@@ -130,11 +130,10 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 }
 
 func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
-	// Skip if exists by name in entities table.
+	// Skip if exists by name in providers table.
 	var existing string
 	err := tx.QueryRowContext(ctx,
-		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
-		 WHERE s.type = 'provider' AND e.identifier = ?`, p.Name).Scan(&existing)
+		`SELECT id FROM providers WHERE name = ?`, p.Name).Scan(&existing)
 	if err == nil {
 		logging.Printf("[seed] provider %q already exists, skipping", p.Name)
 		return nil
@@ -176,9 +175,9 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 	dataJSON, _ := json.Marshal(data)
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO users (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
-		 VALUES (?, '1', 'provider_v1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
-		provID, p.Name, p.Name, string(dataJSON))
+		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, metadata, created_at, updated_at)
+		 VALUES (?, '1', ?, ?, ?, ?, ?, ?, TRUE, 0, '{}', datetime('now'), datetime('now'))`,
+		provID, p.Name, p.Protocol, p.Template, string(dataJSON), "{}", autoReg)
 	if err != nil {
 		return err
 	}
@@ -235,9 +234,9 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))`,
-		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON, profileJSON)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON)
 	if err != nil {
 		return err
 	}
@@ -250,7 +249,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
-				`INSERT INTO user_credentials (id, user_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				`INSERT INTO credentials (id, user_id, type, data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)
 		}
 	}
@@ -279,11 +278,11 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, userID string, iden
 		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			// Delete existing + re-insert.
-			tx.ExecContext(ctx, `DELETE FROM user_credentials WHERE user_id = ? AND credential_type = 'password'`, userID)
+			tx.ExecContext(ctx, `DELETE FROM credentials WHERE user_id = ? AND type = 'password'`, userID)
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
-				`INSERT INTO user_credentials (id, user_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				`INSERT INTO credentials (id, user_id, type, data) VALUES (?, ?, 'password', ?)`,
 				credID, userID, credJSON)
 			logging.Printf("[seed]   updated password for %q", ident.Identifier)
 		}
@@ -303,13 +302,9 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, userID string, iden
 	return nil
 }
 
-// seedCapabilities inserts capabilities for an entity (idempotent via INSERT OR IGNORE).
-func seedCapabilities(ctx context.Context, tx *sql.Tx, userID string, caps []string) {
-	for _, cap := range caps {
-		tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO user_capabilities (user_id, capability) VALUES (?, ?)`,
-			userID, cap)
-	}
+// seedCapabilities is a no-op — capabilities are now handled by FGA.
+func seedCapabilities(_ context.Context, _ *sql.Tx, _ string, _ []string) {
+	// FGA tuples are written during bootstrap; seed caps are ignored.
 }
 
 // seedPATs creates PAT tokens for an entity (idempotent via name check).
@@ -356,11 +351,10 @@ func seedPATs(ctx context.Context, tx *sql.Tx, userID string, pats []SeedPAT) {
 }
 
 func seedLinkedAccount(ctx context.Context, tx *sql.Tx, userID string, la SeedLinkedAccount) {
-	// Resolve provider by name or ID from entities table.
+	// Resolve provider by name or ID from providers table.
 	var providerID string
 	err := tx.QueryRowContext(ctx,
-		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
-		 WHERE s.type = 'provider' AND (e.identifier = ? OR e.id = ?)`,
+		`SELECT id FROM providers WHERE name = ? OR id = ?`,
 		la.Provider, la.Provider).Scan(&providerID)
 	if err != nil {
 		logging.Printf("[seed] linked_account: provider %q not found, skipping", la.Provider)
@@ -370,7 +364,7 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, userID string, la SeedLi
 	// Skip if already linked.
 	var existingLink int64
 	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
+		`SELECT id FROM linked_identities WHERE provider_id = ? AND external_sub = ?`,
 		providerID, la.ExternalSub).Scan(&existingLink)
 	if err == nil {
 		return // already linked
@@ -378,7 +372,7 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, userID string, la SeedLi
 
 	linkID := id.New()
 	tx.ExecContext(ctx,
-		`INSERT INTO linked_accounts (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
 		linkID, userID, providerID, la.ExternalSub, la.ExternalEmail)
 

@@ -27,9 +27,9 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 	}
 
 	var count1 int
-	db.SQL().QueryRow("SELECT COUNT(*) FROM entities").Scan(&count1)
-	if count1 != 3 {
-		t.Fatalf("expected 3 identities after first bootstrap (admin + console + default org), got %d", count1)
+	db.SQL().QueryRow("SELECT COUNT(*) FROM users").Scan(&count1)
+	if count1 != 1 {
+		t.Fatalf("expected 1 user after first bootstrap (admin), got %d", count1)
 	}
 
 	// Second call should be a no-op (idempotent).
@@ -38,9 +38,9 @@ func TestEnsureAdmin_Idempotent(t *testing.T) {
 	}
 
 	var count2 int
-	db.SQL().QueryRow("SELECT COUNT(*) FROM entities").Scan(&count2)
-	if count2 != 3 {
-		t.Fatalf("expected 3 identities after second bootstrap (idempotent), got %d", count2)
+	db.SQL().QueryRow("SELECT COUNT(*) FROM users").Scan(&count2)
+	if count2 != 1 {
+		t.Fatalf("expected 1 user after second bootstrap (idempotent), got %d", count2)
 	}
 }
 
@@ -86,11 +86,21 @@ func TestEnsureAdmin_AdminHasCapabilities(t *testing.T) {
 		t.Fatalf("EnsureAdmin: %v", err)
 	}
 
-	// Admin should have "admin" and "password" capabilities.
-	var capCount int
-	db.SQL().QueryRow(`SELECT COUNT(*) FROM user_capabilities
-		WHERE user_id = (SELECT id FROM users WHERE identifier = 'admin')`).Scan(&capCount)
-	if capCount != 2 {
-		t.Errorf("expected 2 capabilities (admin, password), got %d", capCount)
+	// Admin should exist in users table with active state.
+	var userType, state string
+	db.SQL().QueryRow(`SELECT user_type, state FROM users WHERE identifier = 'admin'`).Scan(&userType, &state)
+	if userType != "human" {
+		t.Errorf("expected admin user_type=human, got %q", userType)
+	}
+	if state != "active" {
+		t.Errorf("expected admin state=active, got %q", state)
+	}
+
+	// Verify admin has a password credential set.
+	var credCount int
+	db.SQL().QueryRow(`SELECT COUNT(*) FROM credentials
+		WHERE user_id = (SELECT id FROM users WHERE identifier = 'admin')`).Scan(&credCount)
+	if credCount < 1 {
+		t.Errorf("expected at least 1 credential for admin, got %d", credCount)
 	}
 }

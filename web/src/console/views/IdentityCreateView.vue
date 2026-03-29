@@ -160,7 +160,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { entityApi, magicLinkApi, schemaApi, metaSchemaApi, type Schema } from '@/api/resources'
+import { userApi, magicLinkApi, schemaApi, metaSchemaApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
@@ -305,7 +305,7 @@ async function submit() {
         schema_id: selectedSchema.value,
       }
     }
-    const created = await entityApi.create(payload)
+    const created = await userApi.create(payload)
     if (form.password && created.id && isInteractiveIdentity.value) {
       await api.post(`/v1/users/${created.id}/password`, { password: form.password }).catch(() => {})
     }

@@ -154,6 +154,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 	if err != nil {
+		logging.Printf("[flow] %s identifier resolve error: %v", flow.ID, err)
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -179,7 +180,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 	var credData string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT credential_data FROM user_credentials WHERE user_id = ? AND credential_type = 'password'`,
+		`SELECT data FROM credentials WHERE user_id = ? AND type = 'password'`,
 		flow.IduserID,
 	).Scan(&credData)
 	if err != nil {
@@ -190,7 +191,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 		return
 	}
 
-	// Extract hash from credential_data JSON: {"hash":"..."}.
+	// Extract hash from data JSON: {"hash":"..."}.
 	hash := auth.DecodeCredentialJSON(credData)
 	if hash == "" {
 		logging.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IduserID)
@@ -354,8 +355,8 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	}
 
 	_, err := h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'active', ?, '{}', datetime('now'), datetime('now'))`,
+		`INSERT INTO users (id, org_id, identifier, display_name, state, metadata, created_at, updated_at)
+		 VALUES (?, '1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
 		newID, identifier, displayName, profileJSON,
 	)
 	if err != nil {
@@ -399,7 +400,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		PoWDurationMs:   flow.PoWDurationMs,
 		VisitorID:       flow.VisitorID,
 		FingerprintHash: flow.FingerprintHash,
-		TraceID:         r.Header.Get("traceparent"),
+		TraceID:         r.Header.Get("Traceparent"),
 	}
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals)
 	if err != nil {

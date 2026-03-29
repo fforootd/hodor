@@ -87,7 +87,7 @@ func PreviewUpgrade(ctx context.Context, db *sql.DB, schemaType string, newSchem
 
 	// Sample entities.
 	rows, err := db.QueryContext(ctx,
-		`SELECT i.id, i.display_name, i.data FROM users i
+		`SELECT i.id, i.display_name, i.metadata FROM users i
 		  JOIN schemas s ON i.schema_id = s.id
 		 WHERE s.type = ? ORDER BY RANDOM() LIMIT ?`,
 		schemaType, sampleSize,
@@ -306,7 +306,7 @@ func estimateAffected(ctx context.Context, db *sql.DB, schemaType string, fc Fie
 			`SELECT COUNT(*) FROM users i
 			  JOIN schemas s ON i.schema_id = s.id
 			 WHERE s.type = ? AND (
-				json_extract(i.data, '$.' || ?) IS NULL OR json_extract(i.data, '$.' || ?) = ''
+				json_extract(i.metadata, '$.' || ?) IS NULL OR json_extract(i.metadata, '$.' || ?) = ''
 			)`, schemaType, fieldName, fieldName,
 		).Scan(&count)
 		if err != nil {
@@ -321,7 +321,7 @@ func estimateAffected(ctx context.Context, db *sql.DB, schemaType string, fc Fie
 		err := db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM users i
 			  JOIN schemas s ON i.schema_id = s.id
-			 WHERE s.type = ? AND json_extract(i.data, '$.' || ?) IS NOT NULL`,
+			 WHERE s.type = ? AND json_extract(i.metadata, '$.' || ?) IS NOT NULL`,
 			schemaType, fieldName,
 		).Scan(&count)
 		if err != nil {

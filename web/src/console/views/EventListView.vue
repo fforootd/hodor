@@ -110,7 +110,7 @@
                </div>
                <div>
                   <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Aggregate Topology</h4>
-                  <p class="text-xs font-mono">{{ row.original.aggregate_type }} <span class="text-muted-foreground">→</span> <RouterLink :to="`/console/s/${row.original.aggregate_type}/${row.original.aggregate_id}`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink></p>
+                  <p class="text-xs font-mono">{{ row.original.aggregate_type }} <span class="text-muted-foreground">→</span> <RouterLink :to="`/s/${row.original.aggregate_type}/${row.original.aggregate_id}`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink></p>
                </div>
             </div>
           </div>
@@ -338,7 +338,7 @@ const columns = [
       if (!actorId) return h('span', { class: 'text-xs text-muted-foreground' }, '—')
       const actorType = row.original.actor_type || 'human_user'
       return h(RouterLink, {
-        to: `/console/s/${actorType}/${actorId}`,
+        to: `/users/${actorId}`,
         class: 'inline-flex items-center gap-1 text-xs font-mono text-primary hover:underline max-w-[160px] truncate',
         title: actorId,
       }, () => [
