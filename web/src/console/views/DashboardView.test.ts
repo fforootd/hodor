@@ -70,10 +70,10 @@ describe('DashboardView', () => {
 
   it('loads and displays stats from API', async () => {
     vi.mocked(countsApi.get).mockResolvedValue({ human_user: 2, org: 1 })
-    vi.mocked(schemaApi.list).mockResolvedValue([{ id: 's1' }])
-    vi.mocked(providerApi.list).mockResolvedValue([{ id: 'p1' }, { id: 'p2' }])
+    vi.mocked(schemaApi.list).mockResolvedValue([{ id: 's1', type: 'user', schema: {}, message: '', org_id: 'o1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', is_default: false, version: 1 }] as any)
+    vi.mocked(providerApi.list).mockResolvedValue([{ id: 'p1', name: 'Google', type: 'oidc', enabled: true, config: {}, created_at: '2026-01-01T00:00:00Z' }, { id: 'p2', name: 'GitHub', type: 'oidc', enabled: true, config: {}, created_at: '2026-01-01T00:00:00Z' }])
     vi.mocked(eventApi.list).mockResolvedValue([
-      { id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z' },
+      { id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z', actor_id: 'a1', aggregate_id: 'agg1', aggregate_type: 'identity', payload: {} },
     ])
 
     const wrapper = mountView()
@@ -104,8 +104,8 @@ describe('DashboardView', () => {
     vi.mocked(schemaApi.list).mockResolvedValue([])
     vi.mocked(providerApi.list).mockResolvedValue([])
     vi.mocked(eventApi.list).mockResolvedValue([
-      { id: '1', event_type: 'identity.created', created_at: '2026-01-01T10:00:00Z' },
-      { id: '2', event_type: 'session.deleted', created_at: '2026-01-01T11:00:00Z' },
+      { id: '1', event_type: 'identity.created', created_at: '2026-01-01T10:00:00Z', actor_id: 'a1', aggregate_id: 'agg1', aggregate_type: 'identity', payload: {} },
+      { id: '2', event_type: 'session.deleted', created_at: '2026-01-01T11:00:00Z', actor_id: 'a2', aggregate_id: 'agg2', aggregate_type: 'session', payload: {} },
     ])
 
     const wrapper = mountView()

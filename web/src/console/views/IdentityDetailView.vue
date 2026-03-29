@@ -134,7 +134,7 @@
               <dt class="font-medium text-muted-foreground">Org ID</dt>
               <dd>{{ identity.org_id }}</dd>
               <dt class="font-medium text-muted-foreground">Schema</dt>
-              <dd>{{ identity.schema_name || '—' }}</dd>
+              <dd>{{ (identity as any).schema_name || '—' }}</dd>
               <dt class="font-medium text-muted-foreground">Created</dt>
               <dd>{{ formatTime(identity.created_at) }}</dd>
               <dt class="font-medium text-muted-foreground">Updated</dt>
@@ -327,7 +327,7 @@ const editJsonParsed = ref<any>({})
 const displayMeta = ref<any>({})
 const entitySchema = ref<any>(null)
 
-const schemaType = computed(() => (route.params as any).schemaType || identity.value?.schema_name || '')
+const schemaType = computed(() => (route.params as any).schemaType || (identity.value as any)?.schema_name || '')
 const isInteractiveIdentity = computed(() => {
   if (!entitySchema.value) return true
   return !!(entitySchema.value['x-identifier'] || entitySchema.value['x-auth-methods'])
@@ -447,17 +447,17 @@ async function deleteIdentity() {
 onMounted(async () => {
   try {
     identity.value = await entityApi.get(route.params.id as string)
-    if (identity.value?.schema_name) {
+    const schemaName = (identity.value as any)?.schema_name
+    if (schemaName) {
       const allSchemas = await schemaApi.list()
-      const match = allSchemas.find((s: any) => s.type === identity.value!.schema_name && s.is_default)
-        || allSchemas.find((s: any) => s.type === identity.value!.schema_name)
+      const match = allSchemas.find((s: any) => s.type === schemaName && s.is_default)
+        || allSchemas.find((s: any) => s.type === schemaName)
       if (match) entitySchema.value = match.schema
     }
     try {
       const metaData = await metaSchemaApi.get()
-      const st = identity.value?.schema_name
-      if (st) {
-        const entry = (metaData['x-catalog'] || {})[st]
+      if (schemaName) {
+        const entry = (metaData['x-catalog'] || {})[schemaName]
         if (entry) displayMeta.value = { singular: entry.singular, alias: entry.alias, path: entry.path, icon: entry.icon }
       }
     } catch { /* ignore */ }

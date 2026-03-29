@@ -9,7 +9,6 @@
 // Initialize the SDK client (must run before any SDK calls).
 import './sdk'
 
-// Re-export generated types under their legacy names.
 export type {
   IdentityResponse as Identity,
   SchemaResponse as Schema,
@@ -40,6 +39,28 @@ export type {
   ProviderResponse,
   ImportResult,
   ListResponse,
+} from '@zitadel/client-js'
+
+// Internal type imports for explicit return annotations.
+import type {
+  IdentityResponse,
+  SchemaResponse,
+  SessionResponse,
+  CatalogTemplateDetailResponse,
+  CatalogInstallResponse,
+  CatalogRefreshResponse,
+  CountsResponse,
+  FgaCheckResponse,
+  FgaBatchTestResponse,
+  FgaModelGraphResponse,
+  FgaModelResponse,
+  FgaListObjectsResponse,
+  FgaExpandResponse,
+  SearchResponse,
+  PromoteSchemaResponse,
+  DiffSchemaResponse,
+  PreviewSchemaResponse,
+  MagicLinkResponse,
 } from '@zitadel/client-js'
 
 // Import SDK service functions.
@@ -109,12 +130,12 @@ async function unwrapItems<T>(promise: Promise<any>): Promise<T[]> {
 // User API (type-specific, replaces generic entityApi)
 // ------------------------------------------------------------------
 export const userApi = {
-  list: () => unwrapItems(listUsers()),
-  get: (id: string) => unwrap(getUser({ path: { id } })),
-  create: (data: Record<string, unknown>) => unwrap(createUser({ body: data as any })),
-  update: (id: string, data: Record<string, unknown>) => unwrap(updateUser({ path: { id }, body: data as any })),
-  delete: (id: string) => unwrap(deleteUser({ path: { id } })),
-  setPassword: (id: string, password: string) => unwrap(setUserPasswordFn({ path: { id }, body: { password } })),
+  list: (): Promise<IdentityResponse[]> => unwrapItems<IdentityResponse>(listUsers()),
+  get: (id: string): Promise<IdentityResponse> => unwrap<IdentityResponse>(getUser({ path: { id } })),
+  create: (data: Record<string, unknown>): Promise<IdentityResponse> => unwrap<IdentityResponse>(createUser({ body: data as any })),
+  update: (id: string, data: Record<string, unknown>): Promise<IdentityResponse> => unwrap<IdentityResponse>(updateUser({ path: { id }, body: data as any })),
+  delete: (id: string): Promise<void> => unwrap<void>(deleteUser({ path: { id } })),
+  setPassword: (id: string, password: string): Promise<void> => unwrap<void>(setUserPasswordFn({ path: { id }, body: { password } })),
 }
 
 // Backward-compatible alias — views still import entityApi.
@@ -124,19 +145,19 @@ export const entityApi = userApi
 // Schema API
 // ------------------------------------------------------------------
 export const schemaApi = {
-  list: () => unwrapItems(listSchemas()),
-  listByType: (type: string) => unwrapItems(listSchemas({ query: { type } })),
-  get: (id: string) => unwrap(getSchema({ path: { id } })),
+  list: (): Promise<SchemaResponse[]> => unwrapItems<SchemaResponse>(listSchemas()),
+  listByType: (type: string): Promise<SchemaResponse[]> => unwrapItems<SchemaResponse>(listSchemas({ query: { type } })),
+  get: (id: string): Promise<SchemaResponse> => unwrap<SchemaResponse>(getSchema({ path: { id } })),
   update: (id: string, schema: Record<string, unknown>, message?: string) =>
-    unwrap(updateSchema({ path: { id }, body: { schema, message: message || '' } })),
-  promote: (id: string) =>
-    unwrap(promoteSchemaFn({ path: { id } })),
-  diff: (id: string, compareId: string) =>
-    unwrap(diffSchemaFn({ path: { id }, query: { compare: compareId } })),
-  preview: (id: string, entityId: string) =>
-    unwrap(previewSchemaFn({ path: { id }, body: { entity_id: entityId } })),
+    unwrap<SchemaResponse>(updateSchema({ path: { id }, body: { schema, message: message || '' } })),
+  promote: (id: string): Promise<PromoteSchemaResponse> =>
+    unwrap<PromoteSchemaResponse>(promoteSchemaFn({ path: { id } })),
+  diff: (id: string, compareId: string): Promise<DiffSchemaResponse> =>
+    unwrap<DiffSchemaResponse>(diffSchemaFn({ path: { id }, query: { compare: compareId } })),
+  preview: (id: string, entityId: string): Promise<PreviewSchemaResponse> =>
+    unwrap<PreviewSchemaResponse>(previewSchemaFn({ path: { id }, body: { entity_id: entityId } })),
   entityCount: (id: string) =>
-    unwrap(schemaIdentityCount({ path: { id } })).then((r: any) => r.count),
+    unwrap<any>(schemaIdentityCount({ path: { id } })).then((r: any) => r.count),
   // previewUpgrade stays on raw api — not in the generated SDK yet
   previewUpgrade: (type: string, newSchema: Record<string, any>, sampleSize = 10) =>
     api.post<UpgradeReport>(`/v1/schemas/${encodeURIComponent(type)}/preview-upgrade`, {
@@ -172,18 +193,18 @@ export const catalogApi = {
       `/v1/catalog${Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : ''}`
     ).then(r => r.templates || [])
   },
-  get: (id: string) => unwrap(getCatalogEntry({ path: { id } })),
-  install: (id: string, variables: Record<string, any>) =>
-    unwrap(installFromCatalogFn({ path: { id }, body: { variables } })),
-  refresh: () => unwrap(refreshCatalogFn()),
+  get: (id: string): Promise<CatalogTemplateDetailResponse> => unwrap<CatalogTemplateDetailResponse>(getCatalogEntry({ path: { id } })),
+  install: (id: string, variables: Record<string, any>): Promise<CatalogInstallResponse> =>
+    unwrap<CatalogInstallResponse>(installFromCatalogFn({ path: { id }, body: { variables } })),
+  refresh: (): Promise<CatalogRefreshResponse> => unwrap<CatalogRefreshResponse>(refreshCatalogFn()),
 }
 
 // ------------------------------------------------------------------
 // Session API
 // ------------------------------------------------------------------
 export const sessionApi = {
-  list: () => unwrapItems(listSessions()),
-  revoke: (id: string) => unwrap(revokeSession({ path: { id } })),
+  list: (): Promise<SessionResponse[]> => unwrapItems<SessionResponse>(listSessions()),
+  revoke: (id: string): Promise<void> => unwrap<void>(revokeSession({ path: { id } })),
 }
 
 // ------------------------------------------------------------------
@@ -206,12 +227,12 @@ export interface Event {
 }
 
 export const eventApi = {
-  list: (params?: { type?: string; limit?: number; session_id?: string }) => {
+  list: (params?: { type?: string; limit?: number; session_id?: string }): Promise<Event[]> => {
     const query: Record<string, string> = {}
     if (params?.type) query.types = params.type
     if (params?.limit) query.limit = String(params.limit)
     if (params?.session_id) query.session_id = params.session_id
-    return unwrapItems(listEvents({ query: query as any }))
+    return unwrapItems<Event>(listEvents({ query: query as any }))
   },
 }
 
@@ -227,21 +248,21 @@ export interface SearchResult {
 }
 
 export const searchApi = {
-  search: (q: string, limit = 10) => unwrap(search({ query: { q, limit } })),
+  search: (q: string, limit = 10): Promise<SearchResponse> => unwrap<SearchResponse>(search({ query: { q, limit } })),
 }
 
 // ------------------------------------------------------------------
 // Magic Link API
 // ------------------------------------------------------------------
 export const magicLinkApi = {
-  send: (email: string) => unwrap(sendMagicLinkFn({ body: { email } })),
+  send: (email: string): Promise<MagicLinkResponse> => unwrap<MagicLinkResponse>(sendMagicLinkFn({ body: { email } })),
 }
 
 // ------------------------------------------------------------------
 // Meta Schema API
 // ------------------------------------------------------------------
 export const metaSchemaApi = {
-  get: () => unwrap(getMetaSchemaFn()),
+  get: (): Promise<any> => unwrap<any>(getMetaSchemaFn()),
 }
 
 // ------------------------------------------------------------------
@@ -254,14 +275,14 @@ export interface Org {
 }
 
 export const orgApi = {
-  list: () => unwrapItems(listOrgs()),
+  list: (): Promise<Org[]> => unwrapItems<Org>(listOrgs()),
 }
 
 // ------------------------------------------------------------------
 // Counts API
 // ------------------------------------------------------------------
 export const countsApi = {
-  get: () => unwrap(entityCounts()),
+  get: (): Promise<CountsResponse> => unwrap<CountsResponse>(entityCounts()),
 }
 
 // ------------------------------------------------------------------
@@ -285,11 +306,11 @@ export interface ProviderTemplate {
 }
 
 export const providerApi = {
-  list: () => unwrapItems(listProviders()),
+  list: (): Promise<Provider[]> => unwrapItems<Provider>(listProviders()),
   templates: () => api.get<{ templates: ProviderTemplate[] }>('/v1/providers/templates').then(r => r.templates || []),
-  create: (data: Record<string, unknown>) => unwrap(createProviderFn({ body: data as any })),
-  update: (id: string, data: Record<string, unknown>) => unwrap(updateProviderFn({ path: { id }, body: data as any })),
-  delete: (id: string) => unwrap(deleteProviderFn({ path: { id } })),
+  create: (data: Record<string, unknown>) => unwrap<any>(createProviderFn({ body: data as any })),
+  update: (id: string, data: Record<string, unknown>) => unwrap<any>(updateProviderFn({ path: { id }, body: data as any })),
+  delete: (id: string): Promise<void> => unwrap<void>(deleteProviderFn({ path: { id } })),
 }
 
 // ------------------------------------------------------------------
@@ -340,27 +361,27 @@ export interface FGATestResult {
 }
 
 export const fgaApi = {
-  getModel: () => unwrap(fgaGetModel()),
-  getModelGraph: () => unwrap(fgaModelGraph()),
-  check: (user: string, relation: string, object: string) =>
-    unwrap(fgaCheckFn({ body: { user, relation, object } })),
+  getModel: (): Promise<FgaModelResponse> => unwrap<FgaModelResponse>(fgaGetModel()),
+  getModelGraph: (): Promise<FgaModelGraphResponse> => unwrap<FgaModelGraphResponse>(fgaModelGraph()),
+  check: (user: string, relation: string, object: string): Promise<FgaCheckResponse> =>
+    unwrap<FgaCheckResponse>(fgaCheckFn({ body: { user, relation, object } })),
   readTuples: (params?: { user?: string; relation?: string; object?: string }) => {
     const query: Record<string, string> = {}
     if (params?.user) query.user = params.user
     if (params?.relation) query.relation = params.relation
     if (params?.object) query.object = params.object
-    return unwrap(fgaReadTuples({ query: query as any })).then((r: any) => r.tuples || [])
+    return unwrap<any>(fgaReadTuples({ query: query as any })).then((r: any) => r.tuples || [])
   },
   writeTuples: (tuples: FGATuple[]) =>
-    unwrap(fgaWriteTuplesFn({ body: { tuples } as any })),
+    unwrap<any>(fgaWriteTuplesFn({ body: { tuples } as any })),
   deleteTuples: (tuples: FGATuple[]) =>
-    unwrap(fgaDeleteTuplesFn({ body: { tuples } as any })),
-  listObjects: (user: string, relation: string, type: string) =>
-    unwrap(fgaListObjectsFn({ body: { user, relation, type } })),
-  expand: (relation: string, object: string) =>
-    unwrap(fgaExpandFn({ body: { relation, object } })),
-  batchTest: (assertions: { user: string; relation: string; object: string; expected: boolean }[]) =>
-    unwrap(fgaBatchTestFn({ body: { assertions } as any })),
+    unwrap<any>(fgaDeleteTuplesFn({ body: { tuples } as any })),
+  listObjects: (user: string, relation: string, type: string): Promise<FgaListObjectsResponse> =>
+    unwrap<FgaListObjectsResponse>(fgaListObjectsFn({ body: { user, relation, type } })),
+  expand: (relation: string, object: string): Promise<FgaExpandResponse> =>
+    unwrap<FgaExpandResponse>(fgaExpandFn({ body: { relation, object } })),
+  batchTest: (assertions: { user: string; relation: string; object: string; expected: boolean }[]): Promise<FgaBatchTestResponse> =>
+    unwrap<FgaBatchTestResponse>(fgaBatchTestFn({ body: { assertions } as any })),
 }
 
 // ------------------------------------------------------------------

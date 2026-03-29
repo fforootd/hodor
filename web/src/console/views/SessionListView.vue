@@ -159,6 +159,10 @@ import { ref, onMounted, computed, h } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink, useRoute } from 'vue-router'
 import { sessionApi, entityApi, type Session } from '@/api/resources'
+import type { IdentityResponse } from '@zitadel/client-js'
+
+/** Session with a computed state field and optional server-side extras. */
+type SessionWithState = Session & { state: string } & Record<string, any>
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
@@ -173,7 +177,7 @@ import {
 import { createColumnHelper } from '@tanstack/vue-table'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
 
-const sessions = ref<Session[]>([])
+const sessions = ref<SessionWithState[]>([])
 const selectedRows = ref({})
 const userDict = ref<Record<string, {name: string, identifier: string}>>({})
 const globalSearch = ref('')
@@ -304,8 +308,8 @@ onMounted(async () => {
     })
     
     const dict: Record<string, {name: string, identifier: string}> = {}
-    for (const ent of entitiesRes) {
-      const profileEmail = ent.profile?.email as string | undefined
+    for (const ent of entitiesRes as IdentityResponse[]) {
+      const profileEmail = (ent as any).profile?.email as string | undefined
       dict[ent.id] = { 
         name: ent.display_name || 'Unknown User', 
         identifier: profileEmail || ent.identifier || ent.id
@@ -357,7 +361,7 @@ const expiredCount = computed(() => sessions.value.filter(s => s.state === 'expi
 const revokedCount = computed(() => sessions.value.filter(s => s.state === 'revoked').length)
 const totalCount = computed(() => sessions.value.length)
 
-const columnHelper = createColumnHelper<Session>()
+const columnHelper = createColumnHelper<SessionWithState>()
 
 const columns = [
   columnHelper.display({
@@ -393,12 +397,12 @@ const columns = [
     header: 'Session ID',
     cell: info => h('span', { class: 'text-sm font-mono text-muted-foreground truncate max-w-[120px] inline-block', title: info.getValue() }, info.getValue() || '—'),
   }),
-  columnHelper.accessor(row => row.identifier || row.entity_id || row.identity_id, {
+  columnHelper.accessor(row => row.entity_id, {
     id: 'user',
     header: 'User',
     cell: ({ row, getValue }) => {
       const fallbackId = getValue() as string
-      const entityId = row.original.entity_id || row.original.identity_id || ''
+      const entityId = row.original.entity_id || ''
       const entInfo = userDict.value[entityId]
       
       const displayName = entInfo?.name || 'Unknown User'
@@ -413,7 +417,7 @@ const columns = [
       ])
     },
   }),
-  columnHelper.accessor('geo.country', {
+  columnHelper.accessor(() => '', {
     id: 'organization',
     header: ({ column }) => h(Button, {
       variant: 'ghost',

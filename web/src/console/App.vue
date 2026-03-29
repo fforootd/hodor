@@ -304,7 +304,7 @@ function onCommandSearch(e: Event) {
   debounceTimer = setTimeout(async () => {
     try {
       const resp = await searchApi.search(query.trim())
-      searchResults.value = resp.results || []
+      searchResults.value = (resp.results || []) as SearchResult[]
     } catch {
       searchResults.value = []
     }

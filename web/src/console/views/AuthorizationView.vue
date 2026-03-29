@@ -553,8 +553,8 @@ async function fetchModelGraph() {
   loadingModel.value = true
   try {
     const data = await fgaApi.getModelGraph()
-    modelNodes.value = data.nodes || []
-    modelEdges.value = data.edges || []
+    modelNodes.value = (data.nodes || []) as FGAModelNode[]
+    modelEdges.value = (data.edges || []) as FGAModelEdge[]
     layoutGraph()
   } catch (err: any) {
     toast.error('Failed to load model', { description: err.message })

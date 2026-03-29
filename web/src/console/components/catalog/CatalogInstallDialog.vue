@@ -129,7 +129,13 @@ const emit = defineEmits<{
   installed: [result: { id: string; template_id: string; type: string }]
 }>()
 
-const detail = ref<CatalogTemplateDetail | null>(null)
+/** Extended type with proper variable/payload indexing (SDK generates {} for these). */
+type CatalogDetail = Omit<CatalogTemplateDetail, 'variables' | 'payload'> & {
+  variables: Record<string, { type?: string; description?: string; default?: any }>
+  payload: Record<string, any>
+}
+
+const detail = ref<CatalogDetail | null>(null)
 const loading = ref(false)
 const error = ref('')
 const installing = ref(false)
@@ -151,7 +157,7 @@ watch(() => props.open, async (isOpen) => {
   formValues.value = {}
 
   try {
-    detail.value = await catalogApi.get(props.templateId)
+    detail.value = await catalogApi.get(props.templateId) as CatalogDetail
     // Pre-fill defaults
     if (detail.value.variables) {
       for (const [key, v] of Object.entries(detail.value.variables)) {
