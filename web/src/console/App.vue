@@ -368,8 +368,18 @@ function goToResult(r: SearchResult) {
   showCommandPalette.value = false
   searchResults.value = []
   commandQuery.value = ''
-  const path = r.link.replace(/^\/console/, '') || '/'
-  router.push(path)
+  // Route generation is owned by the frontend, not the API.
+  const routeMap: Record<string, (id: string) => string> = {
+    user:     id => `/users/${id}`,
+    identity: id => `/users/${id}`,
+    org:      id => `/orgs/${id}`,
+    schema:   id => `/schemas/${id}`,
+    event:    () => '/events',
+    provider: () => '/providers',
+    session:  () => '/sessions',
+  }
+  const resolver = routeMap[r.resource_type] || (() => '/')
+  router.push(resolver(r.id))
 }
 
 function navigateTo(path: string) {
@@ -380,7 +390,8 @@ function navigateTo(path: string) {
 }
 
 function getResultIcon(resourceType: string) {
-  if (resourceType === 'identity') return Users
+  if (resourceType === 'user' || resourceType === 'identity') return Users
+  if (resourceType === 'org') return Building2
   if (resourceType === 'schema') return FileJson
   if (resourceType === 'event') return Activity
   if (resourceType === 'provider') return Globe

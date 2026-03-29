@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/captcha"
 	"github.com/zitadel/zitadel/internal/crypto"
@@ -26,7 +25,7 @@ import (
 type Handler struct {
 	db        *database.DB
 	passwords *auth.Passwords
-	api       *api.API
+	api       SessionCreator
 	notify    notify.Channel
 	baseURL   string
 	flows     *FlowStore
@@ -35,7 +34,7 @@ type Handler struct {
 }
 
 // New creates a new login API handler.
-func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API, cookies *session.CookieConfig) *Handler {
+func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, cookies *session.CookieConfig) *Handler {
 	// Generate a random HMAC key for Altcha PoW challenges.
 	// In production, this should come from config/secrets.
 	hmacKey, _ := captcha.GenerateHMACKey()
@@ -337,7 +336,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 		`UPDATE users SET state = 'active' WHERE id = ? AND state = 'pending'`, userID)
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
+	sessResp, err := h.api.CreateSessionForLogin(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return

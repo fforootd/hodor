@@ -3,7 +3,7 @@
   "$version": "1.0",
   "type": "object",
   "x-table": "login_flows",
-  "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, and layout behavior. Inherits from the instance default and can be overridden at org/project/app level (ADR-009).",
+  "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, audience targeting, and layout behavior. Supports gradual rollout via schema_id and user_id targeting. Inherits from the instance default and can be overridden at org/project/app level (ADR-009).",
   "properties": {
     "display_name": {
       "type": "string",
@@ -18,6 +18,17 @@
       "default": false,
       "description": "If true, this flow is the default for its scope (instance/org/app)"
     },
+    "state": {
+      "type": "string",
+      "enum": ["draft", "testing", "active", "archived"],
+      "default": "draft",
+      "description": "Lifecycle state. 'active' = served to all matching users. 'testing' = served only to audience.user_ids. 'draft'/'archived' = never served."
+    },
+    "priority": {
+      "type": "integer",
+      "default": 0,
+      "description": "Higher priority flows are evaluated first. Most-precise-match-wins: user_id > schema_id > org_id > default."
+    },
     "scope": {
       "type": "string",
       "enum": ["instance", "org", "project", "app"],
@@ -27,6 +38,43 @@
     "app_id": {
       "type": "string",
       "description": "If scope=app, the specific app this flow is bound to"
+    },
+    "audience": {
+      "type": "object",
+      "description": "Who sees this flow. Empty = everyone (when is_default=true). Most-precise-match-wins resolution.",
+      "properties": {
+        "schema_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Users with these schema_ids see this flow (specificity level 3)"
+        },
+        "user_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Explicit user allowlist for testing (specificity level 4, highest)"
+        },
+        "org_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Only users in these orgs (specificity level 2)"
+        },
+        "metadata_filter": {
+          "type": "object",
+          "description": "Match against user metadata key-values (e.g. {\"cohort\": \"beta\"})",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "auth_methods": {
+      "type": "object",
+      "description": "Auth method overrides for this flow (passkey, password, magic_link, sso). Same shape as x-auth-methods.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "position": { "type": "integer", "minimum": 0 }
+        }
+      }
     },
     "captcha": {
       "type": "object",

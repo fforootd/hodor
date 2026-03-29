@@ -152,20 +152,25 @@ CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
 -- LOGIN FLOWS — composable login experience definitions (state machine config)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS login_flows (
-    id         TEXT PRIMARY KEY,
-    org_id     TEXT NOT NULL DEFAULT '1',
-    name       TEXT NOT NULL,
-    preset     TEXT DEFAULT 'identifier_first',
-    steps      TEXT NOT NULL DEFAULT '[]',
-    config     TEXT NOT NULL DEFAULT '{}',
-    is_default BOOLEAN DEFAULT 0,
-    enabled    BOOLEAN DEFAULT 1,
-    schema_id  TEXT DEFAULT '',
-    metadata   TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id           TEXT PRIMARY KEY,
+    org_id       TEXT,
+    name         TEXT NOT NULL,
+    preset       TEXT DEFAULT 'identifier_first',
+    steps        TEXT NOT NULL DEFAULT '[]',
+    config       TEXT NOT NULL DEFAULT '{}',
+    is_default   BOOLEAN DEFAULT 0,
+    enabled      BOOLEAN DEFAULT 1,
+    state        TEXT NOT NULL DEFAULT 'draft',
+    priority     INTEGER DEFAULT 0,
+    audience     TEXT NOT NULL DEFAULT '{}',
+    auth_methods TEXT NOT NULL DEFAULT '{}',
+    schema_id    TEXT DEFAULT '',
+    metadata     TEXT DEFAULT '{}',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_lf_org ON login_flows(org_id);
+CREATE INDEX IF NOT EXISTS idx_lf_state ON login_flows(state, enabled);
 
 -- ============================================================================
 -- LINKED IDENTITIES — external identity provider links (user ↔ provider)

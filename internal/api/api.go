@@ -87,6 +87,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// OTel traces ingest (from browser SDK)
 	a.RegisterOTelRoutes(mux)
 
+	// Login Flow management (dedicated handlers with audience targeting)
+	a.RegisterLoginFlowRoutes(mux)
+
 	// Dynamic OpenAPI (generated from registry)
 	a.registerOpenAPIOperations()
 	mux.HandleFunc("GET /openapi.json", a.openAPISpecFromRegistry)
@@ -133,9 +136,8 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 
 	// Generic CRUD routes for other dedicated resource tables.
 	resourceTables := map[string]string{
-		"action":     "actions",
-		"app":        "apps",
-		"login_flow": "login_flows",
+		"action": "actions",
+		"app":    "apps",
 	}
 
 	for typeName, tableName := range resourceTables {
@@ -1648,11 +1650,10 @@ func (a *API) getResource(table string) http.HandlerFunc {
 // --- Universal Search ---
 
 type SearchResult struct {
-	ResourceType string `json:"resource_type"` // entity, schema, event, session, provider
+	ResourceType string `json:"resource_type"` // user, org, schema, event, session, provider
 	ID           string `json:"id"`
 	Title        string `json:"title"`
 	Subtitle     string `json:"subtitle,omitempty"`
-	Link         string `json:"link"`
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {
@@ -1673,7 +1674,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	results := make([]SearchResult, 0, limit*5)
 
 	results = append(results, a.searchEntities(r, pattern, limit)...)
-
+	results = append(results, a.searchOrgs(r, pattern, limit)...)
 	results = append(results, a.searchSchemas(r, pattern, limit)...)
 	results = append(results, a.searchEvents(r, pattern, limit)...)
 	results = append(results, a.searchProviders(r, pattern, limit)...)
@@ -1718,11 +1719,37 @@ func (a *API) searchEntities(r *http.Request, pattern string, limit int) []Searc
 			displayName = dn.String
 		}
 		results = append(results, SearchResult{
-			ResourceType: "identity",
+			ResourceType: "user",
 			ID:           id,
 			Title:        ident,
 			Subtitle:     displayName + " · " + state,
-			Link:         "/admin/entities/" + id + "/edit",
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
+	return results
+}
+
+func (a *API) searchOrgs(r *http.Request, pattern string, limit int) []SearchResult {
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, name FROM orgs WHERE name LIKE ? ORDER BY name LIMIT ?`,
+		pattern, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var results []SearchResult
+	for rows.Next() {
+		var orgID, name string
+		if err := rows.Scan(&orgID, &name); err != nil {
+			continue
+		}
+		results = append(results, SearchResult{
+			ResourceType: "org",
+			ID:           orgID,
+			Title:        name,
+			Subtitle:     orgID,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1750,7 +1777,6 @@ func (a *API) searchSchemas(r *http.Request, pattern string, limit int) []Search
 			ID:           schemaID,
 			Title:        schemaType,
 			Subtitle:     schemaID,
-			Link:         "/console/schemas",
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1779,7 +1805,6 @@ func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchR
 			ID:           evtID,
 			Title:        evtType,
 			Subtitle:     createdAt,
-			Link:         "/console/events",
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1809,7 +1834,6 @@ func (a *API) searchProviders(r *http.Request, pattern string, limit int) []Sear
 			ID:           provID,
 			Title:        name,
 			Subtitle:     protocol + " · " + tmpl,
-			Link:         "/console/providers",
 		})
 	}
 	if err := rows.Err(); err != nil {

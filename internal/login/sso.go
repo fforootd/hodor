@@ -233,7 +233,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
+	sessResp, err := h.api.CreateSessionForLogin(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		logging.Printf("[sso] session create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_session", http.StatusFound)

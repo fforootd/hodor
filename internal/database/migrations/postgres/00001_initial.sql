@@ -145,22 +145,28 @@ CREATE INDEX IF NOT EXISTS idx_actions_org ON actions(org_id);
 CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
 
 -- ============================================================================
--- LOGIN FLOWS — login flow configurations
+-- LOGIN FLOWS — composable login experience definitions (state machine config)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS login_flows (
-    id         TEXT PRIMARY KEY,
-    org_id     TEXT NOT NULL DEFAULT '1',
-    name       TEXT NOT NULL,
-    preset     TEXT DEFAULT 'identifier_first',
-    steps      JSONB NOT NULL DEFAULT '[]',
-    config     JSONB NOT NULL DEFAULT '{}',
-    state      TEXT NOT NULL DEFAULT 'active',
-    schema_id  TEXT DEFAULT '',
-    metadata   JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id           TEXT PRIMARY KEY,
+    org_id       TEXT,
+    name         TEXT NOT NULL,
+    preset       TEXT DEFAULT 'identifier_first',
+    steps        JSONB NOT NULL DEFAULT '[]',
+    config       JSONB NOT NULL DEFAULT '{}',
+    is_default   BOOLEAN DEFAULT FALSE,
+    enabled      BOOLEAN DEFAULT TRUE,
+    state        TEXT NOT NULL DEFAULT 'draft',
+    priority     INTEGER DEFAULT 0,
+    audience     JSONB NOT NULL DEFAULT '{}',
+    auth_methods JSONB NOT NULL DEFAULT '{}',
+    schema_id    TEXT DEFAULT '',
+    metadata     JSONB DEFAULT '{}',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_lf_org ON login_flows(org_id);
+CREATE INDEX IF NOT EXISTS idx_lf_state ON login_flows(state, enabled);
 
 -- ============================================================================
 -- LINKED IDENTITIES — external IdP account links

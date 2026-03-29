@@ -241,7 +241,6 @@ export interface SearchResult {
   id: string
   title: string
   subtitle: string
-  link: string
 }
 
 export const searchApi = {

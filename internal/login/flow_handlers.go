@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/captcha"
 	"github.com/zitadel/zitadel/internal/httputil"
@@ -392,7 +391,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	// Create session via the existing API.
 	// Collect accumulated client signals from the flow.
-	signals := &api.ClientSignals{
+	signals := &ClientSignals{
 		CaptchaProvider: flow.CaptchaProvider,
 		CaptchaVerified: flow.CaptchaVerified,
 		CaptchaScore:    flow.CaptchaScore,
@@ -402,7 +401,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		FingerprintHash: flow.FingerprintHash,
 		TraceID:         r.Header.Get("Traceparent"),
 	}
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals)
+	sessResp, err := h.api.CreateSessionForLogin(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals)
 	if err != nil {
 		flow.Errors = append(flow.Errors, FlowError{Code: "session_failed", Message: "Failed to create session. Please try again."})
 		h.flows.Put(flow)

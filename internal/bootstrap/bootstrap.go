@@ -212,6 +212,11 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 		logging.Printf("WARN: seed console client: %v", err)
 	}
 
+	// Seed the default login flow.
+	if err := seedDefaultLoginFlow(ctx, db); err != nil {
+		logging.Printf("WARN: seed default login flow: %v", err)
+	}
+
 	// Bootstrap FGA tuples using the real org ID.
 	if fgaSvc := api.FGAService; fgaSvc != nil {
 		if err := fgaSvc.OnBootstrap(ctx, userID, orgID); err != nil {
@@ -318,5 +323,34 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 	}
 
 	logging.Printf("seeded %d built-in schemas from catalog", seeded)
+	return nil
+}
+
+// seedDefaultLoginFlow creates the default login flow if none exists.
+// This is the bootstrap seed for the instance-level default flow.
+func seedDefaultLoginFlow(ctx context.Context, db *database.DB) error {
+	var exists int
+	err := db.SQL().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM login_flows WHERE is_default = 1 OR is_default = true`).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check default login flow: %w", err)
+	}
+	if exists > 0 {
+		return nil
+	}
+
+	flowID := id.New()
+	defaultConfig := `{"captcha":{"provider":"altcha","mode":"risk_based","difficulty":3},"fingerprint":{"enabled":true,"provider":"thumbmarkjs"},"rate_limit":{"max_attempts":5,"window_seconds":300,"scope":"ip"},"telemetry":{"enabled":true,"sample_rate":1.0}}`
+
+	_, err = db.SQL().ExecContext(ctx,
+		`INSERT INTO login_flows (id, name, preset, is_default, enabled, state, priority, config, audience, auth_methods, created_at, updated_at)
+		 VALUES (?, 'Default Login', 'identifier_first', 1, 1, 'active', 0, ?, '{}', '{}', datetime('now'), datetime('now'))`,
+		flowID, defaultConfig,
+	)
+	if err != nil {
+		return fmt.Errorf("insert default login flow: %w", err)
+	}
+
+	logging.Printf("seeded default login flow (id=%s)", flowID)
 	return nil
 }
