@@ -265,9 +265,8 @@ func Defaults() *Config {
 					Mode:  "buffered",
 				},
 				Request: StreamConfig{
-					Sinks:      []string{"stdout", "otel", "analytics"},
-					Mode:       "sampled",
-					SampleRate: 0.01,
+					Sinks: []string{"stdout", "otel", "analytics"},
+					Mode:  "buffered",
 				},
 				Jobs: StreamConfig{
 					Sinks: []string{"stdout", "analytics"},

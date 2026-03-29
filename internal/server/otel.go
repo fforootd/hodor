@@ -34,6 +34,11 @@ func OTelMiddleware(next http.Handler) http.Handler {
 			ctx = telemetry.WithSessionID(ctx, sessionID)
 		}
 
+		// Check for Flow ID header (set by login WC during flow steps).
+		if flowID := r.Header.Get("X-Flow-Id"); flowID != "" {
+			ctx = telemetry.WithFlowID(ctx, flowID)
+		}
+
 		// Set trace headers in response for correlation.
 		w.Header().Set("X-Trace-Id", traceID)
 		w.Header().Set("X-Span-Id", spanID)

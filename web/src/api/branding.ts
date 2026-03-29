@@ -1,4 +1,5 @@
 import { api } from './client'
+import { generateTraceparent, getFlowId } from '@/lib/telemetry'
 
 export interface Branding {
   org_id: string
@@ -108,17 +109,30 @@ export const brandingApi = {
     api.get<Branding>(`/v1/branding${domain ? `?domain=${domain}` : ''}`),
 }
 
+/** Build flow correlation headers for Traceparent and X-Flow-ID propagation. */
+function flowHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Traceparent': generateTraceparent(),
+  }
+  const flowId = getFlowId()
+  if (flowId) {
+    headers['X-Flow-Id'] = flowId
+  }
+  return headers
+}
+
 export const flowApi = {
   create: (redirectUri?: string, state?: string) => {
     const body: Record<string, string> = {}
     if (redirectUri) body.redirect_uri = redirectUri
     if (state) body.state = state
-    return api.post<FlowStep>('/v1/login/flows', body)
+    return api.post<FlowStep>('/v1/login/flows', body, flowHeaders())
   },
 
   submit: (flowId: string, action: string, data?: Record<string, string>) =>
-    api.post<FlowStep | FlowCompleteResponse>(`/v1/login/flows/${flowId}/submit`, { action, ...data }),
+    api.post<FlowStep | FlowCompleteResponse>(`/v1/login/flows/${flowId}/submit`, { action, ...data }, flowHeaders()),
 
   get: (flowId: string) =>
-    api.get<FlowStep>(`/v1/login/flows/${flowId}`),
+    api.get<FlowStep>(`/v1/login/flows/${flowId}`, flowHeaders()),
 }
+

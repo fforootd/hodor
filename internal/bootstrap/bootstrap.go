@@ -32,6 +32,11 @@ func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 		return fmt.Errorf("seed schemas: %w", err)
 	}
 
+	// Always seed the default login flow (idempotent).
+	if err := seedDefaultLoginFlow(ctx, db); err != nil {
+		logging.Printf("WARN: seed default login flow: %v", err)
+	}
+
 	var count int
 	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
 	if err != nil {
@@ -210,11 +215,6 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	// Seed the default console OIDC client.
 	if err := seedConsoleClient(ctx, db); err != nil {
 		logging.Printf("WARN: seed console client: %v", err)
-	}
-
-	// Seed the default login flow.
-	if err := seedDefaultLoginFlow(ctx, db); err != nil {
-		logging.Printf("WARN: seed default login flow: %v", err)
 	}
 
 	// Bootstrap FGA tuples using the real org ID.

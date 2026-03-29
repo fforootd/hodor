@@ -291,6 +291,7 @@ CREATE TABLE IF NOT EXISTS events (
     span_id        TEXT DEFAULT '',
     parent_span_id TEXT DEFAULT '',
     session_id     TEXT DEFAULT '',
+    flow_id        TEXT DEFAULT '',
     sequence       BIGINT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     shipped_at     TIMESTAMPTZ
@@ -300,6 +301,7 @@ CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
 CREATE INDEX IF NOT EXISTS idx_events_org ON events(org_id);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_events_flow ON events(flow_id) WHERE flow_id IS NOT NULL AND flow_id != '';
 
 -- ============================================================================
 -- DOMAINS — verified domain ownership

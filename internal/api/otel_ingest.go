@@ -9,6 +9,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/telemetry"
 )
 
 // ─── OTel Traces Ingest ────────────────────────────────────
@@ -144,6 +145,11 @@ func (a *API) ingestOTelTraces(w http.ResponseWriter, r *http.Request) {
 	// The X-Flow-ID header must reference an active flow that we issued.
 	// This prevents arbitrary writes — you can only submit traces for flows you started.
 	flowID := r.Header.Get("X-Flow-Id")
+	// Inject flow_id into context so emitEvent persists it in the flow_id column.
+	if flowID != "" {
+		ctx := telemetry.WithFlowID(r.Context(), flowID)
+		r = r.WithContext(ctx)
+	}
 	// Note: flow validation is optional — we log unlinked traces but don't reject.
 	// This allows OTel auto-instrumentation (document load, etc.) to work even
 	// before a flow is created.

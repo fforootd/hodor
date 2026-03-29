@@ -1853,10 +1853,11 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 	spanID := telemetry.SpanIDFromContext(ctx)
 	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
+	flowID := telemetry.FlowIDFromContext(ctx)
 	tx.ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, flow_id, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID, flowID)
 }
 
 func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
@@ -1870,10 +1871,11 @@ func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID strin
 	spanID := telemetry.SpanIDFromContext(ctx)
 	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
+	flowID := telemetry.FlowIDFromContext(ctx)
 	a.db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), actorID, actorID, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, flow_id, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, eventCategory(eventType), actorID, actorID, payloadJSON, traceID, spanID, parentSpanID, sessionID, flowID)
 	a.bus.Signal()
 }
 
@@ -1891,11 +1893,13 @@ func emitEventSimple(ctx context.Context, db interface {
 	spanID := telemetry.SpanIDFromContext(ctx)
 	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
+	flowID := telemetry.FlowIDFromContext(ctx)
 	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, datetime('now'))`,
-		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, flow_id, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, datetime('now'))`,
+		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, traceID, spanID, parentSpanID, sessionID, flowID)
 }
+
 
 // eventCategory derives the event category from the event_type prefix.
 func eventCategory(eventType string) string {

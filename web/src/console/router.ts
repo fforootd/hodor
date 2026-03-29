@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { resetTraceContext } from '@/api/client'
 
 // Runtime base path: injected by the Go server for sub-path deployments
 const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
@@ -43,6 +44,11 @@ const router = createRouter({
     { path: '/login-flows', name: 'login-flows', component: () => import('./views/LoginFlowListView.vue') },
     { path: '/login-flows/:id', name: 'login-flow-detail', component: () => import('./views/LoginFlowDetailView.vue') },
   ],
+})
+
+// Reset trace context on every navigation for per-page trace grouping.
+router.afterEach(() => {
+  resetTraceContext()
 })
 
 export default router

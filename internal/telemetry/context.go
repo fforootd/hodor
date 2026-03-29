@@ -9,6 +9,7 @@ const (
 	spanIDKey       contextKey = "span_id"
 	parentSpanIDKey contextKey = "parent_span_id"
 	sessionIDKey    contextKey = "session_id"
+	flowIDKey       contextKey = "flow_id"
 )
 
 // WithTraceID adds a trace_id to the context.
@@ -58,6 +59,19 @@ func ParentSpanIDFromContext(ctx context.Context) string {
 // SessionIDFromContext gets the session_id from the context.
 func SessionIDFromContext(ctx context.Context) string {
 	if val, ok := ctx.Value(sessionIDKey).(string); ok {
+		return val
+	}
+	return ""
+}
+
+// WithFlowID adds a flow_id to the context.
+func WithFlowID(ctx context.Context, flowID string) context.Context {
+	return context.WithValue(ctx, flowIDKey, flowID)
+}
+
+// FlowIDFromContext gets the flow_id from the context.
+func FlowIDFromContext(ctx context.Context) string {
+	if val, ok := ctx.Value(flowIDKey).(string); ok {
 		return val
 	}
 	return ""

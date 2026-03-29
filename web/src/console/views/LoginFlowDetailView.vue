@@ -7,17 +7,49 @@
           <ArrowLeft class="size-4" />
         </Button>
         <div>
-          <h1 class="text-2xl font-bold tracking-tight">{{ flow?.display_name || 'Login Flow' }}</h1>
-          <p class="text-muted-foreground text-sm mt-0.5">{{ getProfile().description || 'Configure login experience' }}</p>
+          <div class="flex items-center gap-2">
+            <h1 class="text-2xl font-bold tracking-tight">{{ flow?.name || 'Login Flow' }}</h1>
+            <Badge v-if="flow?.is_default" variant="default">Default</Badge>
+            <Badge :variant="stateVariant(flow?.state)" class="text-xs">{{ flow?.state || 'draft' }}</Badge>
+          </div>
+          <p class="text-muted-foreground text-sm mt-0.5">
+            <template v-if="flow?.is_default">
+              Applies to all users not matched by a specific flow
+            </template>
+            <template v-else>
+              Configure login experience and audience targeting
+            </template>
+          </p>
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <Badge v-if="getProfile().is_default" variant="secondary">Default</Badge>
-        <Badge variant="outline">v{{ flow?.profile?.version || 1 }}</Badge>
+        <!-- Promote button -->
+        <Button
+          v-if="flow && flow.state !== 'active' && flow.state !== 'archived'"
+          variant="outline"
+          @click="promoteFlow"
+          :disabled="promoting"
+        >
+          <Spinner v-if="promoting" class="size-4 mr-2" />
+          <ArrowUp v-else class="size-4 mr-2" />
+          Promote to {{ flow?.state === 'draft' ? 'Testing' : 'Active' }}
+        </Button>
         <Button @click="saveFlow" :disabled="saving">
           <Spinner v-if="saving" class="size-4 mr-2" />
           Save
         </Button>
+      </div>
+    </div>
+
+    <!-- Default flow banner -->
+    <div v-if="flow?.is_default" class="rounded-lg border border-primary/20 bg-primary/[0.03] p-4 flex items-start gap-3">
+      <Shield class="size-5 text-primary mt-0.5 shrink-0" />
+      <div>
+        <p class="text-sm font-medium">This is your instance default login flow</p>
+        <p class="text-xs text-muted-foreground mt-0.5">
+          All users who don't match a more specific flow will see this configuration.
+          Changes here affect every login that isn't handled by a targeted flow.
+        </p>
       </div>
     </div>
 
@@ -36,12 +68,17 @@
               <Input id="name" v-model="form.name" />
             </div>
             <div class="space-y-1.5">
-              <Label for="desc">Description</Label>
-              <Input id="desc" v-model="form.description" />
+              <Label for="priority">Priority</Label>
+              <Input id="priority" type="number" v-model.number="form.priority" min="0" max="1000" />
+              <p class="text-xs text-muted-foreground">Higher priority flows are evaluated first.</p>
             </div>
-            <div class="flex items-center gap-2">
-              <input type="checkbox" id="default" v-model="form.isDefault" class="accent-primary" />
-              <Label for="default">Default flow for this scope</Label>
+            <div class="space-y-1.5">
+              <Label for="preset">Preset</Label>
+              <select id="preset" v-model="form.preset" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                <option value="identifier_first">Identifier First</option>
+                <option value="passkey_first">Passkey First</option>
+                <option value="sso_only">SSO Only</option>
+              </select>
             </div>
           </CardContent>
         </Card>
@@ -247,7 +284,8 @@
 
 <script setup lang="ts">
 /**
- * LoginFlowDetailView — Edit a login flow entity with a live preview.
+ * LoginFlowDetailView — Edit a login flow with live preview.
+ * Uses the dedicated /v1/login-flows API with top-level fields.
  */
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -258,22 +296,29 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
-import { ArrowLeft } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUp, Shield } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
 
-interface FlowEntity {
+interface LoginFlow {
   id: string
-  identifier: string
-  display_name: string
-  profile: any
+  name: string
+  preset: string
+  is_default: boolean
+  enabled: boolean
+  state: string
+  priority: number
+  audience: any
+  auth_methods: any
+  config: any
   created_at: string
   updated_at: string
 }
 
-const flow = ref<FlowEntity | null>(null)
+const flow = ref<LoginFlow | null>(null)
 const saving = ref(false)
+const promoting = ref(false)
 const previewLayout = ref('centered')
 
 const layouts = [
@@ -285,8 +330,8 @@ const layouts = [
 
 const form = reactive({
   name: '',
-  description: '',
-  isDefault: false,
+  priority: 0,
+  preset: 'identifier_first',
   captcha: {
     provider: 'altcha',
     mode: 'risk_based',
@@ -309,42 +354,53 @@ const form = reactive({
   },
 })
 
-function getProfile(): any {
-  return flow.value?.profile || {}
+function stateVariant(state?: string): 'default' | 'secondary' | 'outline' | 'destructive' {
+  switch (state) {
+    case 'active': return 'default'
+    case 'testing': return 'secondary'
+    case 'archived': return 'destructive'
+    default: return 'outline'
+  }
 }
 
-function populateForm(entity: FlowEntity) {
-  const p = entity.profile || {}
-  form.name = entity.display_name || p.display_name || ''
-  form.description = p.description || ''
-  form.isDefault = p.is_default || false
+function populateForm(f: LoginFlow) {
+  form.name = f.name || ''
+  form.priority = f.priority || 0
+  form.preset = f.preset || 'identifier_first'
 
-  if (p.captcha) {
-    form.captcha.provider = p.captcha.provider || 'altcha'
-    form.captcha.mode = p.captcha.mode || 'risk_based'
-    form.captcha.difficulty = p.captcha.difficulty || 3
+  // Config is stored in the `config` JSON blob.
+  const c = typeof f.config === 'string' ? safeJSON(f.config) : (f.config || {})
+
+  if (c.captcha) {
+    form.captcha.provider = c.captcha.provider || 'altcha'
+    form.captcha.mode = c.captcha.mode || 'risk_based'
+    form.captcha.difficulty = c.captcha.difficulty || 3
   }
-  if (p.fingerprint) {
-    form.fingerprint.enabled = p.fingerprint.enabled !== false
-    form.fingerprint.provider = p.fingerprint.provider || 'thumbmarkjs'
-    form.fingerprint.persist = p.fingerprint.persist !== false
+  if (c.fingerprint) {
+    form.fingerprint.enabled = c.fingerprint.enabled !== false
+    form.fingerprint.provider = c.fingerprint.provider || 'thumbmarkjs'
+    form.fingerprint.persist = c.fingerprint.persist !== false
   }
-  if (p.rate_limit) {
-    form.rateLimit.maxAttempts = p.rate_limit.max_attempts || 5
-    form.rateLimit.windowSeconds = p.rate_limit.window_seconds || 300
-    form.rateLimit.lockoutSeconds = p.rate_limit.lockout_seconds || 900
-    form.rateLimit.scope = p.rate_limit.scope || 'ip'
+  if (c.rate_limit) {
+    form.rateLimit.maxAttempts = c.rate_limit.max_attempts || 5
+    form.rateLimit.windowSeconds = c.rate_limit.window_seconds || 300
+    form.rateLimit.lockoutSeconds = c.rate_limit.lockout_seconds || 900
+    form.rateLimit.scope = c.rate_limit.scope || 'ip'
   }
-  if (p.telemetry) {
-    form.telemetry.enabled = p.telemetry.enabled !== false
-    form.telemetry.sampleRate = p.telemetry.sample_rate ?? 1.0
+  if (c.telemetry) {
+    form.telemetry.enabled = c.telemetry.enabled !== false
+    form.telemetry.sampleRate = c.telemetry.sample_rate ?? 1.0
   }
+}
+
+function safeJSON(s: string): any {
+  try { return JSON.parse(s) } catch { return {} }
 }
 
 async function loadFlow() {
   const id = route.params.id as string
   try {
-    const resp = await api.get<FlowEntity>(`/v1/login-flows/${id}`)
+    const resp = await api.get<LoginFlow>(`/v1/login-flows/${id}`)
     flow.value = resp
     populateForm(resp)
   } catch {
@@ -357,11 +413,11 @@ async function saveFlow() {
   saving.value = true
   try {
     await api.patch(`/v1/login-flows/${flow.value.id}`, {
-      display_name: form.name,
-      profile: {
-        display_name: form.name,
-        description: form.description,
-        is_default: form.isDefault,
+      name: form.name,
+      preset: form.preset,
+      priority: form.priority,
+      is_default: flow.value.is_default,
+      config: {
         captcha: {
           provider: form.captcha.provider,
           mode: form.captcha.mode,
@@ -394,6 +450,19 @@ async function saveFlow() {
     console.error('Failed to save login flow:', e)
   } finally {
     saving.value = false
+  }
+}
+
+async function promoteFlow() {
+  if (!flow.value) return
+  promoting.value = true
+  try {
+    await api.post(`/v1/login-flows/${flow.value.id}/promote`, {})
+    await loadFlow()
+  } catch (e: any) {
+    console.error('Failed to promote flow:', e)
+  } finally {
+    promoting.value = false
   }
 }
 

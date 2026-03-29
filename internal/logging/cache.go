@@ -21,6 +21,7 @@ type CacheRecord struct {
 	TraceID   string
 	SpanID    string
 	SessionID string
+	FlowID    string
 	CreatedAt string
 }
 
@@ -57,6 +58,7 @@ func OpenCache(path string, maxRows int) (*Cache, error) {
 			trace_id   TEXT NOT NULL DEFAULT '',
 			span_id    TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL DEFAULT '',
+			flow_id    TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)
 	`)
@@ -74,10 +76,10 @@ func (c *Cache) Write(rec CacheRecord) error {
 	defer c.mu.Unlock()
 
 	_, err := c.db.Exec(
-		`INSERT INTO log_buffer (event_type, category, stream, level, payload, actor_id, trace_id, span_id, session_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO log_buffer (event_type, category, stream, level, payload, actor_id, trace_id, span_id, session_id, flow_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.EventType, rec.Category, rec.Stream, rec.Level, rec.Payload,
-		rec.ActorID, rec.TraceID, rec.SpanID, rec.SessionID,
+		rec.ActorID, rec.TraceID, rec.SpanID, rec.SessionID, rec.FlowID,
 		rec.CreatedAt,
 	)
 	return err
@@ -89,7 +91,7 @@ func (c *Cache) ReadBatch(n int) ([]CacheRecord, error) {
 	defer c.mu.Unlock()
 
 	rows, err := c.db.Query(
-		`SELECT id, event_type, category, stream, level, payload, actor_id, trace_id, span_id, session_id, created_at
+		`SELECT id, event_type, category, stream, level, payload, actor_id, trace_id, span_id, session_id, flow_id, created_at
 		 FROM log_buffer ORDER BY id ASC LIMIT ?`, n)
 	if err != nil {
 		return nil, err
@@ -100,7 +102,7 @@ func (c *Cache) ReadBatch(n int) ([]CacheRecord, error) {
 	for rows.Next() {
 		var r CacheRecord
 		if err := rows.Scan(&r.ID, &r.EventType, &r.Category, &r.Stream, &r.Level,
-			&r.Payload, &r.ActorID, &r.TraceID, &r.SpanID, &r.SessionID, &r.CreatedAt); err != nil {
+			&r.Payload, &r.ActorID, &r.TraceID, &r.SpanID, &r.SessionID, &r.FlowID, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, r)

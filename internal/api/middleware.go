@@ -92,6 +92,10 @@ func RequestLogMiddleware() func(http.Handler) http.Handler {
 				"status", rw.statusCode,
 				"duration_ms", duration,
 				"actor_id", actorID,
+				"trace_id", telemetry.TraceIDFromContext(r.Context()),
+				"span_id", telemetry.SpanIDFromContext(r.Context()),
+				"session_id", telemetry.SessionIDFromContext(r.Context()),
+				"flow_id", telemetry.FlowIDFromContext(r.Context()),
 			)
 		})
 	}

@@ -1,6 +1,6 @@
 /**
  * Telemetry SDK for the <zitadel-login> web component.
- * Initializes OTel Browser SDK for structured signal collection.
+ * Provides trace context propagation and signal collection.
  *
  * Signals collected:
  * - document.load timing (auto-instrumented)
@@ -10,6 +10,11 @@
  *
  * All spans are exported to the server's /v1/otel/traces endpoint
  * and flow into the Tier 2 OLAP pipeline (ADR-010).
+ *
+ * Trace strategy:
+ * - One trace_id is generated per login flow lifecycle.
+ * - All browser spans AND server-side fetch calls share this trace_id.
+ * - The flow_id is sent via X-Flow-ID header for server-side correlation.
  */
 
 // Types for the telemetry config
@@ -27,6 +32,32 @@ export interface TelemetryConfig {
 interface TelemetryProvider {
   shutdown: () => void
   getTracer: (name: string) => any
+}
+
+// ─── Trace ID Management ───────────────────────────────────
+// One trace_id per login flow. Shared across browser spans and
+// sent as Traceparent to the server so server events join the
+// same trace tree.
+let flowTraceId: string = generateHex(32)
+let currentFlowId: string = ''
+
+/** Get the current trace_id for use in Traceparent headers. */
+export function getFlowTraceId(): string {
+  return flowTraceId
+}
+
+/** Get the current flow_id for use in X-Flow-ID headers. */
+export function getFlowId(): string {
+  return currentFlowId
+}
+
+/**
+ * Generate a W3C Traceparent header value for the current flow.
+ * Each call gets a new span_id but shares the flow's trace_id.
+ */
+export function generateTraceparent(): string {
+  const spanId = generateHex(16)
+  return `00-${flowTraceId}-${spanId}-01`
 }
 
 // Lightweight tracer that works without the full OTel SDK.
@@ -88,6 +119,9 @@ class FallbackTracer implements TelemetryProvider {
     const batch = this.spans.splice(0)
     const endpoint = this.config.otelEndpoint || `${this.config.baseUrl}/v1/otel/traces`
 
+    // All spans in this batch share the flow's trace_id.
+    const traceId = flowTraceId
+
     // Convert to simplified OTLP JSON format.
     const otlpPayload = {
       resourceSpans: [{
@@ -99,8 +133,8 @@ class FallbackTracer implements TelemetryProvider {
         },
         scopeSpans: [{
           spans: batch.map(s => ({
-            traceId: generateTraceId(),
-            spanId: generateSpanId(),
+            traceId: traceId,
+            spanId: generateHex(16),
             name: s.name,
             kind: 1, // INTERNAL
             startTimeUnixNano: String(Math.floor((performance.timeOrigin + (s.startTime || 0)) * 1_000_000)),
@@ -119,7 +153,7 @@ class FallbackTracer implements TelemetryProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(this.config.flowId ? { 'X-Flow-ID': this.config.flowId } : {}),
+          ...(currentFlowId ? { 'X-Flow-ID': currentFlowId } : {}),
         },
         body: JSON.stringify(otlpPayload),
         keepalive: true,
@@ -192,25 +226,18 @@ export function shutdownTelemetry() {
 
 /**
  * Update the flow ID for trace linking (called when a new flow is created).
+ * Also generates a fresh trace_id for this flow lifecycle.
  */
 export function setFlowId(flowId: string) {
-  // The fallback tracer stores config by reference, so we update it.
-  if (provider && provider instanceof FallbackTracer) {
-    (provider as any).config.flowId = flowId
-  }
+  currentFlowId = flowId
+  // Generate a fresh trace_id for this flow — all subsequent spans and
+  // fetch calls will share this trace_id for end-to-end correlation.
+  flowTraceId = generateHex(32)
 }
 
 // ─── Helpers ───────────────────────────────────────────────
 
-function generateTraceId(): string {
-  return randomHex(32)
-}
-
-function generateSpanId(): string {
-  return randomHex(16)
-}
-
-function randomHex(length: number): string {
+function generateHex(length: number): string {
   const bytes = new Uint8Array(length / 2)
   crypto.getRandomValues(bytes)
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')

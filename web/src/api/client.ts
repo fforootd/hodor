@@ -1,4 +1,4 @@
-/** Shared fetch wrapper with auth handling */
+/** Shared fetch wrapper with auth handling and trace propagation */
 import { toast } from 'vue-sonner'
 
 // Runtime base path: injected by the Go server via <script>window.__ZITADEL_BASE_PATH__="..."</script>
@@ -60,11 +60,38 @@ function credentialsMode(): RequestCredentials {
   }
 }
 
+// ─── Trace Context ─────────────────────────────────────────
+// Each page navigation generates a new trace_id. All API calls
+// within that navigation share the trace_id (as parent), with
+// each call getting its own span_id. This creates a trace tree:
+//   Navigation trace_id
+//   ├── GET /v1/users (span AAA)
+//   ├── GET /v1/schemas (span BBB)
+//   └── PATCH /v1/users/123 (span CCC)
+
+let currentTraceId = generateHex(32)
+
+/** Reset the trace_id on navigation. Call from router.afterEach(). */
+export function resetTraceContext() {
+  currentTraceId = generateHex(32)
+}
+
+function generateHex(length: number): string {
+  const bytes = new Uint8Array(length / 2)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  // Generate a unique span_id for this request.
+  const spanId = generateHex(16)
+  const traceparent = `00-${currentTraceId}-${spanId}-01`
+
   const resp = await fetch(`${BASE_URL}${path}`, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
+      'Traceparent': traceparent,
       ...opts.headers,
     },
     credentials: credentialsMode(),
@@ -90,13 +117,15 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
-  put: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
-  patch: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
-  delete: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'DELETE', ...(body ? { body: JSON.stringify(body) } : {}) }),
+  get: <T>(path: string, headers?: Record<string, string>) =>
+    request<T>(path, { headers }),
+  post: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(body), headers }),
+  put: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body), headers }),
+  patch: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'PATCH', body: JSON.stringify(body), headers }),
+  delete: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'DELETE', ...(body ? { body: JSON.stringify(body) } : {}), headers }),
 }
+

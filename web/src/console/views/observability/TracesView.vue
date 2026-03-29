@@ -15,6 +15,7 @@
             <SelectItem value="trace">By Trace</SelectItem>
             <SelectItem value="session">By Session</SelectItem>
             <SelectItem value="identity">By Identity</SelectItem>
+            <SelectItem value="flow">By Flow</SelectItem>
           </SelectContent>
         </Select>
         <Select v-model="timeRange">
@@ -307,6 +308,7 @@ interface TraceGroup {
   trace_group: string
   trace_id: string
   session_id: string
+  flow_id: string
   actor_id: string
   started_at: string
   span_count: number
@@ -355,7 +357,8 @@ const groupExpr = computed(() => {
   switch (String(groupBy.value)) {
     case 'session': return 'session_id'
     case 'identity': return 'actor_id'
-    default: return "COALESCE(NULLIF(trace_id, ''), session_id)"
+    case 'flow': return 'flow_id'
+    default: return "COALESCE(NULLIF(trace_id, ''), NULLIF(session_id, ''), NULLIF(flow_id, ''))"
   }
 })
 
@@ -391,7 +394,7 @@ async function fetchRecentTraces() {
   const sql = `
     SELECT 
       ${ge} as trace_group, 
-      trace_id, session_id,
+      trace_id, session_id, flow_id,
       MIN(actor_id) as actor_id,
       MIN(event_type) as root_event_type,
       MIN(created_at) as started_at, 
@@ -399,7 +402,7 @@ async function fetchRecentTraces() {
       MAX(payload) as sample_payload
     FROM events 
     WHERE created_at >= '${cutoff}'
-      AND ((trace_id != '' AND trace_id IS NOT NULL) OR (session_id != '' AND session_id IS NOT NULL) OR (actor_id != '' AND actor_id IS NOT NULL))
+      AND ((trace_id != '' AND trace_id IS NOT NULL) OR (session_id != '' AND session_id IS NOT NULL) OR (actor_id != '' AND actor_id IS NOT NULL) OR (flow_id != '' AND flow_id IS NOT NULL))
     GROUP BY ${ge}
     ORDER BY started_at DESC 
     LIMIT 50
@@ -422,6 +425,7 @@ async function fetchRecentTraces() {
           trace_group: r.trace_group,
           trace_id: r.trace_id || '',
           session_id: r.session_id || '',
+          flow_id: r.flow_id || '',
           actor_id: r.actor_id || '',
           started_at: r.started_at,
           span_count: Number(r.span_count),
@@ -461,7 +465,7 @@ async function fetchFilteredTraces() {
   const sql = `
     SELECT 
       ${ge} as trace_group, 
-      trace_id, session_id,
+      trace_id, session_id, flow_id,
       MIN(actor_id) as actor_id,
       MIN(event_type) as root_event_type,
       MIN(created_at) as started_at, 
@@ -469,7 +473,7 @@ async function fetchFilteredTraces() {
       MAX(payload) as sample_payload
     FROM events 
     WHERE created_at >= '${cutoff}'
-      AND (trace_id = '${val}' OR session_id = '${val}' OR actor_id = '${val}')
+      AND (trace_id = '${val}' OR session_id = '${val}' OR actor_id = '${val}' OR flow_id = '${val}')
     GROUP BY ${ge}
     ORDER BY started_at DESC 
     LIMIT 50
@@ -492,6 +496,7 @@ async function fetchFilteredTraces() {
           trace_group: r.trace_group,
           trace_id: r.trace_id || '',
           session_id: r.session_id || '',
+          flow_id: r.flow_id || '',
           actor_id: r.actor_id || '',
           started_at: r.started_at,
           span_count: Number(r.span_count),

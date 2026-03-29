@@ -89,6 +89,7 @@ func (h *cacheSink) Handle(_ context.Context, r slog.Record) error {
 	traceID, _ := attrs["trace_id"].(string)
 	spanID, _ := attrs["span_id"].(string)
 	sessionID, _ := attrs["session_id"].(string)
+	flowID, _ := attrs["flow_id"].(string)
 
 	return h.cache.Write(CacheRecord{
 		EventType: eventType,
@@ -100,6 +101,7 @@ func (h *cacheSink) Handle(_ context.Context, r slog.Record) error {
 		TraceID:   traceID,
 		SpanID:    spanID,
 		SessionID: sessionID,
+		FlowID:    flowID,
 		CreatedAt: createdAtNow(),
 	})
 }

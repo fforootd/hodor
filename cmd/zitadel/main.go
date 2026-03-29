@@ -122,6 +122,10 @@ func startCmd() *cobra.Command {
 			}
 			defer db.Close()
 
+			// Activate analytics drainer now that DB is available.
+			// logging.Init was called without DB; this starts the cache→events pipeline.
+			logging.ActivateDrainer(db.SQL())
+
 			// Schema migration — behavior depends on config.
 			migrateMode := cfg.Database.ResolveMigrateMode()
 			switch migrateMode {

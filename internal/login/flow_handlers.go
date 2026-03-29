@@ -13,6 +13,7 @@ import (
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/telemetry"
 	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
@@ -70,6 +71,10 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, "flow not found or expired")
 		return
 	}
+
+	// Inject flow_id into context so all downstream EmitAuthEvent calls include it.
+	ctx := telemetry.WithFlowID(r.Context(), flowID)
+	r = r.WithContext(ctx)
 
 	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -422,6 +427,11 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		"flow_id":    flow.ID,
 		"method":     "flow",
 	})
+
+	// Backfill session_id on all prior flow events for bidirectional linkage.
+	h.db.SQL().ExecContext(r.Context(),
+		`UPDATE events SET session_id = ? WHERE flow_id = ? AND session_id = ''`,
+		sessResp.Session.ID, flow.ID)
 
 	// Determine redirect URI: OIDC redirect_uri if present, otherwise /console.
 	redirectURI := "/console"

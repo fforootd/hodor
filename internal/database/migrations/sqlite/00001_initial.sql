@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS events (
     span_id        TEXT,
     parent_span_id TEXT,
     session_id     TEXT,
+    flow_id        TEXT,
     sequence       INTEGER,
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     shipped_at     TEXT
@@ -308,6 +309,7 @@ CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id) WHERE trace_id I
 CREATE INDEX IF NOT EXISTS idx_events_ship ON events(shipped_at) WHERE shipped_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_events_category ON events(category, created_at);
 CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_id) WHERE actor_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_flow ON events(flow_id) WHERE flow_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_org ON events(org_id, created_at);
 
 -- ============================================================================

@@ -122,15 +122,17 @@ type RedactionConfig struct {
 // --- Global state ---
 
 var (
-	globalMu        sync.RWMutex
-	globalLevel     slog.Level
-	globalFormat    string
-	globalRouting   map[Stream][]Sink
-	globalRedactor  *Redactor
-	globalSinks     map[Sink]slog.Handler
-	globalStreamCfg map[Stream]StreamConfig
-	globalCache     *Cache
-	initialized     bool
+	globalMu           sync.RWMutex
+	globalLevel        slog.Level
+	globalFormat       string
+	globalRouting      map[Stream][]Sink
+	globalRedactor     *Redactor
+	globalSinks        map[Sink]slog.Handler
+	globalStreamCfg    map[Stream]StreamConfig
+	globalCache        *Cache
+	globalAnalyticsCfg *AnalyticsSinkConfig // saved for deferred drainer activation
+	globalDrainerCancel context.CancelFunc  // cancel handle for running drainer
+	initialized        bool
 )
 
 // Init configures the global logging system. Must be called once at startup
@@ -169,20 +171,17 @@ func Init(cfg Config) {
 			// The cache sink handler is created per-stream in New() based on stream mode.
 		}
 
+		// Save analytics config for deferred drainer activation.
+		analyticsCfg := cfg.Sinks.Analytics
+		globalAnalyticsCfg = &analyticsCfg
+
 		// Start drainer if we have both cache and a destination DB.
 		if globalCache != nil && cfg.DB != nil {
-			interval := 5 * time.Second
-			if cfg.Sinks.Analytics.DrainInterval != "" {
-				if d, err := time.ParseDuration(cfg.Sinks.Analytics.DrainInterval); err == nil {
-					interval = d
-				}
-			}
-			batch := cfg.Sinks.Analytics.DrainBatch
-			if batch <= 0 {
-				batch = 500
-			}
-			drainer := NewDrainer(globalCache, cfg.DB, interval, batch)
-			go drainer.Run(context.Background())
+			startDrainer(cfg.DB, cfg.Sinks.Analytics)
+		} else if globalCache != nil && cfg.DB == nil {
+			// Warn early: analytics is buffering to cache but drainer
+			// can't start until ActivateDrainer(db) is called after DB open.
+			slog.Warn("analytics sink enabled but DB not yet available — call logging.ActivateDrainer(db) after database opens")
 		}
 	}
 
@@ -202,6 +201,52 @@ func Init(cfg Config) {
 	globalRouting[StreamEventPusher] = parseSinks(cfg.Streams.EventPusher.Sinks, nil) // disabled by default
 
 	initialized = true
+}
+
+// startDrainer creates and starts a drainer goroutine with the given config.
+func startDrainer(db *sql.DB, cfg AnalyticsSinkConfig) {
+	interval := 5 * time.Second
+	if cfg.DrainInterval != "" {
+		if d, err := time.ParseDuration(cfg.DrainInterval); err == nil {
+			interval = d
+		}
+	}
+	batch := cfg.DrainBatch
+	if batch <= 0 {
+		batch = 500
+	}
+
+	// Cancel any previously running drainer.
+	if globalDrainerCancel != nil {
+		globalDrainerCancel()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	globalDrainerCancel = cancel
+
+	drainer := NewDrainer(globalCache, db, interval, batch)
+	go drainer.Run(ctx)
+
+	slog.Info("analytics drainer activated", "interval", interval.String(), "batch", batch)
+}
+
+// ActivateDrainer starts the analytics drainer with the given database.
+// Call this after the database has been opened if logging.Init was called
+// without a DB (the common startup sequence).
+func ActivateDrainer(db *sql.DB) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if globalCache == nil {
+		slog.Warn("ActivateDrainer called but analytics cache is not initialized")
+		return
+	}
+	if globalAnalyticsCfg == nil {
+		slog.Warn("ActivateDrainer called but analytics sink is not enabled")
+		return
+	}
+
+	startDrainer(db, *globalAnalyticsCfg)
 }
 
 // InitDefaults initializes logging with sensible defaults (text to stdout, info level).

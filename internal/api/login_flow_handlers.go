@@ -186,7 +186,7 @@ func (a *API) listLoginFlows(w http.ResponseWriter, r *http.Request) {
 		query += ` WHERE state = ?`
 		args = append(args, stateFilter)
 	}
-	query += ` ORDER BY priority DESC, created_at DESC`
+	query += ` ORDER BY COALESCE(is_default,0) DESC, priority DESC, created_at DESC`
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -299,6 +299,16 @@ func (a *API) deleteLoginFlow(w http.ResponseWriter, r *http.Request) {
 	flowID := r.PathValue("id")
 	if flowID == "" {
 		httputil.WriteError(w, http.StatusBadRequest, "id required")
+		return
+	}
+
+	// Prevent deletion of the default flow — it must always exist.
+	var isDefault int
+	_ = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COALESCE(is_default,0) FROM login_flows WHERE id = ?`, flowID,
+	).Scan(&isDefault)
+	if isDefault != 0 {
+		httputil.WriteError(w, http.StatusBadRequest, "cannot delete the default login flow — edit it instead")
 		return
 	}
 
