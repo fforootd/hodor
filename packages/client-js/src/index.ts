@@ -6,22 +6,22 @@
  *
  * @example
  * ```ts
- * import { client, listEntities, getEntity } from '@zitadel/client-js'
+ * import { client, listUsers, getUser } from '@zitadel/client-js'
  *
  * // Configure the client
  * client.setConfig({ baseUrl: 'https://your-instance.zitadel.cloud' })
  *
  * // Use generated SDK methods
- * const { data } = await listEntities({ query: { limit: 10 } })
+ * const { data } = await listUsers({ query: { limit: 10 } })
  * ```
  */
 
 // Re-export everything from the generated SDK.
-export * from './generated/types.gen.js'
-export * from './generated/sdk.gen.js'
+export * from './generated/types.gen'
+export * from './generated/sdk.gen'
 
 // Re-export the generated client instance for configuration.
-export { client } from './generated/client.gen.js'
+export { client } from './generated/client.gen'
 
 // Re-export the configurable client factory.
-export { createClient } from './client.js'
+export { createClient } from './client'

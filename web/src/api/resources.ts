@@ -91,16 +91,18 @@ import { api } from './client'
 // ------------------------------------------------------------------
 // Helper to unwrap hey-api responses: { data, error } → data
 // ------------------------------------------------------------------
-async function unwrap<T>(promise: Promise<{ data?: T; error?: unknown }>): Promise<T> {
-  const { data, error } = await promise
-  if (error !== undefined) throw error
-  return data as T
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function unwrap<T>(promise: Promise<any>): Promise<T> {
+  const res = await promise
+  if (res.error !== undefined) throw res.error
+  return res.data as T
 }
 
-async function unwrapItems<T>(promise: Promise<{ data?: { items: T[] }; error?: unknown }>): Promise<T[]> {
-  const { data, error } = await promise
-  if (error !== undefined) throw error
-  return ((data as any)?.items as T[]) || []
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function unwrapItems<T>(promise: Promise<any>): Promise<T[]> {
+  const res = await promise
+  if (res.error !== undefined) throw res.error
+  return (res.data?.items as T[]) || []
 }
 
 // ------------------------------------------------------------------
@@ -324,12 +326,8 @@ export interface FGAModelEdge {
   kind: string
 }
 
-export interface FGACheckResult {
-  allowed: boolean
-  user: string
-  relation: string
-  object: string
-}
+
+
 
 export interface FGATestResult {
   user: string
