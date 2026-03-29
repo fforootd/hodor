@@ -75,7 +75,7 @@ export const schemaIdentityCount = (opts?: Opts) => wrap(api.get<any>(`/v1/schem
 
 // Sessions
 export const listSessions = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/sessions${qs(opts?.query)}`))
-export const revokeSession = (opts?: Opts) => wrap(api.delete<any>(`/v1/sessions/${opts?.path?.id}`))
+export const revokeSession = (opts?: Opts) => wrap(api.post<any>(`/v1/sessions/${opts?.path?.id}/revoke`, {}))
 
 // Events
 export const listEvents = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/events${qs(opts?.query)}`))

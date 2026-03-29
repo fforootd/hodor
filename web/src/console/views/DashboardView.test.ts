@@ -20,6 +20,8 @@ const stubComponents = {
 // Stub lucide icons as simple spans.
 vi.mock('lucide-vue-next', () => ({
   Users: { template: '<span class="icon-users" />' },
+  Building2: { template: '<span class="icon-building" />' },
+  AppWindow: { template: '<span class="icon-appwindow" />' },
   FileJson: { template: '<span class="icon-filejson" />' },
   Globe: { template: '<span class="icon-globe" />' },
   Activity: { template: '<span class="icon-activity" />' },
@@ -28,12 +30,13 @@ vi.mock('lucide-vue-next', () => ({
 // Mock the resources module — this is the actual import used by DashboardView.
 vi.mock('@/api/resources', () => ({
   countsApi: { get: vi.fn() },
+  orgApi: { list: vi.fn() },
   schemaApi: { list: vi.fn() },
   providerApi: { list: vi.fn() },
   eventApi: { list: vi.fn() },
 }))
 
-import { countsApi, schemaApi, providerApi, eventApi } from '@/api/resources'
+import { countsApi, orgApi, schemaApi, providerApi, eventApi } from '@/api/resources'
 
 describe('DashboardView', () => {
   beforeEach(() => {
@@ -51,44 +54,49 @@ describe('DashboardView', () => {
   it('renders stat cards with placeholder values initially', () => {
     // APIs never resolve — test initial state.
     vi.mocked(countsApi.get).mockReturnValue(new Promise(() => {}))
+    vi.mocked(orgApi.list).mockReturnValue(new Promise(() => {}))
     vi.mocked(schemaApi.list).mockReturnValue(new Promise(() => {}))
     vi.mocked(providerApi.list).mockReturnValue(new Promise(() => {}))
     vi.mocked(eventApi.list).mockReturnValue(new Promise(() => {}))
 
     const wrapper = mountView()
     const cards = wrapper.findAll('.card')
-    // 4 stat cards + 1 events card = 5 total cards
-    expect(cards.length).toBeGreaterThanOrEqual(4)
+    // 6 stat cards + 1 events card = 7 total cards
+    expect(cards.length).toBeGreaterThanOrEqual(6)
 
     // Initial stat values should be '—' (em dash placeholder)
     const cardContents = wrapper.findAll('.card-content')
-    const statValues = cardContents.slice(0, 4).map((c) => c.find('.text-2xl').text())
+    const statValues = cardContents.slice(0, 6).map((c) => c.find('.text-2xl').text())
     statValues.forEach((val) => {
       expect(val).toBe('—')
     })
   })
 
   it('loads and displays stats from API', async () => {
-    vi.mocked(countsApi.get).mockResolvedValue({ human_user: 2, org: 1 })
+    vi.mocked(countsApi.get).mockResolvedValue({ users: 5, apps: 2 })
+    vi.mocked(orgApi.list).mockResolvedValue([{ id: 'o1', name: 'Default' }] as any)
     vi.mocked(schemaApi.list).mockResolvedValue([{ id: 's1', type: 'user', schema: {}, message: '', org_id: 'o1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', is_default: false, version: 1 }] as any)
     vi.mocked(providerApi.list).mockResolvedValue([{ id: 'p1', name: 'Google', type: 'oidc', enabled: true, config: {}, created_at: '2026-01-01T00:00:00Z' }, { id: 'p2', name: 'GitHub', type: 'oidc', enabled: true, config: {}, created_at: '2026-01-01T00:00:00Z' }])
     vi.mocked(eventApi.list).mockResolvedValue([
-      { id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z', actor_id: 'a1', aggregate_id: 'agg1', aggregate_type: 'identity', payload: {} },
+      { id: 'e1', event_type: 'identity.created', created_at: new Date().toISOString(), actor_id: 'a1', aggregate_id: 'agg1', aggregate_type: 'identity', payload: {} },
     ])
 
     const wrapper = mountView()
     await flushPromises()
 
     const cardContents = wrapper.findAll('.card-content')
-    const statValues = cardContents.slice(0, 4).map((c) => c.find('.text-2xl').text())
-    expect(statValues[0]).toBe('3') // identities (2 human_user + 1 org)
-    expect(statValues[1]).toBe('1') // schemas
-    expect(statValues[2]).toBe('2') // providers
-    expect(statValues[3]).toBe('1') // events
+    const statValues = cardContents.slice(0, 6).map((c) => c.find('.text-2xl').text())
+    expect(statValues[0]).toBe('5') // users
+    expect(statValues[1]).toBe('1') // orgs
+    expect(statValues[2]).toBe('2') // apps
+    expect(statValues[3]).toBe('1') // schemas
+    expect(statValues[4]).toBe('2') // providers
+    expect(statValues[5]).toBe('1') // events last 1h
   })
 
   it('displays "No recent events" when empty', async () => {
     vi.mocked(countsApi.get).mockResolvedValue({})
+    vi.mocked(orgApi.list).mockResolvedValue([])
     vi.mocked(schemaApi.list).mockResolvedValue([])
     vi.mocked(providerApi.list).mockResolvedValue([])
     vi.mocked(eventApi.list).mockResolvedValue([])
@@ -101,6 +109,7 @@ describe('DashboardView', () => {
 
   it('renders recent events with badges', async () => {
     vi.mocked(countsApi.get).mockResolvedValue({})
+    vi.mocked(orgApi.list).mockResolvedValue([])
     vi.mocked(schemaApi.list).mockResolvedValue([])
     vi.mocked(providerApi.list).mockResolvedValue([])
     vi.mocked(eventApi.list).mockResolvedValue([

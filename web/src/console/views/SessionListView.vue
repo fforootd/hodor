@@ -110,9 +110,9 @@
           <div class="space-y-1">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Entity ID</span>
             <RouterLink 
-              :to="`/users/${row.original.entity_id || row.original.identity_id}`" 
+              :to="`/users/${row.original.user_id}`" 
               class="block rounded bg-muted px-2 py-1 text-xs font-mono break-all text-primary hover:underline"
-            >{{ row.original.entity_id || row.original.identity_id || '—' }}</RouterLink>
+            >{{ row.original.user_id || '—' }}</RouterLink>
           </div>
           <div class="space-y-1">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">IP Address</span>
@@ -158,7 +158,7 @@
 import { ref, onMounted, computed, h } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink, useRoute } from 'vue-router'
-import { sessionApi, userApi, type Session } from '@/api/resources'
+import { sessionApi, userApi, orgApi, type Session } from '@/api/resources'
 import type { IdentityResponse } from '@zitadel/client-js'
 
 /** Session with a computed state field and optional server-side extras. */
@@ -180,6 +180,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 const sessions = ref<SessionWithState[]>([])
 const selectedRows = ref({})
 const userDict = ref<Record<string, {name: string, identifier: string}>>({})
+const orgDict = ref<Record<string, string>>({})
 const globalSearch = ref('')
 const isSearchOpen = ref(false)
 
@@ -295,9 +296,10 @@ function parseDevice(ua: string | undefined): { icon: any, label: string } {
 
 onMounted(async () => {
   try { 
-    const [sessRes, entitiesRes] = await Promise.all([
+    const [sessRes, entitiesRes, orgsRes] = await Promise.all([
       sessionApi.list(),
-      userApi.list().catch(() => []) 
+      userApi.list().catch(() => []),
+      orgApi.list().catch(() => []),
     ])
     
     sessions.value = sessRes.map((s: Session) => {
@@ -316,6 +318,13 @@ onMounted(async () => {
       }
     }
     userDict.value = dict
+
+    // Build org lookup.
+    const oDict: Record<string, string> = {}
+    for (const org of (orgsRes as any[])) {
+      oDict[org.id] = org.name || org.id
+    }
+    orgDict.value = oDict
 
     const user = route.query.user as string | undefined
     if (user) {
@@ -397,34 +406,37 @@ const columns = [
     header: 'Session ID',
     cell: info => h('span', { class: 'text-sm font-mono text-muted-foreground truncate max-w-[120px] inline-block', title: info.getValue() }, info.getValue() || '—'),
   }),
-  columnHelper.accessor(row => row.entity_id, {
+  columnHelper.accessor(row => row.user_id, {
     id: 'user',
     header: 'User',
-    cell: ({ row, getValue }) => {
-      const fallbackId = getValue() as string
-      const entityId = row.original.entity_id || ''
-      const entInfo = userDict.value[entityId]
+    cell: ({ row }) => {
+      const userId = row.original.user_id || ''
+      const entInfo = userDict.value[userId]
       
       const displayName = entInfo?.name || 'Unknown User'
-      const displaySub = entInfo?.identifier || fallbackId
+      const displaySub = entInfo?.identifier || userId
       
       return h('div', { class: 'flex items-center space-x-3 py-1' }, [
         h('div', { class: 'p-1.5 bg-muted rounded-md shrink-0' }, [h(Key, { class: 'w-4 h-4 text-muted-foreground' })]),
         h('div', { class: 'flex flex-col min-w-0 max-w-[200px]' }, [
-          h(RouterLink, { to: `/users/${entityId}`, class: 'text-sm font-medium hover:underline truncate' }, () => displayName),
+          h(RouterLink, { to: `/users/${userId}`, class: 'text-sm font-medium hover:underline truncate' }, () => displayName),
           h('span', { class: 'text-xs text-muted-foreground truncate', title: displaySub }, displaySub)
         ])
       ])
     },
   }),
-  columnHelper.accessor(() => '', {
+  columnHelper.accessor(row => row.org_id, {
     id: 'organization',
     header: ({ column }) => h(Button, {
       variant: 'ghost',
       class: '-ml-4',
       onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
     }, () => ['Organization', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
-    cell: () => h(Badge, { variant: 'secondary', class: 'font-normal bg-muted text-muted-foreground whitespace-nowrap' }, () => 'Acme Corp'),
+    cell: ({ row }) => {
+      const orgId = row.original.org_id || ''
+      const orgName = orgDict.value[orgId] || orgId || '—'
+      return h(Badge, { variant: 'secondary', class: 'font-normal bg-muted text-muted-foreground whitespace-nowrap' }, () => orgName)
+    },
   }),
   columnHelper.accessor('ip_address', {
     id: 'ip_address',

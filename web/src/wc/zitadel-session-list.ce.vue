@@ -51,6 +51,7 @@
           <thead>
             <tr class="border-b bg-[var(--color-muted)]">
               <th class="h-10 px-4 text-left font-medium text-[var(--color-muted-foreground)]">User</th>
+              <th class="h-10 px-4 text-left font-medium text-[var(--color-muted-foreground)]">Organization</th>
               <th class="h-10 px-4 text-left font-medium text-[var(--color-muted-foreground)]">IP</th>
               <th class="h-10 px-4 text-left font-medium text-[var(--color-muted-foreground)]">Device</th>
               <th class="h-10 px-4 text-left font-medium text-[var(--color-muted-foreground)]">Status</th>
@@ -65,8 +66,16 @@
               class="border-b last:border-0 hover:bg-[var(--color-muted)] cursor-pointer transition-colors"
               @click="onSessionClick(s)"
             >
-              <td class="p-4 font-medium">
-                {{ s.entity_id || '—' }}
+              <td class="p-4">
+                <div class="flex flex-col min-w-0">
+                  <span class="text-sm font-medium truncate">{{ userDict[s.user_id]?.name || 'Unknown User' }}</span>
+                  <span class="text-xs text-[var(--color-muted-foreground)] truncate">{{ userDict[s.user_id]?.identifier || s.user_id }}</span>
+                </div>
+              </td>
+              <td class="p-4">
+                <span class="inline-flex items-center rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs font-medium text-[var(--color-muted-foreground)]">
+                  {{ orgDict[s.org_id] || s.org_id || '—' }}
+                </span>
               </td>
               <td class="p-4 font-mono text-xs text-[var(--color-muted-foreground)]">{{ s.ip_address || '—' }}</td>
               <td class="p-4 text-[var(--color-muted-foreground)]">{{ parseUserAgent(s.user_agent) }}</td>
@@ -124,6 +133,8 @@ const isDark = computed(() => isDarkMode(props.darkMode))
 
 let api: WCApiClient
 const sessions = ref<any[]>([])
+const userDict = ref<Record<string, { name: string; identifier: string }>>({})
+const orgDict = ref<Record<string, string>>({})
 const loading = ref(false)
 const error = ref('')
 const searchQuery = ref('')
@@ -135,11 +146,17 @@ const revokedCount = computed(() => sessions.value.filter(s => s._state === 'rev
 const filteredSessions = computed(() => {
   if (!searchQuery.value.trim()) return sessions.value
   const q = searchQuery.value.toLowerCase()
-  return sessions.value.filter(s =>
-    (s.entity_id || '').toLowerCase().includes(q) ||
-    (s.ip_address || '').toLowerCase().includes(q) ||
-    (s.user_agent || '').toLowerCase().includes(q)
-  )
+  return sessions.value.filter(s => {
+    const userName = userDict.value[s.user_id]?.name || ''
+    const userIdentifier = userDict.value[s.user_id]?.identifier || ''
+    const orgName = orgDict.value[s.org_id] || ''
+    return userName.toLowerCase().includes(q) ||
+      userIdentifier.toLowerCase().includes(q) ||
+      (s.user_id || '').toLowerCase().includes(q) ||
+      (s.ip_address || '').toLowerCase().includes(q) ||
+      (s.user_agent || '').toLowerCase().includes(q) ||
+      orgName.toLowerCase().includes(q)
+  })
 })
 
 function parseUserAgent(ua: string): string {
@@ -172,14 +189,14 @@ function sessionState(s: any): string {
 function onSessionClick(s: any) {
   dispatchWCEvent(TAG_NAME, 'session-selected', {
     id: s.id,
-    entity_id: s.entity_id,
+    user_id: s.user_id,
     state: s._state,
   })
 }
 
 async function revokeSession(id: string) {
   try {
-    await api.delete(`/v1/sessions/${id}`)
+    await api.post<any>(`/v1/sessions/${id}/revoke`, {})
     const idx = sessions.value.findIndex(s => s.id === id)
     if (idx !== -1) {
       sessions.value[idx] = { ...sessions.value[idx], _state: 'revoked', revoked_at: new Date().toISOString() }
@@ -196,13 +213,36 @@ onMounted(async () => {
   loading.value = true
   error.value = ''
   try {
-    const data = await api.get<any>('/v1/sessions')
-    const items = data.items || []
+    // Fetch sessions, users, and orgs in parallel.
+    const [sessData, usersData, orgsData] = await Promise.all([
+      api.get<any>('/v1/sessions'),
+      api.get<any>('/v1/users').catch(() => ({ items: [] })),
+      api.get<any>('/v1/orgs').catch(() => ({ items: [] })),
+    ])
+
+    const items = sessData.items || []
     sessions.value = items.map((s: any) => ({ ...s, _state: sessionState(s) }))
 
-    // Filter by userId if provided
+    // Build user lookup.
+    const uDict: Record<string, { name: string; identifier: string }> = {}
+    for (const u of (usersData.items || usersData || [])) {
+      uDict[u.id] = {
+        name: u.display_name || 'Unknown User',
+        identifier: u.profile?.email || u.identifier || u.id,
+      }
+    }
+    userDict.value = uDict
+
+    // Build org lookup.
+    const oDict: Record<string, string> = {}
+    for (const o of (orgsData.items || orgsData || [])) {
+      oDict[o.id] = o.name || o.id
+    }
+    orgDict.value = oDict
+
+    // Filter by userId if provided.
     if (props.userId) {
-      sessions.value = sessions.value.filter(s => s.entity_id === props.userId)
+      sessions.value = sessions.value.filter(s => s.user_id === props.userId)
     }
   } catch (e: any) {
     error.value = e?.message || 'Failed to load sessions'
