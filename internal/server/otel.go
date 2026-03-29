@@ -39,6 +39,11 @@ func OTelMiddleware(next http.Handler) http.Handler {
 			ctx = telemetry.WithFlowID(ctx, flowID)
 		}
 
+		// Check for Fingerprint header (set by clients for device correlation).
+		if fingerprint := r.Header.Get("X-Fingerprint"); fingerprint != "" {
+			ctx = telemetry.WithFingerprint(ctx, fingerprint)
+		}
+
 		// Set trace headers in response for correlation.
 		w.Header().Set("X-Trace-Id", traceID)
 		w.Header().Set("X-Span-Id", spanID)

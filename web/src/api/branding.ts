@@ -1,5 +1,5 @@
 import { api } from './client'
-import { generateTraceparent, getFlowId } from '@/lib/telemetry'
+import { generateTraceparent, getFlowId, getDeviceFingerprint } from '@/lib/telemetry'
 
 export interface Branding {
   org_id: string
@@ -109,7 +109,7 @@ export const brandingApi = {
     api.get<Branding>(`/v1/branding${domain ? `?domain=${domain}` : ''}`),
 }
 
-/** Build flow correlation headers for Traceparent and X-Flow-ID propagation. */
+/** Build flow correlation headers for Traceparent, X-Flow-ID, and X-Fingerprint propagation. */
 function flowHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Traceparent': generateTraceparent(),
@@ -117,6 +117,10 @@ function flowHeaders(): Record<string, string> {
   const flowId = getFlowId()
   if (flowId) {
     headers['X-Flow-Id'] = flowId
+  }
+  const fingerprint = getDeviceFingerprint()
+  if (fingerprint) {
+    headers['X-Fingerprint'] = fingerprint
   }
   return headers
 }

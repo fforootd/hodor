@@ -96,6 +96,7 @@ func RequestLogMiddleware() func(http.Handler) http.Handler {
 				"span_id", telemetry.SpanIDFromContext(r.Context()),
 				"session_id", telemetry.SessionIDFromContext(r.Context()),
 				"flow_id", telemetry.FlowIDFromContext(r.Context()),
+				"device_fingerprint", telemetry.FingerprintFromContext(r.Context()),
 			)
 		})
 	}

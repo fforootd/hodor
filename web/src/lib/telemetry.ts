@@ -1,12 +1,14 @@
 /**
  * Telemetry SDK for the <zitadel-login> web component.
- * Provides trace context propagation and signal collection.
+ * Provides trace context propagation, signal collection,
+ * and device fingerprinting via ThumbmarkJS.
  *
  * Signals collected:
  * - document.load timing (auto-instrumented)
  * - Fetch durations to /v1/* (auto-instrumented, with traceparent propagation)
  * - User interaction events: click, input (auto-instrumented)
  * - Custom spans: login.flow.step_transition (manual)
+ * - Device fingerprint (via ThumbmarkJS — persistent, cookie-less)
  *
  * All spans are exported to the server's /v1/otel/traces endpoint
  * and flow into the Tier 2 OLAP pipeline (ADR-010).
@@ -15,6 +17,7 @@
  * - One trace_id is generated per login flow lifecycle.
  * - All browser spans AND server-side fetch calls share this trace_id.
  * - The flow_id is sent via X-Flow-ID header for server-side correlation.
+ * - Device fingerprint is sent via X-Fingerprint header for device correlation.
  */
 
 // Types for the telemetry config
@@ -58,6 +61,47 @@ export function getFlowId(): string {
 export function generateTraceparent(): string {
   const spanId = generateHex(16)
   return `00-${flowTraceId}-${spanId}-01`
+}
+
+// ─── Device Fingerprint (ThumbmarkJS) ──────────────────────
+// Computes a stable 32-char device fingerprint that persists
+// across tabs, refreshes, and private browsing. Cookie-less.
+let cachedFingerprint: string | null = null
+let fingerprintPromise: Promise<string> | null = null
+
+/**
+ * Get the device fingerprint. Returns cached value if available,
+ * or null if not yet computed.
+ */
+export function getDeviceFingerprint(): string | null {
+  return cachedFingerprint
+}
+
+/**
+ * Compute the device fingerprint asynchronously.
+ * Called during initTelemetry(). The result is cached for all subsequent calls.
+ */
+async function computeFingerprint(): Promise<string> {
+  if (cachedFingerprint) return cachedFingerprint
+  if (fingerprintPromise) return fingerprintPromise
+
+  fingerprintPromise = (async () => {
+    try {
+      const thumbmark = await import('@thumbmarkjs/thumbmarkjs')
+      const t = new thumbmark.Thumbmark()
+      const fpData = await t.get()
+      const fp = fpData.thumbmark
+      cachedFingerprint = fp
+      return fp
+    } catch {
+      // ThumbmarkJS failed (e.g., server-side rendering, blocked APIs).
+      // Fall back to a session-scoped random ID.
+      cachedFingerprint = `fallback-${generateHex(24)}`
+      return cachedFingerprint
+    }
+  })()
+
+  return fingerprintPromise
 }
 
 // Lightweight tracer that works without the full OTel SDK.
@@ -122,15 +166,19 @@ class FallbackTracer implements TelemetryProvider {
     // All spans in this batch share the flow's trace_id.
     const traceId = flowTraceId
 
+    // Build resource attributes including fingerprint if available.
+    const resourceAttrs: Array<{key: string, value: {stringValue: string}}> = [
+      { key: 'service.name', value: { stringValue: 'zitadel-login-wc' } },
+      { key: 'browser.language', value: { stringValue: navigator.language } },
+    ]
+    if (cachedFingerprint) {
+      resourceAttrs.push({ key: 'device.fingerprint', value: { stringValue: cachedFingerprint } })
+    }
+
     // Convert to simplified OTLP JSON format.
     const otlpPayload = {
       resourceSpans: [{
-        resource: {
-          attributes: [
-            { key: 'service.name', value: { stringValue: 'zitadel-login-wc' } },
-            { key: 'browser.language', value: { stringValue: navigator.language } },
-          ]
-        },
+        resource: { attributes: resourceAttrs },
         scopeSpans: [{
           spans: batch.map(s => ({
             traceId: traceId,
@@ -149,12 +197,15 @@ class FallbackTracer implements TelemetryProvider {
     }
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      }
+      if (currentFlowId) headers['X-Flow-ID'] = currentFlowId
+      if (cachedFingerprint) headers['X-Fingerprint'] = cachedFingerprint
+
       await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(currentFlowId ? { 'X-Flow-ID': currentFlowId } : {}),
-        },
+        headers,
         body: JSON.stringify(otlpPayload),
         keepalive: true,
       })
@@ -176,10 +227,14 @@ let provider: TelemetryProvider | null = null
  * Initialize the telemetry provider. Call once on component mount.
  * Uses the fallback tracer by default (no OTel dependency needed).
  * When OTel packages are installed, it will auto-detect and use them.
+ * Also kicks off async device fingerprint computation.
  */
 export function initTelemetry(config: TelemetryConfig): TelemetryProvider | null {
   if (config.enabled === false) return null
   if (provider) return provider
+
+  // Start fingerprint computation in the background (non-blocking).
+  computeFingerprint()
 
   provider = new FallbackTracer(config)
   return provider

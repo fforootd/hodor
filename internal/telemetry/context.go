@@ -76,3 +76,18 @@ func FlowIDFromContext(ctx context.Context) string {
 	}
 	return ""
 }
+
+const fingerprintKey contextKey = "device_fingerprint"
+
+// WithFingerprint adds a device fingerprint to the context.
+func WithFingerprint(ctx context.Context, fingerprint string) context.Context {
+	return context.WithValue(ctx, fingerprintKey, fingerprint)
+}
+
+// FingerprintFromContext gets the device fingerprint from the context.
+func FingerprintFromContext(ctx context.Context) string {
+	if val, ok := ctx.Value(fingerprintKey).(string); ok {
+		return val
+	}
+	return ""
+}

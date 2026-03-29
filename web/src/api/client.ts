@@ -1,5 +1,6 @@
 /** Shared fetch wrapper with auth handling and trace propagation */
 import { toast } from 'vue-sonner'
+import { getDeviceFingerprint } from '../lib/telemetry'
 
 // Runtime base path: injected by the Go server via <script>window.__ZITADEL_BASE_PATH__="..."</script>
 // This allows the same build to work at any sub-path (e.g., /auth, /zitadel).
@@ -87,11 +88,15 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const spanId = generateHex(16)
   const traceparent = `00-${currentTraceId}-${spanId}-01`
 
+  // Include device fingerprint if available (non-blocking — uses cached value).
+  const fingerprint = getDeviceFingerprint()
+
   const resp = await fetch(`${BASE_URL}${path}`, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
       'Traceparent': traceparent,
+      ...(fingerprint ? { 'X-Fingerprint': fingerprint } : {}),
       ...opts.headers,
     },
     credentials: credentialsMode(),

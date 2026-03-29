@@ -17,9 +17,11 @@
     "format": "prettier --write 'src/**/*.{ts,vue,css,json}'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "@guolao/vue-monaco-editor": "^1.6.0",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/vue-table": "^8.21.3",
+    "@thumbmarkjs/thumbmarkjs": "^1.7.6",
     "@unovis/ts": "^1.6.4",
     "@unovis/vue": "^1.6.4",
     "@vueuse/core": "^10.11.1",
