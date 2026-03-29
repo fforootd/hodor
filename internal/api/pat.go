@@ -14,7 +14,7 @@ import (
 // --- PAT types ---
 
 type CreatePATRequest struct {
-	EntityID string   `json:"entity_id"`
+	UserID string   `json:"user_id"`
 	Name     string   `json:"name"`
 	Scopes   []string `json:"scopes,omitempty"`
 }
@@ -22,7 +22,7 @@ type CreatePATRequest struct {
 type CreatePATResponse struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	EntityID  string   `json:"entity_id"`
+	UserID  string   `json:"user_id"`
 	Token     string   `json:"token"` // Only returned on creation — never again.
 	Scopes    []string `json:"scopes"`
 	CreatedAt string   `json:"created_at"`
@@ -31,7 +31,7 @@ type CreatePATResponse struct {
 type PATResponse struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
-	EntityID  string   `json:"entity_id"`
+	UserID  string   `json:"user_id"`
 	Scopes    []string `json:"scopes"`
 	LastUsed  *string  `json:"last_used,omitempty"`
 	CreatedAt string   `json:"created_at"`
@@ -50,8 +50,8 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.EntityID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "entity_id is required")
+	if req.UserID == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
 	if req.Name == "" {
@@ -67,7 +67,7 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 	// Verify entity exists.
 	var exists int
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT 1 FROM entities WHERE id = ?`, req.EntityID).Scan(&exists)
+		`SELECT 1 FROM users WHERE id = ?`, req.UserID).Scan(&exists)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "entity not found")
 		return
@@ -85,25 +85,25 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 	scopesJSON, _ := json.Marshal(req.Scopes)
 
 	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO tokens (id, type, token_hash, entity_id, name, scopes, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, created_at)
 		 VALUES (?, 'pat', ?, ?, ?, ?, ?)`,
-		tokenID, tokenHash, req.EntityID, req.Name, string(scopesJSON), now,
+		tokenID, tokenHash, req.UserID, req.Name, string(scopesJSON), now,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to create PAT: "+err.Error())
 		return
 	}
 
-	a.EmitAuthEvent(r.Context(), "pat.created", req.EntityID, map[string]any{
+	a.EmitAuthEvent(r.Context(), "pat.created", req.UserID, map[string]any{
 		"token_id":  tokenID,
 		"name":      req.Name,
-		"entity_id": req.EntityID,
+		"user_id": req.UserID,
 	})
 
 	httputil.WriteJSON(w, http.StatusCreated, CreatePATResponse{
 		ID:        tokenID,
 		Name:      req.Name,
-		EntityID:  req.EntityID,
+		UserID:  req.UserID,
 		Token:     rawToken,
 		Scopes:    req.Scopes,
 		CreatedAt: now,
@@ -111,17 +111,17 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
-	entityFilter := r.URL.Query().Get("entity_id")
+	entityFilter := r.URL.Query().Get("user_id")
 
 	var query string
 	var args []any
 	if entityFilter != "" {
-		query = `SELECT id, name, entity_id, scopes, last_used, created_at
-		         FROM tokens WHERE type = 'pat' AND revoked_at IS NULL AND entity_id = ?
+		query = `SELECT id, name, user_id, scopes, last_used, created_at
+		         FROM tokens WHERE type = 'pat' AND revoked_at IS NULL AND user_id = ?
 		         ORDER BY created_at DESC`
 		args = []any{entityFilter}
 	} else {
-		query = `SELECT id, name, entity_id, scopes, last_used, created_at
+		query = `SELECT id, name, user_id, scopes, last_used, created_at
 		         FROM tokens WHERE type = 'pat' AND revoked_at IS NULL
 		         ORDER BY created_at DESC`
 	}
@@ -138,7 +138,7 @@ func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
 		var p PATResponse
 		var scopesStr string
 		var lastUsed *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.EntityID, &scopesStr, &lastUsed, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.UserID, &scopesStr, &lastUsed, &p.CreatedAt); err != nil {
 			continue
 		}
 		json.Unmarshal([]byte(scopesStr), &p.Scopes)

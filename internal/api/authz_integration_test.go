@@ -10,8 +10,8 @@ import (
 
 func TestNonAdmin_CannotCreateSchema(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user-schema@test.com", "Schema User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user-schema@test.com", "Schema User")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithCookie("/v1/schemas", map[string]any{
 		"type":   "test_type",
@@ -24,8 +24,8 @@ func TestNonAdmin_CannotCreateSchema(t *testing.T) {
 
 func TestNonAdmin_CannotCreateEntity(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user-entity@test.com", "Entity User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user-entity@test.com", "Entity User")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithCookie("/v1/users", map[string]any{
 		"identifier":   "hacker@test.com",
@@ -38,8 +38,8 @@ func TestNonAdmin_CannotCreateEntity(t *testing.T) {
 
 func TestNonAdmin_CannotListSessions(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user-sess@test.com", "Session User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user-sess@test.com", "Session User")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.GetWithCookie("/v1/sessions", userToken)
 	if code != 403 {
@@ -49,8 +49,8 @@ func TestNonAdmin_CannotListSessions(t *testing.T) {
 
 func TestNonAdmin_CannotCreatePAT(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user-pat@test.com", "PAT User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user-pat@test.com", "PAT User")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithCookie("/v1/pats", map[string]any{
 		"name":   "evil-pat",
@@ -63,8 +63,8 @@ func TestNonAdmin_CannotCreatePAT(t *testing.T) {
 
 func TestNonAdmin_CannotImport(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user-import@test.com", "Import User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user-import@test.com", "Import User")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithCookie("/v1/import", map[string]any{
 		"identities": []any{},
@@ -76,8 +76,8 @@ func TestNonAdmin_CannotImport(t *testing.T) {
 
 func TestNonAdmin_CannotManageProviders(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user-prov@test.com", "Provider User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user-prov@test.com", "Provider User")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithCookie("/v1/providers", map[string]any{
 		"name": "Hacker Provider",
@@ -133,9 +133,9 @@ func TestAccount_SelfServiceOnlySeesOwnSessions(t *testing.T) {
 	items, _ := body["items"].([]any)
 	for _, item := range items {
 		session, _ := item.(map[string]any)
-		entityID, _ := session["entity_id"].(string)
-		if entityID != idA && entityID != "" {
-			t.Errorf("user A sees session for entity %v — IDOR vulnerability!", entityID)
+		userID, _ := session["user_id"].(string)
+		if userID != idA && userID != "" {
+			t.Errorf("user A sees session for entity %v — IDOR vulnerability!", userID)
 		}
 	}
 }
@@ -163,7 +163,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		{"POST", "/v1/schemas", map[string]any{"type": "t", "schema": map[string]any{"type": "object"}}, 401, 403, 201},
 		{"POST", "/v1/users", map[string]any{"identifier": "matrix@test.com"}, 401, 403, 201},
 		{"GET", "/v1/sessions", nil, 401, 403, 200},
-		{"POST", "/v1/pats", map[string]any{"name": "p", "entity_id": 1, "scopes": []string{"admin"}}, 401, 403, 201},
+		{"POST", "/v1/pats", map[string]any{"name": "p", "user_id": 1, "scopes": []string{"admin"}}, 401, 403, 201},
 		{"POST", "/v1/import", map[string]any{"identities": []any{}}, 401, 403, 200},
 		{"POST", "/v1/providers", map[string]any{"name": "P", "protocol": "oidc", "config": map[string]any{"issuer": "https://x.com", "client_id": "c"}}, 401, 403, 201},
 		// Self-service routes should work for both user and admin.

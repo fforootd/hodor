@@ -88,8 +88,8 @@ func TestRevokedSession_Returns401(t *testing.T) {
 
 func TestNonAdmin_CannotAccessAdminEndpoints(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user@test.com", "Test User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user@test.com", "Test User")
+	userToken := srv.CreateSession(userID)
 
 	// Non-admin should not be able to create schemas.
 	code, _ := srv.PostJSONWithBearer("/v1/schemas", map[string]any{
@@ -103,8 +103,8 @@ func TestNonAdmin_CannotAccessAdminEndpoints(t *testing.T) {
 
 func TestNonAdmin_CanAccessOwnProfile(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user@test.com", "Test User")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user@test.com", "Test User")
+	userToken := srv.CreateSession(userID)
 
 	code, body := srv.GetWithBearer("/v1/account/profile", userToken)
 	if code != 200 {
@@ -140,7 +140,7 @@ func TestBulkImport_CreatesIdentities(t *testing.T) {
 	token := srv.LoginAdmin()
 
 	code, body := srv.PostJSONWithBearer("/v1/import", map[string]any{
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "bulk1@test.com", "display_name": "Bulk One", "password": "pass123"},
 			{"identifier": "bulk2@test.com", "display_name": "Bulk Two", "password": "pass456"},
 		},
@@ -163,14 +163,14 @@ func TestBulkImport_SkipsDuplicates(t *testing.T) {
 
 	// Import once.
 	srv.PostJSONWithBearer("/v1/import", map[string]any{
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "dup@test.com", "display_name": "Dup User"},
 		},
 	}, token)
 
 	// Import again with same identifier.
 	code, body := srv.PostJSONWithBearer("/v1/import", map[string]any{
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "dup@test.com", "display_name": "Dup User Updated"},
 		},
 		"on_conflict": "skip",
@@ -194,11 +194,11 @@ func TestBulkImport_WithProviders(t *testing.T) {
 		"providers": []map[string]any{
 			{"name": "Test OIDC", "protocol": "oidc", "config": map[string]any{"issuer": "https://test.example.com"}},
 		},
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "linked@test.com", "display_name": "Linked User"},
 		},
 		"linked_accounts": []map[string]any{
-			{"entity_identifier": "linked@test.com", "provider_name": "Test OIDC", "external_sub": "ext-123"},
+			{"user_identifier": "linked@test.com", "provider_name": "Test OIDC", "external_sub": "ext-123"},
 		},
 		"on_conflict": "skip",
 	}, token)
@@ -218,7 +218,7 @@ func TestIdentitiesBulk_Creates(t *testing.T) {
 	token := srv.LoginAdmin()
 
 	code, body := srv.PostJSONWithBearer("/v1/admin/bulk", map[string]any{
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "batch1@test.com", "display_name": "Batch 1"},
 			{"identifier": "batch2@test.com", "display_name": "Batch 2"},
 			{"identifier": "batch3@test.com", "display_name": "Batch 3"},
@@ -245,7 +245,7 @@ func TestBulkImport_Unauthorized(t *testing.T) {
 
 	// No token — should be 401.
 	code, _ := srv.PostJSONWithBearer("/v1/import", map[string]any{
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "unauth@test.com"},
 		},
 	}, "")
@@ -257,11 +257,11 @@ func TestBulkImport_Unauthorized(t *testing.T) {
 
 func TestBulkImport_NonAdminForbidden(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("regularuser@test.com", "Regular")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("regularuser@test.com", "Regular")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithBearer("/v1/import", map[string]any{
-		"entities": []map[string]any{
+		"users": []map[string]any{
 			{"identifier": "hack@test.com"},
 		},
 	}, userToken)

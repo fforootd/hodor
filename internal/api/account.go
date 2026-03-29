@@ -23,7 +23,7 @@ func (a *API) RegisterAccountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/account/activity", a.requireSession(a.listOwnActivity))
 }
 
-func callerIdentityID(r *http.Request) string {
+func callerIduserID(r *http.Request) string {
 	return r.Header.Get("X-Identity-Id")
 }
 
@@ -34,7 +34,7 @@ func callerSessionID(r *http.Request) string {
 // --- GET /v1/account/profile ---
 
 func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
-	identityID := callerIdentityID(r)
+	userID := callerIduserID(r)
 
 	// Load identity.
 	var identifier, displayName, state, profile, schemaID, createdAt, updatedAt string
@@ -42,7 +42,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT identifier, COALESCE(display_name,''), state, COALESCE(profile,'{}'),
 		        org_id, COALESCE(schema_id,''), created_at, updated_at
-		 FROM entities WHERE id = ?`, identityID,
+		 FROM users WHERE id = ?`, userID,
 	).Scan(&identifier, &displayName, &state, &profile, &orgID, &schemaID, &createdAt, &updatedAt)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
@@ -68,13 +68,13 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 	fieldPerms := redact.FieldPermissions(schemaJSON, defaultEditable)
 
 	// Emit view event.
-	a.EmitAuthEvent(r.Context(), "account.profile_viewed", identityID, map[string]any{
-		"entity_id": identityID,
+	a.EmitAuthEvent(r.Context(), "account.profile_viewed", userID, map[string]any{
+		"user_id": userID,
 	})
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"identity": map[string]any{
-			"id":           identityID,
+			"id":           userID,
 			"identifier":   identifier,
 			"display_name": displayName,
 			"state":        state,
@@ -94,7 +94,7 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 // --- PATCH /v1/account/profile ---
 
 func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
-	identityID := callerIdentityID(r)
+	userID := callerIduserID(r)
 
 	var req struct {
 		DisplayName *string        `json:"display_name,omitempty"`
@@ -108,7 +108,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	// Load current identity data.
 	var currentProfile, schemaID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(profile,'{}'), COALESCE(schema_id,'') FROM entities WHERE id = ?`, identityID,
+		`SELECT COALESCE(profile,'{}'), COALESCE(schema_id,'') FROM users WHERE id = ?`, userID,
 	).Scan(&currentProfile, &schemaID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
@@ -174,9 +174,9 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 
 	updates = append(updates, "profile = ?")
 	args = append(args, string(profileBytes))
-	args = append(args, identityID)
+	args = append(args, userID)
 
-	query := fmt.Sprintf("UPDATE entities SET %s WHERE id = ?", strings.Join(updates, ", "))
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(updates, ", "))
 	_, err = a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -184,7 +184,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit event with redacted before/after.
-	a.EmitAuthEvent(r.Context(), "account.profile_updated", identityID, map[string]any{
+	a.EmitAuthEvent(r.Context(), "account.profile_updated", userID, map[string]any{
 		"fields_changed": changedFields,
 		"before":         redact.Payload(schemaJSON, beforeProfile),
 		"after":          redact.Payload(schemaJSON, existingProfile),
@@ -196,13 +196,13 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 // --- GET /v1/account/sessions ---
 
 func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
-	identityID := callerIdentityID(r)
+	userID := callerIduserID(r)
 	currentSessionID := callerSessionID(r)
 
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT id, user_agent, ip_address, created_at, expires_at
-		 FROM sessions WHERE entity_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
-		 ORDER BY created_at DESC`, identityID,
+		 FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
+		 ORDER BY created_at DESC`, userID,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
@@ -238,17 +238,17 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 // --- POST /v1/account/sessions/{id}/revoke ---
 
 func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
-	identityID := callerIdentityID(r)
+	userID := callerIduserID(r)
 	sessionID := r.PathValue("id")
 
 	// Only allow revoking own sessions.
 	var ownerID string
 	var userAgent, ipAddress string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT entity_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
+		`SELECT user_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
 		 FROM sessions WHERE id = ? AND revoked_at IS NULL`, sessionID,
 	).Scan(&ownerID, &userAgent, &ipAddress)
-	if err != nil || ownerID != identityID {
+	if err != nil || ownerID != userID {
 		httputil.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -256,7 +256,7 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	_, _ = a.db.SQL().ExecContext(r.Context(),
 		`UPDATE sessions SET revoked_at = datetime('now') WHERE id = ?`, sessionID)
 
-	a.EmitAuthEvent(r.Context(), "account.session_revoked", identityID, map[string]any{
+	a.EmitAuthEvent(r.Context(), "account.session_revoked", userID, map[string]any{
 		"session_id": sessionID,
 		"user_agent": userAgent,
 		"ip_address": ipAddress,
@@ -268,13 +268,13 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 // --- POST /v1/account/sessions/revoke-others ---
 
 func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
-	identityID := callerIdentityID(r)
+	userID := callerIduserID(r)
 	currentSessionID := callerSessionID(r)
 
 	result, err := a.db.SQL().ExecContext(r.Context(),
 		`UPDATE sessions SET revoked_at = datetime('now')
-		 WHERE entity_id = ? AND id != ? AND revoked_at IS NULL`,
-		identityID, currentSessionID,
+		 WHERE user_id = ? AND id != ? AND revoked_at IS NULL`,
+		userID, currentSessionID,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "revocation failed")
@@ -283,7 +283,7 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 
 	count, _ := result.RowsAffected()
 
-	a.EmitAuthEvent(r.Context(), "account.sessions_revoked_all", identityID, map[string]any{
+	a.EmitAuthEvent(r.Context(), "account.sessions_revoked_all", userID, map[string]any{
 		"count":           count,
 		"kept_session_id": currentSessionID,
 	})
@@ -294,7 +294,7 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 // --- GET /v1/account/activity ---
 
 func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
-	identityID := callerIdentityID(r)
+	userID := callerIduserID(r)
 
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -307,7 +307,7 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT id, event_type, COALESCE(aggregate_type,''), COALESCE(payload,'{}'), created_at
 		 FROM events WHERE actor_id = ?
-		 ORDER BY id DESC LIMIT ?`, identityID, limit,
+		 ORDER BY id DESC LIMIT ?`, userID, limit,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")

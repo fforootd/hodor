@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT PRIMARY KEY,
-    entity_id   TEXT NOT NULL,
+    user_id   TEXT NOT NULL,
     org_id      TEXT NOT NULL DEFAULT '0',
     token_hash  TEXT NOT NULL,
     user_agent  TEXT,
@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	if len(sessionCols) == 0 {
 		t.Fatal("no columns found for sessions table")
 	}
-	expectedSession := []string{"id", "entity_id", "org_id", "token_hash", "user_agent", "ip_address", "metadata", "created_at", "expires_at", "revoked_at"}
+	expectedSession := []string{"id", "user_id", "org_id", "token_hash", "user_agent", "ip_address", "metadata", "created_at", "expires_at", "revoked_at"}
 	if len(sessionCols) != len(expectedSession) {
 		t.Errorf("sessions: expected %d columns, got %d: %v", len(expectedSession), len(sessionCols), sessionCols)
 	}
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT PRIMARY KEY,
-    entity_id   TEXT NOT NULL,
+    user_id   TEXT NOT NULL,
     org_id      TEXT NOT NULL DEFAULT '0',
     token_hash  TEXT NOT NULL,
     user_agent  TEXT,

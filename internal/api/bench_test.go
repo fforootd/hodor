@@ -66,7 +66,7 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 
 	// Get admin ID and create a PAT.
 	var adminID string
-	db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID)
+	db.SQL().QueryRow(`SELECT id FROM users WHERE identifier = 'admin'`).Scan(&adminID)
 
 	token := createBenchPAT(b, db, adminID)
 
@@ -77,7 +77,7 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 	for i := 0; i < seedCount; i++ {
 		ids[i] = id.New()
 		tx.Exec(
-			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
+			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("bench-user-%d", i), fmt.Sprintf("Bench User %d", i), now, now)
 	}
@@ -88,7 +88,7 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 	return &benchServer{ts: ts, db: db, token: token, ids: ids}
 }
 
-func createBenchPAT(b *testing.B, db *database.DB, entityID string) string {
+func createBenchPAT(b *testing.B, db *database.DB, userID string) string {
 	b.Helper()
 
 	raw := "zit_pat_" + id.New()
@@ -97,9 +97,9 @@ func createBenchPAT(b *testing.B, db *database.DB, entityID string) string {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 
 	_, err := db.SQL().Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, name, scopes, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, created_at)
 		 VALUES (?, 'pat', ?, ?, 'bench-pat', '["admin"]', ?)`,
-		tokenID, hash, entityID, now)
+		tokenID, hash, userID, now)
 	if err != nil {
 		b.Fatalf("insert PAT: %v", err)
 	}
@@ -188,9 +188,9 @@ func BenchmarkAPICreateSession(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		entityID := bs.ids[benchRandN(len(bs.ids))]
+		userID := bs.ids[benchRandN(len(bs.ids))]
 		status, _ := benchDoJSON(b, bs, "POST", "/v1/sessions", map[string]any{
-			"entity_id": entityID,
+			"user_id": userID,
 		})
 		if status != http.StatusCreated {
 			b.Fatalf("create session: got %d", status)

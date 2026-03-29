@@ -159,7 +159,7 @@ func buildCheckObject(fgaType, resourceID string, r *http.Request) string {
 
 	// Session and entity operations → always org-level
 	// Sessions are ephemeral (no per-session FGA tuples).
-	// Entities fall back to org until creation handlers wire OnEntityCreated.
+	// Entities fall back to org until creation handlers wire OnResourceCreated.
 	case fgaType == "session" || fgaType == "entity":
 		orgID := resolveOrgID(r)
 		return "org:" + orgID

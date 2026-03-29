@@ -140,7 +140,7 @@ func TestCheck_EntityPermissions(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	err = svc.OnEntityCreated(ctx, "entity1", "admin", "org1")
+	err = svc.OnResourceCreated(ctx, "entity1", "admin", "org1")
 	if err != nil {
 		t.Fatalf("entity created: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestDeleteTuples(t *testing.T) {
 	}
 }
 
-func TestOnEntityDeleted(t *testing.T) {
+func TestOnResourceDeleted(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -331,7 +331,7 @@ func TestOnEntityDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	err = svc.OnEntityCreated(ctx, "ent1", "admin", "org1")
+	err = svc.OnResourceCreated(ctx, "ent1", "admin", "org1")
 	if err != nil {
 		t.Fatalf("entity created: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestOnEntityDeleted(t *testing.T) {
 	}
 
 	// Delete entity.
-	err = svc.OnEntityDeleted(ctx, "ent1")
+	err = svc.OnResourceDeleted(ctx, "ent1")
 	if err != nil {
 		t.Fatalf("delete entity: %v", err)
 	}

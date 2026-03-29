@@ -99,7 +99,7 @@ func seedTestEntities(t *testing.T, db *sql.DB) {
 
 	for _, u := range users {
 		dataJSON, _ := json.Marshal(u.data)
-		db.Exec(`INSERT INTO entities (id, schema_id, identifier, display_name, data, org_id, created_at, updated_at)
+		db.Exec(`INSERT INTO users (id, schema_id, identifier, display_name, data, org_id, created_at, updated_at)
 			VALUES (?, 'human_user_v1', ?, ?, ?, '', datetime('now'), datetime('now'))`,
 			u.id, u.name, u.name, string(dataJSON))
 	}
@@ -301,7 +301,7 @@ func TestService_Install(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, err := svc.Install(context.Background(), "rate-limit-by-path", map[string]any{
+	userID, err := svc.Install(context.Background(), "rate-limit-by-path", map[string]any{
 		"path_prefix":         "/v1/admin",
 		"requests_per_minute": 200,
 		"burst":               20,
@@ -309,13 +309,13 @@ func TestService_Install(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if entityID == "" {
+	if userID == "" {
 		t.Fatal("empty entity ID")
 	}
 
 	// Verify entity was created.
 	var schemaID, dataJSON string
-	err = db.QueryRow(`SELECT schema_id, data FROM entities WHERE id = ?`, entityID).Scan(&schemaID, &dataJSON)
+	err = db.QueryRow(`SELECT schema_id, data FROM users WHERE id = ?`, userID).Scan(&schemaID, &dataJSON)
 	if err != nil {
 		t.Fatalf("query entity: %v", err)
 	}
@@ -341,13 +341,13 @@ func TestService_Install_WithDefaults(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, err := svc.Install(context.Background(), "rate-limit-by-path", nil)
+	userID, err := svc.Install(context.Background(), "rate-limit-by-path", nil)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -361,7 +361,7 @@ func TestService_Install_LoginFlow(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, err := svc.Install(context.Background(), "passkey-first", map[string]any{
+	userID, err := svc.Install(context.Background(), "passkey-first", map[string]any{
 		"primary_color":      "#ff6600",
 		"heading_text":       "Welcome to Acme",
 		"allow_registration": false,
@@ -371,7 +371,7 @@ func TestService_Install_LoginFlow(t *testing.T) {
 	}
 
 	var schemaID, dataJSON string
-	db.QueryRow(`SELECT schema_id, data FROM entities WHERE id = ?`, entityID).Scan(&schemaID, &dataJSON)
+	db.QueryRow(`SELECT schema_id, data FROM users WHERE id = ?`, userID).Scan(&schemaID, &dataJSON)
 
 	if schemaID != "login_flow_v1" {
 		t.Errorf("schema_id = %q, want login_flow_v1", schemaID)
@@ -401,7 +401,7 @@ func TestService_Install_SSOEnterprise(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, err := svc.Install(context.Background(), "sso-enterprise", map[string]any{
+	userID, err := svc.Install(context.Background(), "sso-enterprise", map[string]any{
 		"company_name": "ACME Corp",
 	})
 	if err != nil {
@@ -409,7 +409,7 @@ func TestService_Install_SSOEnterprise(t *testing.T) {
 	}
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -433,7 +433,7 @@ func TestInstall_HasCatalogMetadata(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, err := svc.Install(context.Background(), "google-oidc", map[string]any{
+	userID, err := svc.Install(context.Background(), "google-oidc", map[string]any{
 		"client_id":     "test-id",
 		"client_secret": "test-secret",
 	})
@@ -442,7 +442,7 @@ func TestInstall_HasCatalogMetadata(t *testing.T) {
 	}
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -471,14 +471,14 @@ func TestCatalogState_Linked(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, _ := svc.Install(context.Background(), "rate-limit-by-path", map[string]any{
+	userID, _ := svc.Install(context.Background(), "rate-limit-by-path", map[string]any{
 		"path_prefix":         "/v1/test",
 		"requests_per_minute": 100,
 		"burst":               10,
 	})
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -493,10 +493,10 @@ func TestCatalogState_Forked(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, _ := svc.Install(context.Background(), "rate-limit-by-path", nil)
+	userID, _ := svc.Install(context.Background(), "rate-limit-by-path", nil)
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -526,10 +526,10 @@ func TestCatalogState_ForkedLoginFlow(t *testing.T) {
 	db := setupTestDB(t)
 	svc := New(config.CatalogConfig{}, db)
 
-	entityID, _ := svc.Install(context.Background(), "passkey-first", nil)
+	userID, _ := svc.Install(context.Background(), "passkey-first", nil)
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
@@ -1123,10 +1123,10 @@ func BenchmarkCatalogState(b *testing.B) {
 		db.Exec(`INSERT OR IGNORE INTO schemas (id, type, is_default) VALUES (?, ?, true)`, st+"_v1", st)
 	}
 	db.Exec(`CREATE TABLE IF NOT EXISTS entities (id TEXT PRIMARY KEY, schema_id TEXT DEFAULT '', identifier TEXT DEFAULT '', display_name TEXT DEFAULT '', data TEXT DEFAULT '{}', org_id TEXT DEFAULT '', created_at TEXT, updated_at TEXT)`)
-	entityID, _ := svc.Install(context.Background(), "rate-limit-by-path", nil)
+	userID, _ := svc.Install(context.Background(), "rate-limit-by-path", nil)
 
 	var dataJSON string
-	db.QueryRow(`SELECT data FROM entities WHERE id = ?`, entityID).Scan(&dataJSON)
+	db.QueryRow(`SELECT data FROM users WHERE id = ?`, userID).Scan(&dataJSON)
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
 

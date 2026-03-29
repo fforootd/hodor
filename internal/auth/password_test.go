@@ -26,16 +26,16 @@ func newTestDB(t *testing.T) *database.DB {
 
 func createTestIdentity(t *testing.T, db *database.DB) string {
 	t.Helper()
-	identityID := id.New()
+	userID := id.New()
 	_, err := db.SQL().Exec(
-		`INSERT INTO entities (id, org_id, identifier, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, '1', 'test@example.com', 'active', '{"display_name":"Test User"}', '{}', datetime('now'), datetime('now'))`,
-		identityID,
+		userID,
 	)
 	if err != nil {
 		t.Fatalf("create identity: %v", err)
 	}
-	return identityID
+	return userID
 }
 
 func TestHashAndVerify(t *testing.T) {
@@ -80,15 +80,15 @@ func TestSetAndCheckPassword(t *testing.T) {
 	pw := NewPasswords(db)
 	ctx := context.Background()
 
-	identityID := createTestIdentity(t, db)
+	userID := createTestIdentity(t, db)
 
 	// Set password.
-	if err := pw.SetPassword(ctx, identityID, "my-secret-password"); err != nil {
+	if err := pw.SetPassword(ctx, userID, "my-secret-password"); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}
 
 	// Check correct password.
-	ok, err := pw.CheckPassword(ctx, identityID, "my-secret-password")
+	ok, err := pw.CheckPassword(ctx, userID, "my-secret-password")
 	if err != nil {
 		t.Fatalf("CheckPassword: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestSetAndCheckPassword(t *testing.T) {
 	}
 
 	// Check wrong password.
-	ok, err = pw.CheckPassword(ctx, identityID, "wrong-password")
+	ok, err = pw.CheckPassword(ctx, userID, "wrong-password")
 	if err != nil {
 		t.Fatalf("CheckPassword error: %v", err)
 	}
@@ -120,20 +120,20 @@ func TestSetPasswordReplace(t *testing.T) {
 	pw := NewPasswords(db)
 	ctx := context.Background()
 
-	identityID := createTestIdentity(t, db)
+	userID := createTestIdentity(t, db)
 
 	// Set initial password.
-	if err := pw.SetPassword(ctx, identityID, "password-v1"); err != nil {
+	if err := pw.SetPassword(ctx, userID, "password-v1"); err != nil {
 		t.Fatalf("SetPassword v1: %v", err)
 	}
 
 	// Replace with new password.
-	if err := pw.SetPassword(ctx, identityID, "password-v2"); err != nil {
+	if err := pw.SetPassword(ctx, userID, "password-v2"); err != nil {
 		t.Fatalf("SetPassword v2: %v", err)
 	}
 
 	// Old password should fail.
-	ok, err := pw.CheckPassword(ctx, identityID, "password-v1")
+	ok, err := pw.CheckPassword(ctx, userID, "password-v1")
 	if err != nil {
 		t.Fatalf("CheckPassword old: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestSetPasswordReplace(t *testing.T) {
 	}
 
 	// New password should succeed.
-	ok, err = pw.CheckPassword(ctx, identityID, "password-v2")
+	ok, err = pw.CheckPassword(ctx, userID, "password-v2")
 	if err != nil {
 		t.Fatalf("CheckPassword new: %v", err)
 	}
@@ -292,13 +292,13 @@ func TestCheckPassword_TimingEquality(t *testing.T) {
 	pw := NewPasswords(db)
 	ctx := context.Background()
 
-	identityID := createTestIdentity(t, db)
-	if err := pw.SetPassword(ctx, identityID, "real-password"); err != nil {
+	userID := createTestIdentity(t, db)
+	if err := pw.SetPassword(ctx, userID, "real-password"); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}
 
 	// Wrong password for existing user.
-	ok1, err := pw.CheckPassword(ctx, identityID, "wrong-password")
+	ok1, err := pw.CheckPassword(ctx, userID, "wrong-password")
 	if err != nil {
 		t.Fatalf("CheckPassword existing: %v", err)
 	}

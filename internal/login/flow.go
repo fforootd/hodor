@@ -700,7 +700,7 @@ type Flow struct {
 	ID           string
 	SchemaConfig *SchemaAuthConfig
 	CurrentStep  StepType
-	IdentityID   string
+	IduserID   string
 	Identifier   string
 	DisplayName  string
 	Verified     bool

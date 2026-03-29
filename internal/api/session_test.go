@@ -9,8 +9,8 @@ import (
 
 func TestSession_AdminCanListAndRevoke(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user1@test.com", "User 1")
-	_ = srv.CreateSession(identityID) // create a session for the user
+	userID := srv.CreateIdentity("user1@test.com", "User 1")
+	_ = srv.CreateSession(userID) // create a session for the user
 
 	adminToken := srv.LoginAdmin()
 
@@ -45,8 +45,8 @@ func TestSession_AdminCanListAndRevoke(t *testing.T) {
 
 func TestSession_NonAdminCannotManage(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user2@test.com", "User 2")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user2@test.com", "User 2")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.GetWithBearer("/v1/sessions", userToken)
 	if code != 403 {

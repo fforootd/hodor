@@ -17,7 +17,7 @@ import (
 
 type SessionResponse struct {
 	ID         string  `json:"id"`
-	IdentityID string  `json:"entity_id"`
+	IduserID string  `json:"user_id"`
 	OrgID      string  `json:"org_id"`
 	UserAgent  string  `json:"user_agent,omitempty"`
 	IPAddress  string  `json:"ip_address,omitempty"`
@@ -27,7 +27,7 @@ type SessionResponse struct {
 }
 
 type CreateSessionRequest struct {
-	IdentityID string `json:"entity_id"`
+	IduserID string `json:"user_id"`
 	UserAgent  string `json:"user_agent,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`
 }
@@ -115,12 +115,12 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.IdentityID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "entity_id is required")
+	if req.IduserID == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
 
-	resp, err := a.CreateSessionInternal(r.Context(), req.IdentityID, req.UserAgent, req.IPAddress, nil)
+	resp, err := a.CreateSessionInternal(r.Context(), req.IduserID, req.UserAgent, req.IPAddress, nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -131,7 +131,7 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 
 // CreateSessionInternal creates a session programmatically (used by UI login).
 // signals may be nil for legacy callers.
-func (a *API) CreateSessionInternal(ctx context.Context, identityID string, userAgent, ipAddress string, signals *ClientSignals) (*CreateSessionResponse, error) {
+func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals) (*CreateSessionResponse, error) {
 	sessionID := id.New()
 
 	rawToken, tokenHash, err := generatePrefixedToken(PrefixSession)
@@ -177,9 +177,9 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID string, user
 
 	// Verify identity exists.
 	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM entities WHERE id = ?`, identityID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ?`, userID).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("identity %s not found", identityID)
+		return nil, fmt.Errorf("identity %s not found", userID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("check identity: %w", err)
@@ -187,9 +187,9 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID string, user
 
 	// Insert session (metadata record).
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, '1', ?, ?, ?, ?, ?, ?)`,
-		sessionID, identityID, tokenHash,
+		sessionID, userID, tokenHash,
 		userAgent, ipAddress, string(metadataJSON),
 		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
 	)
@@ -200,17 +200,17 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID string, user
 	// Insert into unified tokens table.
 	tokenID := id.New()
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
-		tokenID, tokenHash, identityID, sessionID,
+		tokenID, tokenHash, userID, sessionID,
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert token: %w", err)
 	}
 
-	emitEvent(ctx, tx, "session.created", identityID, sessionID, "session", map[string]any{
-		"entity_id":  identityID,
+	emitEvent(ctx, tx, "session.created", userID, sessionID, "session", map[string]any{
+		"user_id":  userID,
 		"user_agent": userAgent,
 		"ip_address": ipAddress,
 	})
@@ -224,7 +224,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, identityID string, user
 	return &CreateSessionResponse{
 		Session: SessionResponse{
 			ID:         sessionID,
-			IdentityID: identityID,
+			IduserID: userID,
 			OrgID:      "org_default",
 			UserAgent:  userAgent,
 			IPAddress:  ipAddress,
@@ -252,16 +252,16 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
-	identityID, _ := r.URL.Query().Get("entity_id"), ""
+	userID, _ := r.URL.Query().Get("user_id"), ""
 	limit := 50
 
-	query := `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+	query := `SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
 	          FROM sessions ORDER BY created_at DESC LIMIT ?`
 	args := []any{limit}
-	if identityID != "" {
-		query = `SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
-		         FROM sessions WHERE entity_id = ? ORDER BY created_at DESC LIMIT ?`
-		args = []any{identityID, limit}
+	if userID != "" {
+		query = `SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+		         FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+		args = []any{userID, limit}
 	}
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
@@ -274,7 +274,7 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	var sessions []SessionResponse
 	for rows.Next() {
 		var s SessionResponse
-		rows.Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
+		rows.Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -325,11 +325,11 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 		`UPDATE tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`,
 		now, sessionID)
 
-	var revokedIdentityID string
-	tx.QueryRowContext(ctx, `SELECT entity_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIdentityID)
+	var revokedIduserID string
+	tx.QueryRowContext(ctx, `SELECT user_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIduserID)
 
-	emitEvent(ctx, tx, "session.revoked", revokedIdentityID, sessionID, "session", map[string]any{
-		"entity_id": revokedIdentityID,
+	emitEvent(ctx, tx, "session.revoked", revokedIduserID, sessionID, "session", map[string]any{
+		"user_id": revokedIduserID,
 		"reason":    "api_revoke",
 	})
 
@@ -344,8 +344,8 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 func (a *API) loadSession(ctx context.Context, sessionID string) (SessionResponse, error) {
 	var s SessionResponse
 	err := a.db.SQL().QueryRowContext(ctx,
-		`SELECT id, entity_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+		`SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
 		 FROM sessions WHERE id = ?`, sessionID,
-	).Scan(&s.ID, &s.IdentityID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
+	).Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
 	return s, err
 }

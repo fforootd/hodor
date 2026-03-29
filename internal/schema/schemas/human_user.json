@@ -2,6 +2,8 @@
   "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
+  "x-table": "users",
+  "x-table-filter": { "user_type": "human" },
 
   "x-auth-methods": {
     "password":   { "enabled": true,  "interactive": true,  "position": 1 },

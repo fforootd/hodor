@@ -80,7 +80,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	// Look up the default org ID from bootstrap.
 	var orgID string
-	db.SQL().QueryRow(`SELECT org_id FROM entities WHERE identifier = 'admin' LIMIT 1`).Scan(&orgID)
+	db.SQL().QueryRow(`SELECT org_id FROM users WHERE identifier = 'admin' LIMIT 1`).Scan(&orgID)
 	if orgID == "" {
 		orgID = "0" // fallback
 	}
@@ -89,7 +89,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	// (EnsureAdmin runs before server.New, so api.FGAService was nil at that time.)
 	if fgaSvc := api.FGAService; fgaSvc != nil {
 		var adminID string
-		db.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin' LIMIT 1`).Scan(&adminID)
+		db.SQL().QueryRow(`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`).Scan(&adminID)
 		if adminID != "" {
 			_ = fgaSvc.OnBootstrap(t.Context(), adminID, orgID)
 		}
@@ -115,7 +115,7 @@ func (ts *TestServer) URL() string {
 func (ts *TestServer) LoginAdmin() string {
 	ts.t.Helper()
 	var adminID string
-	err := ts.DB.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = 'admin'`).Scan(&adminID)
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM users WHERE identifier = 'admin'`).Scan(&adminID)
 	if err != nil {
 		ts.t.Fatalf("find admin: %v", err)
 	}
@@ -126,28 +126,28 @@ func (ts *TestServer) LoginAdmin() string {
 func (ts *TestServer) CreateIdentity(identifier, displayName string) string {
 	ts.t.Helper()
 
-	var identityID string
-	err := ts.DB.SQL().QueryRow(`SELECT id FROM entities WHERE identifier = ?`, identifier).Scan(&identityID)
+	var userID string
+	err := ts.DB.SQL().QueryRow(`SELECT id FROM users WHERE identifier = ?`, identifier).Scan(&userID)
 	if err == nil {
-		return identityID
+		return userID
 	}
 
-	identityID = id.New()
+	userID = id.New()
 
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 'active', '{}', '{}', ?, ?)`,
-		identityID, ts.OrgID, identifier, displayName, now, now)
+		userID, ts.OrgID, identifier, displayName, now, now)
 	if err != nil {
 		ts.t.Fatalf("insert identity: %v", err)
 	}
-	return identityID
+	return userID
 }
 
 // CreateSession inserts a valid session directly into the DB and returns the raw token.
 // The token is prefixed with zit_ses_ and inserted into both sessions and tokens tables.
-func (ts *TestServer) CreateSession(identityID string) string {
+func (ts *TestServer) CreateSession(userID string) string {
 	ts.t.Helper()
 
 	hexPart, err := crypto.RandomHex(32)
@@ -163,18 +163,18 @@ func (ts *TestServer) CreateSession(identityID string) string {
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
 	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, ?, ?, 'testutil', '127.0.0.1', '{}', ?, ?)`,
-		sessionID, identityID, ts.OrgID, hash, now, expiresAt)
+		sessionID, userID, ts.OrgID, hash, now, expiresAt)
 	if err != nil {
 		ts.t.Fatalf("insert session: %v", err)
 	}
 
 	// Also insert into the unified tokens table.
 	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
-		tokenID, hash, identityID, sessionID, expiresAt, now)
+		tokenID, hash, userID, sessionID, expiresAt, now)
 	if err != nil {
 		ts.t.Fatalf("insert token: %v", err)
 	}
@@ -351,7 +351,7 @@ func (ts *TestServer) PostJSONRaw(path string, body map[string]any) (int, map[st
 }
 
 // CreatePAT inserts a Personal Access Token directly and returns the raw token.
-func (ts *TestServer) CreatePAT(identityID string) string {
+func (ts *TestServer) CreatePAT(userID string) string {
 	ts.t.Helper()
 
 	b := make([]byte, 32)
@@ -366,9 +366,9 @@ func (ts *TestServer) CreatePAT(identityID string) string {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 
 	_, err := ts.DB.SQL().Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, name, scopes, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, created_at)
 		 VALUES (?, 'pat', ?, ?, 'test-pat', '["admin"]', ?)`,
-		tokenID, hash, identityID, now)
+		tokenID, hash, userID, now)
 	if err != nil {
 		ts.t.Fatalf("insert PAT: %v", err)
 	}
@@ -377,7 +377,7 @@ func (ts *TestServer) CreatePAT(identityID string) string {
 }
 
 // CreateSessionWithExpiry inserts a session with a custom expiry duration.
-func (ts *TestServer) CreateSessionWithExpiry(identityID string, d time.Duration) string {
+func (ts *TestServer) CreateSessionWithExpiry(userID string, d time.Duration) string {
 	ts.t.Helper()
 
 	b := make([]byte, 32)
@@ -394,17 +394,17 @@ func (ts *TestServer) CreateSessionWithExpiry(identityID string, d time.Duration
 	expiresAt := time.Now().UTC().Add(d).Format("2006-01-02 15:04:05")
 
 	_, err := ts.DB.SQL().Exec(
-		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, ?, ?, 'testutil', '127.0.0.1', '{}', ?, ?)`,
-		sessionID, identityID, ts.OrgID, hash, now, expiresAt)
+		sessionID, userID, ts.OrgID, hash, now, expiresAt)
 	if err != nil {
 		ts.t.Fatalf("insert session: %v", err)
 	}
 
 	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
-		tokenID, hash, identityID, sessionID, expiresAt, now)
+		tokenID, hash, userID, sessionID, expiresAt, now)
 	if err != nil {
 		ts.t.Fatalf("insert token: %v", err)
 	}

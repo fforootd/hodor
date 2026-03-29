@@ -24,7 +24,7 @@ const (
 
 // TokenInfo carries the resolved identity of a token holder.
 type TokenInfo struct {
-	EntityID  string   // The identity this token belongs to ("" if nullable)
+	UserID  string   // The identity this token belongs to ("" if nullable)
 	SessionID string   // Only for session tokens
 	TokenType string   // "session", "pat", "opaque"
 	OrgID     string   // The org_id from the entity
@@ -74,9 +74,9 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.entity_id, t.session_id, COALESCE(e.org_id, 0) FROM tokens t
+		`SELECT t.user_id, t.session_id, COALESCE(e.org_id, 0) FROM tokens t
 		 JOIN sessions s ON t.session_id = s.id
-		 LEFT JOIN entities e ON t.entity_id = e.id
+		 LEFT JOIN entities e ON t.user_id = e.id
 		 WHERE t.token_hash = ?
 		   AND t.type = 'session'
 		   AND t.revoked_at IS NULL
@@ -84,7 +84,7 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 		   AND s.expires_at > datetime('now')
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
 		h,
-	).Scan(&info.EntityID, &info.SessionID, &info.OrgID)
+	).Scan(&info.UserID, &info.SessionID, &info.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid session token")
 	}
@@ -103,14 +103,14 @@ func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenIn
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.entity_id, COALESCE(e.org_id, 0) FROM tokens t
-		 LEFT JOIN entities e ON t.entity_id = e.id
+		`SELECT t.user_id, COALESCE(e.org_id, 0) FROM tokens t
+		 LEFT JOIN entities e ON t.user_id = e.id
 		 WHERE t.token_hash = ?
 		   AND t.type = 'pat'
 		   AND t.revoked_at IS NULL
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
 		h,
-	).Scan(&info.EntityID, &info.OrgID)
+	).Scan(&info.UserID, &info.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid PAT")
 	}
@@ -129,13 +129,13 @@ func resolveOpaqueToken(ctx context.Context, db *sql.DB, rawToken string) (*Toke
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT entity_id FROM tokens
+		`SELECT user_id FROM tokens
 		 WHERE token_hash = ?
 		   AND type = 'opaque'
 		   AND revoked_at IS NULL
 		   AND (expires_at IS NULL OR expires_at > datetime('now'))`,
 		h,
-	).Scan(&info.EntityID)
+	).Scan(&info.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid opaque token")
 	}
@@ -152,22 +152,22 @@ func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string) (*Toke
 	// First try the new tokens table (for migrated tokens).
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
-		`SELECT t.entity_id, COALESCE(t.session_id, ''), t.type FROM tokens t
+		`SELECT t.user_id, COALESCE(t.session_id, ''), t.type FROM tokens t
 		 WHERE t.token_hash = ?
 		   AND t.revoked_at IS NULL
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
 		h,
-	).Scan(&info.EntityID, &info.SessionID, &info.TokenType)
+	).Scan(&info.UserID, &info.SessionID, &info.TokenType)
 	if err == nil {
 		return &info, nil
 	}
 
 	// Fall back to the old sessions table.
 	err = db.QueryRowContext(ctx,
-		`SELECT entity_id, id FROM sessions
+		`SELECT user_id, id FROM sessions
 		 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > datetime('now')`,
 		h,
-	).Scan(&info.EntityID, &info.SessionID)
+	).Scan(&info.UserID, &info.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token")
 	}

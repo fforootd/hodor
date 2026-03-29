@@ -329,7 +329,7 @@ const adminSidebar = `
   </aside>
 `
 
-func renderAdminDashboard(w http.ResponseWriter, ident *IdentityContext, identityCount, sessionCount, eventCount int) {
+func renderAdminDashboard(w http.ResponseWriter, ident *UserContext, identityCount, sessionCount, eventCount int) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	dashTmpl.Execute(w, map[string]any{
 		"Title":         "Dashboard",
@@ -341,7 +341,7 @@ func renderAdminDashboard(w http.ResponseWriter, ident *IdentityContext, identit
 }
 
 // Admin identities list template.
-var entitiesListTmpl = template.Must(template.New("entities").Parse(baseHead + adminSidebar + `
+var entitiesListTmpl = template.Must(template.New("users").Parse(baseHead + adminSidebar + `
   <div class="admin-main">
     <div class="admin-header">
       <h1>Identities</h1>
@@ -388,7 +388,7 @@ var entitiesListTmpl = template.Must(template.New("entities").Parse(baseHead + a
 </div>
 ` + baseFoot))
 
-func renderAdminEntities(w http.ResponseWriter, ident *IdentityContext, identities any) {
+func renderAdminEntities(w http.ResponseWriter, ident *UserContext, identities any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	entitiesListTmpl.Execute(w, map[string]any{
 		"Title":    "Entities",
@@ -569,7 +569,7 @@ type SchemaOption struct {
 	AuthMethods string
 }
 
-func renderAdminIdentityForm(w http.ResponseWriter, ident *IdentityContext, identity *api.IdentityResponse, errorMsg string, schemas []SchemaOption) {
+func renderAdminIdentityForm(w http.ResponseWriter, ident *UserContext, identity *api.UserResponse, errorMsg string, schemas []SchemaOption) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := map[string]any{
@@ -663,7 +663,7 @@ var sessionsListTmpl = template.Must(template.New("sessions").Parse(baseHead + a
 </div>
 ` + baseFoot))
 
-func renderAdminSessions(w http.ResponseWriter, ident *IdentityContext, sessions any) {
+func renderAdminSessions(w http.ResponseWriter, ident *UserContext, sessions any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	sessionsListTmpl.Execute(w, map[string]any{
 		"Title":    "Sessions",
@@ -724,7 +724,7 @@ var eventsListTmpl = template.Must(template.New("events").Parse(baseHead + `
 </div>
 ` + baseFoot))
 
-func renderAdminEvents(w http.ResponseWriter, ident *IdentityContext, events any, filter string) {
+func renderAdminEvents(w http.ResponseWriter, ident *UserContext, events any, filter string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	eventsListTmpl.Execute(w, map[string]any{
 		"Title":  "Events",
@@ -821,7 +821,7 @@ var jobsListTmpl = template.Must(template.New("jobs").Parse(baseHead + `
 </div>
 ` + baseFoot))
 
-func renderAdminJobs(w http.ResponseWriter, ident *IdentityContext, jobs any, policies any) {
+func renderAdminJobs(w http.ResponseWriter, ident *UserContext, jobs any, policies any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	jobsListTmpl.Execute(w, map[string]any{
 		"Title":    "Jobs",
@@ -894,7 +894,7 @@ type SchemaField struct {
 	Required bool
 }
 
-func renderAdminSchemas(w http.ResponseWriter, ident *IdentityContext, schemas []SchemaCard) {
+func renderAdminSchemas(w http.ResponseWriter, ident *UserContext, schemas []SchemaCard) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	schemasListTmpl.Execute(w, map[string]any{
 		"Title":   "Schemas",

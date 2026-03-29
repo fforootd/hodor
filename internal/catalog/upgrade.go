@@ -63,7 +63,7 @@ func PreviewUpgrade(ctx context.Context, db *sql.DB, schemaType string, newSchem
 	// Count total entities of this type.
 	var totalEntities int
 	err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM entities i
+		`SELECT COUNT(*) FROM users i
 		  JOIN schemas s ON i.schema_id = s.id
 		 WHERE s.type = ?`, schemaType,
 	).Scan(&totalEntities)
@@ -87,7 +87,7 @@ func PreviewUpgrade(ctx context.Context, db *sql.DB, schemaType string, newSchem
 
 	// Sample entities.
 	rows, err := db.QueryContext(ctx,
-		`SELECT i.id, i.display_name, i.data FROM entities i
+		`SELECT i.id, i.display_name, i.data FROM users i
 		  JOIN schemas s ON i.schema_id = s.id
 		 WHERE s.type = ? ORDER BY RANDOM() LIMIT ?`,
 		schemaType, sampleSize,
@@ -303,7 +303,7 @@ func estimateAffected(ctx context.Context, db *sql.DB, schemaType string, fc Fie
 		// Count entities missing this field.
 		var count int
 		err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM entities i
+			`SELECT COUNT(*) FROM users i
 			  JOIN schemas s ON i.schema_id = s.id
 			 WHERE s.type = ? AND (
 				json_extract(i.data, '$.' || ?) IS NULL OR json_extract(i.data, '$.' || ?) = ''
@@ -319,7 +319,7 @@ func estimateAffected(ctx context.Context, db *sql.DB, schemaType string, fc Fie
 		// Count entities that have this field.
 		var count int
 		err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM entities i
+			`SELECT COUNT(*) FROM users i
 			  JOIN schemas s ON i.schema_id = s.id
 			 WHERE s.type = ? AND json_extract(i.data, '$.' || ?) IS NOT NULL`,
 			schemaType, fieldName,

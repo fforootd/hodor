@@ -2,6 +2,7 @@
   "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
+  "x-table": "login_flows",
   "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, and layout behavior. Inherits from the instance default and can be overridden at org/project/app level (ADR-009).",
   "properties": {
     "display_name": {

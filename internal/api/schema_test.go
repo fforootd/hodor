@@ -50,8 +50,8 @@ func TestSchema_CRUD(t *testing.T) {
 
 func TestSchema_NonAdminForbiddenWrite(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user4@test.com", "User 4")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user4@test.com", "User 4")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithBearer("/v1/schemas", map[string]any{
 		"id": "hack_schema_v1",

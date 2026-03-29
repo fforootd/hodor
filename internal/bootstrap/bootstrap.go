@@ -1,5 +1,5 @@
 // Package bootstrap handles first-run initialization—creating the default
-// admin identity and printing its credentials to stdout.
+// admin user and printing its credentials to stdout.
 package bootstrap
 
 import (
@@ -21,8 +21,8 @@ import (
 	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
-// EnsureAdmin checks if any entities exist. If not, it creates a default
-// admin identity. The behavior depends on the seedFile parameter:
+// EnsureAdmin checks if any users exist. If not, it creates a default
+// admin user. The behavior depends on the seedFile parameter:
 //   - If seedFile is set: skip admin creation (the seed file handles it).
 //   - If no seedFile and interactive terminal: run the first-run wizard.
 //   - If no seedFile and non-interactive: create admin with random password.
@@ -33,9 +33,9 @@ func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 	}
 
 	var count int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities`).Scan(&count)
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
 	if err != nil {
-		return fmt.Errorf("count entities: %w", err)
+		return fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
 		return nil // Already bootstrapped.
@@ -47,7 +47,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 		return nil
 	}
 
-	logging.Println("No entities found — bootstrapping admin account...")
+	logging.Println("No users found — bootstrapping admin account...")
 
 	// Determine if we're running in an interactive terminal.
 	if isInteractiveTerminal() {
@@ -160,11 +160,9 @@ func createRandomAdmin(ctx context.Context, db *database.DB) error {
 	return nil
 }
 
-// createAdmin inserts the admin identity with capabilities and password.
+// createAdmin inserts the admin user with password credentials.
 func createAdmin(ctx context.Context, db *database.DB, username, email, password string) error {
-	identityID := id.New()
-
-	profileJSON := fmt.Sprintf(`{"email":%q}`, email)
+	userID := id.New()
 
 	tx, err := db.SQL().BeginTx(ctx, nil)
 	if err != nil {
@@ -172,38 +170,27 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	}
 	defer tx.Rollback()
 
-	// Create the admin identity using the human_user schema.
+	// Create the admin user in the users table.
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, 'Admin', 'active', 'human_user_v1', ?, '{}', datetime('now'), datetime('now'))`,
-		identityID, username, profileJSON,
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, '1', ?, 'Admin', 'human', 'active', 'human_user_v1', ?, datetime('now'), datetime('now'))`,
+		userID, username, fmt.Sprintf(`{"email":%q}`, email),
 	)
 	if err != nil {
-		return fmt.Errorf("insert admin identity: %w", err)
+		return fmt.Errorf("insert admin user: %w", err)
 	}
 
-	// Add capabilities — password + admin.
-	for _, cap := range []string{"password", "admin"} {
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
-			identityID, cap,
-		)
-		if err != nil {
-			return fmt.Errorf("insert capability %s: %w", cap, err)
-		}
-	}
-
-	// Promote display_name to entity_indexes.
+	// Promote display_name to resource_indexes.
 	_, _ = tx.ExecContext(ctx,
-		`INSERT INTO entity_indexes (entity_type, entity_id, field, value) VALUES ('identity', ?, 'display_name', 'Admin')`,
-		identityID)
+		`INSERT INTO resource_indexes (resource_type, resource_id, field, value) VALUES ('user', ?, 'display_name', 'Admin')`,
+		userID)
 
 	// Enforce uniqueness (ADR-016): register identifier + email in unique_fields.
-	if err := uniqueness.EnforceFromIdentifier(ctx, tx, identityID, "1", username); err != nil {
+	if err := uniqueness.EnforceFromIdentifier(ctx, tx, userID, "1", username); err != nil {
 		logging.Printf("WARN: bootstrap unique identifier: %v", err)
 	}
 	// Also register email at instance scope.
-	_ = uniqueness.Enforce(ctx, tx, identityID, "1",
+	_ = uniqueness.Enforce(ctx, tx, userID, "1",
 		[]uniqueness.FieldConstraint{{FieldName: "email", Scope: uniqueness.ScopeInstance}},
 		map[string]any{"email": email},
 	)
@@ -214,7 +201,7 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 
 	// Set password (outside tx — uses its own transaction).
 	pw := auth.NewPasswords(db)
-	if err := pw.SetPassword(ctx, identityID, password); err != nil {
+	if err := pw.SetPassword(ctx, userID, password); err != nil {
 		return fmt.Errorf("set admin password: %w", err)
 	}
 
@@ -223,26 +210,25 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 		logging.Printf("WARN: seed default org: %v", err)
 	}
 
-	// Seed the default console OIDC client (public SPA, no secret).
+	// Seed the default console OIDC client.
 	if err := seedConsoleClient(ctx, db); err != nil {
 		logging.Printf("WARN: seed console client: %v", err)
 	}
 
 	// Bootstrap FGA tuples: admin → instance:owner, org parent, org owner.
 	if fgaSvc := api.FGAService; fgaSvc != nil {
-		// Use org_id from the admin entity (numeric, matches middleware resolution).
 		var orgID string
 		err := db.SQL().QueryRowContext(ctx,
-			`SELECT org_id FROM entities WHERE identifier = ? LIMIT 1`,
+			`SELECT org_id FROM users WHERE identifier = ? LIMIT 1`,
 			username,
 		).Scan(&orgID)
 		if err != nil || orgID == "" {
 			logging.Printf("WARN: could not find org_id for FGA bootstrap: %v", err)
 		} else {
-			if err := fgaSvc.OnBootstrap(ctx, identityID, orgID); err != nil {
+			if err := fgaSvc.OnBootstrap(ctx, userID, orgID); err != nil {
 				logging.Printf("WARN: FGA bootstrap tuples failed: %v", err)
 			} else {
-				logging.Printf("[fga] bootstrap tuples written: admin=%s org=%s", identityID, orgID)
+				logging.Printf("[fga] bootstrap tuples written: admin=%s org=%s", userID, orgID)
 			}
 		}
 	}
@@ -250,10 +236,10 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	return nil
 }
 
-// seedDefaultOrg creates the default organization if it doesn't exist.
+// seedDefaultOrg creates the default organization in the orgs table if it doesn't exist.
 func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 	var exists int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE identifier = 'default' AND schema_id = 'org_v1'`).Scan(&exists)
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM orgs WHERE name = 'Default'`).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check default org: %w", err)
 	}
@@ -263,30 +249,23 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 
 	orgID := id.New()
 
-	orgData := `{
-		"display_name": "Default",
-		"branding": {
-			"primary_color": "#1a1a2e"
-		}
-	}`
-
 	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
-		 VALUES (?, 0, 'default', 'Default', 'active', 'org_v1', ?, datetime('now'), datetime('now'))`,
-		orgID, orgData,
+		`INSERT INTO orgs (id, instance_id, name, state, metadata, created_at, updated_at)
+		 VALUES (?, 'inst_default', 'Default', 'active', '{"branding":{"primary_color":"#1a1a2e"}}', datetime('now'), datetime('now'))`,
+		orgID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert default org: %w", err)
 	}
 
-	logging.Println("seeded default organization (identifier=default)")
+	logging.Println("seeded default organization (name=Default)")
 	return nil
 }
 
-// seedConsoleClient creates the default console OIDC client identity if it doesn't exist.
+// seedConsoleClient creates the default console OIDC client in the apps table.
 func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	var exists int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE identifier = 'console'`).Scan(&exists)
+	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM apps WHERE client_id = 'console'`).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check console client: %w", err)
 	}
@@ -295,29 +274,23 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	}
 
 	consoleID := id.New()
-
-	consoleData := `{
-		"client_name": "Zitadel Console",
-		"app_type": "spa",
-		"redirect_uris": ["http://localhost:5173/console", "http://localhost:8080/console"],
-		"post_logout_redirect_uris": ["http://localhost:5173", "http://localhost:8080"]
-	}`
+	redirectURIs := `["http://localhost:5173/console", "http://localhost:8080/console"]`
 
 	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
-		 VALUES (?, 1, 'console', 'Zitadel Console', 'active', 'app_v1', ?, datetime('now'), datetime('now'))`,
-		consoleID, consoleData,
+		`INSERT INTO apps (id, org_id, name, app_type, client_id, redirect_uris, state, schema_id, created_at, updated_at)
+		 VALUES (?, '1', 'Zitadel Console', 'oidc', 'console', ?, 'active', 'app_v1', datetime('now'), datetime('now'))`,
+		consoleID, redirectURIs,
 	)
 	if err != nil {
-		return fmt.Errorf("insert console entity: %w", err)
+		return fmt.Errorf("insert console app: %w", err)
 	}
 
 	logging.Println("seeded default console OIDC client (client_id=console)")
 	return nil
 }
 
-// seedSchemas reads the x-catalog from the meta schema and seeds each entity
-// schema that has a $ref into the database.
+// seedSchemas reads the x-catalog from the meta schema and seeds each
+// schema into the database.
 func seedSchemas(ctx context.Context, db *database.DB) error {
 	catalog, err := schema.Catalog()
 	if err != nil {
@@ -357,6 +330,6 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 		seeded++
 	}
 
-	logging.Printf("seeded %d built-in entity schemas from catalog", seeded)
+	logging.Printf("seeded %d built-in schemas from catalog", seeded)
 	return nil
 }

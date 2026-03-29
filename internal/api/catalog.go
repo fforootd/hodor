@@ -71,7 +71,7 @@ func installFromCatalog(svc *catalog.Service) http.HandlerFunc {
 			return
 		}
 
-		entityID, err := svc.Install(r.Context(), templateID, req.Variables)
+		userID, err := svc.Install(r.Context(), templateID, req.Variables)
 		if err != nil {
 			logging.Printf("[catalog] install %s failed: %v", templateID, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -81,7 +81,7 @@ func installFromCatalog(svc *catalog.Service) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]any{
-			"id":          entityID,
+			"id":          userID,
 			"template_id": templateID,
 			"status":      "installed",
 		})

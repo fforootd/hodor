@@ -41,7 +41,7 @@ func seedIdentities(b *testing.B, db *sql.DB, n int) []string {
 	for i := 0; i < n; i++ {
 		ids[i] = id.New()
 		tx.Exec(
-			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
+			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			ids[i], fmt.Sprintf("user-%d", i), fmt.Sprintf("User %d", i), now, now)
 	}
@@ -52,7 +52,7 @@ func seedIdentities(b *testing.B, db *sql.DB, n int) []string {
 }
 
 // seedSessionToken inserts a session+token pair and returns the raw token string.
-func seedSessionToken(b *testing.B, db *sql.DB, entityID string) string {
+func seedSessionToken(b *testing.B, db *sql.DB, userID string) string {
 	b.Helper()
 	raw := "zit_ses_" + id.New()
 	h := sha256.Sum256([]byte(raw))
@@ -63,13 +63,13 @@ func seedSessionToken(b *testing.B, db *sql.DB, entityID string) string {
 	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 
 	db.Exec(
-		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 		 VALUES (?, ?, '0', ?, 'bench', '127.0.0.1', '{}', ?, ?)`,
-		sessionID, entityID, hash, now, expiresAt)
+		sessionID, userID, hash, now, expiresAt)
 	db.Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
-		tokenID, hash, entityID, sessionID, expiresAt, now)
+		tokenID, hash, userID, sessionID, expiresAt, now)
 	return raw
 }
 
@@ -95,7 +95,7 @@ func BenchmarkDBInsertIdentity(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		newID := id.New()
 		_, err := db.Exec(
-			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
+			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 			 VALUES (?, '0', ?, ?, 'active', '{}', '{}', '{}', ?, ?)`,
 			newID, fmt.Sprintf("bench-insert-%d", i), fmt.Sprintf("Bench Insert %d", i), now, now)
 		if err != nil {
@@ -116,7 +116,7 @@ func BenchmarkDBGetIdentity(b *testing.B) {
 		target := ids[benchRandN(len(ids))]
 		var identifier, displayName string
 		err := db.QueryRow(
-			`SELECT identifier, display_name FROM entities WHERE id = ?`, target,
+			`SELECT identifier, display_name FROM users WHERE id = ?`, target,
 		).Scan(&identifier, &displayName)
 		if err != nil {
 			b.Fatalf("get: %v", err)
@@ -167,7 +167,7 @@ func BenchmarkDBUpdateIdentity(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		target := ids[benchRandN(len(ids))]
 		_, err := db.Exec(
-			`UPDATE entities SET display_name = ?, updated_at = datetime('now') WHERE id = ?`,
+			`UPDATE users SET display_name = ?, updated_at = datetime('now') WHERE id = ?`,
 			fmt.Sprintf("Updated %d", i), target)
 		if err != nil {
 			b.Fatalf("update: %v", err)
@@ -184,7 +184,7 @@ func BenchmarkDBInsertSession(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		entityID := ids[benchRandN(len(ids))]
+		userID := ids[benchRandN(len(ids))]
 		sessionID := id.New()
 		tokenID := id.New()
 		hash := fmt.Sprintf("hash-%s", id.New())
@@ -193,13 +193,13 @@ func BenchmarkDBInsertSession(b *testing.B) {
 
 		tx, _ := db.BeginTx(context.Background(), nil)
 		tx.Exec(
-			`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+			`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
 			 VALUES (?, ?, '0', ?, 'bench', '127.0.0.1', '{}', ?, ?)`,
-			sessionID, entityID, hash, now, expiresAt)
+			sessionID, userID, hash, now, expiresAt)
 		tx.Exec(
-			`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at)
+			`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
 			 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
-			tokenID, hash, entityID, sessionID, expiresAt, now)
+			tokenID, hash, userID, sessionID, expiresAt, now)
 		if err := tx.Commit(); err != nil {
 			b.Fatalf("commit session: %v", err)
 		}
@@ -225,13 +225,13 @@ func BenchmarkDBResolveToken(b *testing.B) {
 		h := sha256.Sum256([]byte(raw))
 		hash := hex.EncodeToString(h[:])
 
-		var entityID, tokenType string
+		var userID, tokenType string
 		var expiresAt sql.NullString
 		err := db.QueryRow(
-			`SELECT t.entity_id, t.type, t.expires_at
+			`SELECT t.user_id, t.type, t.expires_at
 			 FROM tokens t WHERE t.token_hash = ? AND t.revoked_at IS NULL`,
 			hash,
-		).Scan(&entityID, &tokenType, &expiresAt)
+		).Scan(&userID, &tokenType, &expiresAt)
 		if err != nil {
 			b.Fatalf("resolve: %v", err)
 		}
@@ -254,7 +254,7 @@ func BenchmarkDBConcurrentReads(b *testing.B) {
 		for pb.Next() {
 			target := ids[benchRandN(len(ids))]
 			var identifier string
-			db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier)
+			db.QueryRow(`SELECT identifier FROM users WHERE id = ?`, target).Scan(&identifier)
 		}
 	})
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "reads/sec")
@@ -274,14 +274,14 @@ func BenchmarkDBConcurrentMixed(b *testing.B) {
 				// 20% writes
 				newID := id.New()
 				db.Exec(
-					`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
+					`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at)
 					 VALUES (?, '0', ?, 'Bench Mixed', 'active', '{}', '{}', '{}', datetime('now'), datetime('now'))`,
 					newID, fmt.Sprintf("mixed-%s", newID))
 			} else {
 				// 80% reads
 				target := ids[benchRandN(len(ids))]
 				var identifier string
-				db.QueryRow(`SELECT identifier FROM entities WHERE id = ?`, target).Scan(&identifier)
+				db.QueryRow(`SELECT identifier FROM users WHERE id = ?`, target).Scan(&identifier)
 			}
 			i++
 		}

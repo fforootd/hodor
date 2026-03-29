@@ -35,10 +35,10 @@ func setupTestDB(t *testing.T) *sql.DB {
 			scope_id         TEXT NOT NULL DEFAULT '',
 			field_name       TEXT NOT NULL,
 			normalized_value TEXT NOT NULL,
-			entity_id        TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+			user_id        TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
 			UNIQUE(scope_id, field_name, normalized_value)
 		);
-		CREATE INDEX idx_unique_fields_entity ON unique_fields(entity_id);
+		CREATE INDEX idx_unique_fields_entity ON unique_fields(user_id);
 		CREATE INDEX idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
 	`)
 	if err != nil {
@@ -60,7 +60,7 @@ func commitTx(tb testing.TB, tx *sql.Tx) {
 func insertEntity(t *testing.T, db *sql.DB, id, orgID, identifier string) {
 	t.Helper()
 	_, err := db.Exec(
-		`INSERT INTO entities (id, org_id, identifier, display_name, state)
+		`INSERT INTO users (id, org_id, identifier, display_name, state)
 		 VALUES (?, ?, ?, ?, 'active')`,
 		id, orgID, identifier, identifier,
 	)
@@ -334,7 +334,7 @@ func TestResolveIdentifier_InstanceScope(t *testing.T) {
 	insertEntity(t, db, "e1", "org1", "alice@test.com")
 
 	// Insert instance-scoped unique field.
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 	         VALUES ('', 'email', 'alice@test.com', 'e1')`)
 
 	result, err := ResolveIdentifier(ctx, db, "Alice@Test.COM", "")
@@ -344,8 +344,8 @@ func TestResolveIdentifier_InstanceScope(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected result, got nil")
 	}
-	if result.EntityID != "e1" {
-		t.Errorf("entity_id = %q, want e1", result.EntityID)
+	if result.UserID != "e1" {
+		t.Errorf("user_id = %q, want e1", result.UserID)
 	}
 }
 
@@ -357,9 +357,9 @@ func TestResolveIdentifier_OrgScope(t *testing.T) {
 	insertEntity(t, db, "e2", "org2", "alice")
 
 	// Insert org-scoped unique fields.
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 	         VALUES ('org1', 'username', 'alice', 'e1')`)
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 	         VALUES ('org2', 'username', 'alice', 'e2')`)
 
 	// Resolve with org1 context.
@@ -367,7 +367,7 @@ func TestResolveIdentifier_OrgScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e1" {
+	if result == nil || result.UserID != "e1" {
 		t.Fatalf("expected e1, got %+v", result)
 	}
 
@@ -376,7 +376,7 @@ func TestResolveIdentifier_OrgScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e2" {
+	if result == nil || result.UserID != "e2" {
 		t.Fatalf("expected e2, got %+v", result)
 	}
 }
@@ -402,7 +402,7 @@ func TestResolveIdentifier_LegacyFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e1" {
+	if result == nil || result.UserID != "e1" {
 		t.Fatalf("expected e1 via legacy fallback, got %+v", result)
 	}
 }
@@ -415,10 +415,10 @@ func TestResolveIdentifier_InstanceBeforeOrg(t *testing.T) {
 	insertEntity(t, db, "e-org", "org2", "alice-org")
 
 	// Instance-scoped email.
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 	         VALUES ('', 'email', 'alice@global.com', 'e-global')`)
 	// Org-scoped username with same value (unusual but possible).
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 	         VALUES ('org2', 'email', 'alice@global.com', 'e-org')`)
 
 	// Instance match should win even when org is provided.
@@ -426,7 +426,7 @@ func TestResolveIdentifier_InstanceBeforeOrg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e-global" {
+	if result == nil || result.UserID != "e-global" {
 		t.Fatalf("instance scope should take priority, got %+v", result)
 	}
 }
@@ -628,8 +628,8 @@ func TestResolveIdentifier_SkipsInactive(t *testing.T) {
 	ctx := context.Background()
 
 	// Insert an inactive entity.
-	db.Exec(`INSERT INTO entities (id, org_id, identifier, display_name, state) VALUES ('e1', 'org1', 'alice@test.com', 'Alice', 'deactivated')`)
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('', 'email', 'alice@test.com', 'e1')`)
+	db.Exec(`INSERT INTO users (id, org_id, identifier, display_name, state) VALUES ('e1', 'org1', 'alice@test.com', 'Alice', 'deactivated')`)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id) VALUES ('', 'email', 'alice@test.com', 'e1')`)
 
 	result, err := ResolveIdentifier(ctx, db, "alice@test.com", "")
 	if !errors.Is(err, ErrIdentityNotFound) {
@@ -649,7 +649,7 @@ func TestResolveIdentifier_LegacyCaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e1" {
+	if result == nil || result.UserID != "e1" {
 		t.Fatalf("legacy fallback should be case-insensitive, got %+v", result)
 	}
 }
@@ -670,7 +670,7 @@ func TestEnforceFromIdentifier_Empty(t *testing.T) {
 	commitTx(t, tx)
 
 	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE entity_id = 'e1'`).Scan(&count)
+	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE user_id = 'e1'`).Scan(&count)
 	if count != 0 {
 		t.Errorf("no unique_fields should be created for empty identifier, got %d", count)
 	}
@@ -740,7 +740,7 @@ func TestEnforce_WhitespaceOnlyValue(t *testing.T) {
 	commitTx(t, tx)
 
 	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE entity_id = 'e1'`).Scan(&count)
+	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE user_id = 'e1'`).Scan(&count)
 	if count != 0 {
 		t.Errorf("whitespace-only should not create unique_fields row, got %d", count)
 	}
@@ -791,8 +791,8 @@ func TestValidateSchemaChange_NoDuplicates(t *testing.T) {
 	insertEntity(t, db, "e2", "org1", "bob")
 
 	// Insert distinct values.
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('', 'email', 'alice@test.com', 'e1')`)
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('', 'email', 'bob@test.com', 'e2')`)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id) VALUES ('', 'email', 'alice@test.com', 'e1')`)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id) VALUES ('', 'email', 'bob@test.com', 'e2')`)
 
 	violations, err := ValidateSchemaChange(ctx, db, []FieldConstraint{
 		{FieldName: "email", Scope: ScopeInstance},
@@ -813,12 +813,12 @@ func TestValidateSchemaChange_WithDuplicates(t *testing.T) {
 	insertEntity(t, db, "e2", "org2", "alice2")
 
 	// Insert DUPLICATE values (simulating pre-existing data).
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('', 'email', 'shared@test.com', 'e1')`)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id) VALUES ('', 'email', 'shared@test.com', 'e1')`)
 	// Manually insert a second row with same value but different scope_id to bypass UNIQUE constraint
 	// In real scenario, these would exist from before the constraint was added.
 	// For testing, insert into org-scoped first, then check instance-scoped validation.
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('org1', 'email', 'shared@test.com', 'e1')`)
-	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id) VALUES ('org2', 'email', 'shared@test.com', 'e2')`)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id) VALUES ('org1', 'email', 'shared@test.com', 'e1')`)
+	db.Exec(`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id) VALUES ('org2', 'email', 'shared@test.com', 'e2')`)
 
 	// Check org-scoped: no duplicates (different org_ids).
 	violations, err := ValidateSchemaChange(ctx, db, []FieldConstraint{
@@ -841,14 +841,14 @@ func TestResolveIdentifier_LegacyOrgScoped(t *testing.T) {
 	// Two entities with same identifier in different orgs (legacy, no unique_fields).
 	insertEntity(t, db, "e1", "org1", "alice")
 	// Can't insert same (org_id, identifier) due to UNIQUE index, so test different orgs.
-	db.Exec(`INSERT INTO entities (id, org_id, identifier, display_name, state) VALUES ('e2', 'org2', 'alice', 'Alice Org2', 'active')`)
+	db.Exec(`INSERT INTO users (id, org_id, identifier, display_name, state) VALUES ('e2', 'org2', 'alice', 'Alice Org2', 'active')`)
 
 	// Without unique_fields, legacy fallback should respect org context.
 	result, err := ResolveIdentifier(ctx, db, "alice", "org1")
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e1" {
+	if result == nil || result.UserID != "e1" {
 		t.Fatalf("expected e1 for org1, got %+v", result)
 	}
 
@@ -856,7 +856,7 @@ func TestResolveIdentifier_LegacyOrgScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	if result == nil || result.EntityID != "e2" {
+	if result == nil || result.UserID != "e2" {
 		t.Fatalf("expected e2 for org2, got %+v", result)
 	}
 }
@@ -918,16 +918,16 @@ func TestCascadeDelete(t *testing.T) {
 
 	// Verify unique_fields row exists.
 	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE entity_id = 'e1'`).Scan(&count)
+	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE user_id = 'e1'`).Scan(&count)
 	if count != 1 {
 		t.Fatalf("expected 1 unique_fields row, got %d", count)
 	}
 
 	// Delete entity.
-	db.ExecContext(ctx, `DELETE FROM entities WHERE id = 'e1'`)
+	db.ExecContext(ctx, `DELETE FROM users WHERE id = 'e1'`)
 
 	// unique_fields should be cascaded.
-	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE entity_id = 'e1'`).Scan(&count)
+	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE user_id = 'e1'`).Scan(&count)
 	if count != 0 {
 		t.Errorf("unique_fields should be 0 after cascade delete, got %d", count)
 	}

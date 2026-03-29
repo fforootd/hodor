@@ -1,53 +1,189 @@
 -- +goose Up
--- Zitadel baseline schema — PostgreSQL
+-- Zitadel baseline schema — PostgreSQL (ADR-022: dedicated resource tables)
 
 -- ============================================================================
--- ENTITIES
+-- INSTANCES
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS entities (
-    id           TEXT PRIMARY KEY,
-    org_id       TEXT NOT NULL DEFAULT '0',
-    identifier   TEXT NOT NULL,
-    display_name TEXT,
-    state        TEXT NOT NULL DEFAULT 'active',
-    schema_id    TEXT DEFAULT '',
-    profile      JSONB DEFAULT '{}',
-    metadata     JSONB DEFAULT '{}',
-    data         JSONB DEFAULT '{}',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS instances (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    state      TEXT NOT NULL DEFAULT 'active',
+    settings   JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_entities_org ON entities(org_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_identifier ON entities(org_id, identifier);
 
 -- ============================================================================
--- ENTITY CAPABILITIES
+-- ORGS
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS entity_capabilities (
-    entity_id  TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    capability TEXT NOT NULL,
-    PRIMARY KEY (entity_id, capability)
+CREATE TABLE IF NOT EXISTS orgs (
+    id          TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL REFERENCES instances(id),
+    name        TEXT NOT NULL,
+    state       TEXT NOT NULL DEFAULT 'active',
+    schema_id   TEXT DEFAULT '',
+    metadata    JSONB DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_caps_capability ON entity_capabilities(capability);
+CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
 
 -- ============================================================================
--- ENTITY CREDENTIALS
+-- SCHEMAS
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS entity_credentials (
+CREATE TABLE IF NOT EXISTS schemas (
+    id         TEXT PRIMARY KEY,
+    type       TEXT NOT NULL,
+    org_id     TEXT NOT NULL DEFAULT '1',
+    schema     JSONB NOT NULL,
+    version    INTEGER DEFAULT 1,
+    is_default BOOLEAN DEFAULT FALSE,
+    visibility TEXT NOT NULL DEFAULT 'private',
+    message    TEXT DEFAULT '',
+    created_by TEXT DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id);
+CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default);
+CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
+
+-- ============================================================================
+-- USERS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL DEFAULT '1',
+    identifier    TEXT NOT NULL,
+    display_name  TEXT DEFAULT '',
+    user_type     TEXT NOT NULL DEFAULT 'human',
+    state         TEXT NOT NULL DEFAULT 'active',
+    schema_id     TEXT DEFAULT '',
+    metadata      JSONB DEFAULT '{}',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(org_id, identifier)
+);
+CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+CREATE INDEX IF NOT EXISTS idx_users_type ON users(user_type);
+CREATE INDEX IF NOT EXISTS idx_users_state ON users(state);
+
+-- ============================================================================
+-- USER CREDENTIALS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS user_credentials (
     id              TEXT PRIMARY KEY,
-    entity_id       TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     credential_type TEXT NOT NULL,
     credential_data JSONB DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_creds_identity ON entity_credentials(entity_id);
+CREATE INDEX IF NOT EXISTS idx_creds_user ON user_credentials(user_id);
+
+-- ============================================================================
+-- PROVIDERS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS providers (
+    id              TEXT PRIMARY KEY,
+    org_id          TEXT NOT NULL DEFAULT '1',
+    name            TEXT NOT NULL,
+    protocol        TEXT NOT NULL DEFAULT 'oidc',
+    template        TEXT NOT NULL DEFAULT 'custom',
+    config          JSONB NOT NULL DEFAULT '{}',
+    claim_overrides JSONB NOT NULL DEFAULT '{}',
+    auto_register   BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    display_order   INTEGER NOT NULL DEFAULT 0,
+    schema_id       TEXT DEFAULT '',
+    metadata        JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(org_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
+
+-- ============================================================================
+-- APPS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS apps (
+    id             TEXT PRIMARY KEY,
+    org_id         TEXT NOT NULL DEFAULT '1',
+    name           TEXT NOT NULL,
+    app_type       TEXT NOT NULL DEFAULT 'oidc',
+    client_id      TEXT NOT NULL UNIQUE,
+    client_secret  TEXT DEFAULT '',
+    redirect_uris  JSONB DEFAULT '[]',
+    grant_types    JSONB DEFAULT '["authorization_code"]',
+    response_types JSONB DEFAULT '["code"]',
+    state          TEXT NOT NULL DEFAULT 'active',
+    schema_id      TEXT DEFAULT '',
+    metadata       JSONB DEFAULT '{}',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_apps_org ON apps(org_id);
+
+-- ============================================================================
+-- ACTIONS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS actions (
+    id          TEXT PRIMARY KEY,
+    org_id      TEXT NOT NULL DEFAULT '1',
+    name        TEXT NOT NULL,
+    hook        TEXT NOT NULL DEFAULT 'on_event',
+    action_type TEXT NOT NULL DEFAULT 'expr',
+    trigger     TEXT DEFAULT '',
+    config      JSONB NOT NULL DEFAULT '{}',
+    priority    INTEGER DEFAULT 0,
+    enabled     BOOLEAN DEFAULT TRUE,
+    schema_id   TEXT DEFAULT '',
+    metadata    JSONB DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_actions_org ON actions(org_id);
+CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
+
+-- ============================================================================
+-- LOGIN FLOWS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS login_flows (
+    id         TEXT PRIMARY KEY,
+    org_id     TEXT NOT NULL DEFAULT '1',
+    name       TEXT NOT NULL,
+    preset     TEXT DEFAULT 'identifier_first',
+    steps      JSONB NOT NULL DEFAULT '[]',
+    config     JSONB NOT NULL DEFAULT '{}',
+    state      TEXT NOT NULL DEFAULT 'active',
+    schema_id  TEXT DEFAULT '',
+    metadata   JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lf_org ON login_flows(org_id);
+
+-- ============================================================================
+-- LINKED ACCOUNTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS linked_accounts (
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider_id    TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    external_sub   TEXT NOT NULL,
+    external_email TEXT DEFAULT '',
+    raw_claims     JSONB DEFAULT '{}',
+    linked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at   TIMESTAMPTZ,
+    UNIQUE(provider_id, external_sub)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_user ON linked_accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_accounts(provider_id, external_sub);
 
 -- ============================================================================
 -- SESSIONS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
-    entity_id  TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     org_id     TEXT NOT NULL DEFAULT '0',
     token_hash TEXT NOT NULL,
     user_agent TEXT,
@@ -57,7 +193,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_identity ON sessions(entity_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 
 -- ============================================================================
@@ -67,7 +203,7 @@ CREATE TABLE IF NOT EXISTS tokens (
     id         TEXT PRIMARY KEY,
     type       TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
-    entity_id  TEXT REFERENCES entities(id) ON DELETE CASCADE,
+    user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
     session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
     name       TEXT,
     scopes     JSONB NOT NULL DEFAULT '[]',
@@ -77,7 +213,7 @@ CREATE TABLE IF NOT EXISTS tokens (
     revoked_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
-CREATE INDEX IF NOT EXISTS idx_tokens_entity ON tokens(entity_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_user ON tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
 
 -- ============================================================================
@@ -86,6 +222,7 @@ CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
 CREATE TABLE IF NOT EXISTS events (
     id             TEXT PRIMARY KEY,
     event_type     TEXT NOT NULL,
+    category       TEXT NOT NULL DEFAULT '',
     org_id         TEXT NOT NULL DEFAULT '0',
     actor_id       TEXT,
     actor_type     TEXT,
@@ -100,6 +237,7 @@ CREATE TABLE IF NOT EXISTS events (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
 CREATE INDEX IF NOT EXISTS idx_events_org ON events(org_id);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_type, aggregate_id);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
@@ -119,25 +257,11 @@ CREATE INDEX IF NOT EXISTS idx_domains_org ON domains(org_id);
 CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 
 -- ============================================================================
--- NOTIFICATION TEMPLATES
--- ============================================================================
-CREATE TABLE IF NOT EXISTS notification_templates (
-    id       TEXT PRIMARY KEY,
-    org_id   TEXT,
-    channel  TEXT NOT NULL,
-    event    TEXT NOT NULL,
-    language TEXT NOT NULL DEFAULT 'en',
-    subject  TEXT,
-    body     TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_tpl_unique ON notification_templates(org_id, channel, event, language);
-
--- ============================================================================
 -- MAGIC TOKENS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS magic_tokens (
     token      TEXT PRIMARY KEY,
-    entity_id  TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
     used_at    TIMESTAMPTZ,
     session_id TEXT
@@ -183,110 +307,54 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 );
 
 -- ============================================================================
--- INSTANCES
+-- SETTINGS
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS instances (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    state      TEXT NOT NULL DEFAULT 'active',
-    settings   JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================================
--- ORGS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS orgs (
-    id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL REFERENCES instances(id),
-    name        TEXT NOT NULL,
-    state       TEXT NOT NULL DEFAULT 'active',
-    metadata    JSONB DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
-
--- ============================================================================
--- GROUPS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS groups (
-    id         TEXT PRIMARY KEY,
-    org_id     TEXT NOT NULL REFERENCES orgs(id),
-    name       TEXT NOT NULL,
-    metadata   JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
-
--- ============================================================================
--- SCHEMAS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS schemas (
+CREATE TABLE IF NOT EXISTS settings (
     id         TEXT PRIMARY KEY,
     type       TEXT NOT NULL,
-    org_id     TEXT NOT NULL DEFAULT '1',
-    schema     JSONB NOT NULL,
-    version    INTEGER DEFAULT 1,
-    is_default BOOLEAN DEFAULT FALSE,
-    visibility TEXT NOT NULL DEFAULT 'private',
-    message    TEXT DEFAULT '',
-    created_by TEXT DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    scope      TEXT NOT NULL DEFAULT 'instance',
+    scope_id   TEXT NOT NULL DEFAULT '',
+    data       JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(type, scope, scope_id)
 );
-CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id);
-CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default);
-CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
+CREATE INDEX IF NOT EXISTS idx_settings_type ON settings(type, scope);
 
 -- ============================================================================
--- ENTITY INDEXES
+-- CATALOG CACHE
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS entity_indexes (
-    entity_type TEXT NOT NULL,
-    entity_id   TEXT NOT NULL,
-    field       TEXT NOT NULL,
-    value       TEXT NOT NULL,
-    PRIMARY KEY (entity_type, entity_id, field)
+CREATE TABLE IF NOT EXISTS catalog_cache (
+    key        TEXT PRIMARY KEY,
+    data       JSONB NOT NULL,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_ei_lookup ON entity_indexes(entity_type, field, value);
 
 -- ============================================================================
--- PROVIDERS
+-- UNIQUE FIELDS
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS providers (
-    id              TEXT PRIMARY KEY,
-    org_id          TEXT NOT NULL DEFAULT '1',
-    name            TEXT NOT NULL,
-    protocol        TEXT NOT NULL DEFAULT 'oidc',
-    template        TEXT NOT NULL DEFAULT 'custom',
-    config          JSONB NOT NULL DEFAULT '{}',
-    claim_overrides JSONB NOT NULL DEFAULT '{}',
-    auto_register   BOOLEAN NOT NULL DEFAULT TRUE,
-    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
-    display_order   INTEGER NOT NULL DEFAULT 0,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS unique_fields (
+    scope_id         TEXT NOT NULL DEFAULT '',
+    field_name       TEXT NOT NULL,
+    normalized_value TEXT NOT NULL,
+    resource_type    TEXT NOT NULL DEFAULT '',
+    resource_id      TEXT NOT NULL,
+    UNIQUE(scope_id, field_name, normalized_value)
 );
-CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
+CREATE INDEX IF NOT EXISTS idx_unique_fields_resource ON unique_fields(resource_id);
+CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
 
 -- ============================================================================
--- LINKED ACCOUNTS
+-- RESOURCE INDEXES
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS linked_accounts (
-    id             TEXT PRIMARY KEY,
-    entity_id      TEXT NOT NULL,
-    provider_id    TEXT NOT NULL,
-    external_sub   TEXT NOT NULL,
-    external_email TEXT DEFAULT '',
-    raw_claims     JSONB DEFAULT '{}',
-    linked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_used_at   TIMESTAMPTZ,
-    UNIQUE(provider_id, external_sub)
+CREATE TABLE IF NOT EXISTS resource_indexes (
+    resource_type TEXT NOT NULL,
+    resource_id   TEXT NOT NULL,
+    field         TEXT NOT NULL,
+    value         TEXT NOT NULL,
+    PRIMARY KEY (resource_type, resource_id, field)
 );
-CREATE INDEX IF NOT EXISTS idx_linked_identity ON linked_accounts(entity_id);
-CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_accounts(provider_id, external_sub);
+CREATE INDEX IF NOT EXISTS idx_ri_lookup ON resource_indexes(resource_type, field, value);
 
 -- ============================================================================
 -- SSO STATES
@@ -403,22 +471,25 @@ DROP TABLE IF EXISTS oidc_tokens;
 DROP TABLE IF EXISTS oidc_codes;
 DROP TABLE IF EXISTS oidc_auth_requests;
 DROP TABLE IF EXISTS sso_states;
+DROP TABLE IF EXISTS resource_indexes;
+DROP TABLE IF EXISTS unique_fields;
+DROP TABLE IF EXISTS catalog_cache;
+DROP TABLE IF EXISTS settings;
 DROP TABLE IF EXISTS linked_accounts;
+DROP TABLE IF EXISTS magic_tokens;
+DROP TABLE IF EXISTS tokens;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS login_flows;
+DROP TABLE IF EXISTS actions;
+DROP TABLE IF EXISTS apps;
 DROP TABLE IF EXISTS providers;
-DROP TABLE IF EXISTS entity_indexes;
-DROP TABLE IF EXISTS schemas;
-DROP TABLE IF EXISTS groups;
-DROP TABLE IF EXISTS orgs;
-DROP TABLE IF EXISTS instances;
+DROP TABLE IF EXISTS user_credentials;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS domains;
+DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS retention_policies;
 DROP TABLE IF EXISTS jobs;
 DROP TABLE IF EXISTS consumer_cursors;
-DROP TABLE IF EXISTS magic_tokens;
-DROP TABLE IF EXISTS notification_templates;
-DROP TABLE IF EXISTS domains;
-DROP TABLE IF EXISTS events;
-DROP TABLE IF EXISTS tokens;
-DROP TABLE IF EXISTS sessions;
-DROP TABLE IF EXISTS entity_credentials;
-DROP TABLE IF EXISTS entity_capabilities;
-DROP TABLE IF EXISTS entities;
+DROP TABLE IF EXISTS schemas;
+DROP TABLE IF EXISTS orgs;
+DROP TABLE IF EXISTS instances;

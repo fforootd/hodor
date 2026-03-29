@@ -115,7 +115,7 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	}
 
 	for typeName, entry := range catalog {
-		if entry.Storage != "entities" || entry.Path == "" {
+		if entry.Storage != "users" || entry.Path == "" {
 			continue // Skip system views (sessions, events, jobs).
 		}
 
@@ -152,7 +152,7 @@ func (a *API) typeHandler(schemaType string, next http.HandlerFunc) http.Handler
 
 // --- Identity types ---
 
-type IdentityRequest struct {
+type UserRequest struct {
 	SchemaID     string   `json:"schema_id,omitempty"`
 	Identifier   string   `json:"identifier"`
 	DisplayName  string   `json:"display_name,omitempty"`
@@ -162,7 +162,7 @@ type IdentityRequest struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
-type IdentityResponse struct {
+type UserResponse struct {
 	ID           string   `json:"id"`
 	OrgID        string   `json:"org_id"`
 	Identifier   string   `json:"identifier"`
@@ -191,7 +191,7 @@ type ErrorResponse struct {
 // --- Identity handlers ---
 
 func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
-	var req IdentityRequest
+	var req UserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -201,7 +201,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	identityID := id.New()
+	userID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	profileJSON := "{}"
@@ -231,9 +231,9 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', ?, ?, ?, ?, ?)`,
-		identityID, req.Identifier, req.DisplayName, req.SchemaID, profileJSON, metadataJSON, now, now,
+		userID, req.Identifier, req.DisplayName, req.SchemaID, profileJSON, metadataJSON, now, now,
 	)
 	if err != nil {
 		// Do not swallow the actual SQL error message!
@@ -251,7 +251,7 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	if orgID == "" {
 		orgID = "1"
 	}
-	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, identityID, orgID, req.Identifier); err != nil {
+	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, userID, orgID, req.Identifier); err != nil {
 		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
 				"error": "uniqueness_violation",
@@ -268,8 +268,8 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	// Insert capabilities.
 	for _, cap := range req.Capabilities {
 		_, err = tx.ExecContext(r.Context(),
-			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
-			identityID, cap)
+			`INSERT INTO user_capabilities (user_id, capability) VALUES (?, ?)`,
+			userID, cap)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, "failed to add capability")
 			return
@@ -277,10 +277,10 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Promote indexed fields.
-	promoteIndexes(r.Context(), tx, "identity", identityID, profileJSON)
+	promoteIndexes(r.Context(), tx, "identity", userID, profileJSON)
 
 	// Emit event.
-	emitEvent(r.Context(), tx, "identity.created", identityID, identityID, "identity", map[string]any{
+	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
 		"identifier": req.Identifier,
 	})
 
@@ -301,13 +301,13 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 		if orgID == "" {
 			orgID = "1" // default org
 		}
-		if err := svc.OnEntityCreated(r.Context(), identityID, creatorID, orgID); err != nil {
+		if err := svc.OnResourceCreated(r.Context(), userID, creatorID, orgID); err != nil {
 			logging.Printf("[fga] warn: failed to write entity tuples: %v", err)
 		}
 	}
 
-	resp := IdentityResponse{
-		ID:           identityID,
+	resp := UserResponse{
+		ID:           userID,
 		OrgID:        "org_default",
 		Identifier:   req.Identifier,
 		DisplayName:  req.DisplayName,
@@ -321,13 +321,13 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getIdentity(w http.ResponseWriter, r *http.Request) {
-	identityID, err := parseID(r, "id")
+	userID, err := parseID(r, "id")
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	resp, err := a.loadIdentity(r, identityID)
+	resp, err := a.loadIdentity(r, userID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
@@ -360,7 +360,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	var where []string
 	var args []any
 	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.state, i.profile, i.metadata, i.data, i.created_at, i.updated_at
-		 FROM entities i`
+		 FROM users i`
 	if schemaType != "" {
 		baseSelect += ` JOIN schemas s ON i.schema_id = s.id`
 		where = append(where, `s.type = ?`)
@@ -382,7 +382,7 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var identities []IdentityResponse
+	var identities []UserResponse
 	for rows.Next() {
 		ident, err := scanIdentityRow(rows)
 		if err != nil {
@@ -406,13 +406,13 @@ func (a *API) listIdentities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
-	identityID, err := parseID(r, "id")
+	userID, err := parseID(r, "id")
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	var req IdentityRequest
+	var req UserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -439,15 +439,15 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "profile = ?")
 		args = append(args, string(profileJSON))
 		// Re-promote indexes.
-		promoteIndexes(r.Context(), tx, "identity", identityID, string(profileJSON))
+		promoteIndexes(r.Context(), tx, "identity", userID, string(profileJSON))
 	}
 	if req.DisplayName != "" {
 		setClauses = append(setClauses, "display_name = ?")
 		args = append(args, req.DisplayName)
 	}
-	args = append(args, identityID)
+	args = append(args, userID)
 
-	query := "UPDATE entities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
+	query := "UPDATE users SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -459,7 +459,7 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), tx, "identity.updated", identityID, identityID, "identity", map[string]any{
+	emitEvent(r.Context(), tx, "identity.updated", userID, userID, "identity", map[string]any{
 		"state": req.State,
 	})
 
@@ -470,12 +470,12 @@ func (a *API) updateIdentity(w http.ResponseWriter, r *http.Request) {
 
 	a.bus.Signal()
 
-	resp, _ := a.loadIdentity(r, identityID)
+	resp, _ := a.loadIdentity(r, userID)
 	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
-	identityID, err := parseID(r, "id")
+	userID, err := parseID(r, "id")
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
@@ -489,9 +489,9 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Clean up promoted indexes.
-	_, _ = tx.ExecContext(r.Context(), `DELETE FROM entity_indexes WHERE entity_type = 'identity' AND entity_id = ?`, identityID)
+	_, _ = tx.ExecContext(r.Context(), `DELETE FROM resource_indexes WHERE entity_type = 'identity' AND user_id = ?`, userID)
 
-	result, err := tx.ExecContext(r.Context(), `DELETE FROM entities WHERE id = ?`, identityID)
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -502,7 +502,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), tx, "identity.deleted", identityID, identityID, "identity", nil)
+	emitEvent(r.Context(), tx, "identity.deleted", userID, userID, "identity", nil)
 
 	if err := tx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
@@ -513,7 +513,7 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 
 	// Wire FGA: clean up all tuples for deleted entity.
 	if svc := FGAService; svc != nil {
-		if err := svc.OnEntityDeleted(r.Context(), identityID); err != nil {
+		if err := svc.OnResourceDeleted(r.Context(), userID); err != nil {
 			logging.Printf("[fga] warn: failed to delete entity tuples: %v", err)
 		}
 	}
@@ -522,13 +522,13 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) setEntityPassword(w http.ResponseWriter, r *http.Request) {
-	identityID := r.PathValue("id")
-	if identityID == "" {
+	userID := r.PathValue("id")
+	if userID == "" {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid identity id")
 		return
 	}
 
-	var req SetEntityPasswordRequest
+	var req SetUserPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -539,7 +539,7 @@ func (a *API) setEntityPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pwd := auth.NewPasswords(a.db)
-	if err := pwd.SetPassword(r.Context(), identityID, req.Password); err != nil {
+	if err := pwd.SetPassword(r.Context(), userID, req.Password); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to set password")
 		return
 	}
@@ -801,7 +801,7 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 	// Count affected entities (those NOT pinned to a specific version).
 	var affected int
 	a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM entities i
+		`SELECT COUNT(*) FROM users i
 		 JOIN schemas s ON i.schema_id = s.id
 		 WHERE s.type = ? AND s.org_id = ? AND s.is_default = true`,
 		schemaType, orgID).Scan(&affected)
@@ -963,14 +963,14 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 	schemaID := r.PathValue("id")
 
 	var req struct {
-		EntityID string `json:"entity_id"` // identity ID or identifier
+		UserID string `json:"user_id"` // identity ID or identifier
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.EntityID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "entity_id is required")
+	if req.UserID == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
 
@@ -989,10 +989,10 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 	var identifier string
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT i.identifier, i.data, COALESCE(sc.schema, '{}')
-		 FROM entities i
+		 FROM users i
 		 LEFT JOIN schemas sc ON i.schema_id = sc.id
 		 WHERE i.identifier = ? OR CAST(i.id AS TEXT) = ?`,
-		req.EntityID, req.EntityID,
+		req.UserID, req.UserID,
 	).Scan(&identifier, &dataStr, &currentSchemaStr)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "entity not found")
@@ -1047,7 +1047,7 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 
 	// Count entities by schema type.
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT s.type, COUNT(*) FROM entities i
+		`SELECT s.type, COUNT(*) FROM users i
 		 JOIN schemas s ON i.schema_id = s.id
 		 GROUP BY s.type`)
 	if err == nil {
@@ -1068,7 +1068,7 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 	// Count orgs separately (dedicated table, org_id on entities).
 	var orgCount int
 	if err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(DISTINCT org_id) FROM entities WHERE org_id > 0`).Scan(&orgCount); err == nil {
+		`SELECT COUNT(DISTINCT org_id) FROM users WHERE org_id > 0`).Scan(&orgCount); err == nil {
 		counts["org"] = orgCount
 	}
 
@@ -1206,7 +1206,7 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 
 	var count int
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM entities WHERE schema_id = ?`, schemaID,
+		`SELECT COUNT(*) FROM users WHERE schema_id = ?`, schemaID,
 	).Scan(&count)
 	if err != nil {
 		count = 0
@@ -1215,12 +1215,12 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-func (a *API) loadIdentity(r *http.Request, identityID string) (IdentityResponse, error) {
-	var resp IdentityResponse
+func (a *API) loadIdentity(r *http.Request, userID string) (UserResponse, error) {
+	var resp UserResponse
 	var displayName, profileStr, metaStr, dataStr sql.NullString
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT id, org_id, identifier, display_name, state, profile, metadata, data, created_at, updated_at
-		 FROM entities WHERE id = ?`, identityID,
+		 FROM users WHERE id = ?`, userID,
 	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
 		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
@@ -1238,13 +1238,13 @@ func (a *API) loadIdentity(r *http.Request, identityID string) (IdentityResponse
 	if dataStr.Valid {
 		json.Unmarshal([]byte(dataStr.String), &resp.Data)
 	}
-	resp.Capabilities = a.loadCapabilities(r, identityID)
+	resp.Capabilities = a.loadCapabilities(r, userID)
 	return resp, nil
 }
 
-func (a *API) loadCapabilities(r *http.Request, identityID string) []string {
+func (a *API) loadCapabilities(r *http.Request, userID string) []string {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT capability FROM entity_capabilities WHERE entity_id = ?`, identityID)
+		`SELECT capability FROM user_capabilities WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil
 	}
@@ -1261,8 +1261,8 @@ func (a *API) loadCapabilities(r *http.Request, identityID string) []string {
 	return caps
 }
 
-func scanIdentityRow(rows *sql.Rows) (IdentityResponse, error) {
-	var resp IdentityResponse
+func scanIdentityRow(rows *sql.Rows) (UserResponse, error) {
+	var resp UserResponse
 	var displayName, profileStr, metaStr, dataStr sql.NullString
 	err := rows.Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.State,
 		&profileStr, &metaStr, &dataStr, &resp.CreatedAt, &resp.UpdatedAt)
@@ -1385,9 +1385,9 @@ func (a *API) searchEntities(r *http.Request, pattern string, limit int) []Searc
 
 func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []SearchResult {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT DISTINCT ei.entity_id, e.identifier, e.display_name, ei.field, ei.value
-		 FROM entity_indexes ei
-		 JOIN entities e ON ei.entity_id = e.id
+		`SELECT DISTINCT ei.user_id, e.identifier, e.display_name, ei.field, ei.value
+		 FROM resource_indexes ei
+		 JOIN entities e ON ei.user_id = e.id
 		 WHERE ei.value LIKE ?
 		 LIMIT ?`,
 		pattern, limit)
@@ -1398,13 +1398,13 @@ func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []
 	seen := map[string]bool{}
 	var results []SearchResult
 	for rows.Next() {
-		var entityID string
+		var userID string
 		var ident, field, value string
 		var dn sql.NullString
-		if err := rows.Scan(&entityID, &ident, &dn, &field, &value); err != nil {
+		if err := rows.Scan(&userID, &ident, &dn, &field, &value); err != nil {
 			continue
 		}
-		idStr := entityID
+		idStr := userID
 		if seen[idStr] {
 			continue
 		}
@@ -1418,7 +1418,7 @@ func (a *API) searchEntityIndexes(r *http.Request, pattern string, limit int) []
 			ID:           idStr,
 			Title:        ident,
 			Subtitle:     fmt.Sprintf("%s: %s · %s", field, value, displayName),
-			Link:         "/admin/entities/" + entityID + "/edit",
+			Link:         "/admin/entities/" + userID + "/edit",
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1486,7 +1486,7 @@ func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchR
 
 func (a *API) searchProviders(r *http.Request, pattern string, limit int) []SearchResult {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT e.id, e.identifier, e.data FROM entities e
+		`SELECT e.id, e.identifier, e.data FROM users e
 		 JOIN schemas s ON e.schema_id = s.id
 		 WHERE s.type = 'provider' AND (e.identifier LIKE ? OR e.display_name LIKE ?)
 		 ORDER BY e.identifier LIMIT ?`,
@@ -1519,10 +1519,10 @@ func (a *API) searchProviders(r *http.Request, pattern string, limit int) []Sear
 	return results
 }
 
-func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID string, dataJSON string) {
+func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, userID string, dataJSON string) {
 	_, _ = tx.ExecContext(ctx,
-		`DELETE FROM entity_indexes WHERE entity_type = ? AND entity_id = ?`,
-		entityType, entityID)
+		`DELETE FROM resource_indexes WHERE entity_type = ? AND user_id = ?`,
+		entityType, userID)
 
 	var data map[string]any
 	if json.Unmarshal([]byte(dataJSON), &data) != nil {
@@ -1531,8 +1531,8 @@ func promoteIndexes(ctx context.Context, tx *sql.Tx, entityType string, entityID
 	for field, val := range data {
 		if strVal, ok := val.(string); ok && strVal != "" {
 			_, _ = tx.ExecContext(ctx,
-				`INSERT OR REPLACE INTO entity_indexes (entity_type, entity_id, field, value) VALUES (?, ?, ?, ?)`,
-				entityType, entityID, field, strVal)
+				`INSERT OR REPLACE INTO resource_indexes (entity_type, user_id, field, value) VALUES (?, ?, ?, ?)`,
+				entityType, userID, field, strVal)
 		}
 	}
 }
@@ -1624,13 +1624,13 @@ func eventCategory(eventType string) string {
 }
 
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).
-func (a *API) GetIdentityByID(r *http.Request, identityID string) (IdentityResponse, error) {
-	return a.loadIdentity(r, identityID)
+func (a *API) GetIdentityByID(r *http.Request, userID string) (UserResponse, error) {
+	return a.loadIdentity(r, userID)
 }
 
-// CreateIdentityInternal is an exported helper for the UI to create an identity.
-func (a *API) CreateIdentityInternal(r *http.Request, req IdentityRequest) (IdentityResponse, error) {
-	identityID := id.New()
+// CreateUserInternal is an exported helper for the UI to create an identity.
+func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse, error) {
+	userID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	profileJSON := "{}"
@@ -1641,47 +1641,47 @@ func (a *API) CreateIdentityInternal(r *http.Request, req IdentityRequest) (Iden
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		return IdentityResponse{}, fmt.Errorf("begin tx: %w", err)
+		return UserResponse{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', ?, '{}', ?, ?)`,
-		identityID, req.Identifier, req.DisplayName, profileJSON, now, now)
+		userID, req.Identifier, req.DisplayName, profileJSON, now, now)
 	if err != nil {
-		return IdentityResponse{}, fmt.Errorf("insert: %w", err)
+		return UserResponse{}, fmt.Errorf("insert: %w", err)
 	}
 
 	for _, cap := range req.Capabilities {
 		tx.ExecContext(r.Context(),
-			`INSERT INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
-			identityID, cap)
+			`INSERT INTO user_capabilities (user_id, capability) VALUES (?, ?)`,
+			userID, cap)
 	}
 
-	promoteIndexes(r.Context(), tx, "identity", identityID, profileJSON)
-	emitEvent(r.Context(), tx, "identity.created", identityID, identityID, "identity", map[string]any{
+	promoteIndexes(r.Context(), tx, "identity", userID, profileJSON)
+	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
 		"identifier": req.Identifier,
 	})
 
 	if err := tx.Commit(); err != nil {
-		return IdentityResponse{}, fmt.Errorf("commit: %w", err)
+		return UserResponse{}, fmt.Errorf("commit: %w", err)
 	}
 	a.bus.Signal()
 
-	return IdentityResponse{
-		ID: identityID, OrgID: "org_default", Identifier: req.Identifier, DisplayName: req.DisplayName,
+	return UserResponse{
+		ID: userID, OrgID: "org_default", Identifier: req.Identifier, DisplayName: req.DisplayName,
 		State: "active", Profile: req.Profile, Capabilities: req.Capabilities,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
-// UpdateIdentityInternal is an exported helper for the UI to update an identity.
-func (a *API) UpdateIdentityInternal(r *http.Request, identityID string, req IdentityRequest) (IdentityResponse, error) {
+// UpdateUserInternal is an exported helper for the UI to update an identity.
+func (a *API) UpdateUserInternal(r *http.Request, userID string, req UserRequest) (UserResponse, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
-		return IdentityResponse{}, fmt.Errorf("begin tx: %w", err)
+		return UserResponse{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -1695,48 +1695,48 @@ func (a *API) UpdateIdentityInternal(r *http.Request, identityID string, req Ide
 		profileJSON, _ := json.Marshal(req.Profile)
 		setClauses = append(setClauses, "profile = ?")
 		args = append(args, string(profileJSON))
-		promoteIndexes(r.Context(), tx, "identity", identityID, string(profileJSON))
+		promoteIndexes(r.Context(), tx, "identity", userID, string(profileJSON))
 	}
-	args = append(args, identityID)
+	args = append(args, userID)
 
-	query := "UPDATE entities SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
+	query := "UPDATE users SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
-		return IdentityResponse{}, fmt.Errorf("update: %w", err)
+		return UserResponse{}, fmt.Errorf("update: %w", err)
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return IdentityResponse{}, fmt.Errorf("identity %s", identityID)
+		return UserResponse{}, fmt.Errorf("identity %s", userID)
 	}
 
-	emitEvent(r.Context(), tx, "identity.updated", identityID, identityID, "identity", nil)
+	emitEvent(r.Context(), tx, "identity.updated", userID, userID, "identity", nil)
 	if err := tx.Commit(); err != nil {
-		return IdentityResponse{}, fmt.Errorf("commit: %w", err)
+		return UserResponse{}, fmt.Errorf("commit: %w", err)
 	}
 	a.bus.Signal()
 
-	return a.loadIdentity(r, identityID)
+	return a.loadIdentity(r, userID)
 }
 
 // DeleteIdentityInternal is an exported helper for the UI to delete an identity.
-func (a *API) DeleteIdentityInternal(r *http.Request, identityID string) error {
+func (a *API) DeleteIdentityInternal(r *http.Request, userID string) error {
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	tx.ExecContext(r.Context(), `DELETE FROM entity_indexes WHERE entity_type = 'identity' AND entity_id = ?`, identityID)
-	result, err := tx.ExecContext(r.Context(), `DELETE FROM entities WHERE id = ?`, identityID)
+	tx.ExecContext(r.Context(), `DELETE FROM resource_indexes WHERE entity_type = 'identity' AND user_id = ?`, userID)
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("identity %s", identityID)
+		return fmt.Errorf("identity %s", userID)
 	}
 
-	emitEvent(r.Context(), tx, "identity.deleted", identityID, identityID, "identity", nil)
+	emitEvent(r.Context(), tx, "identity.deleted", userID, userID, "identity", nil)
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

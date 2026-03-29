@@ -199,23 +199,63 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 
-	entityID := id.New()
+	resourceID := id.New()
 	displayName, _ := resolved["display_name"].(string)
 	if displayName == "" {
 		displayName = payload.Name
 	}
 
-	// Insert entity using schema_id (FK to schemas table).
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO entities (id, schema_id, identifier, display_name, data, org_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, '', datetime('now'), datetime('now'))`,
-		entityID, schemaID, templateID, displayName, string(dataJSON),
-	)
+	// Dispatch insert to the correct dedicated table based on template type.
+	switch payload.Type {
+	case "provider":
+		protocol, _ := resolved["protocol"].(string)
+		if protocol == "" {
+			protocol = "oidc"
+		}
+		templateName, _ := resolved["template"].(string)
+		if templateName == "" {
+			templateName = templateID
+		}
+		configJSON, _ := json.Marshal(resolved["config"])
+		overridesJSON, _ := json.Marshal(resolved["claim_overrides"])
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, displayName, protocol, templateName,
+			string(configJSON), string(overridesJSON), schemaID, string(dataJSON),
+		)
+	case "action":
+		hook, _ := resolved["hook"].(string)
+		actionType, _ := resolved["action_type"].(string)
+		trigger, _ := resolved["trigger"].(string)
+		configJSON, _ := json.Marshal(resolved["config"])
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO actions (id, org_id, name, hook, action_type, trigger, config, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, displayName, hook, actionType, trigger,
+			string(configJSON), schemaID, string(dataJSON),
+		)
+	case "login_flow":
+		stepsJSON, _ := json.Marshal(resolved["steps"])
+		configJSON, _ := json.Marshal(resolved["config"])
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO login_flows (id, org_id, name, steps, config, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, displayName, string(stepsJSON), string(configJSON), schemaID, string(dataJSON),
+		)
+	default:
+		// Schema or unknown type — insert as user (fallback for schema templates etc.).
+		_, err = s.db.ExecContext(ctx,
+			`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, '1', ?, ?, 'human', 'active', ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, templateID, displayName, schemaID, string(dataJSON),
+		)
+	}
 	if err != nil {
-		return "", fmt.Errorf("insert entity: %w", err)
+		return "", fmt.Errorf("insert resource: %w", err)
 	}
 
-	return entityID, nil
+	return resourceID, nil
 }
 
 // CatalogState returns the lifecycle state of an entity based on its _catalog metadata.

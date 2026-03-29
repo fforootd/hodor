@@ -52,31 +52,25 @@ func (h *Handler) RegisterSSORoutes(mux *http.ServeMux) {
 func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	providerID := r.PathValue("provider_id")
 
-	// Load provider config from entities table.
-	var dataJSON, entityState string
+	// Load provider config from providers table.
+	var configStr, protocol string
+	var enabled bool
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT e.data, e.state FROM entities e
-		 JOIN schemas s ON e.schema_id = s.id
-		 WHERE e.id = ? AND s.type = 'provider'`, providerID,
-	).Scan(&dataJSON, &entityState)
+		`SELECT config, protocol, enabled FROM providers WHERE id = ?`, providerID,
+	).Scan(&configStr, &protocol, &enabled)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
-	if entityState != "active" {
+	if !enabled {
 		httputil.WriteError(w, http.StatusForbidden, "provider is disabled")
 		return
 	}
-	var provData map[string]any
-	_ = json.Unmarshal([]byte(dataJSON), &provData)
-	protocol, _ := provData["protocol"].(string)
-	configMap, _ := provData["config"].(map[string]any)
-	configJSON, _ := json.Marshal(configMap)
+	configJSONStr := configStr
 	if protocol != "oidc" {
 		httputil.WriteError(w, http.StatusBadRequest, "only OIDC providers are supported")
 		return
 	}
-	configJSONStr := string(configJSON)
 
 	var cfg oidcConfig
 	_ = json.Unmarshal([]byte(configJSONStr), &cfg)
@@ -160,26 +154,27 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Delete used state.
 	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM sso_states WHERE state = ?`, state)
 
-	// Load provider from entities table.
-	var provDataJSON string
+	// Load provider from providers table.
+	var provConfigStr, provOverridesStr string
 	err = h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT e.data FROM entities e
-		 JOIN schemas s ON e.schema_id = s.id
-		 WHERE e.id = ? AND s.type = 'provider'`, providerID,
-	).Scan(&provDataJSON)
+		`SELECT config, COALESCE(claim_overrides, '{}') FROM providers WHERE id = ?`, providerID,
+	).Scan(&provConfigStr, &provOverridesStr)
 	if err != nil {
 		logging.Printf("[sso] provider lookup failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_config", http.StatusFound)
 		return
 	}
-	var provData2 map[string]any
-	_ = json.Unmarshal([]byte(provDataJSON), &provData2)
-	configMap2, _ := provData2["config"].(map[string]any)
+	var configMap2 map[string]any
+	_ = json.Unmarshal([]byte(provConfigStr), &configMap2)
 	configJSON2, _ := json.Marshal(configMap2)
-	overrideMap, _ := provData2["claim_overrides"].(map[string]any)
-	overridesJSON2, _ := json.Marshal(overrideMap)
-	template, _ := provData2["template"].(string)
-	autoRegister, _ := provData2["auto_register"].(bool)
+	overridesJSON2 := []byte(provOverridesStr)
+
+	// Load template and auto_register from providers table.
+	var template string
+	var autoRegister bool
+	_ = h.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COALESCE(template, ''), auto_register FROM providers WHERE id = ?`, providerID,
+	).Scan(&template, &autoRegister)
 
 	var cfg oidcConfig
 	_ = json.Unmarshal(configJSON2, &cfg)
@@ -230,7 +225,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Find or create linked account.
-	identityID, err := h.findOrCreateLinkedIdentity(r.Context(), providerID, externalSub, externalEmail, claims, string(overridesJSON2), autoRegister)
+	userID, err := h.findOrCreateLinkedIdentity(r.Context(), providerID, externalSub, externalEmail, claims, string(overridesJSON2), autoRegister)
 	if err != nil {
 		logging.Printf("[sso] link/create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_link_failed", http.StatusFound)
@@ -238,7 +233,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr, nil)
+	sessResp, err := h.api.CreateSessionInternal(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		logging.Printf("[sso] session create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_session", http.StatusFound)
@@ -246,7 +241,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit event.
-	h.api.EmitAuthEvent(r.Context(), "auth.sso_login", identityID, map[string]any{
+	h.api.EmitAuthEvent(r.Context(), "auth.sso_login", userID, map[string]any{
 		"provider_id":  providerID,
 		"template":     template,
 		"external_sub": externalSub,
@@ -261,11 +256,11 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, externalSub, externalEmail string, claims map[string]any, overridesJSON string, autoRegister bool) (string, error) {
 	// Check if already linked.
-	var identityID string
+	var userID string
 	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT entity_id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
+		`SELECT user_id FROM linked_accounts WHERE provider_id = ? AND external_sub = ?`,
 		providerID, externalSub,
-	).Scan(&identityID)
+	).Scan(&userID)
 
 	if err == nil {
 		// Already linked — update last_used_at and raw_claims.
@@ -274,7 +269,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 			`UPDATE linked_accounts SET last_used_at = datetime('now'), raw_claims = ?, external_email = ? WHERE provider_id = ? AND external_sub = ?`,
 			string(claimsJSON), externalEmail, providerID, externalSub,
 		)
-		return identityID, nil
+		return userID, nil
 	}
 
 	if !autoRegister {
@@ -307,7 +302,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	profileJSON, _ := json.Marshal(profile)
 
 	_, err = h.db.SQL().ExecContext(ctx,
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', 'human_user_v1', ?, '{}', datetime('now'), datetime('now'))`,
 		newID, identifier, displayName, string(profileJSON),
 	)
@@ -319,7 +314,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	linkID := id.New()
 	claimsJSON, _ := json.Marshal(claims)
 	_, err = h.db.SQL().ExecContext(ctx,
-		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_accounts (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
 		linkID, newID, providerID, externalSub, externalEmail, string(claimsJSON),
 	)

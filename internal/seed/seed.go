@@ -25,7 +25,7 @@ import (
 // SeedFile represents the top-level structure of a seed YAML file.
 type SeedFile struct {
 	Providers  []SeedProvider `yaml:"providers"`
-	Identities []SeedIdentity `yaml:"entities"`
+	Identities []SeedIdentity `yaml:"users"`
 }
 
 // SeedProvider defines a provider to seed.
@@ -133,7 +133,7 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 	// Skip if exists by name in entities table.
 	var existing string
 	err := tx.QueryRowContext(ctx,
-		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
 		 WHERE s.type = 'provider' AND e.identifier = ?`, p.Name).Scan(&existing)
 	if err == nil {
 		logging.Printf("[seed] provider %q already exists, skipping", p.Name)
@@ -176,7 +176,7 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 	dataJSON, _ := json.Marshal(data)
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO entities (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
+		`INSERT INTO users (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
 		 VALUES (?, '1', 'provider_v1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
 		provID, p.Name, p.Name, string(dataJSON))
 	if err != nil {
@@ -195,7 +195,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 
 	// Check if exists by identifier.
 	var existingID string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		// Entity already exists — handle according to on_conflict.
 		switch onConflict {
@@ -235,7 +235,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))`,
 		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON, profileJSON)
 	if err != nil {
@@ -250,7 +250,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
-				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				`INSERT INTO user_credentials (id, user_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)
 		}
 	}
@@ -272,56 +272,56 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 }
 
 // updateExistingIdentity handles the on_conflict: update case.
-func updateExistingIdentity(ctx context.Context, tx *sql.Tx, entityID string, ident SeedIdentity) error {
+func updateExistingIdentity(ctx context.Context, tx *sql.Tx, userID string, ident SeedIdentity) error {
 	// Update password if provided.
 	if ident.Password != "" {
 		pw := auth.NewPasswords(nil)
 		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			// Delete existing + re-insert.
-			tx.ExecContext(ctx, `DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`, entityID)
+			tx.ExecContext(ctx, `DELETE FROM user_credentials WHERE user_id = ? AND credential_type = 'password'`, userID)
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
-				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
-				credID, entityID, credJSON)
+				`INSERT INTO user_credentials (id, user_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				credID, userID, credJSON)
 			logging.Printf("[seed]   updated password for %q", ident.Identifier)
 		}
 	}
 
 	// Upsert capabilities.
-	seedCapabilities(ctx, tx, entityID, ident.Capabilities)
+	seedCapabilities(ctx, tx, userID, ident.Capabilities)
 
 	// Upsert PATs.
-	seedPATs(ctx, tx, entityID, ident.PATs)
+	seedPATs(ctx, tx, userID, ident.PATs)
 
 	// Process linked accounts.
 	for _, la := range ident.LinkedAccounts {
-		seedLinkedAccount(ctx, tx, entityID, la)
+		seedLinkedAccount(ctx, tx, userID, la)
 	}
 
 	return nil
 }
 
 // seedCapabilities inserts capabilities for an entity (idempotent via INSERT OR IGNORE).
-func seedCapabilities(ctx context.Context, tx *sql.Tx, entityID string, caps []string) {
+func seedCapabilities(ctx context.Context, tx *sql.Tx, userID string, caps []string) {
 	for _, cap := range caps {
 		tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO entity_capabilities (entity_id, capability) VALUES (?, ?)`,
-			entityID, cap)
+			`INSERT OR IGNORE INTO user_capabilities (user_id, capability) VALUES (?, ?)`,
+			userID, cap)
 	}
 }
 
 // seedPATs creates PAT tokens for an entity (idempotent via name check).
-func seedPATs(ctx context.Context, tx *sql.Tx, entityID string, pats []SeedPAT) {
+func seedPATs(ctx context.Context, tx *sql.Tx, userID string, pats []SeedPAT) {
 	for _, pat := range pats {
 		// Skip if a PAT with this name already exists for this entity.
 		var existingID string
 		err := tx.QueryRowContext(ctx,
-			`SELECT id FROM tokens WHERE entity_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL`,
-			entityID, pat.Name).Scan(&existingID)
+			`SELECT id FROM tokens WHERE user_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL`,
+			userID, pat.Name).Scan(&existingID)
 		if err == nil {
-			logging.Printf("[seed]   PAT %q already exists for entity %s, skipping", pat.Name, entityID)
+			logging.Printf("[seed]   PAT %q already exists for entity %s, skipping", pat.Name, userID)
 			continue
 		}
 
@@ -343,23 +343,23 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID string, pats []SeedPAT) 
 		scopesJSON, _ := json.Marshal(scopes)
 
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO tokens (id, type, token_hash, entity_id, name, scopes, created_at)
+			`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, created_at)
 			 VALUES (?, 'pat', ?, ?, ?, ?, datetime('now'))`,
-			tokenID, tokenHash, entityID, pat.Name, string(scopesJSON))
+			tokenID, tokenHash, userID, pat.Name, string(scopesJSON))
 		if err != nil {
 			logging.Printf("[seed]   failed to create PAT %q: %v", pat.Name, err)
 			continue
 		}
 
-		logging.Printf("[seed]   created PAT %q for entity %s", pat.Name, entityID)
+		logging.Printf("[seed]   created PAT %q for entity %s", pat.Name, userID)
 	}
 }
 
-func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID string, la SeedLinkedAccount) {
+func seedLinkedAccount(ctx context.Context, tx *sql.Tx, userID string, la SeedLinkedAccount) {
 	// Resolve provider by name or ID from entities table.
 	var providerID string
 	err := tx.QueryRowContext(ctx,
-		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
 		 WHERE s.type = 'provider' AND (e.identifier = ? OR e.id = ?)`,
 		la.Provider, la.Provider).Scan(&providerID)
 	if err != nil {
@@ -378,11 +378,11 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID string, la Se
 
 	linkID := id.New()
 	tx.ExecContext(ctx,
-		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_accounts (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
-		linkID, identityID, providerID, la.ExternalSub, la.ExternalEmail)
+		linkID, userID, providerID, la.ExternalSub, la.ExternalEmail)
 
-	logging.Printf("[seed] linked identity %s → provider %s (sub: %s)", identityID, providerID, la.ExternalSub)
+	logging.Printf("[seed] linked identity %s → provider %s (sub: %s)", userID, providerID, la.ExternalSub)
 }
 
 func generateShortID() string {

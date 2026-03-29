@@ -17,9 +17,9 @@ import (
 	"github.com/zitadel/zitadel/internal/session"
 )
 
-// IdentityContext holds the authenticated identity info on the request context.
-type IdentityContext struct {
-	IdentityID   string
+// UserContext holds the authenticated identity info on the request context.
+type UserContext struct {
+	IduserID   string
 	Identifier   string
 	DisplayName  string
 	Capabilities []string
@@ -88,11 +88,11 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up identity by identifier.
-	var identityID string
+	var userID string
 	err := u.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id FROM entities WHERE identifier = ? AND state = 'active'`,
+		`SELECT id FROM users WHERE identifier = ? AND state = 'active'`,
 		identifier,
-	).Scan(&identityID)
+	).Scan(&userID)
 	if err == sql.ErrNoRows {
 		u.api.EmitAuthEvent(r.Context(), "auth.login_failure", "", map[string]any{
 			"identifier": identifier,
@@ -109,9 +109,9 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify password.
-	ok, err := u.passwords.CheckPassword(r.Context(), identityID, password)
+	ok, err := u.passwords.CheckPassword(r.Context(), userID, password)
 	if err != nil || !ok {
-		u.api.EmitAuthEvent(r.Context(), "auth.login_failure", identityID, map[string]any{
+		u.api.EmitAuthEvent(r.Context(), "auth.login_failure", userID, map[string]any{
 			"identifier": identifier,
 			"reason":     "invalid_password",
 			"ip_address": r.RemoteAddr,
@@ -122,7 +122,7 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session via api package (emits session.created).
-	sessResp, err := u.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr, nil)
+	sessResp, err := u.api.CreateSessionInternal(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		logging.Printf("create session failed: %v", err)
 		renderLoginPage(w, "Failed to create session", redirectTo)
@@ -130,7 +130,7 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit login success event.
-	u.api.EmitAuthEvent(r.Context(), "auth.login_success", identityID, map[string]any{
+	u.api.EmitAuthEvent(r.Context(), "auth.login_success", userID, map[string]any{
 		"identifier":  identifier,
 		"session_id":  sessResp.Session.ID,
 		"auth_method": "password",
@@ -178,7 +178,7 @@ func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
 // --- Admin handlers ---
 
 func (u *UI) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	var identityCount, sessionCount, eventCount int
 	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM entities`).Scan(&identityCount)
@@ -189,11 +189,11 @@ func (u *UI) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT i.id, i.identifier, json_extract(i.data, '$.display_name'), i.state, i.created_at
-		 FROM entities i ORDER BY i.id ASC LIMIT 100`)
+		 FROM users i ORDER BY i.id ASC LIMIT 100`)
 	if err != nil {
 		http.Error(w, "Failed to load entities", http.StatusInternalServerError)
 		return
@@ -228,11 +228,11 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT s.id, i.identifier, s.user_agent, s.ip_address, s.created_at, s.expires_at
-		 FROM sessions s JOIN entities e ON s.entity_id = i.id
+		 FROM sessions s JOIN entities e ON s.user_id = i.id
 		 WHERE s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 100`)
 	if err != nil {
 		http.Error(w, "Failed to load sessions", http.StatusInternalServerError)
@@ -268,7 +268,7 @@ func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	typeFilter := r.URL.Query().Get("type")
 
@@ -318,7 +318,7 @@ func (u *UI) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	type JobRow struct {
 		Name        string
@@ -457,13 +457,13 @@ func (u *UI) loadSchemaOptions(ctx context.Context) []SchemaOption {
 }
 
 func (u *UI) handleAdminIdentityNew(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 	schemas := u.loadSchemaOptions(r.Context())
 	renderAdminIdentityForm(w, ident, nil, "", schemas)
 }
 
 func (u *UI) handleAdminIdentityCreate(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 	schemas := u.loadSchemaOptions(r.Context())
 	if err := r.ParseForm(); err != nil {
 		renderAdminIdentityForm(w, ident, nil, "Invalid form data", schemas)
@@ -486,7 +486,7 @@ func (u *UI) handleAdminIdentityCreate(w http.ResponseWriter, r *http.Request) {
 	// Build capabilities from auth method checkboxes.
 	caps := append([]string{}, r.Form["auth_methods"]...)
 
-	resp, err := u.api.CreateIdentityInternal(r, api.IdentityRequest{
+	resp, err := u.api.CreateUserInternal(r, api.UserRequest{
 		Identifier:   identifier,
 		Capabilities: caps,
 		Profile:      data,
@@ -508,7 +508,7 @@ func (u *UI) handleAdminIdentityCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminIdentityEdit(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	parsedID := r.PathValue("id")
 	if parsedID == "" {
@@ -527,7 +527,7 @@ func (u *UI) handleAdminIdentityEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleAdminIdentityUpdate(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Invalid form data", http.StatusBadRequest)
 		return
@@ -555,7 +555,7 @@ func (u *UI) handleAdminIdentityUpdate(w http.ResponseWriter, r *http.Request) {
 		data["display_name"] = displayName
 	}
 
-	_, updateErr := u.api.UpdateIdentityInternal(r, parsedID, api.IdentityRequest{
+	_, updateErr := u.api.UpdateUserInternal(r, parsedID, api.UserRequest{
 		State:   state,
 		Profile: data,
 	})
@@ -590,7 +590,7 @@ func (u *UI) handleAdminIdentityDelete(w http.ResponseWriter, r *http.Request) {
 
 // --- Session helpers ---
 
-func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
+func (u *UI) getSession(r *http.Request) (*UserContext, bool) {
 	rawToken, ok := session.ReadSessionCookie(r, u.cookies)
 	if !ok {
 		return nil, false
@@ -598,15 +598,15 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 
 	tokenHash := crypto.HashTokenHex(rawToken)
 
-	var identityID string
+	var userID string
 	var identifier string
 	var dataJSON sql.NullString
 	err := u.db.SQL().QueryRowContext(r.Context(),
-		`SELECT s.entity_id, i.identifier, i.data
-		 FROM sessions s JOIN entities e ON s.entity_id = i.id
+		`SELECT s.user_id, i.identifier, i.data
+		 FROM sessions s JOIN entities e ON s.user_id = i.id
 		 WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
 		tokenHash,
-	).Scan(&identityID, &identifier, &dataJSON)
+	).Scan(&userID, &identifier, &dataJSON)
 	if err != nil {
 		return nil, false
 	}
@@ -624,7 +624,7 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 
 	// Load capabilities.
 	capRows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT capability FROM entity_capabilities WHERE entity_id = ?`, identityID)
+		`SELECT capability FROM user_capabilities WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, false
 	}
@@ -640,8 +640,8 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 	if err := capRows.Err(); err != nil {
 		return nil, false
 	}
-	return &IdentityContext{
-		IdentityID:   identityID,
+	return &UserContext{
+		IduserID:   userID,
 		Identifier:   identifier,
 		DisplayName:  displayName,
 		Capabilities: caps,
@@ -649,7 +649,7 @@ func (u *UI) getSession(r *http.Request) (*IdentityContext, bool) {
 }
 
 func (u *UI) handleAdminSchemas(w http.ResponseWriter, r *http.Request) {
-	ident := r.Context().Value(ctxKeyIdentity).(*IdentityContext)
+	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT id, type, schema, version, created_at FROM schemas ORDER BY type ASC`)

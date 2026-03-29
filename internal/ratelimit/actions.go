@@ -137,9 +137,9 @@ func (e *ActionEngine) loadActions(ctx context.Context, hook string) ([]*compile
 // refreshActions queries the database for all enabled actions and recompiles them.
 func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*compiledAction, error) {
 	rows, err := e.db.QueryContext(ctx,
-		`SELECT i.id, i.data FROM entities i
-		  JOIN schemas s ON i.schema_id = s.id
-		 WHERE s.type = 'action'`,
+		`SELECT id, name, hook, action_type, COALESCE(trigger_expr, 'true'),
+		        priority, config, fail_open, timeout_ms, enabled
+		 FROM actions`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query actions: %w", err)
@@ -156,63 +156,21 @@ func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*comp
 	var hookActions []*compiledAction
 
 	for rows.Next() {
-		var id, dataJSON string
-		if err := rows.Scan(&id, &dataJSON); err != nil {
-			logging.Printf("[actions] scan action %s: %v", id, err)
+		var actionID, name, actionHook, actionType, trigger, configStr string
+		var priority, timeoutMs int
+		var failOpen, enabled bool
+		if err := rows.Scan(&actionID, &name, &actionHook, &actionType, &trigger,
+			&priority, &configStr, &failOpen, &timeoutMs, &enabled); err != nil {
+			logging.Printf("[actions] scan action: %v", err)
 			continue
 		}
 
-		var data map[string]any
-		if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
-			logging.Printf("[actions] unmarshal action %s: %v", id, err)
-			continue
-		}
-
-		// Check enabled.
-		enabled, _ := data["enabled"].(bool)
-		if _, ok := data["enabled"]; !ok {
-			enabled = true // default: enabled
-		}
 		if !enabled {
 			continue
 		}
 
-		// Support both old ("stage"/"condition"/"engine") and new ("hook"/"trigger"/"action_type") field names.
-		actionHook, _ := data["hook"].(string)
-		if actionHook == "" {
-			actionHook, _ = data["stage"].(string) // backward compat
-		}
-
-		actionType, _ := data["action_type"].(string)
-		if actionType == "" {
-			actionType, _ = data["engine"].(string) // backward compat
-		}
-
-		trigger, _ := data["trigger"].(string)
-		if trigger == "" {
-			trigger, _ = data["condition"].(string) // backward compat
-		}
-		if trigger == "" {
-			trigger = "true"
-		}
-
-		priority := 50
-		if v, ok := data["priority"].(float64); ok {
-			priority = int(v)
-		}
-
-		failOpen := false
-		if v, ok := data["fail_open"].(bool); ok {
-			failOpen = v
-		}
-
-		timeoutMs := 5000
-		if v, ok := data["timeout_ms"].(float64); ok {
-			timeoutMs = int(v)
-		}
-
-		config, _ := data["config"].(map[string]any)
-		displayName, _ := data["display_name"].(string)
+		var config map[string]any
+		_ = json.Unmarshal([]byte(configStr), &config)
 
 		// Compile the trigger expression.
 		env := map[string]any{
@@ -227,13 +185,13 @@ func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*comp
 
 		program, err := expr.Compile(trigger, expr.Env(env), expr.AsBool())
 		if err != nil {
-			logging.Printf("[actions] compile action %s trigger %q: %v", id, trigger, err)
+			logging.Printf("[actions] compile action %s trigger %q: %v", actionID, trigger, err)
 			continue
 		}
 
 		ca := &compiledAction{
-			ID:         id,
-			Name:       displayName,
+			ID:         actionID,
+			Name:       name,
 			Hook:       actionHook,
 			Priority:   priority,
 			ActionType: actionType,
@@ -243,7 +201,7 @@ func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*comp
 			TimeoutMs:  timeoutMs,
 		}
 
-		e.cache[id] = ca
+		e.cache[actionID] = ca
 		if actionHook == hook {
 			hookActions = append(hookActions, ca)
 		}

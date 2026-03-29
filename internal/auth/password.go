@@ -56,7 +56,7 @@ func (p *Passwords) Verify(encoded, plain string) (ok bool, updated string, err 
 
 // SetPassword stores a password credential for the given identity.
 // If a password credential already exists, it is replaced.
-func (p *Passwords) SetPassword(ctx context.Context, identityID string, plain string) error {
+func (p *Passwords) SetPassword(ctx context.Context, userID string, plain string) error {
 	encoded, err := p.Hash(plain)
 	if err != nil {
 		return err
@@ -70,8 +70,8 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID string, plain st
 
 	// Delete existing password credential if any.
 	_, err = tx.ExecContext(ctx,
-		`DELETE FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`,
-		identityID,
+		`DELETE FROM user_credentials WHERE user_id = ? AND credential_type = 'password'`,
+		userID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete old password: %w", err)
@@ -82,9 +82,9 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID string, plain st
 	// Store the encoded hash as credential_data JSON.
 	credJSON := EncodeCredentialJSON(encoded)
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data)
+		`INSERT INTO user_credentials (id, user_id, credential_type, credential_data)
 		 VALUES (?, ?, 'password', ?)`,
-		credID, identityID, credJSON,
+		credID, userID, credJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert password credential: %w", err)
@@ -96,14 +96,14 @@ func (p *Passwords) SetPassword(ctx context.Context, identityID string, plain st
 // CheckPassword verifies a password for the given identity.
 // Returns true if the password is correct. Transparently re-hashes if the
 // algorithm has been upgraded.
-func (p *Passwords) CheckPassword(ctx context.Context, identityID string, plain string) (bool, error) {
+func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain string) (bool, error) {
 	// Load password credential.
 	var credJSON string
 	var credID string
 	err := p.db.SQL().QueryRowContext(ctx,
-		`SELECT id, credential_data FROM entity_credentials
-		 WHERE entity_id = ? AND credential_type = 'password'`,
-		identityID,
+		`SELECT id, credential_data FROM user_credentials
+		 WHERE user_id = ? AND credential_type = 'password'`,
+		userID,
 	).Scan(&credID, &credJSON)
 	if err == sql.ErrNoRows {
 		return false, nil // No password credential.
@@ -130,7 +130,7 @@ func (p *Passwords) CheckPassword(ctx context.Context, identityID string, plain 
 	if updated != "" {
 		updatedJSON := EncodeCredentialJSON(updated)
 		_, _ = p.db.SQL().ExecContext(ctx,
-			`UPDATE entity_credentials SET credential_data = ? WHERE id = ?`,
+			`UPDATE user_credentials SET credential_data = ? WHERE id = ?`,
 			updatedJSON, credID,
 		)
 	}

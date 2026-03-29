@@ -2,20 +2,21 @@
   "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
+  "x-table": "sessions",
   "description": "Active user session. Ephemeral, high-write.",
   "properties": {
     "id": {
       "type": "string",
       "readOnly": true
     },
-    "entity_id": {
+    "user_id": {
       "type": "string",
-      "description": "Authenticated identity",
+      "description": "Authenticated user",
       "x-ref": {
-        "resource": "entities",
+        "resource": "users",
         "display": "display_name",
-        "path": "/console/s/{type}/{id}",
-        "inverse": "sessions?entity_id={id}"
+        "path": "/console/s/users/{id}",
+        "inverse": "sessions?user_id={id}"
       }
     },
     "org_id": {
@@ -84,7 +85,7 @@
     }
   },
   "required": [
-    "entity_id",
+    "user_id",
     "token_hash"
   ]
 }

@@ -23,19 +23,19 @@ func (a *API) registerOpenAPIOperations() {
 	a.spec.Add(OpenAPIOperation{
 		Method: "POST", Path: "/v1/users", ID: "createUser",
 		Summary: "Create a user", Tags: []string{"Users"},
-		Request: IdentityRequest{}, Response: IdentityResponse{},
+		Request: UserRequest{}, Response: UserResponse{},
 		StatusCode: 201, Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "GET", Path: "/v1/users/{id}", ID: "getUser",
 		Summary: "Get a user", Tags: []string{"Users"},
-		Response: IdentityResponse{}, PathParams: []OpenAPIParam{idParam},
+		Response: UserResponse{}, PathParams: []OpenAPIParam{idParam},
 		Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "PATCH", Path: "/v1/users/{id}", ID: "updateUser",
 		Summary: "Update a user", Tags: []string{"Users"},
-		Request: UpdateIdentityRequest{}, Response: IdentityResponse{},
+		Request: UpdateUserRequest{}, Response: UserResponse{},
 		PathParams: []OpenAPIParam{idParam}, Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
@@ -46,7 +46,7 @@ func (a *API) registerOpenAPIOperations() {
 	a.spec.Add(OpenAPIOperation{
 		Method: "POST", Path: "/v1/users/{id}/password", ID: "setUserPassword",
 		Summary: "Set a user password", Tags: []string{"Users"},
-		Request: SetEntityPasswordRequest{}, PathParams: []OpenAPIParam{idParam},
+		Request: SetUserPasswordRequest{}, PathParams: []OpenAPIParam{idParam},
 		StatusCode: 204, Security: true,
 	})
 
@@ -59,7 +59,7 @@ func (a *API) registerOpenAPIOperations() {
 	a.spec.Add(OpenAPIOperation{
 		Method: "POST", Path: "/v1/service-accounts", ID: "createServiceAccount",
 		Summary: "Create a service account", Tags: []string{"Service Accounts"},
-		Request: IdentityRequest{}, Response: IdentityResponse{},
+		Request: UserRequest{}, Response: UserResponse{},
 		StatusCode: 201, Security: true,
 	})
 

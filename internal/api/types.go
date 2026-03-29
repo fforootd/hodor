@@ -4,7 +4,7 @@ package api
 // Zitadel API that are NOT already declared in their handler files.
 //
 // Types already declared elsewhere (kept in place to avoid churn):
-//   - IdentityRequest, IdentityResponse, ListResponse, ErrorResponse  → api.go
+//   - UserRequest, UserResponse, ListResponse, ErrorResponse  → api.go
 //   - SchemaRequest, SchemaResponse                                    → api.go
 //   - SearchResult                                                     → api.go
 //   - EventResponse, AggregateRow                                      → event.go
@@ -47,7 +47,7 @@ type DiffSchemaResponse struct {
 
 // PreviewSchemaRequest is the body for POST /v1/schemas/{id}/preview.
 type PreviewSchemaRequest struct {
-	EntityID string `json:"entity_id"`
+	UserID string `json:"user_id"`
 }
 
 // PreviewSchemaResponse is returned from POST /v1/schemas/{id}/preview.
@@ -65,8 +65,8 @@ type SchemaIdentityCountResponse struct {
 
 // --- Identity (extensions) ---
 
-// UpdateIdentityRequest is the body for PATCH /v1/entities/{id}.
-type UpdateIdentityRequest struct {
+// UpdateUserRequest is the body for PATCH /v1/entities/{id}.
+type UpdateUserRequest struct {
 	Identifier   string         `json:"identifier,omitempty"`
 	DisplayName  string         `json:"display_name,omitempty"`
 	State        string         `json:"state,omitempty"`
@@ -424,7 +424,7 @@ type OrgResponse struct {
 	DisplayName string `json:"display_name"`
 }
 
-// SetEntityPasswordRequest is the payload for setting an entity's password.
-type SetEntityPasswordRequest struct {
+// SetUserPasswordRequest is the payload for setting an entity's password.
+type SetUserPasswordRequest struct {
 	Password string `json:"password"`
 }

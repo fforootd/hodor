@@ -99,7 +99,7 @@ func Normalize(value string) string {
 // It reads the entity's data JSON, extracts values for x-unique fields,
 // normalizes them, and inserts into unique_fields.
 // Returns a *Violation error if a constraint is violated.
-func Enforce(ctx context.Context, tx *sql.Tx, entityID, orgID string, constraints []FieldConstraint, data map[string]any) error {
+func Enforce(ctx context.Context, tx *sql.Tx, userID, orgID string, constraints []FieldConstraint, data map[string]any) error {
 	for _, c := range constraints {
 		rawVal, ok := data[c.FieldName]
 		if !ok || rawVal == nil {
@@ -117,9 +117,9 @@ func Enforce(ctx context.Context, tx *sql.Tx, entityID, orgID string, constraint
 		}
 
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+			`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 			 VALUES (?, ?, ?, ?)`,
-			scopeID, c.FieldName, value, entityID,
+			scopeID, c.FieldName, value, userID,
 		)
 		if err != nil {
 			return &ViolationError{
@@ -135,15 +135,15 @@ func Enforce(ctx context.Context, tx *sql.Tx, entityID, orgID string, constraint
 // EnforceFromIdentifier is a convenience for entities that use the legacy
 // identifier column as their primary unique field. It writes an "identifier"
 // entry into unique_fields at instance scope.
-func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, entityID, orgID, identifier string) error {
+func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, userID, orgID, identifier string) error {
 	if identifier == "" {
 		return nil
 	}
 	normalized := Normalize(identifier)
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO unique_fields (scope_id, field_name, normalized_value, entity_id)
+		`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
 		 VALUES ('', 'identifier', ?, ?)`,
-		normalized, entityID,
+		normalized, userID,
 	)
 	if err != nil {
 		return &ViolationError{
@@ -156,14 +156,14 @@ func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, entityID, orgID, ide
 }
 
 // Release removes all unique_fields rows for an entity (used before re-enforcement on update).
-func Release(ctx context.Context, tx *sql.Tx, entityID string) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM unique_fields WHERE entity_id = ?`, entityID)
+func Release(ctx context.Context, tx *sql.Tx, userID string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM unique_fields WHERE user_id = ?`, userID)
 	return err
 }
 
 // ResolvedEntity is the result of an identifier resolution.
 type ResolvedEntity struct {
-	EntityID    string
+	UserID    string
 	DisplayName string
 	OrgID       string
 }
@@ -176,14 +176,14 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 	// Phase 1: Instance-scoped match (globally unique identifiers).
 	var result ResolvedEntity
 	err := db.QueryRowContext(ctx,
-		`SELECT uf.entity_id, COALESCE(e.display_name, e.identifier), e.org_id
+		`SELECT uf.user_id, COALESCE(e.display_name, e.identifier), e.org_id
 		 FROM unique_fields uf
-		 JOIN entities e ON e.id = uf.entity_id
+		 JOIN entities e ON e.id = uf.user_id
 		 WHERE uf.normalized_value = ?
 		   AND uf.scope_id = ''
 		   AND e.state = 'active'
 		 LIMIT 1`, normalized,
-	).Scan(&result.EntityID, &result.DisplayName, &result.OrgID)
+	).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 	if err == nil {
 		return &result, nil
 	}
@@ -194,14 +194,14 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 	// Phase 2: Org-scoped match (if org context is available).
 	if orgID != "" {
 		err = db.QueryRowContext(ctx,
-			`SELECT uf.entity_id, COALESCE(e.display_name, e.identifier), e.org_id
+			`SELECT uf.user_id, COALESCE(e.display_name, e.identifier), e.org_id
 			 FROM unique_fields uf
-			 JOIN entities e ON e.id = uf.entity_id
+			 JOIN entities e ON e.id = uf.user_id
 			 WHERE uf.normalized_value = ?
 			   AND uf.scope_id = ?
 			   AND e.state = 'active'
 			 LIMIT 1`, normalized, orgID,
-		).Scan(&result.EntityID, &result.DisplayName, &result.OrgID)
+		).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 		if err == nil {
 			return &result, nil
 		}
@@ -212,7 +212,7 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 
 	// Phase 3: Fall back to legacy entities.identifier column for backward compat.
 	query := `SELECT id, COALESCE(display_name, identifier), org_id
-	          FROM entities WHERE LOWER(identifier) = ? AND state = 'active'`
+	          FROM users WHERE LOWER(identifier) = ? AND state = 'active'`
 	args := []any{normalized}
 	if orgID != "" {
 		query += ` AND org_id = ?`
@@ -220,7 +220,7 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 	}
 	query += ` LIMIT 1`
 
-	err = db.QueryRowContext(ctx, query, args...).Scan(&result.EntityID, &result.DisplayName, &result.OrgID)
+	err = db.QueryRowContext(ctx, query, args...).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 	if err == nil {
 		return &result, nil
 	}

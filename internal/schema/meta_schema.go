@@ -159,8 +159,8 @@ func ValidateCatalog() []LintError {
 			})
 		}
 
-		// 5. Entity schemas should have "properties".
-		if entry.Storage == "entities" {
+		// 5. Resource schemas should have "properties".
+		if entry.Storage == "dedicated" {
 			if _, ok := schema["properties"]; !ok {
 				errs = append(errs, LintError{
 					Type: typeName, File: entry.Ref, Level: "warning",

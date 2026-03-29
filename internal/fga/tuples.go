@@ -96,27 +96,27 @@ func (s *Service) OnBootstrap(ctx context.Context, adminID, orgID string) error 
 	)
 }
 
-// OnEntityCreated writes tuples when a new entity is created:
+// OnResourceCreated writes tuples when a new entity is created:
 //   - entity:{id} ← org relation → org:{orgID}
 //   - user:{creatorID} → owner → entity:{id}
-func (s *Service) OnEntityCreated(ctx context.Context, entityID, creatorID, orgID string) error {
+func (s *Service) OnResourceCreated(ctx context.Context, userID, creatorID, orgID string) error {
 	return s.WriteTuples(ctx,
-		[3]string{"org:" + orgID, "org", "entity:" + entityID},
-		[3]string{"user:" + creatorID, "owner", "entity:" + entityID},
+		[3]string{"org:" + orgID, "org", "entity:" + userID},
+		[3]string{"user:" + creatorID, "owner", "entity:" + userID},
 	)
 }
 
-// OnEntityDeleted removes all tuples where the entity is the object.
-func (s *Service) OnEntityDeleted(ctx context.Context, entityID string) error {
+// OnResourceDeleted removes all tuples where the entity is the object.
+func (s *Service) OnResourceDeleted(ctx context.Context, userID string) error {
 	// Read all tuples for this entity and delete them.
 	resp, err := s.srv.Read(ctx, &openfgav1.ReadRequest{
 		StoreId: s.storeID,
 		TupleKey: &openfgav1.ReadRequestTupleKey{
-			Object: "entity:" + entityID,
+			Object: "entity:" + userID,
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("fga: read tuples for entity %s: %w", entityID, err)
+		return fmt.Errorf("fga: read tuples for entity %s: %w", userID, err)
 	}
 
 	if len(resp.GetTuples()) == 0 {

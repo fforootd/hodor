@@ -100,7 +100,7 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		h.flowSubmitFingerprint(w, r, flow, req)
 	case "back":
 		flow.CurrentStep = StepIdentifier
-		flow.IdentityID = ""
+		flow.IduserID = ""
 		flow.Identifier = ""
 		flow.DisplayName = ""
 		flow.Verified = false
@@ -158,14 +158,14 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 
-	flow.IdentityID = resolved.EntityID
+	flow.IduserID = resolved.UserID
 	flow.Identifier = identifier
 	flow.DisplayName = resolved.DisplayName
 	flow.CurrentStep = StepAuthSelect
 	flow.Errors = nil
 	h.flows.Put(flow)
 
-	logging.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.EntityID)
+	logging.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.UserID)
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
@@ -179,11 +179,11 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 	var credData string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT credential_data FROM entity_credentials WHERE entity_id = ? AND credential_type = 'password'`,
-		flow.IdentityID,
+		`SELECT credential_data FROM user_credentials WHERE user_id = ? AND credential_type = 'password'`,
+		flow.IduserID,
 	).Scan(&credData)
 	if err != nil {
-		logging.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IdentityID, err)
+		logging.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IduserID, err)
 		flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Something went wrong. Please try again."})
 		h.flows.Put(flow)
 		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
@@ -193,7 +193,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	// Extract hash from credential_data JSON: {"hash":"..."}.
 	hash := auth.DecodeCredentialJSON(credData)
 	if hash == "" {
-		logging.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
+		logging.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IduserID)
 		flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Something went wrong. Please try again."})
 		h.flows.Put(flow)
 		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
@@ -202,7 +202,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 	ok, _, err := h.passwords.Verify(hash, password)
 	if err != nil || !ok {
-		h.api.EmitAuthEvent(r.Context(), "auth.login_failed", flow.IdentityID, map[string]any{
+		h.api.EmitAuthEvent(r.Context(), "auth.login_failed", flow.IduserID, map[string]any{
 			"reason":  "invalid_password",
 			"flow_id": flow.ID,
 		})
@@ -354,7 +354,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	}
 
 	_, err := h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, 'active', ?, '{}', datetime('now'), datetime('now'))`,
 		newID, identifier, displayName, profileJSON,
 	)
@@ -373,7 +373,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	logging.Printf("[flow] %s registered new identity %s (%s)", flow.ID, newID, identifier)
 
 	// Set flow state to the new identity and complete.
-	flow.IdentityID = newID
+	flow.IduserID = newID
 	flow.Identifier = identifier
 	flow.DisplayName = displayName
 	flow.Verified = true
@@ -401,7 +401,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		FingerprintHash: flow.FingerprintHash,
 		TraceID:         r.Header.Get("traceparent"),
 	}
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IdentityID, r.UserAgent(), r.RemoteAddr, signals)
+	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals)
 	if err != nil {
 		flow.Errors = append(flow.Errors, FlowError{Code: "session_failed", Message: "Failed to create session. Please try again."})
 		h.flows.Put(flow)
@@ -415,9 +415,9 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 	flow.CurrentStep = StepComplete
 	h.flows.Put(flow)
 
-	logging.Printf("[flow] %s completed (identity=%s, session=%s)", flow.ID, flow.IdentityID, sessResp.Session.ID)
+	logging.Printf("[flow] %s completed (identity=%s, session=%s)", flow.ID, flow.IduserID, sessResp.Session.ID)
 
-	h.api.EmitAuthEvent(r.Context(), "auth.login_completed", flow.IdentityID, map[string]any{
+	h.api.EmitAuthEvent(r.Context(), "auth.login_completed", flow.IduserID, map[string]any{
 		"session_id": sessResp.Session.ID,
 		"flow_id":    flow.ID,
 		"method":     "flow",

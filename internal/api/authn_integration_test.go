@@ -12,8 +12,8 @@ import (
 
 func TestSession_CreateUseRevoke(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("cycle@test.com", "Cycle User")
-	token := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("cycle@test.com", "Cycle User")
+	token := srv.CreateSession(userID)
 
 	// Use the session.
 	code, _ := srv.GetWithCookie("/v1/account/profile", token)
@@ -48,8 +48,8 @@ func TestSession_CreateUseRevoke(t *testing.T) {
 
 func TestSession_DoubleRevoke_Idempotent(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("double@test.com", "Double User")
-	_ = srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("double@test.com", "Double User")
+	_ = srv.CreateSession(userID)
 	adminToken := srv.LoginAdmin()
 
 	code, body := srv.GetWithCookie("/v1/sessions", adminToken)
@@ -97,7 +97,7 @@ func TestBearer_ValidPAT(t *testing.T) {
 	// Create a PAT via the API.
 	code, body = srv.PostJSONWithCookie("/v1/pats", map[string]any{
 		"name":      "test-pat",
-		"entity_id": adminID,
+		"user_id": adminID,
 		"scopes":    []string{"admin"},
 	}, adminToken)
 	if code != 201 {
@@ -230,8 +230,8 @@ func TestXSessionId_CantBeInjected(t *testing.T) {
 
 func TestUnsignedCookie_Rejected(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("unsigned@test.com", "Unsigned")
-	_ = srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("unsigned@test.com", "Unsigned")
+	_ = srv.CreateSession(userID)
 
 	// Try to authenticate with a raw unsigned cookie.
 	req, _ := http.NewRequest("GET", srv.URL()+"/v1/account/profile", nil)

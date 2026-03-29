@@ -133,7 +133,7 @@ func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
 	je := h.db.JSONExtract
 	var ssoProviders []map[string]any
 	rows, err := h.db.SQL().QueryContext(r.Context(),
-		fmt.Sprintf(`SELECT e.id, e.identifier, e.data FROM entities e
+		fmt.Sprintf(`SELECT e.id, e.identifier, e.data FROM users e
 		 JOIN schemas s ON e.schema_id = s.id
 		 WHERE s.type = 'provider' AND e.state = 'active'
 		 ORDER BY CAST(%s AS INTEGER), e.identifier`, je("e.data", "display_order")))
@@ -202,18 +202,18 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Look up existing identity.
-	var identityID string
+	var userID string
 	var purpose string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id FROM entities WHERE identifier = ?`, email,
-	).Scan(&identityID)
+		`SELECT id FROM users WHERE identifier = ?`, email,
+	).Scan(&userID)
 
 	if err == sql.ErrNoRows {
 		// REGISTRATION: create identity in pending state.
 		purpose = "register"
 		newID := id.New()
 		_, err = h.db.SQL().ExecContext(r.Context(),
-			`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
 			 VALUES (?, 1, ?, ?, 'pending', '{}', '{}', datetime('now'), datetime('now'))`,
 			newID, email, email,
 		)
@@ -221,8 +221,8 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
 			return
 		}
-		identityID = newID
-		logging.Printf("[magic-link] created pending identity %s for %s", identityID, email)
+		userID = newID
+		logging.Printf("[magic-link] created pending identity %s for %s", userID, email)
 	} else if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -240,8 +240,8 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 
 	// Store token.
 	_, err = h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO magic_tokens (token, entity_id, expires_at) VALUES (?, ?, ?)`,
-		token, identityID, expiresAt.Format(time.RFC3339),
+		`INSERT INTO magic_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		token, userID, expiresAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to store token")
@@ -259,7 +259,7 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Emit event.
-	h.api.EmitAuthEvent(r.Context(), "auth.magic_link_sent", identityID, map[string]any{
+	h.api.EmitAuthEvent(r.Context(), "auth.magic_link_sent", userID, map[string]any{
 		"email":   email,
 		"purpose": purpose,
 	})
@@ -279,15 +279,15 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Load and validate token.
-	var identityID string
+	var userID string
 	var expiresAt, identifier string
 	var usedAt sql.NullString
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT mt.entity_id, mt.expires_at, mt.used_at, i.identifier
+		`SELECT mt.user_id, mt.expires_at, mt.used_at, i.identifier
 		 FROM magic_tokens mt
-		 JOIN entities e ON i.id = mt.entity_id
+		 JOIN entities e ON i.id = mt.user_id
 		 WHERE mt.token = ?`, token,
-	).Scan(&identityID, &expiresAt, &usedAt, &identifier)
+	).Scan(&userID, &expiresAt, &usedAt, &identifier)
 
 	if err == sql.ErrNoRows {
 		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", "", map[string]any{
@@ -305,8 +305,8 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	// Check expiry.
 	expiry, _ := time.Parse(time.RFC3339, expiresAt)
 	if time.Now().After(expiry) {
-		logging.Printf("[magic-link] expired token used for %s (identity=%s)", identifier, identityID)
-		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", identityID, map[string]any{
+		logging.Printf("[magic-link] expired token used for %s (identity=%s)", identifier, userID)
+		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", userID, map[string]any{
 			"reason":     "expired",
 			"identifier": identifier,
 			"ip":         r.RemoteAddr,
@@ -317,8 +317,8 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Check single-use.
 	if usedAt.Valid {
-		logging.Printf("[magic-link] already-used token for %s (identity=%s, used_at=%s)", identifier, identityID, usedAt.String)
-		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", identityID, map[string]any{
+		logging.Printf("[magic-link] already-used token for %s (identity=%s, used_at=%s)", identifier, userID, usedAt.String)
+		h.api.EmitAuthEvent(r.Context(), "auth.magic_link_failed", userID, map[string]any{
 			"reason":     "already_used",
 			"identifier": identifier,
 			"used_at":    usedAt.String,
@@ -334,10 +334,10 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Activate identity if pending (registration flow).
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE entities SET state = 'active' WHERE id = ? AND state = 'pending'`, identityID)
+		`UPDATE users SET state = 'active' WHERE id = ? AND state = 'pending'`, userID)
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr, nil)
+	sessResp, err := h.api.CreateSessionInternal(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return
@@ -350,9 +350,9 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	// Set session cookie (HMAC-signed).
 	session.SetSessionCookie(w, sessResp.Token, h.cookies)
 
-	logging.Printf("[magic-link] verified for %s (identity=%s, session=%s)", identifier, identityID, sessResp.Session.ID)
+	logging.Printf("[magic-link] verified for %s (identity=%s, session=%s)", identifier, userID, sessResp.Session.ID)
 
-	h.api.EmitAuthEvent(r.Context(), "auth.magic_link_verified", identityID, map[string]any{
+	h.api.EmitAuthEvent(r.Context(), "auth.magic_link_verified", userID, map[string]any{
 		"session_id": sessResp.Session.ID,
 		"method":     "magic_link",
 	})

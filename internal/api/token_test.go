@@ -97,15 +97,15 @@ func newTokenTestDB(t *testing.T) *database.DB {
 func seedIdentity(t *testing.T, db *database.DB) string {
 	t.Helper()
 	now := sqliteDatetime(time.Now())
-	entityID := id.New()
+	userID := id.New()
 	_, err := db.SQL().Exec(
-		`INSERT INTO entities (id, org_id, identifier, state, profile, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, state, profile, metadata, created_at, updated_at)
 		 VALUES (?, '1', 'test@test.com', 'active', '{}', '{}', ?, ?)`,
-		entityID, now, now)
+		userID, now, now)
 	if err != nil {
 		t.Fatalf("seed identity: %v", err)
 	}
-	return entityID
+	return userID
 }
 
 // sqliteDatetime formats a time in SQLite's datetime() compatible format.
@@ -115,7 +115,7 @@ func sqliteDatetime(t time.Time) string {
 	return t.UTC().Format("2006-01-02 15:04:05")
 }
 
-func seedSessionToken(t *testing.T, db *database.DB, entityID string, expiresAt, revokedAt string) string {
+func seedSessionToken(t *testing.T, db *database.DB, userID string, expiresAt, revokedAt string) string {
 	t.Helper()
 	raw, hash, err := generatePrefixedToken(PrefixSession)
 	if err != nil {
@@ -132,17 +132,17 @@ func seedSessionToken(t *testing.T, db *database.DB, entityID string, expiresAt,
 	}
 
 	_, err = db.SQL().Exec(
-		`INSERT INTO sessions (id, entity_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, revoked_at)
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, revoked_at)
 		 VALUES (?, ?, '1', ?, 'test', '127.0.0.1', '{}', ?, ?, ?)`,
-		sessionID, entityID, hash, now, expiresAt, revokedSession)
+		sessionID, userID, hash, now, expiresAt, revokedSession)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 
 	_, err = db.SQL().Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, session_id, scopes, expires_at, created_at, revoked_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at, revoked_at)
 		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?, ?)`,
-		tokenID, hash, entityID, sessionID, expiresAt, now, revokedToken)
+		tokenID, hash, userID, sessionID, expiresAt, now, revokedToken)
 	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
@@ -150,7 +150,7 @@ func seedSessionToken(t *testing.T, db *database.DB, entityID string, expiresAt,
 	return raw
 }
 
-func seedPATToken(t *testing.T, db *database.DB, entityID string, expiresAt, revokedAt string) string {
+func seedPATToken(t *testing.T, db *database.DB, userID string, expiresAt, revokedAt string) string {
 	t.Helper()
 	raw, hash, err := generatePrefixedToken(PrefixPAT)
 	if err != nil {
@@ -170,9 +170,9 @@ func seedPATToken(t *testing.T, db *database.DB, entityID string, expiresAt, rev
 	}
 
 	_, err = db.SQL().Exec(
-		`INSERT INTO tokens (id, type, token_hash, entity_id, name, scopes, expires_at, created_at, revoked_at)
+		`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, expires_at, created_at, revoked_at)
 		 VALUES (?, 'pat', ?, ?, 'test-pat', '["admin"]', ?, ?, ?)`,
-		tokenID, hash, entityID, expires, now, revoked)
+		tokenID, hash, userID, expires, now, revoked)
 	if err != nil {
 		t.Fatalf("seed PAT: %v", err)
 	}
@@ -182,13 +182,13 @@ func seedPATToken(t *testing.T, db *database.DB, entityID string, expiresAt, rev
 
 func TestResolveToken_Dispatches(t *testing.T) {
 	db := newTokenTestDB(t)
-	entityID := seedIdentity(t, db)
+	userID := seedIdentity(t, db)
 	ctx := context.Background()
 
 	future := sqliteDatetime(time.Now().Add(24 * time.Hour))
 
 	// Session token.
-	sesToken := seedSessionToken(t, db, entityID, future, "")
+	sesToken := seedSessionToken(t, db, userID, future, "")
 	info, err := resolveToken(ctx, db.SQL(), sesToken)
 	if err != nil {
 		t.Fatalf("resolve session token: %v", err)
@@ -196,12 +196,12 @@ func TestResolveToken_Dispatches(t *testing.T) {
 	if info.TokenType != TokenTypeSession {
 		t.Errorf("expected type %q, got %q", TokenTypeSession, info.TokenType)
 	}
-	if info.EntityID != entityID {
-		t.Errorf("expected entityID %s, got %s", entityID, info.EntityID)
+	if info.UserID != userID {
+		t.Errorf("expected userID %s, got %s", userID, info.UserID)
 	}
 
 	// PAT token.
-	patToken := seedPATToken(t, db, entityID, "", "")
+	patToken := seedPATToken(t, db, userID, "", "")
 	info, err = resolveToken(ctx, db.SQL(), patToken)
 	if err != nil {
 		t.Fatalf("resolve PAT token: %v", err)
@@ -224,11 +224,11 @@ func TestResolveToken_UnknownPrefix(t *testing.T) {
 
 func TestResolveSessionToken_Expired(t *testing.T) {
 	db := newTokenTestDB(t)
-	entityID := seedIdentity(t, db)
+	userID := seedIdentity(t, db)
 	ctx := context.Background()
 
 	past := sqliteDatetime(time.Now().Add(-1 * time.Hour))
-	token := seedSessionToken(t, db, entityID, past, "")
+	token := seedSessionToken(t, db, userID, past, "")
 
 	_, err := resolveToken(ctx, db.SQL(), token)
 	if err == nil {
@@ -238,12 +238,12 @@ func TestResolveSessionToken_Expired(t *testing.T) {
 
 func TestResolveSessionToken_Revoked(t *testing.T) {
 	db := newTokenTestDB(t)
-	entityID := seedIdentity(t, db)
+	userID := seedIdentity(t, db)
 	ctx := context.Background()
 
 	future := sqliteDatetime(time.Now().Add(24 * time.Hour))
 	now := sqliteDatetime(time.Now())
-	token := seedSessionToken(t, db, entityID, future, now)
+	token := seedSessionToken(t, db, userID, future, now)
 
 	_, err := resolveToken(ctx, db.SQL(), token)
 	if err == nil {
@@ -253,16 +253,16 @@ func TestResolveSessionToken_Revoked(t *testing.T) {
 
 func TestResolvePATToken_Valid(t *testing.T) {
 	db := newTokenTestDB(t)
-	entityID := seedIdentity(t, db)
+	userID := seedIdentity(t, db)
 	ctx := context.Background()
 
-	token := seedPATToken(t, db, entityID, "", "")
+	token := seedPATToken(t, db, userID, "", "")
 	info, err := resolveToken(ctx, db.SQL(), token)
 	if err != nil {
 		t.Fatalf("resolve valid PAT: %v", err)
 	}
-	if info.EntityID != entityID {
-		t.Errorf("expected entityID %s, got %s", entityID, info.EntityID)
+	if info.UserID != userID {
+		t.Errorf("expected userID %s, got %s", userID, info.UserID)
 	}
 	if info.TokenType != TokenTypePAT {
 		t.Errorf("expected type %q, got %q", TokenTypePAT, info.TokenType)
@@ -271,11 +271,11 @@ func TestResolvePATToken_Valid(t *testing.T) {
 
 func TestResolvePATToken_Expired(t *testing.T) {
 	db := newTokenTestDB(t)
-	entityID := seedIdentity(t, db)
+	userID := seedIdentity(t, db)
 	ctx := context.Background()
 
 	past := sqliteDatetime(time.Now().Add(-1 * time.Hour))
-	token := seedPATToken(t, db, entityID, past, "")
+	token := seedPATToken(t, db, userID, past, "")
 
 	_, err := resolveToken(ctx, db.SQL(), token)
 	if err == nil {
@@ -285,11 +285,11 @@ func TestResolvePATToken_Expired(t *testing.T) {
 
 func TestResolvePATToken_Revoked(t *testing.T) {
 	db := newTokenTestDB(t)
-	entityID := seedIdentity(t, db)
+	userID := seedIdentity(t, db)
 	ctx := context.Background()
 
 	now := sqliteDatetime(time.Now())
-	token := seedPATToken(t, db, entityID, "", now)
+	token := seedPATToken(t, db, userID, "", now)
 
 	_, err := resolveToken(ctx, db.SQL(), token)
 	if err == nil {

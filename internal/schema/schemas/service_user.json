@@ -2,6 +2,8 @@
   "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
+  "x-table": "users",
+  "x-table-filter": { "user_type": "service" },
 
   "x-auth-methods": {
     "pat":      { "enabled": true,  "interactive": false, "max_tokens": 10 },

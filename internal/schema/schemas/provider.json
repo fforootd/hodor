@@ -3,12 +3,7 @@
   "$version": "1.0",
   "type": "object",
   "description": "External identity provider (OIDC, SAML, social login).",
-  "x-storage": "entities",
-  "x-display": {
-    "alias": "Providers",
-    "path": "providers",
-    "icon": "shield"
-  },
+  "x-table": "providers",
   "properties": {
     "display_name": {
       "type": "string",

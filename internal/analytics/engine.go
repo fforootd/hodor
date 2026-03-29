@@ -155,7 +155,7 @@ func (b *OLTPBackend) Query(ctx context.Context, rawSQL string, limit int) (*Que
 // Tables returns metadata about queryable tables.
 func (b *OLTPBackend) Tables(ctx context.Context) ([]TableInfo, error) {
 	// The tables we expose for analytics queries.
-	analyticsTable := []string{"events", "entities", "sessions"}
+	analyticsTable := []string{"events", "users", "sessions"}
 	tables := make([]TableInfo, 0, len(analyticsTable))
 
 	for _, name := range analyticsTable {
@@ -273,12 +273,12 @@ func (e *Engine) handleTables(w http.ResponseWriter, r *http.Request) {
 // parsing JSON at runtime.
 var schemaRefs = map[string]map[string]*RefInfo{
 	"events": {
-		"actor_id":     {Resource: "entities", Display: "display_name", Path: "/console/s/{type}/{id}", Inverse: "events?actor_id={id}"},
-		"aggregate_id": {Resource: "entities", Display: "identifier", Path: "/console/s/{type}/{id}"},
+		"actor_id":     {Resource: "users", Display: "display_name", Path: "/console/s/{type}/{id}", Inverse: "events?actor_id={id}"},
+		"aggregate_id": {Resource: "users", Display: "identifier", Path: "/console/s/{type}/{id}"},
 		"session_id":   {Resource: "sessions", Display: "id", Path: "/console/sessions"},
 	},
 	"sessions": {
-		"entity_id": {Resource: "entities", Display: "display_name", Path: "/console/s/{type}/{id}", Inverse: "sessions?entity_id={id}"},
+		"user_id": {Resource: "users", Display: "display_name", Path: "/console/s/{type}/{id}", Inverse: "sessions?user_id={id}"},
 	},
 }
 

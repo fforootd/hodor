@@ -63,8 +63,8 @@ func TestProvider_CRUD(t *testing.T) {
 
 func TestProvider_NonAdminForbidden(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	identityID := srv.CreateIdentity("user3@test.com", "User 3")
-	userToken := srv.CreateSession(identityID)
+	userID := srv.CreateIdentity("user3@test.com", "User 3")
+	userToken := srv.CreateSession(userID)
 
 	code, _ := srv.PostJSONWithBearer("/v1/providers", map[string]any{
 		"name": "Hacker Provider",

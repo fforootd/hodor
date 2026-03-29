@@ -43,7 +43,7 @@ type ImportEntity struct {
 
 // ImportLinkedAccount links an identity to a provider.
 type ImportLinkedAccount struct {
-	IdentityIdentifier string `json:"entity_identifier"` // resolves to identity ID
+	IdentityIdentifier string `json:"user_identifier"` // resolves to identity ID
 	ProviderName       string `json:"provider_name"`     // resolves to provider ID
 	ExternalSub        string `json:"external_sub"`
 	ExternalEmail      string `json:"external_email,omitempty"`
@@ -169,7 +169,7 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 	// Check conflict in entities table.
 	var existing string
 	err := tx.QueryRowContext(r.Context(),
-		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
 		 WHERE s.type = 'provider' AND e.identifier = ?`, p.Name).Scan(&existing)
 	if err == nil {
 		if onConflict == "skip" {
@@ -214,7 +214,7 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 	dataJSON, _ := json.Marshal(data)
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO entities (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
+		`INSERT INTO users (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
 		 VALUES (?, '1', 'provider_v1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
 		provID, p.Name, p.Name, string(dataJSON))
 	if err != nil {
@@ -231,7 +231,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 
 	// Check conflict.
 	var existingID string
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM entities WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
+	err := tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		if onConflict == "update" {
 			// Upsert: update display_name and profile.
@@ -241,7 +241,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 				profileJSON = string(b)
 			}
 			tx.ExecContext(r.Context(),
-				`UPDATE entities SET display_name = ?, profile = ?, data = ?, updated_at = datetime('now') WHERE id = ?`,
+				`UPDATE users SET display_name = ?, profile = ?, data = ?, updated_at = datetime('now') WHERE id = ?`,
 				ident.DisplayName, profileJSON, profileJSON, existingID)
 			return ImportResult{Index: idx, Resource: "identity", Status: "updated", ID: existingID}
 		}
@@ -269,7 +269,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	}
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
+		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, data, metadata, created_at, updated_at)
 		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, '{}', datetime('now'), datetime('now'))`,
 		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON, profileJSON)
 	if err != nil {
@@ -284,7 +284,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(r.Context(),
-				`INSERT INTO entity_credentials (id, entity_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
+				`INSERT INTO user_credentials (id, user_id, credential_type, credential_data) VALUES (?, ?, 'password', ?)`,
 				credID, newID, credJSON)
 		}
 	}
@@ -294,8 +294,8 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 
 func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAccount, idx int, onConflict string) ImportResult {
 	// Resolve identity by identifier.
-	var identityID string
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM entities WHERE identifier = ?`, la.IdentityIdentifier).Scan(&identityID)
+	var userID string
+	err := tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE identifier = ?`, la.IdentityIdentifier).Scan(&userID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "identity not found: " + la.IdentityIdentifier}
 	}
@@ -303,7 +303,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 	// Resolve provider by name from entities table.
 	var providerID string
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		`SELECT e.id FROM users e JOIN schemas s ON e.schema_id = s.id
 		 WHERE s.type = 'provider' AND e.identifier = ?`, la.ProviderName).Scan(&providerID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "provider not found: " + la.ProviderName}
@@ -323,9 +323,9 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 
 	linkID := id.New()
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO linked_accounts (id, entity_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		`INSERT INTO linked_accounts (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
-		linkID, identityID, providerID, la.ExternalSub, la.ExternalEmail)
+		linkID, userID, providerID, la.ExternalSub, la.ExternalEmail)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: err.Error()}
 	}
@@ -337,7 +337,7 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 
 func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Entities   []ImportEntity `json:"entities"`
+		Entities   []ImportEntity `json:"users"`
 		OnConflict string         `json:"on_conflict"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

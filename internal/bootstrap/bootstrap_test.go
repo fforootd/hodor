@@ -88,8 +88,8 @@ func TestEnsureAdmin_AdminHasCapabilities(t *testing.T) {
 
 	// Admin should have "admin" and "password" capabilities.
 	var capCount int
-	db.SQL().QueryRow(`SELECT COUNT(*) FROM entity_capabilities
-		WHERE entity_id = (SELECT id FROM entities WHERE identifier = 'admin')`).Scan(&capCount)
+	db.SQL().QueryRow(`SELECT COUNT(*) FROM user_capabilities
+		WHERE user_id = (SELECT id FROM users WHERE identifier = 'admin')`).Scan(&capCount)
 	if capCount != 2 {
 		t.Errorf("expected 2 capabilities (admin, password), got %d", capCount)
 	}

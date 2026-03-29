@@ -40,7 +40,7 @@ func AuthGate(cookieCfg *session.CookieConfig, db *sql.DB) func(http.Handler) ht
 			}
 
 			// Inject identity info into request headers (internal use only).
-			r.Header.Set("X-Identity-Id", info.EntityID)
+			r.Header.Set("X-Identity-Id", info.UserID)
 			r.Header.Set("X-Session-Id", info.SessionID)
 			r.Header.Set("X-Token-Type", info.TokenType)
 			if info.OrgID != "" {
@@ -121,7 +121,7 @@ func extractTokenFromRequest(r *http.Request, cookies *session.CookieConfig) str
 // Kept for backward compatibility with non-API routes (e.g., UI handlers).
 func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		identityID, err := a.resolveCallerIdentity(r)
+		userID, err := a.resolveCallerIdentity(r)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -130,8 +130,8 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 		// Check for admin capability.
 		var adminCap int
 		err = a.db.SQL().QueryRowContext(r.Context(),
-			`SELECT 1 FROM entity_capabilities WHERE entity_id = ? AND capability = 'admin'`,
-			identityID,
+			`SELECT 1 FROM user_capabilities WHERE user_id = ? AND capability = 'admin'`,
+			userID,
 		).Scan(&adminCap)
 		if err == sql.ErrNoRows {
 			writeError(w, http.StatusForbidden, "admin capability required")
@@ -186,7 +186,7 @@ func (a *API) resolveCallerIdentity(r *http.Request) (string, error) {
 	}
 
 	// Inject headers for downstream handlers.
-	r.Header.Set("X-Identity-Id", info.EntityID)
+	r.Header.Set("X-Identity-Id", info.UserID)
 	r.Header.Set("X-Session-Id", info.SessionID)
 	r.Header.Set("X-Token-Type", info.TokenType)
 
@@ -194,7 +194,7 @@ func (a *API) resolveCallerIdentity(r *http.Request) (string, error) {
 	// Since this is called mid-flight inside requireAdmin, we don't recreate the request context here.
 	// AuthGate handles the primary session context injection.
 
-	return info.EntityID, nil
+	return info.UserID, nil
 }
 
 // extractToken gets the session token from either the Authorization header or cookie.
