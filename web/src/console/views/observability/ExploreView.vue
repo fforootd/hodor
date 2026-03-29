@@ -30,6 +30,34 @@
           <TabsTrigger value="sql">SQL Editor</TabsTrigger>
         </TabsList>
         <div class="flex items-center gap-2">
+          <!-- Saved Queries dropdown -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button size="sm" variant="outline">
+                <BookmarkIcon class="mr-1.5 size-3.5" />
+                Saved
+                <Badge v-if="savedQueries.length" variant="secondary" class="ml-1.5 text-[10px] px-1.5 py-0 h-4">{{ savedQueries.length }}</Badge>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-72">
+              <div v-if="!savedQueries.length" class="px-3 py-4 text-center text-xs text-muted-foreground">
+                No saved queries yet
+              </div>
+              <div v-for="sq in savedQueries" :key="sq.id" class="flex items-center justify-between px-2 py-1.5 hover:bg-muted rounded-sm transition-colors group">
+                <button class="flex-1 text-left text-sm truncate" @click="loadSavedQuery(sq)">
+                  <span class="font-medium">{{ sq.name }}</span>
+                  <span class="text-xs text-muted-foreground block truncate">{{ sq.description || sq.sql.slice(0, 60) }}</span>
+                </button>
+                <button class="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive p-1 transition-opacity" @click.stop="deleteSavedQuery(sq.id)">
+                  <Trash2 class="size-3.5" />
+                </button>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button size="sm" variant="outline" @click="saveCurrentQuery" :disabled="!query">
+            <Save class="mr-1.5 size-3.5" />
+            Save
+          </Button>
           <Button size="sm" variant="outline" @click="formatQuery" v-if="activeMode === 'sql'">
             <FileJson class="mr-1.5 size-3.5" />
             Format
@@ -257,11 +285,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Play, FileJson, BarChart3, TrendingUp, Search, Database, ExternalLink } from 'lucide-vue-next'
+import { Play, FileJson, BarChart3, TrendingUp, Search, Database, ExternalLink, Save, Trash2, Bookmark as BookmarkIcon } from 'lucide-vue-next'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { api } from '@/api/client'
 import { VisXYContainer, VisLine, VisArea, VisAxis, VisStackedBar } from '@unovis/vue'
 import { ChartContainer, ChartCrosshair } from '@/components/ui/chart'
+import { Badge } from '@/components/ui/badge'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 const route = useRoute()
 const router = useRouter()
@@ -271,7 +301,7 @@ const schemas = ref<Record<string, any>>({})
 
 // Visual State
 const visTable = ref(String(route.query.table || 'events'))
-const visGroup = ref(String(route.query.group || 'NONE'))
+const visGroup = ref(String(route.query.group || 'event_type'))
 const visMetricFunc = ref(String(route.query.func || 'COUNT'))
 const visMetricCol = ref(String(route.query.mcol || '*'))
 const visFilters = ref<{col: string, op: string, val: string}[]>(
@@ -303,6 +333,42 @@ const tableFilter = ref('')
 const rows = ref<Record<string, any>[]>([])
 const columns = ref<string[]>([])
 
+// Saved queries
+interface SavedQueryItem { id: string; name: string; description: string; sql: string; created_at: string }
+const savedQueries = ref<SavedQueryItem[]>([])
+
+async function fetchSavedQueries() {
+  try {
+    const data = await api.get<any>('/v1/analytics/queries')
+    savedQueries.value = data.items || []
+  } catch { /* ignore */ }
+}
+
+async function saveCurrentQuery() {
+  const name = prompt('Query name:', '')
+  if (!name) return
+  const desc = prompt('Description (optional):', '')
+  try {
+    await api.post('/v1/analytics/queries', { name, description: desc || '', sql: query.value })
+    await fetchSavedQueries()
+  } catch (err: any) {
+    alert('Failed to save: ' + (err.message || err))
+  }
+}
+
+function loadSavedQuery(sq: SavedQueryItem) {
+  query.value = sq.sql
+  activeMode.value = 'sql'
+}
+
+async function deleteSavedQuery(id: string) {
+  if (!confirm('Delete this saved query?')) return
+  try {
+    await api.delete(`/v1/analytics/queries/${id}`)
+    await fetchSavedQueries()
+  } catch { /* ignore */ }
+}
+
 const editorOptions = {
   minimap: { enabled: false },
   lineNumbers: 'off' as const,
@@ -329,9 +395,14 @@ const generatedSQL = computed(() => {
   if (!t) return ''
   
   const metric = visMetricCol.value === '*' ? '*' : visMetricCol.value
-  let sel = `${visMetricFunc.value}(${metric}) as metric`
-  if (visGroup.value && visGroup.value !== 'NONE') sel = `${visGroup.value}, ${sel}`
-  else if (visMetricFunc.value === 'NONE') sel = '*'
+  let sel: string
+  if (visMetricFunc.value === 'NONE') {
+    // "SELECT ROWS" mode — no aggregation
+    sel = visGroup.value && visGroup.value !== 'NONE' ? `${visGroup.value}, *` : '*'
+  } else {
+    sel = `${visMetricFunc.value}(${metric}) as metric`
+    if (visGroup.value && visGroup.value !== 'NONE') sel = `${visGroup.value}, ${sel}`
+  }
 
   let sql = `SELECT ${sel}\nFROM ${t}`
 
@@ -398,6 +469,7 @@ onMounted(async () => {
   } catch (err) {
     console.error('Failed to load schemas', err)
   }
+  fetchSavedQueries()
   if (activeMode.value === 'visual') {
     runQuery()
   }
@@ -486,18 +558,33 @@ async function runQuery() {
     }
 
     const resultRows = data.rows || []
+    const colNames: string[] = data.columns || []
+
     if (resultRows.length > 0) {
-      columns.value = Object.keys(resultRows[0])
-      // Coerce numeric values
-      rows.value = resultRows.map((r: any) => {
-        const out: Record<string, any> = {}
-        for (const [k, v] of Object.entries(r)) {
-          out[k] = isNaN(Number(v)) || v === '' || v === null ? v : Number(v)
-        }
-        return out
-      })
+      // API returns rows as arrays — transform to keyed objects using column names
+      if (Array.isArray(resultRows[0])) {
+        columns.value = colNames.length > 0 ? colNames : resultRows[0].map((_: any, i: number) => String(i))
+        rows.value = resultRows.map((r: any[]) => {
+          const out: Record<string, any> = {}
+          for (let i = 0; i < columns.value.length; i++) {
+            const v = r[i]
+            out[columns.value[i]] = isNaN(Number(v)) || v === '' || v === null ? v : Number(v)
+          }
+          return out
+        })
+      } else {
+        // Rows already keyed (shouldn't happen with current API, but handle gracefully)
+        columns.value = Object.keys(resultRows[0])
+        rows.value = resultRows.map((r: any) => {
+          const out: Record<string, any> = {}
+          for (const [k, v] of Object.entries(r)) {
+            out[k] = isNaN(Number(v)) || v === '' || v === null ? v : Number(v)
+          }
+          return out
+        })
+      }
     } else {
-      columns.value = data.columns || []
+      columns.value = colNames
       rows.value = []
     }
   } catch (err: any) {

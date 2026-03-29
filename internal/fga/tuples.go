@@ -82,14 +82,14 @@ func (s *Service) ListObjects(ctx context.Context, user, relation, objectType st
 
 // OnBootstrap writes the initial FGA tuples for the admin user:
 //   - user:{adminID} → owner → instance:default
-//   - org:{orgID} → parent → instance:default
-//   - user:{adminID} → owner → org:{orgID}
-func (s *Service) OnBootstrap(ctx context.Context, adminID, orgID string) error {
-	logging.Printf("[fga] bootstrapping tuples: admin=%s org=%s", adminID, orgID)
+//   - org:_global → parent → instance:default   (fallback for nullable org_id)
+//   - user:{adminID} → owner → org:_global
+//
+// Real org tuples are written via OnOrgCreated() when users create orgs.
+func (s *Service) OnBootstrap(ctx context.Context, adminID string) error {
+	logging.Printf("[fga] bootstrapping tuples: admin=%s", adminID)
 	return s.WriteTuples(ctx,
 		[3]string{"user:" + adminID, "owner", "instance:default"},
-		[3]string{"instance:default", "parent", "org:" + orgID},
-		[3]string{"user:" + adminID, "owner", "org:" + orgID},
 		// Global org — grants access when org_id is unknown/nullable.
 		[3]string{"instance:default", "parent", "org:_global"},
 		[3]string{"user:" + adminID, "owner", "org:_global"},

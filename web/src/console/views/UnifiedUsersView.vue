@@ -61,7 +61,27 @@
       </TabsList>
     </Tabs>
 
+    <!-- Empty state -->
+    <Empty v-if="!loading && allIdentities.length === 0">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Users />
+        </EmptyMedia>
+        <EmptyTitle>No Users Yet</EmptyTitle>
+        <EmptyDescription>
+          Create your first user, service account, or AI agent to get started.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button @click="isCreateWizardOpen = true">
+          <Plus class="mr-2 size-4" />
+          Create User
+        </Button>
+      </EmptyContent>
+    </Empty>
+
     <DataTable
+      v-if="allIdentities.length > 0"
       :columns="columns as any"
       :data="filteredIdentities"
       v-model:rowSelection="selectedRows"
@@ -126,6 +146,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger,
   DropdownMenuCheckboxItem, DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
 import {
   Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
   CheckCircle2, Ban, Users, KeyRound, Bot,

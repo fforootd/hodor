@@ -23,8 +23,7 @@ func testRecord(eventType string) CacheRecord {
 		Level:     "INFO",
 		Payload:   `{"msg":"test"}`,
 		ActorID:   "actor_1",
-		TraceID:   "trace_1",
-		SpanID:    "span_1",
+		RequestID: "request_1",
 		SessionID: "session_1",
 		CreatedAt: createdAtNow(),
 	}

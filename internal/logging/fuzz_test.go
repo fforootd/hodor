@@ -275,7 +275,7 @@ func BenchmarkFanOutHandler_Handle(b *testing.B) {
 		slog.Int("status", 200),
 		slog.Int64("duration_ms", 42),
 		slog.String("actor_id", "user_abc123"),
-		slog.String("trace_id", "deadbeef12345678deadbeef12345678"),
+		slog.String("request_id", "deadbeef12345678deadbeef12345678"),
 	)
 
 	ctx := context.Background()

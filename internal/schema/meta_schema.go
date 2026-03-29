@@ -44,6 +44,8 @@ type CatalogEntry struct {
 	Countable  bool                     `json:"countable,omitempty"`
 	Aggregates []string                 `json:"aggregates,omitempty"`
 	Engines    map[string]EngineBinding `json:"engines,omitempty"`
+	FGAType    string                   `json:"fga_type,omitempty"`  // OpenFGA object type (e.g. "entity", "app", "org")
+	FGAScope   string                   `json:"fga_scope,omitempty"` // AuthZ scope: "instance", "org", or "" (no FGA)
 }
 
 // GroupEntry represents a nav group definition from x-groups.

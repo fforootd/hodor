@@ -3,14 +3,30 @@
   "$id": "https://zitadel.com/schemas/v1/entity-meta-schema",
   "title": "Zitadel Entity Meta-Schema",
   "description": "Catalog of entity types and annotation validation.",
-
   "x-groups": {
-    "configure":     { "label": "Configure",     "sort_order": 2, "display": "flat" },
-    "marketplace":   { "label": "Marketplace",   "sort_order": 3, "display": "flat" },
-    "observability": { "label": "Observability", "sort_order": 4, "display": "collapsible", "icon": "activity" },
-    "system":        { "label": "System",        "sort_order": 5, "display": "collapsible", "icon": "settings" }
+    "configure": {
+      "label": "Configure",
+      "sort_order": 2,
+      "display": "flat"
+    },
+    "marketplace": {
+      "label": "Marketplace",
+      "sort_order": 3,
+      "display": "flat"
+    },
+    "observability": {
+      "label": "Observability",
+      "sort_order": 4,
+      "display": "collapsible",
+      "icon": "activity"
+    },
+    "system": {
+      "label": "System",
+      "sort_order": 5,
+      "display": "collapsible",
+      "icon": "settings"
+    }
   },
-
   "x-catalog": {
     "users": {
       "group": "nav",
@@ -22,7 +38,13 @@
       "storage": "virtual",
       "route": "/users",
       "countable": true,
-      "aggregates": ["human_user", "service_user", "ai_agent"]
+      "aggregates": [
+        "human_user",
+        "service_user",
+        "ai_agent"
+      ],
+      "fga_type": "entity",
+      "fga_scope": "instance"
     },
     "applications": {
       "group": "nav",
@@ -34,7 +56,11 @@
       "storage": "virtual",
       "route": "/applications",
       "countable": true,
-      "aggregates": ["app"]
+      "aggregates": [
+        "app"
+      ],
+      "fga_type": "app",
+      "fga_scope": "org"
     },
     "human_user": {
       "$ref": "schemas/human_user.json",
@@ -49,10 +75,24 @@
       "storage": "dedicated",
       "nav": "hidden",
       "engines": {
-        "authorization": { "model": "fga", "relations": ["member", "owner", "viewer"] },
-        "claims":        { "model": "expr", "direction": "outbound" },
-        "login":         { "model": "built-in" }
-      }
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "member",
+            "owner",
+            "viewer"
+          ]
+        },
+        "claims": {
+          "model": "expr",
+          "direction": "outbound"
+        },
+        "login": {
+          "model": "built-in"
+        }
+      },
+      "fga_type": "entity",
+      "fga_scope": "instance"
     },
     "service_user": {
       "$ref": "schemas/service_user.json",
@@ -66,8 +106,16 @@
       "storage": "dedicated",
       "nav": "hidden",
       "engines": {
-        "authorization": { "model": "fga", "relations": ["member", "owner"] }
-      }
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "member",
+            "owner"
+          ]
+        }
+      },
+      "fga_type": "entity",
+      "fga_scope": "instance"
     },
     "ai_agent": {
       "$ref": "schemas/ai_agent.json",
@@ -81,8 +129,16 @@
       "storage": "dedicated",
       "nav": "hidden",
       "engines": {
-        "authorization": { "model": "fga", "relations": ["owner", "viewer"] }
-      }
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "owner",
+            "viewer"
+          ]
+        }
+      },
+      "fga_type": "entity",
+      "fga_scope": "instance"
     },
     "app": {
       "$ref": "schemas/app.json",
@@ -96,9 +152,20 @@
       "storage": "dedicated",
       "nav": "hidden",
       "engines": {
-        "authorization": { "model": "fga", "relations": ["owner", "viewer"] },
-        "claims":        { "model": "expr", "direction": "outbound" }
-      }
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "owner",
+            "viewer"
+          ]
+        },
+        "claims": {
+          "model": "expr",
+          "direction": "outbound"
+        }
+      },
+      "fga_type": "app",
+      "fga_scope": "org"
     },
     "org": {
       "$ref": "schemas/org.json",
@@ -113,8 +180,17 @@
       "route": "/orgs",
       "countable": true,
       "engines": {
-        "authorization": { "model": "fga", "relations": ["member", "owner", "admin"] }
-      }
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "member",
+            "owner",
+            "admin"
+          ]
+        }
+      },
+      "fga_type": "org",
+      "fga_scope": "instance"
     },
     "action": {
       "$ref": "schemas/action.json",
@@ -126,7 +202,9 @@
       "path": "actions",
       "icon": "⚡",
       "sort_order": 10,
-      "storage": "dedicated"
+      "storage": "dedicated",
+      "fga_type": "action",
+      "fga_scope": "org"
     },
     "login_flow": {
       "$ref": "schemas/login_flow.json",
@@ -141,8 +219,12 @@
       "storage": "dedicated",
       "countable": true,
       "engines": {
-        "login": { "model": "schema-driven" }
-      }
+        "login": {
+          "model": "schema-driven"
+        }
+      },
+      "fga_type": "login_flow",
+      "fga_scope": "instance"
     },
     "provider": {
       "$ref": "schemas/provider.json",
@@ -155,7 +237,9 @@
       "icon": "🔗",
       "sort_order": 12,
       "storage": "dedicated",
-      "route": "/providers"
+      "route": "/providers",
+      "fga_type": "provider",
+      "fga_scope": "instance"
     },
     "schema": {
       "group": "nav",
@@ -166,7 +250,9 @@
       "icon": "📐",
       "sort_order": 200,
       "storage": "dedicated",
-      "route": "/schemas"
+      "route": "/schemas",
+      "fga_type": "schema",
+      "fga_scope": "instance"
     },
     "marketplace": {
       "group": "nav",
@@ -239,7 +325,21 @@
       "icon": "🔑",
       "sort_order": 104,
       "storage": "dedicated",
-      "route": "/sessions"
+      "route": "/sessions",
+      "fga_type": "session",
+      "fga_scope": "instance"
+    },
+    "fingerprint": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Fingerprints",
+      "singular": "Fingerprint",
+      "path": "fingerprints",
+      "icon": "🔍",
+      "sort_order": 105,
+      "storage": "dedicated",
+      "route": "/fingerprints"
     },
     "job": {
       "$ref": "schemas/job.json",
@@ -276,7 +376,9 @@
       "icon": "🔒",
       "sort_order": 1,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     },
     "identifier_policy": {
       "$ref": "schemas/identifier_policy.json",
@@ -288,7 +390,9 @@
       "icon": "🆔",
       "sort_order": 2,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     },
     "login_policy": {
       "$ref": "schemas/login_policy.json",
@@ -300,7 +404,9 @@
       "icon": "🚪",
       "sort_order": 3,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     },
     "lockout_policy": {
       "$ref": "schemas/lockout_policy.json",
@@ -312,7 +418,9 @@
       "icon": "🔐",
       "sort_order": 4,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     },
     "rate_limit": {
       "$ref": "schemas/rate_limit.json",
@@ -324,7 +432,9 @@
       "icon": "⏱️",
       "sort_order": 5,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     },
     "session_policy": {
       "$ref": "schemas/session_policy.json",
@@ -336,7 +446,9 @@
       "icon": "⏳",
       "sort_order": 6,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     },
     "notification": {
       "$ref": "schemas/notification.json",
@@ -348,10 +460,11 @@
       "icon": "🔔",
       "sort_order": 7,
       "storage": "settings",
-      "nav": "hidden"
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     }
   },
-
   "type": "object",
   "properties": {
     "x-auth-methods": {
@@ -361,16 +474,40 @@
         "$ref": "#/$defs/AuthMethodEntry"
       },
       "propertyNames": {
-        "enum": ["password", "passkey", "magic_link", "sso", "pat", "api_key", "client_cert", "client_secret"]
+        "enum": [
+          "password",
+          "passkey",
+          "magic_link",
+          "sso",
+          "pat",
+          "api_key",
+          "client_cert",
+          "client_secret"
+        ]
       }
     },
     "x-login": {
       "type": "object",
       "description": "Interactive login flow configuration (default, overridable via settings).",
       "properties": {
-        "preset":                { "type": "string", "enum": ["identifier_first", "passkey_first", "sso_only", "custom"], "default": "identifier_first" },
-        "mfa_required":          { "type": "boolean", "default": false },
-        "registration_allowed":  { "type": "boolean", "default": true }
+        "preset": {
+          "type": "string",
+          "enum": [
+            "identifier_first",
+            "passkey_first",
+            "sso_only",
+            "custom"
+          ],
+          "default": "identifier_first"
+        },
+        "mfa_required": {
+          "type": "boolean",
+          "default": false
+        },
+        "registration_allowed": {
+          "type": "boolean",
+          "default": true
+        }
       },
       "additionalProperties": false
     },
@@ -378,50 +515,157 @@
       "type": "object",
       "description": "Visual customization for the login UI (default, overridable via settings).",
       "properties": {
-        "heading":              { "type": "string" },
-        "description":          { "type": "string" },
-        "logo_url":             { "type": "string", "format": "uri" },
-        "org_name":             { "type": "string" },
+        "heading": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "logo_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "org_name": {
+          "type": "string"
+        },
         "colors": {
           "type": "object",
           "properties": {
-            "primary":            { "type": "string" },
-            "primary_foreground": { "type": "string" },
-            "background":         { "type": "string" },
-            "surface":            { "type": "string" },
-            "text":               { "type": "string" },
-            "muted":              { "type": "string" },
-            "accent":             { "type": "string" },
-            "border":             { "type": "string" },
-            "error":              { "type": "string" }
+            "primary": {
+              "type": "string"
+            },
+            "primary_foreground": {
+              "type": "string"
+            },
+            "background": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "muted": {
+              "type": "string"
+            },
+            "accent": {
+              "type": "string"
+            },
+            "border": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
           },
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
-        "font_family":           { "type": "string" },
-        "font_url":              { "type": "string", "format": "uri" },
-        "texts":                 { "type": "object", "additionalProperties": { "type": "string" } },
-        "custom_css":            { "type": "string" },
-        "hide_zitadel_branding": { "type": "boolean" },
-        "layout":                { "type": "string", "enum": ["centered", "split", "muted", "card_image", "minimal"], "default": "centered" },
-        "dark_mode":             { "type": "string", "enum": ["light", "dark", "auto"], "default": "light" },
-        "cover_image":           { "type": "string", "format": "uri", "description": "URL for cover/hero image (used by split and card_image layouts)" },
-        "logo_dark":             { "type": "string", "format": "uri", "description": "Alternative logo for dark mode" },
-        "favicon":               { "type": "string", "format": "uri" },
-        "border_radius":         { "type": "string", "enum": ["sm", "md", "lg", "xl", "full"], "default": "md" },
-        "terms_url":             { "type": "string", "format": "uri" },
-        "privacy_url":           { "type": "string", "format": "uri" },
-        "social_position":       { "type": "string", "enum": ["top", "bottom"], "default": "bottom" },
+        "font_family": {
+          "type": "string"
+        },
+        "font_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "texts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "custom_css": {
+          "type": "string"
+        },
+        "hide_zitadel_branding": {
+          "type": "boolean"
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "centered",
+            "split",
+            "muted",
+            "card_image",
+            "minimal"
+          ],
+          "default": "centered"
+        },
+        "dark_mode": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark",
+            "auto"
+          ],
+          "default": "light"
+        },
+        "cover_image": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL for cover/hero image (used by split and card_image layouts)"
+        },
+        "logo_dark": {
+          "type": "string",
+          "format": "uri",
+          "description": "Alternative logo for dark mode"
+        },
+        "favicon": {
+          "type": "string",
+          "format": "uri"
+        },
+        "border_radius": {
+          "type": "string",
+          "enum": [
+            "sm",
+            "md",
+            "lg",
+            "xl",
+            "full"
+          ],
+          "default": "md"
+        },
+        "terms_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "privacy_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "social_position": {
+          "type": "string",
+          "enum": [
+            "top",
+            "bottom"
+          ],
+          "default": "bottom"
+        },
         "consent": {
           "type": "array",
           "description": "Consent checkboxes shown during registration/login (e.g. terms acceptance, marketing opt-in).",
           "items": {
             "type": "object",
             "properties": {
-              "id":       { "type": "string", "description": "Unique key for the consent item" },
-              "label":    { "type": "string", "description": "Display label, supports markdown links: I agree to the [Terms](https://...)" },
-              "required": { "type": "boolean", "default": false }
+              "id": {
+                "type": "string",
+                "description": "Unique key for the consent item"
+              },
+              "label": {
+                "type": "string",
+                "description": "Display label, supports markdown links: I agree to the [Terms](https://...)"
+              },
+              "required": {
+                "type": "boolean",
+                "default": false
+              }
             },
-            "required": ["id", "label"]
+            "required": [
+              "id",
+              "label"
+            ]
           }
         }
       },
@@ -432,16 +676,72 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "x-identifier":  { "type": "boolean", "description": "Field can be used as a login identifier" },
-          "x-verify":      { "type": "string", "enum": ["email", "sms"], "description": "Verification channel" },
-          "x-recover":     { "type": "string", "enum": ["email", "sms"], "description": "Recovery channel" },
-          "x-mfa":         { "type": "string", "enum": ["sms", "totp"], "description": "MFA method via this field" },
-          "x-claim":       { "type": "string", "description": "Expr mapping to OIDC claims" },
-          "x-sensitive":   { "type": "boolean" },
-          "x-hidden":      { "type": "boolean" },
-          "x-editable":    { "type": "boolean" },
-          "x-source":      { "type": "string", "enum": ["admin", "user", "system", "sso"] },
-          "x-unique":      { "oneOf": [{ "type": "string", "enum": ["instance", "org"] }, { "type": "boolean", "const": false }], "description": "Uniqueness scope: 'instance' = globally unique, 'org' = unique per org. Orthogonal to x-identifier." }
+          "x-identifier": {
+            "type": "boolean",
+            "description": "Field can be used as a login identifier"
+          },
+          "x-verify": {
+            "type": "string",
+            "enum": [
+              "email",
+              "sms"
+            ],
+            "description": "Verification channel"
+          },
+          "x-recover": {
+            "type": "string",
+            "enum": [
+              "email",
+              "sms"
+            ],
+            "description": "Recovery channel"
+          },
+          "x-mfa": {
+            "type": "string",
+            "enum": [
+              "sms",
+              "totp"
+            ],
+            "description": "MFA method via this field"
+          },
+          "x-claim": {
+            "type": "string",
+            "description": "Expr mapping to OIDC claims"
+          },
+          "x-sensitive": {
+            "type": "boolean"
+          },
+          "x-hidden": {
+            "type": "boolean"
+          },
+          "x-editable": {
+            "type": "boolean"
+          },
+          "x-source": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "user",
+              "system",
+              "sso"
+            ]
+          },
+          "x-unique": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "instance",
+                  "org"
+                ]
+              },
+              {
+                "type": "boolean",
+                "const": false
+              }
+            ],
+            "description": "Uniqueness scope: 'instance' = globally unique, 'org' = unique per org. Orthogonal to x-identifier."
+          }
         }
       }
     }
@@ -451,13 +751,31 @@
       "type": "object",
       "description": "Configuration for a single auth method.",
       "properties": {
-        "enabled":     { "type": "boolean" },
-        "interactive": { "type": "boolean", "description": "true = browser-based login, false = API/token-based" },
-        "position":    { "type": "integer", "minimum": 0, "description": "Display order for interactive methods" },
-        "preferred":   { "type": "boolean" },
-        "max_tokens":  { "type": "integer", "minimum": 1, "description": "Max tokens for PAT/API key methods" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "interactive": {
+          "type": "boolean",
+          "description": "true = browser-based login, false = API/token-based"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Display order for interactive methods"
+        },
+        "preferred": {
+          "type": "boolean"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max tokens for PAT/API key methods"
+        }
       },
-      "required": ["enabled", "interactive"]
+      "required": [
+        "enabled",
+        "interactive"
+      ]
     }
   }
 }

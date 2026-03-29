@@ -78,12 +78,9 @@ func NewTestServer(t *testing.T) *TestServer {
 		db.Close()
 	})
 
-	// Look up the default org ID from bootstrap.
+	// Look up the default org ID from bootstrap (may be empty if no default org).
 	var orgID string
 	db.SQL().QueryRow(`SELECT org_id FROM users WHERE identifier = 'admin' LIMIT 1`).Scan(&orgID)
-	if orgID == "" {
-		orgID = "0" // fallback
-	}
 
 	// FGA bootstrap: server is now started, seed tuples for the admin.
 	// (EnsureAdmin runs before server.New, so api.FGAService was nil at that time.)
@@ -91,7 +88,7 @@ func NewTestServer(t *testing.T) *TestServer {
 		var adminID string
 		db.SQL().QueryRow(`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`).Scan(&adminID)
 		if adminID != "" {
-			_ = fgaSvc.OnBootstrap(t.Context(), adminID, orgID)
+			_ = fgaSvc.OnBootstrap(t.Context(), adminID)
 		}
 	}
 

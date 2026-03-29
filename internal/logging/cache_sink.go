@@ -63,6 +63,9 @@ func (h *cacheSink) Handle(_ context.Context, r slog.Record) error {
 	payloadBytes, _ := json.Marshal(attrs)
 
 	// Derive event type and category from the message.
+	// Only structured messages with a dotted prefix (e.g. "request.api",
+	// "auth.login_completed") are stored as events. Plain log lines
+	// like "Catalog ready" or "Database: sqlite://..." are skipped.
 	eventType := r.Message
 	category := "log"
 	for i := 0; i < len(eventType); i++ {
@@ -77,32 +80,37 @@ func (h *cacheSink) Handle(_ context.Context, r slog.Record) error {
 				category = "session"
 			case "token":
 				category = "token"
+			case "signal":
+				category = "signal"
 			default:
 				category = "log"
 			}
 			break
 		}
 	}
+	if category == "log" {
+		return nil // skip unstructured log messages
+	}
 
 	// Extract known fields from attributes.
 	actorID, _ := attrs["actor_id"].(string)
-	traceID, _ := attrs["trace_id"].(string)
-	spanID, _ := attrs["span_id"].(string)
+	requestID, _ := attrs["request_id"].(string)
 	sessionID, _ := attrs["session_id"].(string)
 	flowID, _ := attrs["flow_id"].(string)
+	fingerprint, _ := attrs["device_fingerprint"].(string)
 
 	return h.cache.Write(CacheRecord{
-		EventType: eventType,
-		Category:  category,
-		Stream:    string(h.stream),
-		Level:     r.Level.String(),
-		Payload:   string(payloadBytes),
-		ActorID:   actorID,
-		TraceID:   traceID,
-		SpanID:    spanID,
-		SessionID: sessionID,
-		FlowID:    flowID,
-		CreatedAt: createdAtNow(),
+		EventType:   eventType,
+		Category:    category,
+		Stream:      string(h.stream),
+		Level:       r.Level.String(),
+		Payload:     string(payloadBytes),
+		ActorID:     actorID,
+		RequestID:   requestID,
+		SessionID:   sessionID,
+		FlowID:      flowID,
+		Fingerprint: fingerprint,
+		CreatedAt:   createdAtNow(),
 	})
 }
 

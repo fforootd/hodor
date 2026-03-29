@@ -12,10 +12,12 @@
             <SelectValue placeholder="Group by" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="trace">By Trace</SelectItem>
+            <SelectItem value="trace">By Request</SelectItem>
             <SelectItem value="session">By Session</SelectItem>
             <SelectItem value="identity">By Identity</SelectItem>
             <SelectItem value="flow">By Flow</SelectItem>
+            <SelectItem value="fingerprint">By Fingerprint</SelectItem>
+            <SelectItem value="client">By Client/App</SelectItem>
           </SelectContent>
         </Select>
         <Select v-model="timeRange">
@@ -39,7 +41,7 @@
         <Search class="absolute left-3.5 top-3 h-5 w-5 text-muted-foreground transition-colors group-focus-within:text-primary" />
         <Input 
           v-model="queryInput" 
-          placeholder="Filter by trace_id, session_id, or user identifier..." 
+          placeholder="Filter by request_id, session_id, fingerprint, client_id, or user identifier..." 
           class="pl-11 h-12 w-full bg-card shadow-sm border-muted transition-all focus-visible:ring-2 focus-visible:ring-ring"
           @keydown.enter="applySearch"
         />
@@ -80,10 +82,10 @@
         <!-- Table Header -->
         <div class="grid grid-cols-[2fr_2fr_80px_100px_80px_100px] gap-4 px-4 py-3 border-b bg-muted/30 text-xs font-medium text-muted-foreground uppercase tracking-wider">
           <span>Identity</span>
-          <span>Root Span</span>
-          <span class="text-center">Spans</span>
+          <span>Root Event</span>
+          <span class="text-center">Events</span>
           <span class="text-right">Duration</span>
-          <span class="text-center">Status</span>
+          <span class="text-center">Delegation</span>
           <span class="text-right">Time</span>
         </div>
 
@@ -129,15 +131,20 @@
               </span>
             </div>
 
-            <!-- Status -->
+            <!-- Delegation -->
             <div class="text-center">
-              <Badge v-if="trace.status" 
+              <Badge v-if="trace.delegation_type && trace.delegation_type !== 'direct'" 
+                     variant="outline"
+                     class="font-mono text-xs shadow-none border-dashed text-amber-600 border-amber-200 bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:bg-amber-950">
+                {{ trace.delegation_type }}
+              </Badge>
+              <Badge v-else-if="trace.status" 
                      :variant="trace.status >= 400 ? 'destructive' : 'outline'"
                      class="font-mono text-xs shadow-none border-dashed"
                      :class="trace.status < 400 ? 'text-green-600 border-green-200 bg-green-50 dark:text-green-400 dark:border-green-800 dark:bg-green-950' : ''">
                 {{ trace.status }}
               </Badge>
-              <span v-else class="text-xs text-muted-foreground">—</span>
+              <span v-else class="text-xs text-muted-foreground">Direct</span>
             </div>
 
             <!-- Time -->
@@ -172,23 +179,29 @@
                   </div>
                 </RouterLink>
 
-                <!-- Trace / Session IDs -->
+                <!-- Request / Session / Client IDs -->
                 <div class="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.trace_id">
-                    trace: {{ truncateId(trace.trace_id, 16) }}
+                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.request_id">
+                    request: {{ truncateId(trace.request_id, 16) }}
                   </Badge>
                   <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.session_id">
                     session: {{ truncateId(trace.session_id, 16) }}
                   </Badge>
+                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.client_id" title="Client/App ID">
+                    client: {{ truncateId(trace.client_id, 16) }}
+                  </Badge>
+                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.fingerprint" title="Device Fingerprint">
+                    <Fingerprint class="w-3 h-3 mr-1 inline-block" /> {{ truncateId(trace.fingerprint, 8) }}
+                  </Badge>
                   <Badge variant="secondary" class="text-[10px] py-1">
-                    {{ detailEvents.length }} spans · {{ totalDuration }}ms
+                    {{ detailEvents.length }} events · {{ totalDuration }}ms
                   </Badge>
                 </div>
               </div>
 
-              <!-- Waterfall Header -->
+              <!-- Timeline Header -->
               <div class="flex items-center justify-between text-xs text-muted-foreground px-1">
-                <span class="font-medium uppercase tracking-wider">Waterfall</span>
+                <span class="font-medium uppercase tracking-wider">Timeline</span>
                 <div class="flex items-center gap-4 font-mono">
                   <span>0ms</span>
                   <span>{{ totalDuration }}ms</span>
@@ -247,18 +260,39 @@
                         <div class="grid grid-cols-[110px_1fr] gap-x-2 gap-y-1.5 font-mono">
                           <span class="text-muted-foreground">Event Type</span>
                           <span>{{ span.event_type }}</span>
-                          <span class="text-muted-foreground">Trace ID</span>
-                          <span class="truncate text-primary cursor-pointer hover:underline" @click.stop="jumpToTrace(span.trace_id)">{{ span.trace_id || '—' }}</span>
-                          <span class="text-muted-foreground">Span ID</span>
-                          <span class="truncate">{{ span.span_id || '—' }}</span>
-                          <span class="text-muted-foreground">Parent Span</span>
-                          <span class="truncate">{{ span.parent_span_id || '—' }}</span>
+                          <span class="text-muted-foreground">Request ID</span>
+                          <span class="truncate text-primary cursor-pointer hover:underline" @click.stop="jumpToTrace(span.request_id)">{{ span.request_id || '—' }}</span>
                           <span class="text-muted-foreground">Session ID</span>
                           <RouterLink v-if="span.session_id" to="/console/sessions" class="truncate text-primary hover:underline" @click.stop>{{ span.session_id }}</RouterLink>
                           <span v-else>—</span>
+
+                          <template v-if="span.client_id">
+                            <span class="text-muted-foreground">Client ID</span>
+                            <span class="truncate">{{ span.client_id }}</span>
+                          </template>
+
+                          <template v-if="span.delegation_type && span.delegation_type !== 'direct'">
+                            <span class="text-muted-foreground">Delegation</span>
+                            <span class="truncate text-amber-600 dark:text-amber-400">{{ span.delegation_type }}</span>
+                          </template>
+
+                          <template v-if="span.sdk_name">
+                            <span class="text-muted-foreground">SDK</span>
+                            <span class="truncate">{{ span.sdk_name }} {{ span.sdk_version }}</span>
+                          </template>
+
+                          <span class="text-muted-foreground" v-if="span.fingerprint">Fingerprint</span>
+                          <RouterLink v-if="span.fingerprint" :to="`/console/events?fingerprint=${span.fingerprint}`" class="truncate font-mono text-primary hover:underline" @click.stop>{{ span.fingerprint }}</RouterLink>
+
                           <span class="text-muted-foreground" v-if="span.actor_id">Actor ID</span>
                           <RouterLink v-if="span.actor_id" :to="`/users/${span.actor_id}`" class="truncate text-primary hover:underline" @click.stop>{{ span.actor_id }}</RouterLink>
                         </div>
+                        <RouterLink :to="`/console/events?id=${span.id}`" 
+                                    class="inline-flex items-center gap-1.5 text-[11px] text-primary hover:underline mt-2"
+                                    @click.stop>
+                          <ExternalLink class="w-3 h-3" />
+                          Open in Events
+                        </RouterLink>
                       </div>
                       <div v-if="span.payloadStr !== '{}'" class="border rounded-md bg-muted/20 overflow-hidden">
                         <div class="bg-muted px-3 py-1.5 font-medium font-mono border-b flex items-center justify-between text-muted-foreground">
@@ -287,7 +321,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Search, Workflow, AlertCircle, Zap, Loader2, Clock, Globe, Key, FileJson, Server, Activity, User } from 'lucide-vue-next'
+import { Search, Workflow, AlertCircle, Zap, Loader2, Clock, Globe, Key, FileJson, Server, Activity, User, Fingerprint, ExternalLink } from 'lucide-vue-next'
 import { api } from '@/api/client'
 import { userApi, type Identity } from '@/api/resources'
 import type { AcceptableValue } from 'reka-ui'
@@ -306,10 +340,13 @@ const hasLoaded = ref(false)
 // Trace list (Zone 1)
 interface TraceGroup {
   trace_group: string
-  trace_id: string
+  request_id: string
   session_id: string
   flow_id: string
   actor_id: string
+  fingerprint?: string
+  client_id?: string
+  delegation_type?: string
   started_at: string
   span_count: number
   method?: string
@@ -358,7 +395,9 @@ const groupExpr = computed(() => {
     case 'session': return 'session_id'
     case 'identity': return 'actor_id'
     case 'flow': return 'flow_id'
-    default: return "COALESCE(NULLIF(trace_id, ''), NULLIF(session_id, ''), NULLIF(flow_id, ''))"
+    case 'fingerprint': return 'fingerprint'
+    case 'client': return 'client_id'
+    default: return "COALESCE(NULLIF(request_id, ''), NULLIF(session_id, ''), NULLIF(flow_id, ''), NULLIF(fingerprint, ''))"
   }
 })
 
@@ -394,15 +433,18 @@ async function fetchRecentTraces() {
   const sql = `
     SELECT 
       ${ge} as trace_group, 
-      trace_id, session_id, flow_id,
-      MIN(actor_id) as actor_id,
+      MAX(request_id) as request_id, MAX(session_id) as session_id, MAX(flow_id) as flow_id,
+      MAX(NULLIF(actor_id, '')) as actor_id,
+      MAX(NULLIF(fingerprint, '')) as fingerprint,
+      MAX(NULLIF(client_id, '')) as client_id,
+      MAX(NULLIF(delegation_type, '')) as delegation_type,
       MIN(event_type) as root_event_type,
       MIN(created_at) as started_at, 
       COUNT(*) as span_count,
       MAX(payload) as sample_payload
     FROM events 
     WHERE created_at >= '${cutoff}'
-      AND ((trace_id != '' AND trace_id IS NOT NULL) OR (session_id != '' AND session_id IS NOT NULL) OR (actor_id != '' AND actor_id IS NOT NULL) OR (flow_id != '' AND flow_id IS NOT NULL))
+      AND ((request_id != '' AND request_id IS NOT NULL) OR (session_id != '' AND session_id IS NOT NULL) OR (actor_id != '' AND actor_id IS NOT NULL) OR (flow_id != '' AND flow_id IS NOT NULL) OR (fingerprint != '' AND fingerprint IS NOT NULL))
     GROUP BY ${ge}
     ORDER BY started_at DESC 
     LIMIT 50
@@ -423,9 +465,12 @@ async function fetchRecentTraces() {
 
         const group: TraceGroup = {
           trace_group: r.trace_group,
-          trace_id: r.trace_id || '',
+          request_id: r.request_id || '',
           session_id: r.session_id || '',
           flow_id: r.flow_id || '',
+          fingerprint: r.fingerprint || '',
+          client_id: r.client_id || '',
+          delegation_type: r.delegation_type || '',
           actor_id: r.actor_id || '',
           started_at: r.started_at,
           span_count: Number(r.span_count),
@@ -435,6 +480,10 @@ async function fetchRecentTraces() {
           duration: payload.duration_ms,
           root_event_type: r.root_event_type,
           identity: null
+        }
+
+        if (group.actor_id && (!group.actor_id.includes('-') || group.actor_id === group.request_id)) {
+          group.actor_id = ''
         }
 
         if (group.actor_id) {
@@ -465,15 +514,18 @@ async function fetchFilteredTraces() {
   const sql = `
     SELECT 
       ${ge} as trace_group, 
-      trace_id, session_id, flow_id,
-      MIN(actor_id) as actor_id,
+      MAX(request_id) as request_id, MAX(session_id) as session_id, MAX(flow_id) as flow_id,
+      MAX(NULLIF(actor_id, '')) as actor_id,
+      MAX(NULLIF(fingerprint, '')) as fingerprint,
+      MAX(NULLIF(client_id, '')) as client_id,
+      MAX(NULLIF(delegation_type, '')) as delegation_type,
       MIN(event_type) as root_event_type,
       MIN(created_at) as started_at, 
       COUNT(*) as span_count,
       MAX(payload) as sample_payload
     FROM events 
     WHERE created_at >= '${cutoff}'
-      AND (trace_id = '${val}' OR session_id = '${val}' OR actor_id = '${val}' OR flow_id = '${val}')
+      AND (request_id = '${val}' OR session_id = '${val}' OR actor_id = '${val}' OR flow_id = '${val}' OR fingerprint = '${val}' OR client_id = '${val}')
     GROUP BY ${ge}
     ORDER BY started_at DESC 
     LIMIT 50
@@ -494,9 +546,12 @@ async function fetchFilteredTraces() {
 
         const group: TraceGroup = {
           trace_group: r.trace_group,
-          trace_id: r.trace_id || '',
+          request_id: r.request_id || '',
           session_id: r.session_id || '',
           flow_id: r.flow_id || '',
+          fingerprint: r.fingerprint || '',
+          client_id: r.client_id || '',
+          delegation_type: r.delegation_type || '',
           actor_id: r.actor_id || '',
           started_at: r.started_at,
           span_count: Number(r.span_count),
@@ -506,6 +561,10 @@ async function fetchFilteredTraces() {
           duration: payload.duration_ms,
           root_event_type: r.root_event_type,
           identity: null
+        }
+
+        if (group.actor_id && (!group.actor_id.includes('-') || group.actor_id === group.request_id)) {
+          group.actor_id = ''
         }
 
         if (group.actor_id) {
@@ -543,8 +602,14 @@ async function toggleExpand(trace: TraceGroup) {
     whereClause = `actor_id = '${val}'`
   } else if (gb === 'session') {
     whereClause = `session_id = '${val}'`
+  } else if (gb === 'flow') {
+    whereClause = `flow_id = '${val}'`
+  } else if (gb === 'fingerprint') {
+    whereClause = `fingerprint = '${val}'`
+  } else if (gb === 'client') {
+    whereClause = `client_id = '${val}'`
   } else {
-    whereClause = `trace_id = '${val}' OR session_id = '${val}'`
+    whereClause = `request_id = '${val}' OR session_id = '${val}' OR flow_id = '${val}' OR fingerprint = '${val}'`
   }
   const sql = `SELECT * FROM events WHERE ${whereClause} ORDER BY created_at ASC LIMIT 500`
 
@@ -571,10 +636,10 @@ function selectSpan(span: any) {
   selectedSpan.value = selectedSpan.value?.id === span.id ? null : span
 }
 
-function jumpToTrace(traceId: string) {
-  if (!traceId) return
-  queryInput.value = traceId
-  router.replace({ query: { ...route.query, id: traceId } }).catch(() => {})
+function jumpToTrace(requestId: string) {
+  if (!requestId) return
+  queryInput.value = requestId
+  router.replace({ query: { ...route.query, id: requestId } }).catch(() => {})
   fetchFilteredTraces()
 }
 
@@ -651,11 +716,14 @@ const waterfallSpans = computed(() => {
     return {
       id: raw.id,
       event_type: raw.event_type,
-      trace_id: raw.trace_id,
-      span_id: raw.span_id,
-      parent_span_id: raw.parent_span_id,
+      request_id: raw.request_id,
       session_id: raw.session_id,
       actor_id: raw.actor_id,
+      client_id: raw.client_id,
+      delegation_type: raw.delegation_type,
+      sdk_name: raw.sdk_name,
+      sdk_version: raw.sdk_version,
+      fingerprint: raw.fingerprint,
       created_at: raw.created_at,
       icon, iconColor, iconBg, barColor, label,
       method: payload.method,
@@ -671,21 +739,8 @@ const waterfallSpans = computed(() => {
     }
   })
 
-  // Build span_id → span lookup
-  for (const span of parsed) {
-    if (span.span_id) {
-      spanMap.set(span.span_id, span)
-    }
-  }
-
-  // Build tree
-  for (const span of parsed) {
-    if (span.parent_span_id && spanMap.has(span.parent_span_id)) {
-      spanMap.get(span.parent_span_id).children.push(span)
-    } else {
-      rootSpans.push(span)
-    }
-  }
+  // No span tree — flat chronological timeline (ADR-023: wide events, no span hierarchy)
+  return parsed
 
   // Flatten tree with depth
   const flat: any[] = []

@@ -1,28 +1,30 @@
 package fga
 
 import (
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
-
-	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // Middleware provides FGA-based authorization for API requests.
 // It replaces the old requireAdmin capability check with
 // relationship-based authorization checks.
 type Middleware struct {
-	svc *Service
+	svc     *Service
+	configs map[string]AuthZConfig // keyed by FGA type
+	routes  map[string]string      // route prefix → FGA type
 }
 
-// NewMiddleware creates a new FGA middleware.
+// NewMiddleware creates a new FGA middleware with catalog-driven config.
 func NewMiddleware(svc *Service) *Middleware {
-	return &Middleware{svc: svc}
+	configs, routes := BuildAuthZFromCatalog()
+	return &Middleware{svc: svc, configs: configs, routes: routes}
 }
 
 // Gate is the authorization middleware. For each request it:
 //  1. Resolves which FGA type the route maps to
-//  2. Determines the required permission from HTTP method
+//  2. Determines the required permission from HTTP method + collection/resource
 //  3. Runs an FGA Check against the system store
 //  4. Returns 403 if denied
 //
@@ -44,33 +46,35 @@ func (m *Middleware) Gate(next http.Handler) http.Handler {
 		}
 
 		// What FGA type is this route about?
-		fgaType, resourceID := resolveRouteType(r.URL.Path)
+		fgaType, resourceID := m.resolveRouteType(r.URL.Path)
 		if fgaType == "" {
 			// Unknown route — allow (non-FGA routes like healthz).
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// What permission is needed?
-		perms, ok := PermissionMap[fgaType]
+		// Look up the AuthZ config for this type.
+		cfg, ok := m.configs[fgaType]
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-		permission, ok := perms[r.Method]
-		if !ok {
+
+		// Pick the right permission: collection vs resource.
+		var permission string
+		if resourceID == "" {
+			permission = cfg.CollectionPerms[r.Method]
+		} else {
+			permission = cfg.ResourcePerms[r.Method]
+		}
+		if permission == "" {
+			// No permission defined for this method — allow.
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		// Build the FGA object to check against.
-		object := buildCheckObject(fgaType, resourceID, r)
-
-		// When list/create operations fall back to org-level check,
-		// remap permissions to the org's domain (e.g., can_read → can_read_entity).
-		if strings.HasPrefix(object, "org:") && fgaType != "org" {
-			permission = remapToOrgPermission(permission)
-		}
+		object := cfg.resolveObject(resourceID, r)
 
 		// Run the check.
 		allowed, err := m.svc.Check(r.Context(), "user:"+userID, permission, object)
@@ -122,10 +126,10 @@ func (m *Middleware) Require(fgaType, permission, object string) func(http.Handl
 }
 
 // resolveRouteType determines the FGA type and resource ID from the URL path.
-func resolveRouteType(path string) (fgaType string, resourceID string) {
+func (m *Middleware) resolveRouteType(path string) (fgaType string, resourceID string) {
 	// Try longest prefix match.
 	bestPrefix := ""
-	for prefix, fType := range RouteToFGAType {
+	for prefix, fType := range m.routes {
 		if strings.HasPrefix(path, prefix) && len(prefix) > len(bestPrefix) {
 			bestPrefix = prefix
 			fgaType = fType
@@ -136,7 +140,7 @@ func resolveRouteType(path string) (fgaType string, resourceID string) {
 		return "", ""
 	}
 
-	// Extract resource ID from path (e.g., /v1/entities/abc123 → abc123).
+	// Extract resource ID from path (e.g., /v1/orgs/abc123 → abc123).
 	remainder := strings.TrimPrefix(path, bestPrefix)
 	remainder = strings.TrimPrefix(remainder, "/")
 	if idx := strings.Index(remainder, "/"); idx >= 0 {
@@ -148,68 +152,26 @@ func resolveRouteType(path string) (fgaType string, resourceID string) {
 	return fgaType, resourceID
 }
 
-// buildCheckObject constructs the FGA object string for the check.
-// For list/create operations (no resource ID), check against the org.
-// For read/update/delete operations, check against the specific resource.
-func buildCheckObject(fgaType, resourceID string, r *http.Request) string {
-	switch {
-	// Schema and provider operations → check against instance
-	case fgaType == "schema" || fgaType == "provider":
+// resolveObject constructs the FGA object string for the check.
+// Uses the scope from AuthZConfig to determine the target.
+func (cfg AuthZConfig) resolveObject(resourceID string, r *http.Request) string {
+	// Resource-level operations with scope override.
+	if resourceID != "" && cfg.ResourceScope == "resource" {
+		return cfg.FGAType + ":" + resourceID
+	}
+
+	// Everything else follows the default scope.
+	switch cfg.Scope {
+	case "instance":
 		return "instance:default"
-
-	// Session and entity operations → always org-level
-	// Sessions are ephemeral (no per-session FGA tuples).
-	// Entities fall back to org until creation handlers wire OnResourceCreated.
-	case fgaType == "session" || fgaType == "entity":
-		orgID := resolveOrgID(r)
-		return "org:" + orgID
-
-	// Org-level checks (creating resources, listing collections)
-	case r.Method == "POST" || (resourceID == "" && r.Method == "GET"):
-		orgID := resolveOrgID(r)
-		if fgaType == "org" && r.Method == "POST" {
-			// Creating an org → check against instance
-			return "instance:default"
-		}
-		return "org:" + orgID
-
-	// Setting operations → settings:{type}_{scope}_{scopeID}
-	case fgaType == "settings":
-		if resourceID != "" {
-			return "settings:" + resourceID
-		}
-		orgID := resolveOrgID(r)
-		return "org:" + orgID
-
-	// Resource-level check
-	case resourceID != "":
-		return fgaType + ":" + resourceID
-
-	// Fallback to org-level
+	case "org":
+		return "org:" + resolveOrgID(r)
 	default:
-		orgID := resolveOrgID(r)
-		return "org:" + orgID
+		return "instance:default"
 	}
 }
 
 // resolveOrgID extracts the org context from the request using httputil.
 func resolveOrgID(r *http.Request) string {
 	return httputil.ResolveOrgID(r, "_global")
-}
-
-// remapToOrgPermission translates resource-level permissions to org-scoped
-// equivalents for collection/list endpoints that check against the org.
-func remapToOrgPermission(perm string) string {
-	switch perm {
-	case "can_read":
-		return "can_read_entity"
-	case "can_update":
-		return "can_update_entity"
-	case "can_delete":
-		return "can_delete_entity"
-	case "can_revoke":
-		return "can_read_entity" // session revoke at org level = read access
-	default:
-		return perm // already an org-level permission (can_manage_*, can_create_entity, etc.)
-	}
 }

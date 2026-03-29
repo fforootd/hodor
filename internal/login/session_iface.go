@@ -19,7 +19,7 @@ type ClientSignals struct {
 	PoWDurationMs   float64 `json:"pow_duration_ms,omitempty"`
 	VisitorID       string  `json:"visitor_id,omitempty"`
 	FingerprintHash string  `json:"fingerprint_hash,omitempty"`
-	TraceID         string  `json:"trace_id,omitempty"`
+	RequestID       string  `json:"request_id,omitempty"`
 	DocumentLoadMs  float64 `json:"document_load_ms,omitempty"`
 }
 

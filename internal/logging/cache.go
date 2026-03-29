@@ -11,18 +11,18 @@ import (
 
 // CacheRecord is a single log/event record stored in the local cache.
 type CacheRecord struct {
-	ID        int64
-	EventType string
-	Category  string
-	Stream    string
-	Level     string
-	Payload   string
-	ActorID   string
-	TraceID   string
-	SpanID    string
-	SessionID string
-	FlowID    string
-	CreatedAt string
+	ID          int64
+	EventType   string
+	Category    string
+	Stream      string
+	Level       string
+	Payload     string
+	ActorID     string
+	RequestID   string
+	SessionID   string
+	FlowID      string
+	Fingerprint string
+	CreatedAt   string
 }
 
 // Cache is a local SQLite database used as a durable buffer for analytics writes.
@@ -55,10 +55,10 @@ func OpenCache(path string, maxRows int) (*Cache, error) {
 			level      TEXT NOT NULL DEFAULT 'info',
 			payload    TEXT NOT NULL DEFAULT '{}',
 			actor_id   TEXT NOT NULL DEFAULT '',
-			trace_id   TEXT NOT NULL DEFAULT '',
-			span_id    TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL DEFAULT '',
 			flow_id    TEXT NOT NULL DEFAULT '',
+			fingerprint TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)
 	`)
@@ -76,10 +76,10 @@ func (c *Cache) Write(rec CacheRecord) error {
 	defer c.mu.Unlock()
 
 	_, err := c.db.Exec(
-		`INSERT INTO log_buffer (event_type, category, stream, level, payload, actor_id, trace_id, span_id, session_id, flow_id, created_at)
+		`INSERT INTO log_buffer (event_type, category, stream, level, payload, actor_id, request_id, session_id, flow_id, fingerprint, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rec.EventType, rec.Category, rec.Stream, rec.Level, rec.Payload,
-		rec.ActorID, rec.TraceID, rec.SpanID, rec.SessionID, rec.FlowID,
+		rec.ActorID, rec.RequestID, rec.SessionID, rec.FlowID, rec.Fingerprint,
 		rec.CreatedAt,
 	)
 	return err
@@ -91,7 +91,7 @@ func (c *Cache) ReadBatch(n int) ([]CacheRecord, error) {
 	defer c.mu.Unlock()
 
 	rows, err := c.db.Query(
-		`SELECT id, event_type, category, stream, level, payload, actor_id, trace_id, span_id, session_id, flow_id, created_at
+		`SELECT id, event_type, category, stream, level, payload, actor_id, request_id, session_id, flow_id, fingerprint, created_at
 		 FROM log_buffer ORDER BY id ASC LIMIT ?`, n)
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (c *Cache) ReadBatch(n int) ([]CacheRecord, error) {
 	for rows.Next() {
 		var r CacheRecord
 		if err := rows.Scan(&r.ID, &r.EventType, &r.Category, &r.Stream, &r.Level,
-			&r.Payload, &r.ActorID, &r.TraceID, &r.SpanID, &r.SessionID, &r.FlowID, &r.CreatedAt); err != nil {
+			&r.Payload, &r.ActorID, &r.RequestID, &r.SessionID, &r.FlowID, &r.Fingerprint, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, r)

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/logging"
 )
 
@@ -76,4 +77,47 @@ func (a *API) ingestFingerprint(w http.ResponseWriter, r *http.Request) {
 	knownFingerprints.Store(fpVal, time.Now())
 
 	w.WriteHeader(http.StatusAccepted)
+}
+
+type FingerprintResponse struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	RawData   any    `json:"raw_data"`
+	CreatedAt string `json:"created_at"`
+}
+
+// listFingerprints handles GET /v1/telemetry/fingerprints
+func (a *API) listFingerprints(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	var cursor string
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		cursor = c
+	}
+
+	query := `SELECT id, type, raw_data, created_at FROM fingerprints WHERE id > ? ORDER BY id ASC LIMIT ?`
+	rows, err := a.db.SQL().QueryContext(r.Context(), query, cursor, limit+1)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	defer rows.Close()
+
+	var fps []FingerprintResponse
+	for rows.Next() {
+		var fp FingerprintResponse
+		var rawDataStr string
+		if err := rows.Scan(&fp.ID, &fp.Type, &rawDataStr, &fp.CreatedAt); err != nil {
+			continue
+		}
+		json.Unmarshal([]byte(rawDataStr), &fp.RawData)
+		fps = append(fps, fp)
+	}
+
+	var nextCursor string
+	if len(fps) > limit {
+		fps = fps[:limit]
+		nextCursor = fps[len(fps)-1].ID
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: fps, NextCursor: nextCursor})
 }

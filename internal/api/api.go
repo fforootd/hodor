@@ -428,7 +428,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+		 VALUES (?, '', ?, ?, ?, 'active', ?, ?, ?, ?)`,
 		userID, req.Identifier, req.DisplayName, userType, req.SchemaID, metadataJSON, now, now,
 	)
 	if err != nil {
@@ -444,9 +444,6 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 
 	// Enforce uniqueness via unique_fields table (ADR-016).
 	orgID := r.Header.Get("X-Org-Id")
-	if orgID == "" {
-		orgID = "1"
-	}
 	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, userID, orgID, req.Identifier); err != nil {
 		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -482,9 +479,6 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 			creatorID = "admin" // fallback for bootstrap
 		}
 		orgID := r.Header.Get("X-Org-Id")
-		if orgID == "" {
-			orgID = "1" // default org
-		}
 		if err := svc.OnResourceCreated(r.Context(), userID, creatorID, orgID); err != nil {
 			logging.Printf("[fga] warn: failed to write entity tuples: %v", err)
 		}
@@ -492,7 +486,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 
 	resp := UserResponse{
 		ID:           userID,
-		OrgID:        "org_default",
+		OrgID:        "",
 		Identifier:   req.Identifier,
 		DisplayName:  req.DisplayName,
 		State:        "active",
@@ -760,7 +754,7 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.OrgID == "" {
-		req.OrgID = "org_default"
+		req.OrgID = ""
 	}
 
 	schemaJSON, err := json.Marshal(req.Schema)
@@ -1849,23 +1843,20 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
-	traceID := telemetry.TraceIDFromContext(ctx)
-	spanID := telemetry.SpanIDFromContext(ctx)
-	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
+	requestID := telemetry.RequestIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
 	flowID := telemetry.FlowIDFromContext(ctx)
 	fingerprint := telemetry.FingerprintFromContext(ctx)
-
-	metadataJSON := "{}"
-	if fingerprint != "" {
-		b, _ := json.Marshal(map[string]string{"device_fingerprint": fingerprint})
-		metadataJSON = string(b)
-	}
+	clientID := telemetry.ClientIDFromContext(ctx)
+	tokenID := telemetry.TokenIDFromContext(ctx)
+	delegationType := telemetry.DelegationTypeFromContext(ctx)
+	sdkName := telemetry.SDKNameFromContext(ctx)
+	sdkVersion := telemetry.SDKVersionFromContext(ctx)
 
 	tx.ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, flow_id, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, metadataJSON, traceID, spanID, parentSpanID, sessionID, flowID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
 }
 
 func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
@@ -1875,23 +1866,20 @@ func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID strin
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
-	traceID := telemetry.TraceIDFromContext(ctx)
-	spanID := telemetry.SpanIDFromContext(ctx)
-	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
+	requestID := telemetry.RequestIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
 	flowID := telemetry.FlowIDFromContext(ctx)
 	fingerprint := telemetry.FingerprintFromContext(ctx)
-
-	metadataJSON := "{}"
-	if fingerprint != "" {
-		b, _ := json.Marshal(map[string]string{"device_fingerprint": fingerprint})
-		metadataJSON = string(b)
-	}
+	clientID := telemetry.ClientIDFromContext(ctx)
+	tokenID := telemetry.TokenIDFromContext(ctx)
+	delegationType := telemetry.DelegationTypeFromContext(ctx)
+	sdkName := telemetry.SDKNameFromContext(ctx)
+	sdkVersion := telemetry.SDKVersionFromContext(ctx)
 
 	a.db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, flow_id, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, 'auth', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), actorID, actorID, payloadJSON, metadataJSON, traceID, spanID, parentSpanID, sessionID, flowID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		eventID, eventType, eventCategory(eventType), actorID, actorID, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
 	a.bus.Signal()
 }
 
@@ -1905,23 +1893,20 @@ func emitEventSimple(ctx context.Context, db interface {
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
-	traceID := telemetry.TraceIDFromContext(ctx)
-	spanID := telemetry.SpanIDFromContext(ctx)
-	parentSpanID := telemetry.ParentSpanIDFromContext(ctx)
+	requestID := telemetry.RequestIDFromContext(ctx)
 	sessionID := telemetry.SessionIDFromContext(ctx)
 	flowID := telemetry.FlowIDFromContext(ctx)
 	fingerprint := telemetry.FingerprintFromContext(ctx)
-
-	metadataJSON := "{}"
-	if fingerprint != "" {
-		b, _ := json.Marshal(map[string]string{"device_fingerprint": fingerprint})
-		metadataJSON = string(b)
-	}
+	clientID := telemetry.ClientIDFromContext(ctx)
+	tokenID := telemetry.TokenIDFromContext(ctx)
+	delegationType := telemetry.DelegationTypeFromContext(ctx)
+	sdkName := telemetry.SDKNameFromContext(ctx)
+	sdkVersion := telemetry.SDKVersionFromContext(ctx)
 
 	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, trace_id, span_id, parent_span_id, session_id, flow_id, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, metadataJSON, traceID, spanID, parentSpanID, sessionID, flowID)
+		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
+		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
 }
 
 
@@ -1996,7 +1981,7 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 	a.bus.Signal()
 
 	return UserResponse{
-		ID: userID, OrgID: "org_default", Identifier: req.Identifier, DisplayName: req.DisplayName,
+		ID:           userID, OrgID: "", Identifier: req.Identifier, DisplayName: req.DisplayName,
 		State: "active", Profile: req.Profile, Capabilities: req.Capabilities,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil

@@ -53,7 +53,29 @@
       </TabsList>
     </Tabs>
 
+    <!-- Empty state -->
+    <Empty v-if="allApps.length === 0 && !loading" class="border border-dashed">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <AppWindow />
+        </EmptyMedia>
+        <EmptyTitle>No Applications Yet</EmptyTitle>
+        <EmptyDescription>
+          Register your first OIDC application to integrate authentication.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button as-child>
+          <router-link to="/s/app/new">
+            <Plus class="mr-2 size-4" />
+            New Application
+          </router-link>
+        </Button>
+      </EmptyContent>
+    </Empty>
+
     <DataTable
+      v-if="allApps.length > 0"
       :columns="columns as any"
       :data="filteredApps"
       v-model:rowSelection="selectedRows"
@@ -116,6 +138,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
 import {
   Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
   CheckCircle2, Ban, AppWindow,
@@ -130,6 +153,7 @@ const activeTab = ref('all')
 const allApps = ref<AppWithType[]>([])
 const selectedRows = ref({})
 const globalSearch = ref('')
+const loading = ref(true)
 const issuer = window.location.origin
 
 const appTypes = ['app'] // Future: add 'app_saml' when SAML is implemented
@@ -207,6 +231,7 @@ onMounted(async () => {
     }
   }
   allApps.value = merged
+  loading.value = false
 })
 
 watch(activeTab, () => {

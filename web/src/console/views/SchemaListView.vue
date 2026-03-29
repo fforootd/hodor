@@ -109,16 +109,29 @@
     <div v-if="!filteredGroups.length && searchQuery" class="flex h-24 items-center justify-center text-muted-foreground text-sm">
       No schemas matching "{{ searchQuery }}"
     </div>
-    <div v-if="!schemaGroups.length && !searchQuery" class="flex flex-col h-32 items-center justify-center gap-2 text-muted-foreground">
-      <FileJson class="size-8 opacity-30" />
-      <p class="text-sm">No schemas found</p>
-      <router-link to="/marketplace" class="no-underline">
-        <Button variant="outline" size="sm" class="gap-1.5 mt-1">
-          <Store class="size-3.5" />
-          Browse Marketplace
+    <Empty v-if="!schemaGroups.length && !searchQuery">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileJson />
+        </EmptyMedia>
+        <EmptyTitle>No Schemas</EmptyTitle>
+        <EmptyDescription>
+          Schema types define entity structures. Create one or browse the marketplace.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="outline" as-child>
+          <router-link to="/marketplace">
+            <Store class="size-4 mr-2" />
+            Browse Marketplace
+          </router-link>
         </Button>
-      </router-link>
-    </div>
+        <Button size="sm" class="gap-1.5" @click="showCreateDialog = true">
+            <Plus class="size-3.5" />
+            New Schema Type
+        </Button>
+      </EmptyContent>
+    </Empty>
   </div>
 </template>
 
@@ -137,6 +150,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   Search as SearchIcon, Plus, FileJson, Store,
 } from 'lucide-vue-next'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
 
 const router = useRouter()
 

@@ -25,20 +25,23 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	cfg := h.getDefaultSchemaConfig(r)
 	ssoProviders := h.loadSSOProviders(r)
 
-	// Optional: accept OIDC redirect context.
+	// Optional: accept OIDC redirect context and initial device fingerprint.
 	var req struct {
 		RedirectURI string `json:"redirect_uri,omitempty"`
 		State       string `json:"state,omitempty"`
+		Fingerprint string `json:"fingerprint,omitempty"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	flowID := id.NewFlow()
 	flow := &Flow{
-		ID:           flowID,
-		SchemaConfig: cfg,
-		SSOProviders: ssoProviders,
-		RedirectURI:  req.RedirectURI,
-		OIDCState:    req.State,
+		ID:              flowID,
+		SchemaConfig:    cfg,
+		SSOProviders:    ssoProviders,
+		RedirectURI:     req.RedirectURI,
+		OIDCState:       req.State,
+		VisitorID:       req.Fingerprint,
+		FingerprintHash: req.Fingerprint,
 	}
 
 	// Determine entry step based on preset.
@@ -404,7 +407,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		PoWDurationMs:   flow.PoWDurationMs,
 		VisitorID:       flow.VisitorID,
 		FingerprintHash: flow.FingerprintHash,
-		TraceID:         r.Header.Get("Traceparent"),
+		RequestID:       telemetry.RequestIDFromContext(r.Context()),
 	}
 	sessResp, err := h.api.CreateSessionForLogin(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals)
 	if err != nil {
@@ -428,10 +431,6 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		"method":     "flow",
 	})
 
-	// Backfill session_id on all prior flow events for bidirectional linkage.
-	h.db.SQL().ExecContext(r.Context(),
-		`UPDATE events SET session_id = ? WHERE flow_id = ? AND session_id = ''`,
-		sessResp.Session.ID, flow.ID)
 
 	// Determine redirect URI: OIDC redirect_uri if present, otherwise /console.
 	redirectURI := "/console"

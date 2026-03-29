@@ -87,10 +87,9 @@ async function computeFingerprint(): Promise<string> {
 
   fingerprintPromise = (async () => {
     try {
-      const thumbmark = await import('@thumbmarkjs/thumbmarkjs')
-      const t = new thumbmark.Thumbmark()
-      const fpData = await t.get()
-      const fp = fpData.thumbmark
+      const { getThumbmark } = await import('@thumbmarkjs/thumbmarkjs')
+      const fpData = await getThumbmark()
+      const fp = fpData.thumbmark as string
       cachedFingerprint = fp
 
       // Ingest the raw thumbmark payload directly to the server for analytics/fraud modeling

@@ -9,6 +9,19 @@ import (
 )
 
 func TestResolveRouteType(t *testing.T) {
+	m := &Middleware{
+		routes: map[string]string{
+			"/v1/users":    "entity",
+			"/v1/apps":     "app",
+			"/v1/orgs":     "org",
+			"/v1/schemas":  "schema",
+			"/v1/sessions": "session",
+			"/v1/settings": "settings",
+			"/v1/providers":"provider",
+			"/v1/fga":      "fga",
+		},
+	}
+
 	tests := []struct {
 		path     string
 		wantType string
@@ -16,19 +29,17 @@ func TestResolveRouteType(t *testing.T) {
 	}{
 		{"/v1/users", "entity", ""},
 		{"/v1/users/abc123", "entity", "abc123"},
-		{"/v1/users", "entity", ""},
-		{"/v1/users/xyz", "entity", "xyz"},
 		{"/v1/apps", "app", ""},
 		{"/v1/apps/myapp", "app", "myapp"},
-		{"/v1/groups", "group", ""},
-		{"/v1/groups/g1", "group", "g1"},
 		{"/v1/schemas", "schema", ""},
 		{"/v1/schemas/human_user_v1", "schema", "human_user_v1"},
 		{"/v1/sessions", "session", ""},
 		{"/v1/settings", "settings", ""},
 		{"/v1/settings/password_policy", "settings", "password_policy"},
-		{"/v1/fga", "schema", ""},
-		{"/v1/fga/check", "schema", "check"},
+		{"/v1/orgs", "org", ""},
+		{"/v1/orgs/org1", "org", "org1"},
+		{"/v1/fga", "fga", ""},
+		{"/v1/fga/check", "fga", "check"},
 		{"/healthz", "", ""},
 		{"/console", "", ""},
 		{"/v1/nonexistent", "", ""},
@@ -36,7 +47,7 @@ func TestResolveRouteType(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
-			gotType, gotID := resolveRouteType(tc.path)
+			gotType, gotID := m.resolveRouteType(tc.path)
 			if gotType != tc.wantType {
 				t.Errorf("resolveRouteType(%q) type = %q, want %q", tc.path, gotType, tc.wantType)
 			}
@@ -47,40 +58,45 @@ func TestResolveRouteType(t *testing.T) {
 	}
 }
 
-func TestBuildCheckObject(t *testing.T) {
+func TestResolveObject(t *testing.T) {
 	tests := []struct {
-		fgaType    string
+		name       string
+		cfg        AuthZConfig
 		resourceID string
 		method     string
 		orgID      string
 		want       string
 	}{
-		{"schema", "", "POST", "", "instance:default"},
-		{"schema", "human_user_v1", "GET", "", "instance:default"},
-		{"provider", "", "POST", "", "instance:default"},
-		{"provider", "prov1", "PATCH", "", "instance:default"},
-		{"entity", "", "POST", "myorg", "org:myorg"},
-		{"entity", "", "GET", "myorg", "org:myorg"},
-		{"entity", "abc123", "GET", "", "org:_global"},    // entity → org-level (no per-entity FGA tuples yet)
-		{"entity", "abc123", "PATCH", "", "org:_global"},  // entity → org-level
-		{"entity", "abc123", "DELETE", "", "org:_global"}, // entity → org-level
-		{"entity", "abc123", "GET", "myorg", "org:myorg"}, // entity → org from header
-		{"session", "", "GET", "myorg", "org:myorg"},      // session → org-level
-		{"session", "s1", "DELETE", "myorg", "org:myorg"}, // session → org-level
-		{"org", "", "POST", "", "instance:default"},       // creating org
-		{"settings", "pwd", "PATCH", "", "settings:pwd"},
-		{"settings", "", "GET", "myorg", "org:myorg"},
+		// Instance-scoped: always instance:default
+		{"schema_list", AuthZConfig{Scope: "instance", FGAType: "schema"}, "", "GET", "", "instance:default"},
+		{"schema_resource", AuthZConfig{Scope: "instance", FGAType: "schema"}, "abc", "GET", "", "instance:default"},
+		{"provider_create", AuthZConfig{Scope: "instance", FGAType: "provider"}, "", "POST", "", "instance:default"},
+		{"session_list", AuthZConfig{Scope: "instance", FGAType: "session"}, "", "GET", "", "instance:default"},
+		{"entity_list", AuthZConfig{Scope: "instance", FGAType: "entity"}, "", "GET", "", "instance:default"},
+		{"entity_resource", AuthZConfig{Scope: "instance", FGAType: "entity"}, "abc", "GET", "", "instance:default"},
+
+		// Org-scoped: check against org
+		{"app_list", AuthZConfig{Scope: "org", FGAType: "app"}, "", "GET", "org1", "org:org1"},
+		{"app_create", AuthZConfig{Scope: "org", FGAType: "app"}, "", "POST", "org1", "org:org1"},
+		{"app_resource", AuthZConfig{Scope: "org", FGAType: "app"}, "myapp", "GET", "org1", "org:org1"},
+		{"app_no_org", AuthZConfig{Scope: "org", FGAType: "app"}, "", "GET", "", "org:_global"},
+
+		// Org with resource scope override: resource-level for specific org
+		{"org_list", AuthZConfig{Scope: "instance", FGAType: "org"}, "", "GET", "", "instance:default"},
+		{"org_create", AuthZConfig{Scope: "instance", FGAType: "org"}, "", "POST", "", "instance:default"},
+		{"org_resource", AuthZConfig{Scope: "instance", FGAType: "org", ResourceScope: "resource"}, "org1", "GET", "", "org:org1"},
+		{"org_resource_patch", AuthZConfig{Scope: "instance", FGAType: "org", ResourceScope: "resource"}, "org1", "PATCH", "", "org:org1"},
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.fgaType+"_"+tc.method+"_"+tc.resourceID, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(tc.method, "/v1/test", nil)
 			if tc.orgID != "" {
 				r.Header.Set("X-Org-Id", tc.orgID)
 			}
-			got := buildCheckObject(tc.fgaType, tc.resourceID, r)
+			got := tc.cfg.resolveObject(tc.resourceID, r)
 			if got != tc.want {
-				t.Errorf("buildCheckObject(%q, %q, %s) = %q, want %q", tc.fgaType, tc.resourceID, tc.method, got, tc.want)
+				t.Errorf("resolveObject(%q, %q) = %q, want %q", tc.cfg.FGAType, tc.resourceID, got, tc.want)
 			}
 		})
 	}
@@ -157,8 +173,8 @@ func TestGate_AllowsAuthorized(t *testing.T) {
 	svc := newTestService(t)
 	ctx := httptest.NewRequest("GET", "/", nil).Context()
 
-	// Bootstrap: admin owns instance, owns org.
-	if err := svc.OnBootstrap(ctx, "admin", "org1"); err != nil {
+	// Bootstrap: admin owns instance.
+	if err := svc.OnBootstrap(ctx, "admin"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
@@ -167,10 +183,9 @@ func TestGate_AllowsAuthorized(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Admin POSTing to /v1/users (checks can_create_entity against org).
-	req := httptest.NewRequest("POST", "/v1/users", nil)
+	// Admin GETting /v1/users (checks can_manage_entities against instance:default).
+	req := httptest.NewRequest("GET", "/v1/users", nil)
 	req.Header.Set("X-Identity-Id", "admin")
-	req.Header.Set("X-Org-Id", "org1")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -195,5 +210,60 @@ func TestGate_PublicRouteBypass(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 for public route, got %d", rec.Code)
+	}
+}
+
+func TestBuildAuthZFromCatalog(t *testing.T) {
+	configs, routes := BuildAuthZFromCatalog()
+
+	// Verify route mapping for key paths.
+	if routes["/v1/users"] != "entity" {
+		t.Errorf("/v1/users → %q, want entity", routes["/v1/users"])
+	}
+	if routes["/v1/orgs"] != "org" {
+		t.Errorf("/v1/orgs → %q, want org", routes["/v1/orgs"])
+	}
+	if routes["/v1/schemas"] != "schema" {
+		t.Errorf("/v1/schemas → %q, want schema", routes["/v1/schemas"])
+	}
+	if routes["/v1/fga"] != "fga" {
+		t.Errorf("/v1/fga → %q, want fga", routes["/v1/fga"])
+	}
+
+	// Verify configs exist for key types.
+	for _, fgaType := range []string{"entity", "org", "schema", "provider", "app", "settings", "fga"} {
+		if _, ok := configs[fgaType]; !ok {
+			t.Errorf("missing AuthZConfig for type %q", fgaType)
+		}
+	}
+
+	// Verify org override: collection = instance-level, resource = resource-level.
+	orgCfg := configs["org"]
+	if orgCfg.Scope != "instance" {
+		t.Errorf("org scope = %q, want instance", orgCfg.Scope)
+	}
+	if orgCfg.ResourceScope != "resource" {
+		t.Errorf("org ResourceScope = %q, want resource", orgCfg.ResourceScope)
+	}
+	if orgCfg.CollectionPerms["GET"] != "can_manage_orgs" {
+		t.Errorf("org collection GET = %q, want can_manage_orgs", orgCfg.CollectionPerms["GET"])
+	}
+	if orgCfg.ResourcePerms["GET"] != "owner" {
+		t.Errorf("org resource GET = %q, want owner", orgCfg.ResourcePerms["GET"])
+	}
+
+	// Verify entity override: instance-scoped.
+	entityCfg := configs["entity"]
+	if entityCfg.Scope != "instance" {
+		t.Errorf("entity scope = %q, want instance", entityCfg.Scope)
+	}
+	if entityCfg.CollectionPerms["GET"] != "can_manage_entities" {
+		t.Errorf("entity collection GET = %q, want can_manage_entities", entityCfg.CollectionPerms["GET"])
+	}
+
+	// Verify provider has correct permission (not can_manage_schemas).
+	provCfg := configs["provider"]
+	if provCfg.CollectionPerms["POST"] != "can_manage_providers" {
+		t.Errorf("provider collection POST = %q, want can_manage_providers", provCfg.CollectionPerms["POST"])
 	}
 }

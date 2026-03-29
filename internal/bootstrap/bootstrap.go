@@ -169,12 +169,8 @@ func createRandomAdmin(ctx context.Context, db *database.DB) error {
 func createAdmin(ctx context.Context, db *database.DB, username, email, password string) error {
 	userID := id.New()
 
-	// Seed the default org first so we can reference its real ID.
-	orgID, err := seedDefaultOrg(ctx, db)
-	if err != nil {
-		logging.Printf("WARN: seed default org: %v", err)
-		orgID = "org_default" // fallback
-	}
+	// User-org relationship is managed by FGA, not by a column.
+	orgID := ""
 
 	tx, err := db.SQL().BeginTx(ctx, nil)
 	if err != nil {
@@ -217,42 +213,18 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 		logging.Printf("WARN: seed console client: %v", err)
 	}
 
-	// Bootstrap FGA tuples using the real org ID.
+	// Bootstrap FGA tuples (instance-level only; no default org).
 	if fgaSvc := api.FGAService; fgaSvc != nil {
-		if err := fgaSvc.OnBootstrap(ctx, userID, orgID); err != nil {
+		if err := fgaSvc.OnBootstrap(ctx, userID); err != nil {
 			logging.Printf("WARN: FGA bootstrap tuples failed: %v", err)
 		} else {
-			logging.Printf("[fga] bootstrap tuples written: admin=%s org=%s", userID, orgID)
+			logging.Printf("[fga] bootstrap tuples written: admin=%s", userID)
 		}
 	}
 
 	return nil
 }
 
-// seedDefaultOrg creates the default organization in the orgs table if it doesn't exist.
-// Returns the org ID (existing or newly created).
-func seedDefaultOrg(ctx context.Context, db *database.DB) (string, error) {
-	// Check if default org already exists and return its ID.
-	var existingID string
-	err := db.SQL().QueryRowContext(ctx, `SELECT id FROM orgs WHERE name = 'Default' LIMIT 1`).Scan(&existingID)
-	if err == nil && existingID != "" {
-		return existingID, nil
-	}
-
-	orgID := id.New()
-
-	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO orgs (id, instance_id, name, state, metadata, created_at, updated_at)
-		 VALUES (?, 'inst_default', 'Default', 'active', '{"branding":{"primary_color":"#1a1a2e"}}', datetime('now'), datetime('now'))`,
-		orgID,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert default org: %w", err)
-	}
-
-	logging.Println("seeded default organization (name=Default)")
-	return orgID, nil
-}
 
 // seedConsoleClient creates the default console OIDC client in the apps table.
 func seedConsoleClient(ctx context.Context, db *database.DB) error {
@@ -270,7 +242,7 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 
 	_, err = db.SQL().ExecContext(ctx,
 		`INSERT INTO apps (id, org_id, name, app_type, client_id, redirect_uris, state, schema_id, created_at, updated_at)
-		 VALUES (?, '1', 'Zitadel Console', 'oidc', 'console', ?, 'active', 'app_v1', datetime('now'), datetime('now'))`,
+		 VALUES (?, '', 'Zitadel Console', 'oidc', 'console', ?, 'active', 'app_v1', datetime('now'), datetime('now'))`,
 		consoleID, redirectURIs,
 	)
 	if err != nil {

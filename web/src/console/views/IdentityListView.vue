@@ -36,7 +36,29 @@
       </CardContent>
     </Card>
 
-    <DataTable 
+    <!-- Empty state -->
+    <Empty v-if="identities.length === 0">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FolderOpen />
+        </EmptyMedia>
+        <EmptyTitle>No {{ label }} Yet</EmptyTitle>
+        <EmptyDescription>
+          Create your first {{ singularLabel.toLowerCase() }} to get started.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button as-child>
+          <router-link :to="`/s/${schemaType}/new`">
+            <Plus class="mr-2 size-4" />
+            New {{ singularLabel }}
+          </router-link>
+        </Button>
+      </EmptyContent>
+    </Empty>
+
+    <DataTable
+      v-if="identities.length > 0"
       :columns="columns as any" 
       :data="identities" 
       v-model:rowSelection="selectedRows"
@@ -129,8 +151,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
 import { 
-  Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, XCircle, Ban
+  Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, XCircle, Ban, FolderOpen
 } from 'lucide-vue-next'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
 import { createColumnHelper } from '@tanstack/vue-table'
 
 const props = defineProps<{ schemaType: string }>()

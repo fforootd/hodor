@@ -8,51 +8,59 @@ import (
 	"github.com/zitadel/zitadel/internal/telemetry"
 )
 
-// OTelMiddleware injects trace_id, span_id, and session_id into the request context.
-// If a W3C traceparent header is present, extracts the trace ID and optional span ID from it.
-// Otherwise, generates new identifiers.
-func OTelMiddleware(next http.Handler) http.Handler {
+// RequestContextMiddleware enriches every request context with correlation IDs.
+// If a W3C traceparent header is present, extracts the trace ID and stores it as request_id.
+// Otherwise, generates a new 128-bit hex request_id.
+// Also reads SDK info headers (informational, not validated for authz).
+func RequestContextMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		// Extract or generate trace ID and span ID.
-		traceID, incomingSpanID := extractTraceparent(r)
-		if traceID == "" {
-			traceID = generateTraceID()
+		// Extract or generate request ID (W3C traceparent compatible).
+		requestID, _ := extractTraceparent(r)
+		if requestID == "" {
+			requestID = generateRequestID()
 		}
+		ctx = telemetry.WithRequestID(ctx, requestID)
 
-		// The incoming span ID becomes the parent; we always generate a fresh child span.
-		parentSpanID := incomingSpanID
-		spanID := generateSpanID()
-
-		ctx = telemetry.WithTraceID(ctx, traceID)
-		ctx = telemetry.WithSpanID(ctx, spanID)
-		ctx = telemetry.WithParentSpanID(ctx, parentSpanID)
-
-		// Also check if a Session ID header exists (set by load balancer or elsewhere)
+		// Session ID from header (set by load balancer or AuthGate).
 		if sessionID := r.Header.Get("X-Session-Id"); sessionID != "" {
 			ctx = telemetry.WithSessionID(ctx, sessionID)
 		}
 
-		// Check for Flow ID header (set by login WC during flow steps).
+		// Flow ID header (set by login WC during flow steps).
 		if flowID := r.Header.Get("X-Flow-Id"); flowID != "" {
 			ctx = telemetry.WithFlowID(ctx, flowID)
 		}
 
-		// Check for Fingerprint header (set by clients for device correlation).
+		// Fingerprint header (set by clients for device correlation).
 		if fingerprint := r.Header.Get("X-Fingerprint"); fingerprint != "" {
 			ctx = telemetry.WithFingerprint(ctx, fingerprint)
 		}
 
-		// Set trace headers in response for correlation.
-		w.Header().Set("X-Trace-Id", traceID)
-		w.Header().Set("X-Span-Id", spanID)
+		// SDK info headers (informational, not trusted for authz).
+		if sdkName := r.Header.Get("X-SDK-Name"); sdkName != "" {
+			ctx = telemetry.WithSDKName(ctx, sdkName)
+			if sdkVersion := r.Header.Get("X-SDK-Version"); sdkVersion != "" {
+				ctx = telemetry.WithSDKVersion(ctx, sdkVersion)
+			}
+		}
+
+		// Set request ID in response for correlation.
+		w.Header().Set("X-Request-Id", requestID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
+// OTelMiddleware is a backward-compatible alias for RequestContextMiddleware.
+// Deprecated: Use RequestContextMiddleware directly.
+func OTelMiddleware(next http.Handler) http.Handler {
+	return RequestContextMiddleware(next)
+}
+
 // extractTraceparent extracts trace ID and span ID from W3C traceparent header.
+// The trace ID becomes the request_id. The span ID is discarded (demoted to metadata).
 func extractTraceparent(r *http.Request) (string, string) {
 	tp := r.Header.Get("Traceparent")
 	if tp == "" {
@@ -65,12 +73,7 @@ func extractTraceparent(r *http.Request) (string, string) {
 	return "", ""
 }
 
-// generateTraceID creates a random 32-char hex trace ID (128-bit).
-func generateTraceID() string {
+// generateRequestID creates a random 32-char hex ID (128-bit, W3C trace ID compatible).
+func generateRequestID() string {
 	return crypto.MustRandomHex(16)
-}
-
-// generateSpanID creates a random 16-char hex span ID (64-bit).
-func generateSpanID() string {
-	return crypto.MustRandomHex(8)
 }

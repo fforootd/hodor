@@ -65,6 +65,18 @@ func (rw *responseWriterWrapper) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Flush delegates to the underlying writer's Flush method (required for SSE streaming).
+func (rw *responseWriterWrapper) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the underlying ResponseWriter for Go's ResponseController.
+func (rw *responseWriterWrapper) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // RequestLogMiddleware logs authenticated API requests via the structured
 // logging system. Request records flow through the cache sink (Tier 2) and
 // are batch-drained to the analytics backend. This replaces the old
@@ -92,11 +104,12 @@ func RequestLogMiddleware() func(http.Handler) http.Handler {
 				"status", rw.statusCode,
 				"duration_ms", duration,
 				"actor_id", actorID,
-				"trace_id", telemetry.TraceIDFromContext(r.Context()),
-				"span_id", telemetry.SpanIDFromContext(r.Context()),
+				"request_id", telemetry.RequestIDFromContext(r.Context()),
 				"session_id", telemetry.SessionIDFromContext(r.Context()),
 				"flow_id", telemetry.FlowIDFromContext(r.Context()),
 				"device_fingerprint", telemetry.FingerprintFromContext(r.Context()),
+				"client_id", telemetry.ClientIDFromContext(r.Context()),
+				"delegation_type", telemetry.DelegationTypeFromContext(r.Context()),
 			)
 		})
 	}

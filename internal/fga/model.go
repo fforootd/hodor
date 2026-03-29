@@ -12,6 +12,7 @@ package fga
 
 import (
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
+	schemaPkg "github.com/zitadel/zitadel/internal/schema"
 )
 
 // ZitadelModel returns the complete OpenFGA type definitions for
@@ -65,12 +66,16 @@ func typeInstance() *openfgav1.TypeDefinition {
 				"admin":  noDirectRelation(),
 				"viewer": directUser(),
 				// Permissions
-				"can_manage_orgs":      noDirectRelation(),
-				"can_manage_settings":  noDirectRelation(),
-				"can_manage_schemas":   noDirectRelation(),
-				"can_manage_providers": noDirectRelation(),
-				"can_view_audit":       noDirectRelation(),
-				"can_manage_fga":       noDirectRelation(),
+				"can_manage_orgs":        noDirectRelation(),
+				"can_manage_settings":    noDirectRelation(),
+				"can_manage_schemas":     noDirectRelation(),
+				"can_manage_providers":   noDirectRelation(),
+				"can_manage_entities":    noDirectRelation(),
+				"can_manage_sessions":    noDirectRelation(),
+				"can_manage_login_flows": noDirectRelation(),
+				"can_manage_actions":     noDirectRelation(),
+				"can_view_audit":         noDirectRelation(),
+				"can_manage_fga":         noDirectRelation(),
 			},
 		},
 		Relations: map[string]*openfgav1.Userset{
@@ -81,12 +86,16 @@ func typeInstance() *openfgav1.TypeDefinition {
 				computed("admin"),
 			),
 			// Permissions — derived from roles
-			"can_manage_orgs":      computed("admin"),
-			"can_manage_settings":  computed("admin"),
-			"can_manage_schemas":   computed("admin"),
-			"can_manage_providers": computed("admin"),
-			"can_view_audit":       computed("viewer"),
-			"can_manage_fga":       computed("owner"),
+			"can_manage_orgs":        computed("admin"),
+			"can_manage_settings":    computed("admin"),
+			"can_manage_schemas":     computed("admin"),
+			"can_manage_providers":   computed("admin"),
+			"can_manage_entities":    computed("admin"),
+			"can_manage_sessions":    computed("admin"),
+			"can_manage_login_flows": computed("admin"),
+			"can_manage_actions":     computed("admin"),
+			"can_view_audit":         computed("viewer"),
+			"can_manage_fga":         computed("owner"),
 		},
 	}
 }
@@ -129,7 +138,10 @@ func typeOrg() *openfgav1.TypeDefinition {
 		},
 		Relations: map[string]*openfgav1.Userset{
 			"parent": this(),
-			"owner":  this(),
+			"owner": union(
+				this(),
+				tupleToUserset("parent", "owner"),
+			),
 			"admin": union(
 				this(),
 				computed("owner"),
@@ -459,74 +471,184 @@ func noDirectRelation() *openfgav1.RelationMetadata {
 	return &openfgav1.RelationMetadata{}
 }
 
-// PermissionMap maps HTTP methods to FGA permissions for a given resource type.
-// Used by the FGA middleware to determine which check to run.
-var PermissionMap = map[string]map[string]string{
-	"entity": {
-		"GET":    "can_read",
-		"POST":   "can_create_entity", // checked against org
-		"PATCH":  "can_update",
-		"PUT":    "can_update",
-		"DELETE": "can_delete",
-	},
-	"app": {
-		"GET":    "can_read",
-		"POST":   "can_manage_apps", // checked against org
-		"PATCH":  "can_update",
-		"PUT":    "can_update",
-		"DELETE": "can_delete",
-	},
-	"group": {
-		"GET":    "can_read",
-		"POST":   "can_manage_groups", // checked against org
-		"PATCH":  "can_update",
-		"PUT":    "can_update",
-		"DELETE": "can_delete",
-	},
-	"org": {
-		"GET":    "can_read_entity", // checked against org itself
-		"POST":   "can_manage_orgs", // checked against instance
-		"PATCH":  "can_update_entity",
-		"PUT":    "can_update_entity",
-		"DELETE": "can_delete_entity",
-	},
-	"settings": {
-		"GET":   "can_read",
-		"POST":  "can_write",
-		"PATCH": "can_write",
-		"PUT":   "can_write",
-	},
-	"schema": {
-		"GET":    "can_view_audit",     // checked against instance
-		"POST":   "can_manage_schemas", // checked against instance
-		"PATCH":  "can_manage_schemas",
-		"DELETE": "can_manage_schemas",
-	},
-	"provider": {
-		"GET":    "can_view_audit",     // checked against instance
-		"POST":   "can_manage_schemas", // checked against instance (provider management)
-		"PATCH":  "can_manage_schemas",
-		"DELETE": "can_manage_schemas",
-	},
-	"session": {
-		"GET":    "can_read",
-		"DELETE": "can_revoke",
-	},
+// ──────────────────────────────────────────────────────────────────
+// AuthZ configuration — catalog-driven, replaces hardcoded maps
+// ──────────────────────────────────────────────────────────────────
+
+// AuthZConfig holds the full authz configuration for one FGA type.
+// Collection (list/create) and resource (get/update/delete) may need
+// different permissions and different FGA objects to check against.
+type AuthZConfig struct {
+	FGAType string // OpenFGA object type (e.g. "entity", "org")
+	Scope   string // Default scope: "instance" or "org"
+
+	// ResourceScope overrides Scope for resource-level ops (GET/{id}, PATCH, DELETE).
+	// If empty, uses Scope. Set to "resource" to check against {fga_type}:{id}.
+	ResourceScope string
+
+	// CollectionPerms maps HTTP methods to FGA permissions for collection-level ops.
+	CollectionPerms map[string]string
+
+	// ResourcePerms maps HTTP methods to FGA permissions for resource-level ops.
+	ResourcePerms map[string]string
 }
 
-// RouteToFGAType maps API route prefixes to FGA type names.
-// Built at startup from x-catalog, but these are the defaults.
-var RouteToFGAType = map[string]string{
-	"/v1/users":            "entity",
-	"/v1/service-accounts": "entity",
-	"/v1/ai-agents":        "entity",
-	"/v1/apps":             "app",
-	"/v1/orgs":             "org",
-	"/v1/groups":           "group",
-	"/v1/settings":         "settings",
-	"/v1/schemas":          "schema",
-	"/v1/providers":        "provider",
-	"/v1/sessions":         "session",
-	"/v1/rules":            "entity",
-	"/v1/fga":              "schema", // FGA admin introspection — instance-level
+// BuildAuthZFromCatalog generates the AuthZ config and route map from x-catalog.
+// This is the single source of truth for all FGA middleware routing.
+func BuildAuthZFromCatalog() (map[string]AuthZConfig, map[string]string) {
+	configs := make(map[string]AuthZConfig)
+	routes := make(map[string]string)
+
+	// Try to load from catalog; fall back to defaults if unavailable.
+	catalog, err := loadCatalog()
+	if err == nil {
+		for _, entry := range catalog {
+			if entry.FGAType == "" || entry.Path == "" {
+				continue
+			}
+			prefix := "/v1/" + entry.Path
+			routes[prefix] = entry.FGAType
+
+			// Only build config once per FGA type (many catalog entries share the same type).
+			if _, exists := configs[entry.FGAType]; !exists {
+				configs[entry.FGAType] = defaultPermsForScope(entry.FGAType, entry.FGAScope)
+			}
+		}
+	}
+
+	// Apply overrides for types with non-standard permission rules.
+	applyOverrides(configs)
+
+	// Non-catalog routes.
+	routes["/v1/fga"] = "fga"
+	if _, exists := configs["fga"]; !exists {
+		configs["fga"] = defaultPermsForScope("fga", "instance")
+	}
+
+	return configs, routes
 }
+
+// loadCatalog wraps schema.Catalog() to avoid an import cycle.
+// We use a function variable so tests can stub it.
+var loadCatalog = func() (map[string]catalogEntry, error) {
+	// We re-parse the embedded JSON directly to avoid importing schema package
+	// (which would create a cycle if schema ever imports fga).
+	// Instead, we import it — no cycle exists today.
+	return loadCatalogFromSchema()
+}
+
+// catalogEntry is a minimal projection of schema.CatalogEntry for FGA.
+type catalogEntry struct {
+	Path     string
+	FGAType  string
+	FGAScope string
+}
+
+func loadCatalogFromSchema() (map[string]catalogEntry, error) {
+	cat, err := schemaPkg.Catalog()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]catalogEntry, len(cat))
+	for k, v := range cat {
+		result[k] = catalogEntry{
+			Path:     v.Path,
+			FGAType:  v.FGAType,
+			FGAScope: v.FGAScope,
+		}
+	}
+	return result, nil
+}
+
+// defaultPermsForScope returns the standard permission set for a given scope.
+func defaultPermsForScope(fgaType, scope string) AuthZConfig {
+	switch scope {
+	case "instance":
+		managePerm := "can_manage_" + fgaType + "s"
+		return AuthZConfig{
+			FGAType: fgaType,
+			Scope:   "instance",
+			CollectionPerms: map[string]string{
+				"GET":  "can_view_audit",
+				"POST": managePerm,
+			},
+			ResourcePerms: map[string]string{
+				"GET":    "can_view_audit",
+				"PATCH":  managePerm,
+				"PUT":    managePerm,
+				"DELETE": managePerm,
+			},
+		}
+	case "org":
+		return AuthZConfig{
+			FGAType: fgaType,
+			Scope:   "org",
+			CollectionPerms: map[string]string{
+				"GET":  "can_read_entity",
+				"POST": "can_create_entity",
+			},
+			ResourcePerms: map[string]string{
+				"GET":    "can_read_entity",
+				"PATCH":  "can_update_entity",
+				"PUT":    "can_update_entity",
+				"DELETE": "can_delete_entity",
+			},
+		}
+	default:
+		// No FGA — allow all
+		return AuthZConfig{FGAType: fgaType, Scope: "instance"}
+	}
+}
+
+// applyOverrides patches config for types that don't fit the defaults.
+func applyOverrides(configs map[string]AuthZConfig) {
+	// Org: collection ops check instance, resource ops check org:{id}.
+	// "owner" relation inherits from parent instance via tupleToUserset,
+	// so instance owners can read/manage any org.
+	if _, ok := configs["org"]; ok {
+		configs["org"] = AuthZConfig{
+			FGAType: "org",
+			Scope:   "instance",
+			CollectionPerms: map[string]string{
+				"GET":  "can_manage_orgs",
+				"POST": "can_manage_orgs",
+			},
+			ResourcePerms: map[string]string{
+				"GET":    "owner",
+				"PATCH":  "owner",
+				"PUT":    "owner",
+				"DELETE": "owner",
+			},
+			ResourceScope: "resource", // check against org:{id}
+		}
+	}
+
+	// Settings: instance-scoped management
+	if _, ok := configs["settings"]; ok {
+		configs["settings"] = AuthZConfig{
+			FGAType: "settings",
+			Scope:   "instance",
+			CollectionPerms: map[string]string{
+				"GET":  "can_view_audit",
+				"POST": "can_manage_settings",
+			},
+			ResourcePerms: map[string]string{
+				"GET":   "can_view_audit",
+				"PATCH": "can_manage_settings",
+				"PUT":   "can_manage_settings",
+			},
+		}
+	}
+
+	// Entity: instance-scoped (users live at instance level)
+	if cfg, ok := configs["entity"]; ok {
+		cfg.CollectionPerms["GET"] = "can_manage_entities"
+		cfg.CollectionPerms["POST"] = "can_manage_entities"
+		cfg.ResourcePerms["GET"] = "can_manage_entities"
+		cfg.ResourcePerms["PATCH"] = "can_manage_entities"
+		cfg.ResourcePerms["PUT"] = "can_manage_entities"
+		cfg.ResourcePerms["DELETE"] = "can_manage_entities"
+		configs["entity"] = cfg
+	}
+}
+

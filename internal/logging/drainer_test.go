@@ -33,10 +33,10 @@ func openTestDestDB(t *testing.T) *sql.DB {
 			aggregate_type TEXT NOT NULL DEFAULT '',
 			payload TEXT NOT NULL DEFAULT '{}',
 			metadata TEXT NOT NULL DEFAULT '{}',
-			trace_id TEXT NOT NULL DEFAULT '',
-			span_id TEXT NOT NULL DEFAULT '',
-			parent_span_id TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL DEFAULT '',
+			flow_id TEXT NOT NULL DEFAULT '',
+			fingerprint TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL
 		)
 	`)

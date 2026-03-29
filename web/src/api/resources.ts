@@ -214,21 +214,27 @@ export interface Event {
   actor_type?: string
   aggregate_id: string
   aggregate_type: string
+  request_id?: string
   session_id?: string
-  trace_id?: string
-  span_id?: string
-  parent_span_id?: string
+  flow_id?: string
+  fingerprint?: string
+  client_id?: string
+  token_id?: string
+  delegation_type?: string
+  sdk_name?: string
+  sdk_version?: string
   payload: Record<string, unknown>
   metadata?: Record<string, unknown>
   created_at: string
 }
 
 export const eventApi = {
-  list: (params?: { type?: string; limit?: number; session_id?: string }): Promise<Event[]> => {
+  list: (params?: { type?: string; limit?: number; session_id?: string; fingerprint?: string }): Promise<Event[]> => {
     const query: Record<string, string> = {}
     if (params?.type) query.types = params.type
     if (params?.limit) query.limit = String(params.limit)
     if (params?.session_id) query.session_id = params.session_id
+    if (params?.fingerprint) query.fingerprint = params.fingerprint
     return unwrapItems<Event>(listEvents({ query: query as any }))
   },
 }

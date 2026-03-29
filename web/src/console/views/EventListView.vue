@@ -6,21 +6,28 @@
     </div>
 
     <!-- Stats Bar -->
-    <div class="flex items-center gap-6 p-4 rounded-lg border text-sm bg-card text-muted-foreground">
-      <div class="flex items-center space-x-2 text-primary">
-        <Activity class="w-4 h-4" />
-        <span class="font-medium">{{ countApi }} Request events</span>
+    <div class="flex items-center justify-between p-4 rounded-lg border text-sm bg-card text-muted-foreground">
+      <div class="flex items-center gap-6">
+        <div class="flex items-center space-x-2 text-primary">
+          <Activity class="w-4 h-4" />
+          <span class="font-medium">{{ countApi }} Request events</span>
+        </div>
+        <div class="w-px h-4 bg-border"></div>
+        <div class="flex items-center space-x-2 text-blue-600">
+          <Key class="w-4 h-4" />
+          <span>{{ countAuth }} Auth events</span>
+        </div>
+        <div class="w-px h-4 bg-border"></div>
+        <div class="flex items-center space-x-2 text-emerald-600">
+          <Globe class="w-4 h-4" />
+          <span>{{ countSession }} Session events</span>
+        </div>
       </div>
-      <div class="w-px h-4 bg-border"></div>
-      <div class="flex items-center space-x-2 text-blue-600">
-        <Key class="w-4 h-4" />
-        <span>{{ countAuth }} Auth events</span>
-      </div>
-      <div class="w-px h-4 bg-border"></div>
-      <div class="flex items-center space-x-2 text-emerald-600">
-        <Globe class="w-4 h-4" />
-        <span>{{ countSession }} Session events</span>
-      </div>
+      <Button size="sm" :variant="isLive ? 'default' : 'outline'" @click="toggleLive" 
+              :class="isLive ? 'bg-red-600 hover:bg-red-700 text-white border-red-600' : ''">
+        <Radio class="size-3.5 mr-1.5" :class="isLive ? 'animate-pulse' : ''" />
+        {{ isLive ? '● Live' : 'Live' }}
+      </Button>
     </div>
 
     <DataTable 
@@ -61,6 +68,15 @@
                     </button>
                     <button class="w-full text-left px-2 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center transition-colors" @mousedown.prevent="appendSearchToken('aggregate:')">
                       <span class="font-medium mr-2">aggregate:</span> Filter by Aggregate ID
+                    </button>
+                    <button class="w-full text-left px-2 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center transition-colors" @mousedown.prevent="appendSearchToken('fingerprint:')">
+                      <span class="font-medium mr-2">fingerprint:</span> Filter by Device Fingerprint
+                    </button>
+                    <button class="w-full text-left px-2 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center transition-colors" @mousedown.prevent="appendSearchToken('client:')">
+                      <span class="font-medium mr-2">client:</span> Filter by Client / App
+                    </button>
+                    <button class="w-full text-left px-2 py-1.5 text-sm hover:bg-muted cursor-pointer flex items-center transition-colors" @mousedown.prevent="appendSearchToken('delegation:')">
+                      <span class="font-medium mr-2">delegation:</span> Filter by Delegation Type
                     </button>
                   </div>
                   
@@ -109,8 +125,33 @@
                   <p class="text-xs font-mono">{{ row.original.id }}</p>
                </div>
                <div>
-                  <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Aggregate Topology</h4>
-                  <p class="text-xs font-mono">{{ row.original.aggregate_type }} <span class="text-muted-foreground">→</span> <RouterLink :to="`/s/${row.original.aggregate_type}/${row.original.aggregate_id}`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink></p>
+                  <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Aggregate</h4>
+                  <p class="text-xs font-mono">
+                    <span class="text-muted-foreground">{{ row.original.aggregate_type }}</span>
+                    <span class="text-muted-foreground mx-1">→</span>
+                    <RouterLink v-if="row.original.aggregate_type === 'session'" :to="`/console/sessions`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink>
+                    <RouterLink v-else-if="row.original.aggregate_type === 'user' || row.original.aggregate_type === 'identity'" :to="`/users/${row.original.aggregate_id}`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink>
+                    <span v-else>{{ row.original.aggregate_id }}</span>
+                  </p>
+               </div>
+            </div>
+            <!-- Wide Event Context (ADR-023) -->
+            <div class="grid grid-cols-3 gap-4 pt-2" v-if="row.original.request_id || row.original.client_id || row.original.delegation_type">
+               <div v-if="row.original.request_id">
+                  <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Request ID</h4>
+                  <RouterLink :to="`/console/traces?id=${row.original.request_id}`" class="text-xs font-mono text-primary hover:underline">{{ row.original.request_id.slice(0, 16) }}…</RouterLink>
+               </div>
+               <div v-if="row.original.client_id">
+                  <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Client / App</h4>
+                  <p class="text-xs font-mono">{{ row.original.client_id }}</p>
+               </div>
+               <div v-if="row.original.delegation_type && row.original.delegation_type !== 'direct'">
+                  <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Delegation</h4>
+                  <Badge variant="outline" class="text-[10px] text-amber-600 border-amber-200 bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:bg-amber-950">{{ row.original.delegation_type }}</Badge>
+               </div>
+               <div v-if="row.original.sdk_name">
+                  <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">SDK</h4>
+                  <p class="text-xs font-mono">{{ row.original.sdk_name }} {{ row.original.sdk_version }}</p>
                </div>
             </div>
           </div>
@@ -137,7 +178,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
 import { 
-  Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Activity, Key, Globe, LayoutList, MoreHorizontal, FileJson, ExternalLink
+  Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Activity, Key, Globe, LayoutList, MoreHorizontal, FileJson, ExternalLink, Link2, Radio
 } from 'lucide-vue-next'
 import { createColumnHelper } from '@tanstack/vue-table'
 
@@ -149,6 +190,46 @@ const selectedRows = ref({})
 const globalSearch = ref('')
 const isSearchOpen = ref(false)
 const eventTypes = ref<string[]>([])
+const isLive = ref(false)
+let eventSource: EventSource | null = null
+
+function toggleLive() {
+  if (isLive.value) {
+    eventSource?.close()
+    eventSource = null
+    isLive.value = false
+    return
+  }
+
+  // Build SSE URL with current filter context
+  const params = new URLSearchParams()
+  params.set('cursor', 'now')
+  const fp = route.query.fingerprint as string
+  if (fp) params.set('fingerprint', fp)
+  const sid = route.query.session_id as string
+  if (sid) params.set('session_id', sid)
+
+  eventSource = new EventSource(`/v1/events/stream?${params.toString()}`)
+  isLive.value = true
+
+  eventSource.onmessage = (e) => {
+    try {
+      const evt = JSON.parse(e.data) as Event
+      events.value = [evt, ...events.value]
+      eventTypes.value = [...new Set([evt.event_type, ...eventTypes.value])]
+    } catch { /* ignore malformed */ }
+  }
+  eventSource.onerror = () => {
+    eventSource?.close()
+    eventSource = null
+    isLive.value = false
+  }
+}
+
+import { onUnmounted } from 'vue'
+onUnmounted(() => {
+  eventSource?.close()
+})
 
 const searchInputRef = ref<any>(null)
 const searchContainerRef = ref<HTMLElement | null>(null)
@@ -182,6 +263,9 @@ const currentFilterPrefix = computed(() => {
    if (lastPart.startsWith('actor:')) return 'actor:'
    if (lastPart.startsWith('aggregate:')) return 'aggregate:'
    if (lastPart.startsWith('session:')) return 'session:'
+   if (lastPart.startsWith('fingerprint:')) return 'fingerprint:'
+   if (lastPart.startsWith('client:')) return 'client:'
+   if (lastPart.startsWith('delegation:')) return 'delegation:'
    return ''
 })
 
@@ -228,6 +312,9 @@ function applySearchQuery(query: string, table: any) {
       else if (['actor', 'user'].includes(key)) filters.push({ id: 'actor', value })
       else if (['aggregate', 'agg'].includes(key)) filters.push({ id: 'aggregate', value })
       else if (['session'].includes(key)) filters.push({ id: 'session', value })
+      else if (['fingerprint', 'fp'].includes(key)) filters.push({ id: 'fingerprint', value })
+       else if (['client', 'app'].includes(key)) filters.push({ id: 'client_id', value })
+       else if (['delegation', 'del'].includes(key)) filters.push({ id: 'delegation', value })
       else globalText += token + ' '
     } else {
       globalText += token + ' '
@@ -249,8 +336,9 @@ function applySearchQuery(query: string, table: any) {
 onMounted(async () => {
   try { 
     const session_id = route.query.session_id as string | undefined
+    const fingerprint = route.query.fingerprint as string | undefined
     const actor = route.query.actor as string | undefined
-    const res = await eventApi.list({ limit: 500, session_id }) as Event[]
+    const res = await eventApi.list({ limit: 500, session_id, fingerprint }) as Event[]
     events.value = res
     eventTypes.value = [...new Set(res.map(e => e.event_type))]
     
@@ -258,12 +346,26 @@ onMounted(async () => {
     if (session_id) {
        globalSearch.value = `session:${session_id} `
        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+    } else if (fingerprint) {
+       globalSearch.value = `fingerprint:${fingerprint} `
+       if (activeTable) applySearchQuery(globalSearch.value, activeTable)
     } else if (actor) {
        globalSearch.value = `actor:${actor} `
        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
     }
   } catch (err) {
     console.error('Failed to load events', err)
+  }
+
+  // Auto-expand event by permalink (?id=xxx)
+  const eventId = route.query.id as string | undefined
+  if (eventId && activeTable) {
+    const idx = events.value.findIndex(e => e.id === eventId)
+    if (idx >= 0) {
+      setTimeout(() => {
+        activeTable?.getRowModel()?.rows[idx]?.toggleExpanded(true)
+      }, 100)
+    }
   }
 })
 
@@ -373,6 +475,65 @@ const columns = [
       ])
     },
   }),
+  // Hidden-by-default wide event columns (toggle via View dropdown)
+  columnHelper.accessor('request_id', {
+    id: 'request_id',
+    header: 'Request ID',
+    cell: info => {
+      const val = info.getValue()
+      if (!val) return h('span', { class: 'text-xs text-muted-foreground' }, '—')
+      return h(RouterLink, {
+        to: `/console/traces?id=${val}`,
+        class: 'text-xs font-mono text-primary hover:underline truncate max-w-[120px] block',
+        title: val,
+      }, () => val.slice(0, 12) + '…')
+    },
+    enableHiding: true,
+    meta: { defaultHidden: true },
+  }),
+  columnHelper.accessor('client_id', {
+    id: 'client_id',
+    header: 'Client',
+    cell: info => h('span', { class: 'text-xs font-mono truncate max-w-[100px] block' }, info.getValue() || '—'),
+    enableHiding: true,
+    meta: { defaultHidden: true },
+    filterFn: 'includesString',
+  }),
+  columnHelper.accessor('delegation_type', {
+    id: 'delegation',
+    header: 'Delegation',
+    cell: info => {
+      const val = info.getValue()
+      if (!val || val === 'direct') return h('span', { class: 'text-xs text-muted-foreground' }, 'direct')
+      return h(Badge, { variant: 'outline', class: 'text-[10px] border-dashed text-amber-600 border-amber-200 bg-amber-50' }, () => val)
+    },
+    enableHiding: true,
+    meta: { defaultHidden: true },
+    filterFn: 'includesString',
+  }),
+  columnHelper.accessor(row => row.sdk_name ? `${row.sdk_name} ${row.sdk_version || ''}`.trim() : '', {
+    id: 'sdk',
+    header: 'SDK',
+    cell: info => h('span', { class: 'text-xs font-mono truncate max-w-[100px] block' }, info.getValue() || '—'),
+    enableHiding: true,
+    meta: { defaultHidden: true },
+  }),
+  columnHelper.accessor('fingerprint', {
+    id: 'fingerprint',
+    header: 'Fingerprint',
+    cell: info => {
+      const val = info.getValue()
+      if (!val) return h('span', { class: 'text-xs text-muted-foreground' }, '—')
+      return h(RouterLink, {
+        to: `/console/events?fingerprint=${val}`,
+        class: 'text-xs font-mono text-primary hover:underline truncate max-w-[80px] block',
+        title: val,
+      }, () => val.slice(0, 8) + '…')
+    },
+    enableHiding: true,
+    meta: { defaultHidden: true },
+    filterFn: 'includesString',
+  }),
   columnHelper.display({
     id: 'actions',
     header: () => null,
@@ -384,10 +545,20 @@ const columns = [
           ])
         ),
         h(DropdownMenuContent, { align: 'end' }, () => [
+          h(DropdownMenuItem, { 
+            class: 'cursor-pointer',
+            onClick: () => {
+              const url = `${window.location.origin}/console/events?id=${row.original.id}`
+              navigator.clipboard.writeText(url)
+            }
+          }, () => [
+            h(Link2, { class: 'w-3.5 h-3.5 mr-2' }),
+            'Copy Permalink'
+          ]),
           h(DropdownMenuItem, { asChild: true, class: 'cursor-pointer' }, () => 
             h(RouterLink, { 
               to: {
-                path: '/observability/explore',
+                path: '/console/observability/explore',
                 query: {
                   table: 'events',
                   func: 'NONE',

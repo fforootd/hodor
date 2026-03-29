@@ -85,10 +85,30 @@
       </CardContent>
     </Card>
 
+    <!-- Empty state -->
+    <Empty v-if="providers.length === 0 && !showCreate">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Link2 />
+        </EmptyMedia>
+        <EmptyTitle>No Providers Configured</EmptyTitle>
+        <EmptyDescription>
+          Connect an identity provider (Google, Entra ID, GitLab, …) to enable federated login.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button @click="showCreate = true">
+          <Plus class="mr-2 size-4" />
+          Add Provider
+        </Button>
+      </EmptyContent>
+    </Empty>
+
     <!-- Provider List (DataTable) -->
-    <DataTable 
-      :columns="columns as any" 
-      :data="providers" 
+    <DataTable
+      v-if="providers.length > 0"
+      :columns="columns as any"
+      :data="providers"
       v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
@@ -220,8 +240,9 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
 import { 
-  Plus, Trash2, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Ban, MoreHorizontal
+  Plus, Trash2, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Ban, MoreHorizontal, Link2
 } from 'lucide-vue-next'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
 import { createColumnHelper } from '@tanstack/vue-table'
 
 interface Template {

@@ -36,6 +36,8 @@ func PublicRoutes() map[string][]string {
 		},
 		"POST": {
 			"/v1/login/",
+			"/v1/telemetry/",
+			"/v1/otel/",
 			"/authorize",
 			"/oauth/",
 		},

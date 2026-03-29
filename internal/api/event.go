@@ -15,20 +15,25 @@ import (
 // --- Event types ---
 
 type EventResponse struct {
-	ID            string `json:"id"`
-	EventType     string `json:"event_type"`
-	OrgID         string `json:"org_id"`
-	ActorID       string `json:"actor_id"`
-	ActorType     string `json:"actor_type"`
-	AggregateID   string `json:"aggregate_id"`
-	AggregateType string `json:"aggregate_type"`
-	SessionID     string `json:"session_id,omitempty"`
-	TraceID       string `json:"trace_id,omitempty"`
-	SpanID        string `json:"span_id,omitempty"`
-	ParentSpanID  string `json:"parent_span_id,omitempty"`
-	Payload       any    `json:"payload,omitempty"`
-	Metadata      any    `json:"metadata,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	ID             string `json:"id"`
+	EventType      string `json:"event_type"`
+	OrgID          string `json:"org_id"`
+	ActorID        string `json:"actor_id"`
+	ActorType      string `json:"actor_type"`
+	AggregateID    string `json:"aggregate_id"`
+	AggregateType  string `json:"aggregate_type"`
+	RequestID      string `json:"request_id,omitempty"`
+	SessionID      string `json:"session_id,omitempty"`
+	FlowID         string `json:"flow_id,omitempty"`
+	Fingerprint    string `json:"fingerprint,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
+	TokenID        string `json:"token_id,omitempty"`
+	DelegationType string `json:"delegation_type,omitempty"`
+	SDKName        string `json:"sdk_name,omitempty"`
+	SDKVersion     string `json:"sdk_version,omitempty"`
+	Payload        any    `json:"payload,omitempty"`
+	Metadata       any    `json:"metadata,omitempty"`
+	CreatedAt      string `json:"created_at"`
 }
 
 type AggregateRow struct {
@@ -56,7 +61,9 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `SELECT id, event_type, org_id, actor_id, actor_type,
-	                 aggregate_id, aggregate_type, payload, metadata, created_at, session_id, trace_id, span_id, parent_span_id
+	                 aggregate_id, aggregate_type, payload, metadata, created_at,
+	                 request_id, session_id, flow_id, fingerprint,
+	                 client_id, token_id, delegation_type, sdk_name, sdk_version
 	          FROM events WHERE id > ?`
 	args := []any{cursor}
 
@@ -75,6 +82,18 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	if sessionID := r.URL.Query().Get("session_id"); sessionID != "" {
 		query += ` AND session_id = ?`
 		args = append(args, sessionID)
+	}
+	if fingerprint := r.URL.Query().Get("fingerprint"); fingerprint != "" {
+		query += ` AND fingerprint = ?`
+		args = append(args, fingerprint)
+	}
+	if clientID := r.URL.Query().Get("client_id"); clientID != "" {
+		query += ` AND client_id = ?`
+		args = append(args, clientID)
+	}
+	if delegationType := r.URL.Query().Get("delegation_type"); delegationType != "" {
+		query += ` AND delegation_type = ?`
+		args = append(args, delegationType)
 	}
 	if types := r.URL.Query().Get("types"); types != "" {
 		typeList := strings.Split(types, ",")
@@ -107,25 +126,43 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var evt EventResponse
 		var payloadStr, metadataStr string
-		var sessionID, traceID, spanID, parentSpanID *string
+		var requestID, sessionID, flowID, fingerprint *string
+		var clientID, tokenID, delegationType, sdkName, sdkVersion *string
 		if err := rows.Scan(
 			&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
 			&evt.AggregateID, &evt.AggregateType,
-			&payloadStr, &metadataStr, &evt.CreatedAt, &sessionID, &traceID, &spanID, &parentSpanID,
+			&payloadStr, &metadataStr, &evt.CreatedAt,
+			&requestID, &sessionID, &flowID, &fingerprint,
+			&clientID, &tokenID, &delegationType, &sdkName, &sdkVersion,
 		); err != nil {
 			continue
+		}
+		if requestID != nil {
+			evt.RequestID = *requestID
 		}
 		if sessionID != nil {
 			evt.SessionID = *sessionID
 		}
-		if traceID != nil {
-			evt.TraceID = *traceID
+		if flowID != nil {
+			evt.FlowID = *flowID
 		}
-		if spanID != nil {
-			evt.SpanID = *spanID
+		if fingerprint != nil {
+			evt.Fingerprint = *fingerprint
 		}
-		if parentSpanID != nil {
-			evt.ParentSpanID = *parentSpanID
+		if clientID != nil {
+			evt.ClientID = *clientID
+		}
+		if tokenID != nil {
+			evt.TokenID = *tokenID
+		}
+		if delegationType != nil {
+			evt.DelegationType = *delegationType
+		}
+		if sdkName != nil {
+			evt.SDKName = *sdkName
+		}
+		if sdkVersion != nil {
+			evt.SDKVersion = *sdkVersion
 		}
 		json.Unmarshal([]byte(payloadStr), &evt.Payload)
 		json.Unmarshal([]byte(metadataStr), &evt.Metadata)
@@ -220,6 +257,9 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	fingerprintFilter := r.URL.Query().Get("fingerprint")
+	clientFilter := r.URL.Query().Get("client_id")
+
 	for {
 		if !consumer.Wait(r.Context()) {
 			return // Client disconnected.
@@ -227,7 +267,9 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 
 		rows, err := a.db.SQL().QueryContext(r.Context(),
 			`SELECT id, event_type, org_id, actor_id, actor_type,
-			        aggregate_id, aggregate_type, payload, metadata, created_at
+			        aggregate_id, aggregate_type, payload, metadata, created_at,
+			        request_id, session_id, flow_id, fingerprint,
+			        client_id, token_id, delegation_type, sdk_name, sdk_version
 			 FROM events WHERE id > ? ORDER BY id ASC LIMIT 100`, cursor)
 		if err != nil {
 			return
@@ -236,12 +278,43 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var evt EventResponse
 			var payloadStr, metadataStr string
+			var requestID, sessionID, flowID, fingerprint *string
+			var clientID, tokenID, delegationType, sdkName, sdkVersion *string
 			if err := rows.Scan(
 				&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
 				&evt.AggregateID, &evt.AggregateType,
 				&payloadStr, &metadataStr, &evt.CreatedAt,
+				&requestID, &sessionID, &flowID, &fingerprint,
+				&clientID, &tokenID, &delegationType, &sdkName, &sdkVersion,
 			); err != nil {
 				continue
+			}
+			if requestID != nil {
+				evt.RequestID = *requestID
+			}
+			if sessionID != nil {
+				evt.SessionID = *sessionID
+			}
+			if flowID != nil {
+				evt.FlowID = *flowID
+			}
+			if fingerprint != nil {
+				evt.Fingerprint = *fingerprint
+			}
+			if clientID != nil {
+				evt.ClientID = *clientID
+			}
+			if tokenID != nil {
+				evt.TokenID = *tokenID
+			}
+			if delegationType != nil {
+				evt.DelegationType = *delegationType
+			}
+			if sdkName != nil {
+				evt.SDKName = *sdkName
+			}
+			if sdkVersion != nil {
+				evt.SDKVersion = *sdkVersion
 			}
 			_ = json.Unmarshal([]byte(payloadStr), &evt.Payload)
 			_ = json.Unmarshal([]byte(metadataStr), &evt.Metadata)
@@ -259,6 +332,18 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 					cursor = evt.ID
 					continue
 				}
+			}
+
+			// Apply fingerprint filter.
+			if fingerprintFilter != "" && evt.Fingerprint != fingerprintFilter {
+				cursor = evt.ID
+				continue
+			}
+
+			// Apply client_id filter.
+			if clientFilter != "" && evt.ClientID != clientFilter {
+				cursor = evt.ID
+				continue
 			}
 
 			data, _ := json.Marshal(evt)

@@ -14,7 +14,7 @@
 //	logger := logging.New(logging.StreamRuntime)
 //	logger.Info("server started", "port", 8080)
 //
-//	// Context-aware (trace_id, session_id auto-attached):
+//	// Context-aware (request_id, session_id auto-attached):
 //	logging.Info(ctx, "request handled", "status", 200)
 package logging
 

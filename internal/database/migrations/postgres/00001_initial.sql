@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS events (
     parent_span_id TEXT DEFAULT '',
     session_id     TEXT DEFAULT '',
     flow_id        TEXT DEFAULT '',
+    fingerprint    TEXT DEFAULT '',
     sequence       BIGINT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     shipped_at     TIMESTAMPTZ
@@ -430,10 +431,6 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO instances (id, name, created_at, updated_at)
 VALUES ('inst_default', 'default', NOW(), NOW())
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO orgs (id, instance_id, name, created_at, updated_at)
-VALUES ('org_default', 'inst_default', 'default', NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- +goose Down

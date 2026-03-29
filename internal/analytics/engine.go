@@ -231,6 +231,7 @@ func (e *Engine) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/analytics/query", e.handleQuery)
 	mux.HandleFunc("GET /v1/analytics/tables", e.handleTables)
 	mux.HandleFunc("GET /v1/analytics/schema", e.handleSchema)
+	e.RegisterSavedQueryRoutes(mux)
 }
 
 func (e *Engine) handleQuery(w http.ResponseWriter, r *http.Request) {

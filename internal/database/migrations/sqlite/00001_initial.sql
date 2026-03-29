@@ -279,38 +279,56 @@ CREATE INDEX IF NOT EXISTS idx_auth_states_code  ON auth_states(code)  WHERE cod
 CREATE INDEX IF NOT EXISTS idx_auth_states_type  ON auth_states(type);
 
 -- ============================================================================
--- EVENTS — append-only event log
+-- FINGERPRINTS — unique hardware identifiers
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS fingerprints (
+    id          TEXT PRIMARY KEY,
+    type        TEXT NOT NULL,
+    raw_data    TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_type ON fingerprints(type);
+
+-- ============================================================================
+-- EVENTS — append-only wide event log (ADR-023)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
-    id             TEXT PRIMARY KEY,
-    event_type     TEXT NOT NULL,
-    category       TEXT NOT NULL DEFAULT '',
-    org_id         TEXT NOT NULL DEFAULT '0',
-    actor_id       TEXT,
-    actor_type     TEXT,
-    aggregate_id   TEXT,
-    aggregate_type TEXT,
-    resource_type  TEXT,
-    payload        TEXT DEFAULT '{}',
-    metadata       TEXT DEFAULT '{}',
-    trace_id       TEXT,
-    span_id        TEXT,
-    parent_span_id TEXT,
-    session_id     TEXT,
-    flow_id        TEXT,
-    sequence       INTEGER,
-    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    shipped_at     TEXT
+    id              TEXT PRIMARY KEY,
+    event_type      TEXT NOT NULL,
+    category        TEXT NOT NULL DEFAULT '',
+    org_id          TEXT NOT NULL DEFAULT '0',
+    actor_id        TEXT,
+    actor_type      TEXT,
+    aggregate_id    TEXT,
+    aggregate_type  TEXT,
+    resource_type   TEXT,
+    payload         TEXT DEFAULT '{}',
+    metadata        TEXT DEFAULT '{}',
+    -- correlation scopes (ADR-023: six orthogonal dimensions)
+    request_id      TEXT,               -- all events from one HTTP request
+    session_id      TEXT,               -- all events from one user session
+    flow_id         TEXT,               -- all events from one login flow
+    fingerprint     TEXT DEFAULT '',     -- all events from one device
+    client_id       TEXT DEFAULT '',     -- app/agent that made the call
+    token_id        TEXT DEFAULT '',     -- specific token used
+    delegation_type TEXT DEFAULT '',     -- 'direct', 'delegated', 'pat_shared', 'exchanged'
+    sdk_name        TEXT DEFAULT '',     -- 'zitadel-js', 'zitadel-go', etc.
+    sdk_version     TEXT DEFAULT '',     -- '1.4.0'
+    sequence        INTEGER,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    shipped_at      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_id, aggregate_type);
-CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id) WHERE trace_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_request ON events(request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_ship ON events(shipped_at) WHERE shipped_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_events_category ON events(category, created_at);
 CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_id) WHERE actor_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_flow ON events(flow_id) WHERE flow_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_org ON events(org_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_client ON events(client_id) WHERE client_id != '';
+CREATE INDEX IF NOT EXISTS idx_events_delegation ON events(delegation_type) WHERE delegation_type != '';
 
 -- ============================================================================
 -- DOMAINS — org → domain mappings
@@ -419,12 +437,28 @@ INSERT OR IGNORE INTO retention_policies (id, event_pattern, oltp_ttl, lake_ttl,
     ('rp_auth_login_failure', 'auth.login_failure', '30d', '365d', 100),
     ('rp_auth',               'auth.*',             '14d', '365d', 90),
     ('rp_session',            'session.*',          '7d',  '90d',  80),
-    ('rp_entity',             'entity.*',           '14d', '365d', 70),
-    ('rp_default',            '*',                  '7d',  '180d', 0);
+    ('rp_identity',           'identity.*',         '30d', '0',    70),
+    ('rp_event',              'event.*',            '3d',  '30d',  60),
+    ('rp_default',            '*',                  '14d', '365d', 0);
 
-INSERT OR IGNORE INTO instances (id, name) VALUES ('inst_default', 'Default');
+-- ============================================================================
+-- SAVED QUERIES — server-side analytics query persistence
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS saved_queries (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    sql_text    TEXT NOT NULL,
+    created_by  TEXT DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_saved_queries_name ON saved_queries(name);
+
+INSERT OR IGNORE INTO instances (id, name) VALUES ('inst_default', 'default');
 
 -- +goose Down
+DROP TABLE IF EXISTS saved_queries;
 DROP TABLE IF EXISTS retention_policies;
 DROP TABLE IF EXISTS consumer_cursors;
 DROP TABLE IF EXISTS cache;

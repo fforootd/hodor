@@ -52,8 +52,8 @@ type ClientSignals struct {
 	FingerprintHash string         `json:"fingerprint_hash,omitempty"`
 	BrowserSignals  map[string]any `json:"browser_signals,omitempty"`
 
-	// Telemetry (OTel)
-	TraceID          string  `json:"trace_id,omitempty"`
+	// Telemetry
+	RequestID        string  `json:"request_id,omitempty"`
 	DocumentLoadMs   float64 `json:"document_load_ms,omitempty"`
 	InteractionCount int     `json:"interaction_count,omitempty"`
 }
@@ -78,8 +78,8 @@ func computeRiskLevel(signals *ClientSignals) string {
 	if signals.VisitorID != "" {
 		score += 0.2
 	}
-	// OTel trace present → real page load happened.
-	if signals.TraceID != "" {
+	// Request ID present → real page load happened.
+	if signals.RequestID != "" {
 		score += 0.1
 	}
 	// Realistic document load time.
@@ -161,9 +161,9 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 				"visitor_id": signals.VisitorID,
 			}
 		}
-		if signals.TraceID != "" {
+		if signals.RequestID != "" {
 			metadata["telemetry"] = map[string]any{
-				"trace_id": signals.TraceID,
+				"request_id": signals.RequestID,
 			}
 		}
 	}
@@ -188,7 +188,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	// Insert session (metadata record).
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
-		 VALUES (?, ?, '1', ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)`,
 		sessionID, userID, tokenHash,
 		userAgent, ipAddress, string(metadataJSON),
 		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
@@ -225,7 +225,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		Session: SessionResponse{
 			ID:        sessionID,
 			IduserID:  userID,
-			OrgID:     "org_default",
+			OrgID:     "",
 			UserAgent: userAgent,
 			IPAddress: ipAddress,
 			CreatedAt: now.Format(time.RFC3339),

@@ -6,6 +6,7 @@
  */
 import { client } from '@zitadel/client-js'
 import { toast } from 'vue-sonner'
+import { getDeviceFingerprint } from '../lib/telemetry'
 
 export { ApiError } from './client'
 
@@ -37,8 +38,15 @@ const consoleFetch: typeof fetch = async (input, init) => {
     ? `${BASE_URL}${input}`
     : input
 
+  const headers = new Headers(init?.headers)
+  const fingerprint = getDeviceFingerprint()
+  if (fingerprint) {
+    headers.set('X-Fingerprint', fingerprint)
+  }
+
   const resp = await globalThis.fetch(url, {
     ...init,
+    headers,
     credentials: 'same-origin',
   })
 

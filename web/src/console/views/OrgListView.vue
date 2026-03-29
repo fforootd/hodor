@@ -70,11 +70,25 @@
     </div>
 
     <!-- Empty -->
-    <div v-if="!loading && !error && !filteredOrgs.length" class="flex flex-col items-center justify-center py-16 text-center">
-      <div class="text-4xl mb-3 opacity-50">🏢</div>
-      <p class="text-sm font-medium">{{ searchQuery ? 'No organizations match your search.' : 'No organizations yet.' }}</p>
-      <p v-if="!searchQuery" class="text-xs text-muted-foreground mt-1">Create your first organization to get started.</p>
-    </div>
+    <Empty v-if="!loading && !error && !filteredOrgs.length">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Building2 />
+        </EmptyMedia>
+        <EmptyTitle>{{ searchQuery ? 'No Results' : 'No Organizations Yet' }}</EmptyTitle>
+        <EmptyDescription>
+          {{ searchQuery ? 'No organizations match your search.' : 'Create your first organization to get started.' }}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent v-if="!searchQuery">
+        <Button as-child>
+          <router-link to="/orgs/new">
+            <Plus class="mr-2 size-4" />
+            New Organization
+          </router-link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   </div>
 </template>
 
@@ -84,7 +98,8 @@ import { orgApi, type Org } from '@/api/resources'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Plus, Search } from 'lucide-vue-next'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
+import { Plus, Search, Building2 } from 'lucide-vue-next'
 
 const orgs = ref<Org[]>([])
 const loading = ref(false)

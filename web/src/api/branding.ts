@@ -130,6 +130,8 @@ export const flowApi = {
     const body: Record<string, string> = {}
     if (redirectUri) body.redirect_uri = redirectUri
     if (state) body.state = state
+    const fingerprint = getDeviceFingerprint()
+    if (fingerprint) body.fingerprint = fingerprint
     return api.post<FlowStep>('/v1/login/flows', body, flowHeaders())
   },
 

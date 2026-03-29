@@ -33,7 +33,7 @@ func TestComputeRiskLevel(t *testing.T) {
 				PoWDurationMs:   1500,
 				CaptchaVerified: true,
 				VisitorID:       "abc123def456",
-				TraceID:         "00-abcdef-12345-01",
+				RequestID:       "00-abcdef-12345-01",
 				DocumentLoadMs:  342,
 			},
 			expected: "low", // 0.3 + 0.1 + 0.2 + 0.2 + 0.1 + 0.1 = 1.0
@@ -42,7 +42,7 @@ func TestComputeRiskLevel(t *testing.T) {
 			name: "fingerprint + trace only",
 			signals: &ClientSignals{
 				VisitorID:      "visitor-xyz",
-				TraceID:        "00-trace-id",
+				RequestID:      "00-request-id",
 				DocumentLoadMs: 500,
 			},
 			expected: "medium", // 0.2 + 0.1 + 0.1 = 0.4

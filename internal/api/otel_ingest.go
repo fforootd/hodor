@@ -88,6 +88,7 @@ func init() {
 func (a *API) RegisterTelemetryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/otel/traces", a.ingestOTelTraces)
 	mux.HandleFunc("POST /v1/telemetry/fingerprints", a.ingestFingerprint)
+	mux.HandleFunc("GET /v1/telemetry/fingerprints", a.listFingerprints)
 }
 
 // OTelSpan represents a simplified OTLP span for storage.
@@ -155,11 +156,15 @@ func (a *API) ingestOTelTraces(w http.ResponseWriter, r *http.Request) {
 	// This allows OTel auto-instrumentation (document load, etc.) to work even
 	// before a flow is created.
 
-	// Parse OTLP JSON.
 	var otlpReq OTLPExportRequest
 	if err := json.Unmarshal(body, &otlpReq); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid OTLP JSON")
 		return
+	}
+
+	var actorID string
+	if id, err := a.resolveCallerIdentity(r); err == nil {
+		actorID = id
 	}
 
 	// ── Protection 4: Server-side tail sampling ──
@@ -195,7 +200,7 @@ func (a *API) ingestOTelTraces(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				emitEvent(r.Context(), tx, "signal.session_trace", span.TraceID, flowID, "signal", payload)
+				emitEvent(r.Context(), tx, "signal.session_trace", actorID, flowID, "signal", payload)
 				if err := tx.Commit(); err != nil {
 					tx.Rollback()
 					continue

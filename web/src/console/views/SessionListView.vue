@@ -5,6 +5,20 @@
       <p class="text-muted-foreground mt-1 text-sm">User authentication events ({{ activeCount }} active of {{ totalCount }} total)</p>
     </div>
 
+    <!-- Empty state -->
+    <Empty v-if="sessions.length === 0" class="from-muted/50 to-background bg-gradient-to-b from-30%">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <KeyIcon />
+        </EmptyMedia>
+        <EmptyTitle>No Sessions</EmptyTitle>
+        <EmptyDescription>
+          Sessions will appear here after users authenticate.
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+
+    <template v-if="sessions.length > 0">
     <!-- Stats Bar -->
     <div class="flex items-center gap-6 p-4 rounded-lg border text-sm bg-card text-muted-foreground">
       <div class="flex items-center space-x-2 text-green-700">
@@ -151,6 +165,7 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
+    </template>
   </div>
 </template>
 
@@ -171,9 +186,10 @@ import { Popover, PopoverAnchor, PopoverTrigger, PopoverContent } from '@/compon
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { 
-  Key, Monitor, Search, ChevronRight,
+  Key as KeyIcon, Monitor, Search, ChevronRight,
   CheckCircle2, XCircle, Clock, MoreHorizontal, Ban, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-vue-next'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { createColumnHelper } from '@tanstack/vue-table'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
 
@@ -417,7 +433,7 @@ const columns = [
       const displaySub = entInfo?.identifier || userId
       
       return h('div', { class: 'flex items-center space-x-3 py-1' }, [
-        h('div', { class: 'p-1.5 bg-muted rounded-md shrink-0' }, [h(Key, { class: 'w-4 h-4 text-muted-foreground' })]),
+        h('div', { class: 'p-1.5 bg-muted rounded-md shrink-0' }, [h(KeyIcon, { class: 'w-4 h-4 text-muted-foreground' })]),
         h('div', { class: 'flex flex-col min-w-0 max-w-[200px]' }, [
           h(RouterLink, { to: `/users/${userId}`, class: 'text-sm font-medium hover:underline truncate' }, () => displayName),
           h('span', { class: 'text-xs text-muted-foreground truncate', title: displaySub }, displaySub)

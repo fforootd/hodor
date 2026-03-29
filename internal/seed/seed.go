@@ -106,12 +106,9 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 	}
 	defer tx.Rollback()
 
-	// Look up the default org ID from the orgs table (populated by bootstrap).
+	// Look up any org ID to assign seeded entities to (may be empty if no orgs exist yet).
 	var defaultOrgID string
-	_ = tx.QueryRowContext(ctx, `SELECT id FROM orgs WHERE name = 'Default' LIMIT 1`).Scan(&defaultOrgID)
-	if defaultOrgID == "" {
-		defaultOrgID = "1" // fallback for pre-bootstrap DBs
-	}
+	_ = tx.QueryRowContext(ctx, `SELECT id FROM orgs LIMIT 1`).Scan(&defaultOrgID)
 
 	// Phase 1: Providers.
 	for _, p := range seed.Providers {

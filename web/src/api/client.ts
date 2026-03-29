@@ -61,18 +61,15 @@ function credentialsMode(): RequestCredentials {
   }
 }
 
-// ─── Trace Context ─────────────────────────────────────────
-// Each page navigation generates a new trace_id. All API calls
-// within that navigation share the trace_id (as parent), with
-// each call getting its own span_id. This creates a trace tree:
-//   Navigation trace_id
-//   ├── GET /v1/users (span AAA)
-//   ├── GET /v1/schemas (span BBB)
-//   └── PATCH /v1/users/123 (span CCC)
+// ─── Request Context ───────────────────────────────────────
+// Each page navigation generates a new request_id (transmitted via W3C
+// Traceparent header). The server extracts the trace-id portion and stores
+// it as request_id per ADR-023. All API calls within one navigation share
+// the same request_id for correlation.
 
 let currentTraceId = generateHex(32)
 
-/** Reset the trace_id on navigation. Call from router.afterEach(). */
+/** Reset the request_id on navigation. Call from router.afterEach(). */
 export function resetTraceContext() {
   currentTraceId = generateHex(32)
 }

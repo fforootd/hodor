@@ -45,6 +45,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // SSE endpoint — must be defined BEFORE /v1 so it takes precedence.
+      // changeOrigin ensures the Host header matches the Go server.
+      '/v1/events/stream': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/v1': 'http://localhost:8080',
       '/healthz': 'http://localhost:8080',
       '/readyz': 'http://localhost:8080',

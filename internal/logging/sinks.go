@@ -65,12 +65,9 @@ func (h *otelHandler) Handle(ctx context.Context, r slog.Record) error {
 		slog.String("otel.protocol", h.protocol),
 	)
 
-	// Extract trace context from context if available.
-	if traceID := telemetry.TraceIDFromContext(ctx); traceID != "" {
-		r.AddAttrs(slog.String("trace_id", traceID))
-	}
-	if spanID := telemetry.SpanIDFromContext(ctx); spanID != "" {
-		r.AddAttrs(slog.String("span_id", spanID))
+	// Extract request context if available (maps to OTEL trace_id for export).
+	if requestID := telemetry.RequestIDFromContext(ctx); requestID != "" {
+		r.AddAttrs(slog.String("trace_id", requestID)) // OTEL export uses trace_id naming
 	}
 
 	return h.inner.Handle(ctx, r)

@@ -199,7 +199,7 @@ func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFl
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}')
 		 FROM login_flows
 		 WHERE COALESCE(enabled,1) = 1 AND state IN ('active','testing')
-		   AND (org_id IS NULL OR org_id = ? OR org_id = '1' OR org_id = 'org_default')
+		   AND (org_id IS NULL OR org_id = '' OR org_id = ?)
 		 ORDER BY priority DESC`,
 		orgID,
 	)

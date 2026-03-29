@@ -75,10 +75,16 @@ func TestCheck_OrgHierarchy(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Setup: admin → instance owner, org parent → instance, admin → org owner.
-	err := svc.OnBootstrap(ctx, "admin", "org1")
+	// Setup: admin → instance owner.
+	err := svc.OnBootstrap(ctx, "admin")
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
+	}
+
+	// Explicitly create org (no default org at bootstrap).
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
 	}
 
 	// admin should be org admin (via owner).
@@ -134,10 +140,15 @@ func TestCheck_EntityPermissions(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Setup: admin owns org, creates entity.
-	err := svc.OnBootstrap(ctx, "admin", "org1")
+	// Setup: admin owns instance, creates org + entity.
+	err := svc.OnBootstrap(ctx, "admin")
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
+	}
+
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
 	}
 
 	err = svc.OnResourceCreated(ctx, "entity1", "admin", "org1")
@@ -186,9 +197,14 @@ func TestCheck_GroupMembership(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup org.
-	err := svc.OnBootstrap(ctx, "admin", "org1")
+	err := svc.OnBootstrap(ctx, "admin")
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
+	}
+
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
 	}
 
 	// Create group.
@@ -327,9 +343,13 @@ func TestOnResourceDeleted(t *testing.T) {
 	ctx := context.Background()
 
 	// Create entity.
-	err := svc.OnBootstrap(ctx, "admin", "org1")
+	err := svc.OnBootstrap(ctx, "admin")
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
+	}
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
 	}
 	err = svc.OnResourceCreated(ctx, "ent1", "admin", "org1")
 	if err != nil {

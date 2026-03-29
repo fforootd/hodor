@@ -215,26 +215,13 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		if err := db.SQL().QueryRowContext(ctx,
 			`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`,
 		).Scan(&adminID); err == nil && adminID != "" {
-			// Get the actual org ID from the orgs table (not users.org_id which may be stale).
-			var orgID string
-			if err := db.SQL().QueryRowContext(ctx,
-				`SELECT id FROM orgs WHERE name = 'Default' LIMIT 1`,
-			).Scan(&orgID); err != nil || orgID == "" {
-				// Fallback to users.org_id if orgs table lookup fails.
-				_ = db.SQL().QueryRowContext(ctx,
-					`SELECT org_id FROM users WHERE id = ? LIMIT 1`, adminID,
-				).Scan(&orgID)
-			}
-			if orgID == "" {
-				orgID = "_global"
-			}
 			// Check if tuples already exist for this admin.
 			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:default")
 			if len(tuples) == 0 {
-				if err := fgaSvc.OnBootstrap(ctx, adminID, orgID); err != nil {
+				if err := fgaSvc.OnBootstrap(ctx, adminID); err != nil {
 					logging.Printf("WARN: FGA post-init bootstrap failed: %v", err)
 				} else {
-					logging.Printf("[fga] post-init bootstrap: admin=%s org=%s", adminID, orgID)
+					logging.Printf("[fga] post-init bootstrap: admin=%s", adminID)
 				}
 			}
 		}
@@ -277,11 +264,13 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	handler = OTelMiddleware(handler)
 
 	httpSrv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:     handler,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is intentionally omitted: SSE streams (/v1/events/stream)
+		// are long-lived connections and need unbounded write time.
+		// Individual handlers use r.Context() cancellation for their own timeout.
+		IdleTimeout: 60 * time.Second,
 	}
 
 	return &Server{

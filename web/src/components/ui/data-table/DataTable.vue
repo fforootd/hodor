@@ -45,7 +45,15 @@ function valueUpdater<T>(updaterOrValue: Updater<T>, target: { value: T }, emitN
 
 const sorting = ref<SortingState>([])
 const columnFilters = ref<ColumnFiltersState>([])
-const columnVisibility = ref<VisibilityState>({})
+// Derive initial visibility from column meta — columns with meta.defaultHidden start hidden
+const initialVisibility: VisibilityState = {}
+for (const col of props.columns) {
+  const meta = (col as any).meta
+  if (meta?.defaultHidden) {
+    initialVisibility[(col as any).id || (col as any).accessorKey || ''] = false
+  }
+}
+const columnVisibility = ref<VisibilityState>(initialVisibility)
 const rowSelection = ref({})
 const expanded = ref<ExpandedState>({})
 

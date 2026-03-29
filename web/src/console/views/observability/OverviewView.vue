@@ -54,7 +54,7 @@
       <Card class="overflow-hidden border-muted">
         <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
           <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Operations</CardTitle>
-          <RouterLink to="/traces" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+          <RouterLink to="/console/traces" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
         </CardHeader>
         <CardContent class="p-0">
           <div v-for="(item, i) in topOperations" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
@@ -72,7 +72,7 @@
       <Card class="overflow-hidden border-muted">
         <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
           <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Users</CardTitle>
-          <RouterLink to="/users" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+          <RouterLink to="/console/users" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
         </CardHeader>
         <CardContent class="p-0">
           <div v-for="(item, i) in topUsers" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
@@ -90,7 +90,7 @@
       <Card class="overflow-hidden border-muted">
         <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
           <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top IPs</CardTitle>
-          <RouterLink to="/sessions" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+          <RouterLink to="/console/sessions" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
         </CardHeader>
         <CardContent class="p-0">
           <div v-for="(item, i) in topIps" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
@@ -104,16 +104,67 @@
         </CardContent>
       </Card>
 
-      <!-- Top Countries -->
+      <!-- Delegation Distribution -->
       <Card class="overflow-hidden border-muted">
         <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
-          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Countries</CardTitle>
-          <span class="text-[11px] text-muted-foreground/50">View all &rarr;</span>
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Delegation Distribution</CardTitle>
         </CardHeader>
-        <CardContent class="p-0 flex items-center justify-center min-h-[140px]">
-          <div class="p-8 text-center text-xs text-muted-foreground flex flex-col items-center">
-            No country data recorded
+        <CardContent class="p-0">
+          <div v-if="delegationData.length" class="p-4">
+            <div class="flex items-center justify-center gap-6 mb-4">
+              <div v-for="item in delegationData" :key="item.name" class="flex items-center gap-2">
+                <div class="w-3 h-3 rounded-full" :style="{ background: delegationColor(item.name) }"></div>
+                <span class="text-xs">{{ item.name }}</span>
+                <span class="text-xs font-medium text-muted-foreground">{{ item.count }}</span>
+              </div>
+            </div>
+            <!-- Simple horizontal stacked bar -->
+            <div class="w-full h-8 rounded-md overflow-hidden flex">
+              <div v-for="item in delegationData" :key="item.name"
+                   class="h-full transition-all flex items-center justify-center text-[9px] font-semibold text-white"
+                   :style="{ width: `${(item.count / totalDelegation) * 100}%`, background: delegationColor(item.name) }">
+                {{ Math.round((item.count / totalDelegation) * 100) }}%
+              </div>
+            </div>
           </div>
+          <div v-else class="p-8 text-center text-xs text-muted-foreground flex flex-col items-center">
+            No delegation data recorded
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- Top Clients/Apps -->
+      <Card class="overflow-hidden border-muted">
+        <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Clients / Apps</CardTitle>
+          <RouterLink to="/console/applications" class="text-[11px] text-primary hover:underline">View all &rarr;</RouterLink>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div v-for="(item, i) in topClients" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
+            <span class="text-xs font-mono truncate pr-4 text-foreground/80 group-hover:text-foreground">{{ item.name }}</span>
+            <div class="flex items-center gap-3 w-1/3 justify-end shrink-0">
+              <span class="text-xs font-medium">{{ formatNumber(item.count) }}</span>
+              <div class="w-20 lg:w-24 h-1.5 bg-muted/50 rounded-full overflow-hidden flex justify-start"><div class="h-full bg-violet-500 rounded-full" :style="{ width: `${(item.count / maxClientCount) * 100}%` }"></div></div>
+            </div>
+          </div>
+          <div v-if="!topClients.length" class="p-8 text-center text-xs text-muted-foreground">No client data recorded</div>
+        </CardContent>
+      </Card>
+
+      <!-- Top SDKs -->
+      <Card class="overflow-hidden border-muted">
+        <CardHeader class="flex flex-row items-center justify-between py-3 border-b bg-muted/30">
+          <CardTitle class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top SDKs</CardTitle>
+        </CardHeader>
+        <CardContent class="p-0">
+          <div v-for="(item, i) in topSdks" :key="i" class="flex items-center justify-between p-3 border-b border-border/40 hover:bg-muted/20 transition-colors group">
+            <span class="text-xs font-mono truncate pr-4 text-foreground/80 group-hover:text-foreground">{{ item.name }}</span>
+            <div class="flex items-center gap-3 w-1/3 justify-end shrink-0">
+              <span class="text-xs font-medium">{{ formatNumber(item.count) }}</span>
+              <div class="w-20 lg:w-24 h-1.5 bg-muted/50 rounded-full overflow-hidden flex justify-start"><div class="h-full bg-teal-500 rounded-full" :style="{ width: `${(item.count / maxSdkCount) * 100}%` }"></div></div>
+            </div>
+          </div>
+          <div v-if="!topSdks.length" class="p-8 text-center text-xs text-muted-foreground">No SDK data recorded</div>
         </CardContent>
       </Card>
     </div>
@@ -147,10 +198,26 @@ interface ReportItem { name: string; count: number }
 const topOperations = ref<ReportItem[]>([])
 const topUsers = ref<ReportItem[]>([])
 const topIps = ref<ReportItem[]>([])
+const topClients = ref<ReportItem[]>([])
+const topSdks = ref<ReportItem[]>([])
+const delegationData = ref<ReportItem[]>([])
 
 const maxOperationCount = computed(() => Math.max(...topOperations.value.map(o => o.count), 1))
 const maxUserCount = computed(() => Math.max(...topUsers.value.map(o => o.count), 1))
 const maxIpCount = computed(() => Math.max(...topIps.value.map(o => o.count), 1))
+const maxClientCount = computed(() => Math.max(...topClients.value.map(o => o.count), 1))
+const maxSdkCount = computed(() => Math.max(...topSdks.value.map(o => o.count), 1))
+const totalDelegation = computed(() => delegationData.value.reduce((sum, d) => sum + d.count, 0) || 1)
+
+function delegationColor(name: string): string {
+  switch (name.toLowerCase()) {
+    case 'direct': return '#22c55e'
+    case 'delegated': return '#f59e0b'
+    case 'pat_shared': return '#ef4444'
+    case 'exchanged': return '#3b82f6'
+    default: return '#8b5cf6'
+  }
+}
 
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
@@ -235,7 +302,7 @@ async function fetchData() {
       sessTs,
       tokTs,
       failTs,
-      opsRes, usersRes, ipsRes
+      opsRes, usersRes, ipsRes, clientsRes, sdksRes, delegationRes
     ] = await Promise.all([
       fetchCount(`SELECT COUNT(*) FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
       fetchCount(`SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
@@ -247,9 +314,12 @@ async function fetchData() {
       fetchTimestamps(`SELECT created_at FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${curTime}'`),
       fetchTimestamps(`SELECT created_at FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${curTime}'`),
       
-      api.post<any>('/v1/analytics/query', { sql: `SELECT event_type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND event_type != '' GROUP BY event_type ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(actor_id, ''), 'Anonymous'), COUNT(*) as count FROM events WHERE created_at >= '${curTime}' GROUP BY actor_id ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT ip_address, COUNT(*) as count FROM sessions WHERE created_at >= '${curTime}' AND ip_address IS NOT NULL AND ip_address != '' GROUP BY ip_address ORDER BY count DESC LIMIT 8` })
+      api.post<any>('/v1/analytics/query', { sql: `SELECT event_type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND event_type != '' AND category != 'log' GROUP BY event_type ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(actor_id, ''), 'Anonymous'), COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY actor_id ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT ip_address, COUNT(*) as count FROM sessions WHERE created_at >= '${curTime}' AND ip_address IS NOT NULL AND ip_address != '' GROUP BY ip_address ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(client_id, ''), 'Console') as name, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY client_id ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(sdk_name, ''), 'Browser') as name, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY sdk_name ORDER BY count DESC LIMIT 8` }),
+      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(delegation_type, ''), 'direct') as type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY delegation_type ORDER BY count DESC` }),
     ]);
 
     const computeChange = (cur: number, prev: number) => {
@@ -288,6 +358,9 @@ async function fetchData() {
     topOperations.value = parseList(opsRes);
     topUsers.value = parseList(usersRes);
     topIps.value = parseList(ipsRes);
+    topClients.value = parseList(clientsRes);
+    topSdks.value = parseList(sdksRes);
+    delegationData.value = parseList(delegationRes);
     
   } catch (err) {
     console.error("Failed to load overview data:", err)

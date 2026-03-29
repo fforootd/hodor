@@ -20,7 +20,7 @@ func (a *API) CreateSessionForLogin(ctx context.Context, userID string, userAgen
 			PoWDurationMs:   signals.PoWDurationMs,
 			VisitorID:       signals.VisitorID,
 			FingerprintHash: signals.FingerprintHash,
-			TraceID:         signals.TraceID,
+			RequestID:       signals.RequestID,
 		}
 	}
 	resp, err := a.CreateSessionInternal(ctx, userID, userAgent, ipAddress, apiSignals)
