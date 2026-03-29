@@ -431,7 +431,6 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		"method":     "flow",
 	})
 
-
 	// Determine redirect URI: OIDC redirect_uri if present, otherwise /console.
 	redirectURI := "/console"
 	if flow.RedirectURI != "" {

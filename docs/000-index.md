@@ -28,6 +28,7 @@
 | [017](adr/017-caching-tiers.md) | Tiered Caching Architecture | Proposed | 2026-03-28 |
 | [018](adr/018-startup-lifecycle.md) | Startup Lifecycle & Schema Migration | Proposed | 2026-03-28 |
 | [019](adr/019-server-driven-login-wc.md) | Server-Driven Login UI + Web Components | Accepted | 2026-03-28 |
+| [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Marketplace Modules | Accepted | 2026-03-29 |
 
 ## Architecture
 
@@ -77,6 +78,8 @@ graph TD
     A005 --> A016
     A002 --> A019[019 Server-Driven Login WC]
     A012 --> A019
+    A005 --> A020[020 AuthZ Model]
+    A006 --> A020
 ```
 
 ## Conventions
@@ -85,4 +88,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 020
+- **Next ADR number**: 021

@@ -14,15 +14,21 @@
       "sort_order": 3,
       "display": "flat"
     },
+    "authorization": {
+      "label": "Authorization",
+      "sort_order": 4,
+      "display": "collapsible",
+      "icon": "shield-check"
+    },
     "observability": {
       "label": "Observability",
-      "sort_order": 4,
+      "sort_order": 5,
       "display": "collapsible",
       "icon": "activity"
     },
     "system": {
       "label": "System",
-      "sort_order": 5,
+      "sort_order": 6,
       "display": "collapsible",
       "icon": "settings"
     }
@@ -192,6 +198,56 @@
       "fga_type": "org",
       "fga_scope": "instance"
     },
+    "group": {
+      "$ref": "schemas/group.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Groups",
+      "singular": "Group",
+      "path": "groups",
+      "icon": "👥",
+      "sort_order": 4,
+      "storage": "dedicated",
+      "route": "/groups",
+      "countable": true,
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "member",
+            "admin",
+            "owner"
+          ]
+        }
+      },
+      "fga_type": "group",
+      "fga_scope": "org"
+    },
+    "project": {
+      "$ref": "schemas/project.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Projects",
+      "singular": "Project",
+      "path": "projects",
+      "icon": "📦",
+      "sort_order": 5,
+      "storage": "dedicated",
+      "route": "/projects",
+      "countable": true,
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": [
+            "member",
+            "admin",
+            "owner"
+          ]
+        }
+      },
+      "fga_type": "project",
+      "fga_scope": "org"
+    },
     "action": {
       "$ref": "schemas/action.json",
       "version": "1.0",
@@ -354,17 +410,65 @@
       "storage": "dedicated",
       "route": "/jobs"
     },
-    "authorization": {
+    "authz_overview": {
       "version": "1.0",
       "group": "nav",
-      "nav_group": "system",
-      "alias": "Authorization",
-      "singular": "Authorization",
+      "nav_group": "authorization",
+      "alias": "Overview",
+      "singular": "Overview",
       "path": "authorization",
       "icon": "🛡️",
-      "sort_order": 202,
+      "sort_order": 200,
       "storage": "virtual",
       "route": "/authorization"
+    },
+    "authz_permissions": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Permissions",
+      "singular": "Permission",
+      "path": "authorization/permissions",
+      "icon": "✅",
+      "sort_order": 201,
+      "storage": "virtual",
+      "route": "/authorization/permissions"
+    },
+    "authz_relationships": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Relationships",
+      "singular": "Relationship",
+      "path": "authorization/relationships",
+      "icon": "🔗",
+      "sort_order": 202,
+      "storage": "virtual",
+      "route": "/authorization/relationships"
+    },
+    "authz_model": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Model",
+      "singular": "Model",
+      "path": "authorization/model",
+      "icon": "📐",
+      "sort_order": 203,
+      "storage": "virtual",
+      "route": "/authorization/model"
+    },
+    "authz_modules": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Modules",
+      "singular": "Module",
+      "path": "authorization/modules",
+      "icon": "📦",
+      "sort_order": 204,
+      "storage": "virtual",
+      "route": "/authorization/modules"
     },
     "password_policy": {
       "$ref": "schemas/password_policy.json",

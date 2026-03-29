@@ -426,6 +426,60 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 );
 
 -- ============================================================================
+-- GROUPS — org-scoped user grouping (SCIM-compliant, ADR-020)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS groups (
+    id          TEXT PRIMARY KEY,
+    org_id      TEXT NOT NULL DEFAULT '1',
+    name        TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'active',
+    metadata    TEXT DEFAULT '{}',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(org_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
+
+-- GROUP MEMBERS — join table for group membership
+CREATE TABLE IF NOT EXISTS group_members (
+    group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gm_group ON group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_gm_user  ON group_members(user_id);
+
+-- ============================================================================
+-- PROJECTS — org-scoped resource containers (ADR-020)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS projects (
+    id          TEXT PRIMARY KEY,
+    org_id      TEXT NOT NULL DEFAULT '1',
+    name        TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'active',
+    metadata    TEXT DEFAULT '{}',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(org_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
+
+-- PROJECT MEMBERS — join table for project membership
+CREATE TABLE IF NOT EXISTS project_members (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pm_project ON project_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_pm_user    ON project_members(user_id);
+
+-- ============================================================================
 -- SEED DATA
 -- ============================================================================
 INSERT OR IGNORE INTO jobs (name, display_name, description, cron) VALUES
@@ -458,6 +512,10 @@ CREATE INDEX IF NOT EXISTS idx_saved_queries_name ON saved_queries(name);
 INSERT OR IGNORE INTO instances (id, name) VALUES ('inst_default', 'default');
 
 -- +goose Down
+DROP TABLE IF EXISTS project_members;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS group_members;
+DROP TABLE IF EXISTS groups;
 DROP TABLE IF EXISTS saved_queries;
 DROP TABLE IF EXISTS retention_policies;
 DROP TABLE IF EXISTS consumer_cursors;

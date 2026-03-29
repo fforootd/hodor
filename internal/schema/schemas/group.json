@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$version": "1.0",
+  "type": "object",
+  "x-display": {
+    "alias": "Groups",
+    "singular": "Group",
+    "group": "access",
+    "path": "groups",
+    "icon": "👥",
+    "sort_order": 60
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "x-identifier": true
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": ["name"]
+}

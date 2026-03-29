@@ -225,7 +225,6 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	return nil
 }
 
-
 // seedConsoleClient creates the default console OIDC client in the apps table.
 func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	var exists int

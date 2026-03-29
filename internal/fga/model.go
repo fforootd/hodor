@@ -1,13 +1,15 @@
 // Package fga model.go defines the Zitadel authorization model for OpenFGA.
 //
-// The model follows a layered hierarchy:
+// The model follows the "Immutable Core + Marketplace Modules" architecture
+// (ADR-020). The core module defines sealed primitive types that Zitadel's
+// APIs, SCIM, and console depend on.
 //
-//	instance → org → entity/app/group/settings
+// Type hierarchy:
+//
+//	instance → org → group/project/app/settings
 //
 // Instance is the isolation boundary. Orgs share the same instance and can
 // access data from other orgs via instance-level admin grants.
-//
-// Groups are first-class citizens — customers have requested them extensively.
 package fga
 
 import (
@@ -16,16 +18,20 @@ import (
 )
 
 // ZitadelModel returns the complete OpenFGA type definitions for
-// Zitadel's internal authorization.
+// Zitadel's immutable core authorization model (ADR-020, Layer 1).
+//
+// These types are sealed — customers cannot modify or delete them.
+// Marketplace modules (Layer 2) and custom types (Layer 3) extend
+// them via OpenFGA Modular Models.
 //
 // Type hierarchy:
 //
 //	user          — actor type (any identity)
 //	instance      — global scope (owner > admin > viewer)
 //	org           — tenant scope (owner > admin > member > viewer)
-//	entity        — identity objects (human_user, service_user, ai_agent)
+//	group         — user grouping, SCIM-compatible, usable in customer authz
+//	project       — app + role + grant containers
 //	app           — OIDC/SAML client applications
-//	group         — user/app grouping with membership-based grants
 //	settings      — cascading policies (password, login, etc.)
 //	session       — active user sessions
 func ZitadelModel() []*openfgav1.TypeDefinition {
@@ -33,9 +39,9 @@ func ZitadelModel() []*openfgav1.TypeDefinition {
 		typeUser(),
 		typeInstance(),
 		typeOrg(),
-		typeEntity(),
-		typeApp(),
 		typeGroup(),
+		typeProject(),
+		typeApp(),
 		typeSettings(),
 		typeSession(),
 	}
@@ -74,6 +80,8 @@ func typeInstance() *openfgav1.TypeDefinition {
 				"can_manage_sessions":    noDirectRelation(),
 				"can_manage_login_flows": noDirectRelation(),
 				"can_manage_actions":     noDirectRelation(),
+				"can_manage_groups":      noDirectRelation(),
+				"can_manage_projects":    noDirectRelation(),
 				"can_view_audit":         noDirectRelation(),
 				"can_manage_fga":         noDirectRelation(),
 			},
@@ -94,6 +102,8 @@ func typeInstance() *openfgav1.TypeDefinition {
 			"can_manage_sessions":    computed("admin"),
 			"can_manage_login_flows": computed("admin"),
 			"can_manage_actions":     computed("admin"),
+			"can_manage_groups":      computed("admin"),
+			"can_manage_projects":    computed("admin"),
 			"can_view_audit":         computed("viewer"),
 			"can_manage_fga":         computed("owner"),
 		},
@@ -119,10 +129,10 @@ func typeOrg() *openfgav1.TypeDefinition {
 				"member": directUser(),
 				"viewer": directUser(),
 				// Permissions
-				"can_create_entity":    noDirectRelation(),
-				"can_read_entity":      noDirectRelation(),
-				"can_update_entity":    noDirectRelation(),
-				"can_delete_entity":    noDirectRelation(),
+				"can_create_resource":  noDirectRelation(),
+				"can_read_resource":    noDirectRelation(),
+				"can_update_resource":  noDirectRelation(),
+				"can_delete_resource":  noDirectRelation(),
 				"can_read_settings":    noDirectRelation(),
 				"can_write_settings":   noDirectRelation(),
 				"can_manage_providers": noDirectRelation(),
@@ -156,10 +166,10 @@ func typeOrg() *openfgav1.TypeDefinition {
 				computed("member"),
 			),
 			// Permissions
-			"can_create_entity":    computed("admin"),
-			"can_read_entity":      computed("viewer"),
-			"can_update_entity":    computed("admin"),
-			"can_delete_entity":    computed("owner"),
+			"can_create_resource":  computed("admin"),
+			"can_read_resource":    computed("viewer"),
+			"can_update_resource":  computed("admin"),
+			"can_delete_resource":  computed("owner"),
 			"can_read_settings":    computed("viewer"),
 			"can_write_settings":   computed("admin"),
 			"can_manage_providers": computed("admin"),
@@ -182,12 +192,12 @@ func typeOrg() *openfgav1.TypeDefinition {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// type entity — identity objects (human_user, service_user, ai_agent)
+// type project — app + role + grant containers
 // ──────────────────────────────────────────────────────────────────
 
-func typeEntity() *openfgav1.TypeDefinition {
+func typeProject() *openfgav1.TypeDefinition {
 	return &openfgav1.TypeDefinition{
-		Type: "entity",
+		Type: "project",
 		Metadata: &openfgav1.Metadata{
 			Relations: map[string]*openfgav1.RelationMetadata{
 				"org": {
@@ -196,42 +206,41 @@ func typeEntity() *openfgav1.TypeDefinition {
 					},
 				},
 				"owner":  directUser(),
-				"editor": directUser(),
-				"viewer": directUser(),
+				"admin":  directUser(),
+				"member": directUserAndGroupMember(),
 				// Permissions
-				"can_read":               noDirectRelation(),
-				"can_update":             noDirectRelation(),
-				"can_delete":             noDirectRelation(),
-				"can_manage_credentials": noDirectRelation(),
-				"can_revoke_sessions":    noDirectRelation(),
+				"can_read":           noDirectRelation(),
+				"can_update":         noDirectRelation(),
+				"can_delete":         noDirectRelation(),
+				"can_manage_members": noDirectRelation(),
 			},
 		},
 		Relations: map[string]*openfgav1.Userset{
 			"org":   this(),
 			"owner": this(),
-			"editor": union(
+			"admin": union(
 				this(),
 				computed("owner"),
-				tupleToUserset("org", "admin"),
 			),
-			"viewer": union(
+			"member": union(
 				this(),
-				computed("editor"),
-				tupleToUserset("org", "member"),
+				computed("admin"),
 			),
 			// Permissions
-			"can_read":   computed("viewer"),
-			"can_update": computed("editor"),
-			"can_delete": union(
-				computed("owner"),
-				tupleToUserset("org", "can_delete_entity"),
+			"can_read": union(
+				computed("member"),
+				tupleToUserset("org", "viewer"),
 			),
-			"can_manage_credentials": union(
-				computed("owner"),
+			"can_update": union(
+				computed("admin"),
 				tupleToUserset("org", "admin"),
 			),
-			"can_revoke_sessions": union(
+			"can_delete": union(
 				computed("owner"),
+				tupleToUserset("org", "can_delete_resource"),
+			),
+			"can_manage_members": union(
+				computed("admin"),
 				tupleToUserset("org", "admin"),
 			),
 		},
@@ -280,7 +289,7 @@ func typeApp() *openfgav1.TypeDefinition {
 			"can_update": computed("editor"),
 			"can_delete": union(
 				computed("owner"),
-				tupleToUserset("org", "can_delete_entity"),
+				tupleToUserset("org", "can_delete_resource"),
 			),
 			"can_rotate_secret": union(
 				computed("owner"),
@@ -339,7 +348,7 @@ func typeGroup() *openfgav1.TypeDefinition {
 			),
 			"can_delete": union(
 				computed("owner"),
-				tupleToUserset("org", "can_delete_entity"),
+				tupleToUserset("org", "can_delete_resource"),
 			),
 			"can_manage_members": union(
 				computed("admin"),
@@ -471,6 +480,16 @@ func noDirectRelation() *openfgav1.RelationMetadata {
 	return &openfgav1.RelationMetadata{}
 }
 
+// directUserAndGroupMember returns metadata allowing direct user OR group#member.
+func directUserAndGroupMember() *openfgav1.RelationMetadata {
+	return &openfgav1.RelationMetadata{
+		DirectlyRelatedUserTypes: []*openfgav1.RelationReference{
+			{Type: "user"},
+			{Type: "group", RelationOrWildcard: &openfgav1.RelationReference_Relation{Relation: "member"}},
+		},
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────
 // AuthZ configuration — catalog-driven, replaces hardcoded maps
 // ──────────────────────────────────────────────────────────────────
@@ -584,14 +603,14 @@ func defaultPermsForScope(fgaType, scope string) AuthZConfig {
 			FGAType: fgaType,
 			Scope:   "org",
 			CollectionPerms: map[string]string{
-				"GET":  "can_read_entity",
-				"POST": "can_create_entity",
+				"GET":  "can_read_resource",
+				"POST": "can_create_resource",
 			},
 			ResourcePerms: map[string]string{
-				"GET":    "can_read_entity",
-				"PATCH":  "can_update_entity",
-				"PUT":    "can_update_entity",
-				"DELETE": "can_delete_entity",
+				"GET":    "can_read_resource",
+				"PATCH":  "can_update_resource",
+				"PUT":    "can_update_resource",
+				"DELETE": "can_delete_resource",
 			},
 		}
 	default:
@@ -640,7 +659,8 @@ func applyOverrides(configs map[string]AuthZConfig) {
 		}
 	}
 
-	// Entity: instance-scoped (users live at instance level)
+	// Entity → only referenced via user: prefix now, but keep for backward compat.
+	// Resources use org-scoped can_*_resource permissions.
 	if cfg, ok := configs["entity"]; ok {
 		cfg.CollectionPerms["GET"] = "can_manage_entities"
 		cfg.CollectionPerms["POST"] = "can_manage_entities"
@@ -650,5 +670,23 @@ func applyOverrides(configs map[string]AuthZConfig) {
 		cfg.ResourcePerms["DELETE"] = "can_manage_entities"
 		configs["entity"] = cfg
 	}
-}
 
+	// Project: collection ops check org, resource ops check project:{id}.
+	if _, ok := configs["project"]; ok {
+		configs["project"] = AuthZConfig{
+			FGAType: "project",
+			Scope:   "org",
+			CollectionPerms: map[string]string{
+				"GET":  "can_read_resource",
+				"POST": "can_create_resource",
+			},
+			ResourcePerms: map[string]string{
+				"GET":    "can_read",
+				"PATCH":  "can_update",
+				"PUT":    "can_update",
+				"DELETE": "can_delete",
+			},
+			ResourceScope: "resource",
+		}
+	}
+}

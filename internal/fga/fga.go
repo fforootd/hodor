@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/zitadel/zitadel/internal/fga/modules"
 	"github.com/zitadel/zitadel/internal/logging"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
@@ -19,10 +20,11 @@ import (
 
 // Service wraps an embedded OpenFGA server.
 type Service struct {
-	srv     *server.Server
-	db      *sql.DB
-	storeID string // internal _system store
-	modelID string // current authorization model ID
+	srv            *server.Server
+	db             *sql.DB
+	storeID        string          // internal _system store
+	modelID        string          // current authorization model ID
+	enabledModules map[string]bool // marketplace modules currently enabled
 }
 
 // New initialises the OpenFGA engine on the provided *sql.DB.
@@ -52,7 +54,7 @@ func New(ctx context.Context, db *sql.DB, dialect string) (*Service, error) {
 		return nil, fmt.Errorf("fga: create server: %w", err)
 	}
 
-	svc := &Service{srv: srv, db: db}
+	svc := &Service{srv: srv, db: db, enabledModules: make(map[string]bool)}
 
 	// 4. Ensure the internal _system store exists.
 	if err := svc.ensureSystemStore(ctx); err != nil {
@@ -362,6 +364,101 @@ func (s *Service) ensureAuthModel(ctx context.Context) error {
 	}
 
 	s.modelID = resp.GetAuthorizationModelId()
-	logging.Printf("[fga] authorization model loaded (user, instance, org, entity, app, group, settings, session)")
+	logging.Printf("[fga] authorization model loaded (user, instance, org, group, project, app, settings, session)")
 	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Module lifecycle (ADR-020, Layer 2)
+// ──────────────────────────────────────────────────────────────────
+
+// EnableModule installs a marketplace module by appending its types
+// to the authorization model. The model is compiled in memory first;
+// if compilation fails (e.g. type name conflict), the installation
+// is rejected without writing to OpenFGA.
+func (s *Service) EnableModule(ctx context.Context, moduleName string) error {
+	mod, ok := modules.Registry[moduleName]
+	if !ok {
+		return fmt.Errorf("fga: unknown module %q", moduleName)
+	}
+
+	if s.enabledModules[moduleName] {
+		return nil // already enabled
+	}
+
+	// Build the compiled model: core + enabled modules + new module.
+	typeDefs := ZitadelModel()
+	for name := range s.enabledModules {
+		if m, ok := modules.Registry[name]; ok {
+			typeDefs = append(typeDefs, m.Types()...)
+		}
+	}
+	typeDefs = append(typeDefs, mod.Types()...)
+
+	// Validate: check for duplicate type names.
+	seen := make(map[string]bool)
+	for _, td := range typeDefs {
+		if seen[td.GetType()] {
+			return fmt.Errorf("fga: module %q conflicts with existing type %q", moduleName, td.GetType())
+		}
+		seen[td.GetType()] = true
+	}
+
+	// Write the compiled model to OpenFGA.
+	resp, err := s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
+		StoreId:         s.storeID,
+		SchemaVersion:   "1.1",
+		TypeDefinitions: typeDefs,
+	})
+	if err != nil {
+		return fmt.Errorf("fga: enable module %q: %w", moduleName, err)
+	}
+
+	s.modelID = resp.GetAuthorizationModelId()
+	s.enabledModules[moduleName] = true
+	logging.Printf("[fga] module %q enabled (model=%s)", moduleName, s.modelID)
+	return nil
+}
+
+// DisableModule removes a marketplace module by recompiling the model
+// without its types. Existing tuples referencing module types become
+// orphaned (check calls will return false).
+func (s *Service) DisableModule(ctx context.Context, moduleName string) error {
+	if !s.enabledModules[moduleName] {
+		return nil // not enabled
+	}
+
+	// Rebuild without this module.
+	typeDefs := ZitadelModel()
+	for name := range s.enabledModules {
+		if name == moduleName {
+			continue
+		}
+		if m, ok := modules.Registry[name]; ok {
+			typeDefs = append(typeDefs, m.Types()...)
+		}
+	}
+
+	resp, err := s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
+		StoreId:         s.storeID,
+		SchemaVersion:   "1.1",
+		TypeDefinitions: typeDefs,
+	})
+	if err != nil {
+		return fmt.Errorf("fga: disable module %q: %w", moduleName, err)
+	}
+
+	s.modelID = resp.GetAuthorizationModelId()
+	delete(s.enabledModules, moduleName)
+	logging.Printf("[fga] module %q disabled (model=%s)", moduleName, s.modelID)
+	return nil
+}
+
+// EnabledModules returns the names of currently enabled marketplace modules.
+func (s *Service) EnabledModules() []string {
+	result := make([]string, 0, len(s.enabledModules))
+	for name := range s.enabledModules {
+		result = append(result, name)
+	}
+	return result
 }

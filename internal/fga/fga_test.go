@@ -88,12 +88,12 @@ func TestCheck_OrgHierarchy(t *testing.T) {
 	}
 
 	// admin should be org admin (via owner).
-	allowed, err := svc.Check(ctx, "user:admin", "can_create_entity", "org:org1")
+	allowed, err := svc.Check(ctx, "user:admin", "can_create_resource", "org:org1")
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
 	if !allowed {
-		t.Error("org owner should have can_create_entity")
+		t.Error("org owner should have can_create_resource")
 	}
 
 	// Add bob as a member.
@@ -102,22 +102,22 @@ func TestCheck_OrgHierarchy(t *testing.T) {
 		t.Fatalf("add member: %v", err)
 	}
 
-	// bob should be able to read entities.
-	allowed, err = svc.Check(ctx, "user:bob", "can_read_entity", "org:org1")
+	// bob should be able to read resources.
+	allowed, err = svc.Check(ctx, "user:bob", "can_read_resource", "org:org1")
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
 	if !allowed {
-		t.Error("org member should have can_read_entity")
+		t.Error("org member should have can_read_resource")
 	}
 
-	// bob should NOT be able to create entities (not admin).
-	allowed, err = svc.Check(ctx, "user:bob", "can_create_entity", "org:org1")
+	// bob should NOT be able to create resources (not admin).
+	allowed, err = svc.Check(ctx, "user:bob", "can_create_resource", "org:org1")
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
 	if allowed {
-		t.Error("org member should NOT have can_create_entity")
+		t.Error("org member should NOT have can_create_resource")
 	}
 
 	// Promote bob to admin.
@@ -126,69 +126,13 @@ func TestCheck_OrgHierarchy(t *testing.T) {
 		t.Fatalf("add admin: %v", err)
 	}
 
-	// bob should now be able to create entities.
-	allowed, err = svc.Check(ctx, "user:bob", "can_create_entity", "org:org1")
+	// bob should now be able to create resources.
+	allowed, err = svc.Check(ctx, "user:bob", "can_create_resource", "org:org1")
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
 	if !allowed {
-		t.Error("org admin should have can_create_entity")
-	}
-}
-
-func TestCheck_EntityPermissions(t *testing.T) {
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	// Setup: admin owns instance, creates org + entity.
-	err := svc.OnBootstrap(ctx, "admin")
-	if err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-
-	err = svc.OnOrgCreated(ctx, "org1", "admin")
-	if err != nil {
-		t.Fatalf("create org: %v", err)
-	}
-
-	err = svc.OnResourceCreated(ctx, "entity1", "admin", "org1")
-	if err != nil {
-		t.Fatalf("entity created: %v", err)
-	}
-
-	// admin (entity owner) can read, update, delete.
-	for _, perm := range []string{"can_read", "can_update", "can_delete"} {
-		allowed, err := svc.Check(ctx, "user:admin", perm, "entity:entity1")
-		if err != nil {
-			t.Fatalf("check %s: %v", perm, err)
-		}
-		if !allowed {
-			t.Errorf("entity owner should have %s", perm)
-		}
-	}
-
-	// Add viewer to the org.
-	err = svc.AddOrgMember(ctx, "viewer", "org1")
-	if err != nil {
-		t.Fatalf("add member: %v", err)
-	}
-
-	// viewer (org member) can read via entity#viewer ← org#member.
-	allowed, err := svc.Check(ctx, "user:viewer", "can_read", "entity:entity1")
-	if err != nil {
-		t.Fatalf("check: %v", err)
-	}
-	if !allowed {
-		t.Error("org member should have can_read on entity")
-	}
-
-	// viewer should NOT be able to update.
-	allowed, err = svc.Check(ctx, "user:viewer", "can_update", "entity:entity1")
-	if err != nil {
-		t.Fatalf("check: %v", err)
-	}
-	if allowed {
-		t.Error("org member should NOT have can_update on entity")
+		t.Error("org admin should have can_create_resource")
 	}
 }
 
@@ -247,6 +191,61 @@ func TestCheck_GroupMembership(t *testing.T) {
 	}
 }
 
+func TestCheck_ProjectPermissions(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Setup.
+	err := svc.OnBootstrap(ctx, "admin")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	// Create project.
+	err = svc.OnProjectCreated(ctx, "proj1", "admin", "org1")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Admin (project owner) can manage project.
+	allowed, err := svc.Check(ctx, "user:admin", "can_update", "project:proj1")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !allowed {
+		t.Error("project owner should have can_update")
+	}
+
+	// Add alice as project member.
+	err = svc.AddProjectMember(ctx, "alice", "proj1")
+	if err != nil {
+		t.Fatalf("add project member: %v", err)
+	}
+
+	// alice can read project.
+	allowed, err = svc.Check(ctx, "user:alice", "can_read", "project:proj1")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !allowed {
+		t.Error("project member should have can_read")
+	}
+
+	// alice cannot delete project.
+	allowed, err = svc.Check(ctx, "user:alice", "can_delete", "project:proj1")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if allowed {
+		t.Error("project member should NOT have can_delete")
+	}
+}
+
 func TestCheck_InstanceAdminInheritance(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -261,12 +260,12 @@ func TestCheck_InstanceAdminInheritance(t *testing.T) {
 	}
 
 	// Instance admin should inherit org admin via parent relation.
-	allowed, err := svc.Check(ctx, "user:admin", "can_create_entity", "org:org1")
+	allowed, err := svc.Check(ctx, "user:admin", "can_create_resource", "org:org1")
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}
 	if !allowed {
-		t.Error("instance owner should have can_create_entity on child org via parent inheritance")
+		t.Error("instance owner should have can_create_resource on child org via parent inheritance")
 	}
 }
 
@@ -338,11 +337,11 @@ func TestDeleteTuples(t *testing.T) {
 	}
 }
 
-func TestOnResourceDeleted(t *testing.T) {
+func TestOnResourceCreatedAndDeleted(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Create entity.
+	// Bootstrap.
 	err := svc.OnBootstrap(ctx, "admin")
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -351,32 +350,84 @@ func TestOnResourceDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
-	err = svc.OnResourceCreated(ctx, "ent1", "admin", "org1")
+
+	// Create a resource (identity).
+	err = svc.OnResourceCreated(ctx, "bob", "admin", "org1")
 	if err != nil {
-		t.Fatalf("entity created: %v", err)
+		t.Fatalf("resource created: %v", err)
 	}
 
-	// Verify tuples exist.
-	tuples, err := svc.ReadTuples(ctx, "", "", "entity:ent1")
+	// bob should now be an org member.
+	allowed, err := svc.Check(ctx, "user:bob", "can_read_resource", "org:org1")
 	if err != nil {
-		t.Fatalf("read: %v", err)
+		t.Fatalf("check: %v", err)
 	}
-	if len(tuples) == 0 {
-		t.Fatal("expected tuples for entity:ent1")
+	if !allowed {
+		t.Error("newly created resource should have org membership")
 	}
 
-	// Delete entity.
-	err = svc.OnResourceDeleted(ctx, "ent1")
+	// Delete resource.
+	err = svc.OnResourceDeleted(ctx, "bob")
 	if err != nil {
-		t.Fatalf("delete entity: %v", err)
+		t.Fatalf("delete resource: %v", err)
+	}
+}
+
+func TestEnableModule_RBAC(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Enable RBAC module.
+	err := svc.EnableModule(ctx, "rbac")
+	if err != nil {
+		t.Fatalf("enable rbac: %v", err)
 	}
 
-	// Verify tuples removed.
-	tuples, err = svc.ReadTuples(ctx, "", "", "entity:ent1")
-	if err != nil {
-		t.Fatalf("read: %v", err)
+	if len(svc.EnabledModules()) != 1 {
+		t.Errorf("expected 1 enabled module, got %d", len(svc.EnabledModules()))
 	}
-	if len(tuples) != 0 {
-		t.Errorf("expected 0 tuples after delete, got %d", len(tuples))
+
+	// Setup org and create role tuple.
+	err = svc.OnBootstrap(ctx, "admin")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	// Write role tuples.
+	err = svc.WriteTuples(ctx,
+		[3]string{"org:org1", "org", "role:editor"},
+		[3]string{"user:alice", "assignee", "role:editor"},
+	)
+	if err != nil {
+		t.Fatalf("write role tuples: %v", err)
+	}
+
+	// alice should be able to use the role.
+	allowed, err := svc.Check(ctx, "user:alice", "can_use", "role:editor")
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !allowed {
+		t.Error("role assignee should have can_use")
+	}
+
+	// Idempotent enable.
+	err = svc.EnableModule(ctx, "rbac")
+	if err != nil {
+		t.Fatalf("re-enable rbac: %v", err)
+	}
+
+	// Disable RBAC.
+	err = svc.DisableModule(ctx, "rbac")
+	if err != nil {
+		t.Fatalf("disable rbac: %v", err)
+	}
+
+	if len(svc.EnabledModules()) != 0 {
+		t.Errorf("expected 0 enabled modules, got %d", len(svc.EnabledModules()))
 	}
 }

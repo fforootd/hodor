@@ -316,6 +316,7 @@ import {
   Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow, Lock,
   Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
   Bot, AppWindow, Activity, Calendar, ShieldCheck, Package, ChevronRight, Settings,
+  UsersRound, FolderKanban,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -467,6 +468,7 @@ function isGroupActive(group: { items: NavItem[] }): boolean {
 
 const groupIconMap: Record<string, any> = {
   observability: Activity,
+  authorization: ShieldCheck,
   system: Settings,
 }
 function getGroupIcon(key: string) {
@@ -487,10 +489,14 @@ function isNavActive(item: NavItem): boolean {
 const iconMap: Record<string, any> = {
   users: Users, applications: AppWindow,
   human_user: Users, service_user: KeyRound, ai_agent: Bot, app: AppWindow,
-  org: Building2, action: Zap, login_flow: Lock, provider: Globe, session: Clock,
+  org: Building2, group: UsersRound, project: FolderKanban,
+  action: Zap, login_flow: Lock, provider: Globe, session: Clock,
   event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
   overview: BarChart3, explore: Search, trace: Workflow,
-  authorization: ShieldCheck, marketplace: Package,
+  // Authorization sub-pages
+  authz_overview: ShieldCheck, authz_permissions: ShieldCheck, authz_relationships: Workflow,
+  authz_model: Workflow, authz_modules: Package,
+  marketplace: Package,
 }
 
 function getIcon(type: string) {

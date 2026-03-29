@@ -11,14 +11,14 @@ import (
 func TestResolveRouteType(t *testing.T) {
 	m := &Middleware{
 		routes: map[string]string{
-			"/v1/users":    "entity",
-			"/v1/apps":     "app",
-			"/v1/orgs":     "org",
-			"/v1/schemas":  "schema",
-			"/v1/sessions": "session",
-			"/v1/settings": "settings",
-			"/v1/providers":"provider",
-			"/v1/fga":      "fga",
+			"/v1/users":     "entity",
+			"/v1/apps":      "app",
+			"/v1/orgs":      "org",
+			"/v1/schemas":   "schema",
+			"/v1/sessions":  "session",
+			"/v1/settings":  "settings",
+			"/v1/providers": "provider",
+			"/v1/fga":       "fga",
 		},
 	}
 

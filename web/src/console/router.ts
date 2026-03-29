@@ -26,6 +26,12 @@ const router = createRouter({
     { path: '/orgs/:id', name: 'org-detail', component: () => import('./views/OrgDetailView.vue') },
     { path: '/s/org', redirect: '/orgs' },
     { path: '/s/org/new', redirect: '/orgs/new' },
+    // Groups — dedicated list + detail
+    { path: '/groups', name: 'groups', component: () => import('./views/GroupListView.vue') },
+    { path: '/groups/:id', name: 'group-detail', component: () => import('./views/GroupDetailView.vue') },
+    // Projects — dedicated list + detail
+    { path: '/projects', name: 'projects', component: () => import('./views/ProjectListView.vue') },
+    { path: '/projects/:id', name: 'project-detail', component: () => import('./views/ProjectDetailView.vue') },
     // System views
     { path: '/schemas', name: 'schemas', component: () => import('./views/SchemaListView.vue') },
     { path: '/schemas/:id', name: 'schema-detail', component: () => import('./views/SchemaDetailView.vue') },
@@ -38,7 +44,14 @@ const router = createRouter({
     { path: '/observability/explore', name: 'obs-explore', component: () => import('./views/observability/ExploreView.vue') },
     { path: '/traces', name: 'traces', component: () => import('./views/observability/TracesView.vue') },
     { path: '/fingerprints', name: 'fingerprints', component: () => import('./views/observability/FingerprintListView.vue') },
-    { path: '/authorization', name: 'authorization', component: () => import('./views/AuthorizationView.vue') },
+    // Authorization section (like observability — collapsible nav group)
+    { path: '/authorization', name: 'authz-overview', component: () => import('./views/AuthorizationView.vue') },
+    { path: '/authorization/permissions', name: 'authz-permissions', component: () => import('./views/authorization/PermissionsView.vue') },
+    { path: '/authorization/relationships', name: 'authz-relationships', component: () => import('./views/authorization/RelationshipsView.vue') },
+    { path: '/authorization/model', name: 'authz-model', component: () => import('./views/authorization/ModelView.vue') },
+    { path: '/authorization/modules', name: 'authz-modules', component: () => import('./views/authorization/ModulesView.vue') },
+    // Backward compat
+    { path: '/administrator', redirect: '/authorization/model' },
     // Actions (uses schema list as a generic identity-like view)
     { path: '/actions', name: 'actions', component: () => import('./views/IdentityListView.vue'), props: () => ({ schemaType: 'action' }) },
     // Login Flow editor with live preview

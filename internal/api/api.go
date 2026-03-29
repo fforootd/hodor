@@ -105,6 +105,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Schema-driven entity routes (e.g. /v1/users, /v1/orgs, /v1/apps).
 	// These are the primary public API — no generic /v1/entities.
 	a.registerEntityRoutes(mux)
+
+	// Groups & Projects — dedicated CRUD + member management (ADR-020)
+	a.RegisterGroupRoutes(mux)
+	a.RegisterProjectRoutes(mux)
+
+	// Module management (enable/disable marketplace modules)
+	a.RegisterModuleRoutes(mux)
 }
 
 // registerEntityRoutes reads the x-catalog from the meta schema and registers
@@ -1909,7 +1916,6 @@ func emitEventSimple(ctx context.Context, db interface {
 		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
 }
 
-
 // eventCategory derives the event category from the event_type prefix.
 func eventCategory(eventType string) string {
 	for i := 0; i < len(eventType); i++ {
@@ -1981,7 +1987,7 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 	a.bus.Signal()
 
 	return UserResponse{
-		ID:           userID, OrgID: "", Identifier: req.Identifier, DisplayName: req.DisplayName,
+		ID: userID, OrgID: "", Identifier: req.Identifier, DisplayName: req.DisplayName,
 		State: "active", Profile: req.Profile, Capabilities: req.Capabilities,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil

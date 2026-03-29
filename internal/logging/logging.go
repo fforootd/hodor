@@ -122,17 +122,17 @@ type RedactionConfig struct {
 // --- Global state ---
 
 var (
-	globalMu           sync.RWMutex
-	globalLevel        slog.Level
-	globalFormat       string
-	globalRouting      map[Stream][]Sink
-	globalRedactor     *Redactor
-	globalSinks        map[Sink]slog.Handler
-	globalStreamCfg    map[Stream]StreamConfig
-	globalCache        *Cache
-	globalAnalyticsCfg *AnalyticsSinkConfig // saved for deferred drainer activation
-	globalDrainerCancel context.CancelFunc  // cancel handle for running drainer
-	initialized        bool
+	globalMu            sync.RWMutex
+	globalLevel         slog.Level
+	globalFormat        string
+	globalRouting       map[Stream][]Sink
+	globalRedactor      *Redactor
+	globalSinks         map[Sink]slog.Handler
+	globalStreamCfg     map[Stream]StreamConfig
+	globalCache         *Cache
+	globalAnalyticsCfg  *AnalyticsSinkConfig // saved for deferred drainer activation
+	globalDrainerCancel context.CancelFunc   // cancel handle for running drainer
+	initialized         bool
 )
 
 // Init configures the global logging system. Must be called once at startup

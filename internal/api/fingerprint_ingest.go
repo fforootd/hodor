@@ -59,7 +59,7 @@ func (a *API) ingestFingerprint(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Not seen yet, insert into Postgres as a new 'client_fingerprint'
 	payloadBytes, _ := json.Marshal(payload)
-	
+
 	// We use ON CONFLICT DO NOTHING to handle concurrent requests
 	_, err = a.db.SQL().ExecContext(r.Context(),
 		`INSERT INTO fingerprints (id, type, raw_data, created_at)

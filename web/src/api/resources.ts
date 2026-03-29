@@ -423,3 +423,100 @@ export interface UpgradeReport {
   field_changes: UpgradeFieldChange[]
   sample_entities: UpgradeEntityResult[]
 }
+
+// ------------------------------------------------------------------
+// Group API (ADR-020: sealed primitive)
+// ------------------------------------------------------------------
+export interface Group {
+  id: string
+  org_id: string
+  name: string
+  description: string
+  state: string
+  metadata?: Record<string, unknown>
+  member_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Member {
+  user_id: string
+  display_name?: string
+  role: string
+  added_at: string
+}
+
+export const groupApi = {
+  list: (orgId?: string): Promise<Group[]> => {
+    const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
+    return api.get<{ items: Group[] }>(`/v1/groups${qs}`).then(r => r.items || [])
+  },
+  get: (id: string): Promise<Group> =>
+    api.get<Group>(`/v1/groups/${encodeURIComponent(id)}`),
+  create: (data: { name: string; description?: string; metadata?: Record<string, unknown> }): Promise<Group> =>
+    api.post<Group>('/v1/groups', data),
+  update: (id: string, data: Partial<{ name: string; description: string; state: string; metadata: Record<string, unknown> }>): Promise<Group> =>
+    api.patch<Group>(`/v1/groups/${encodeURIComponent(id)}`, data),
+  delete: (id: string): Promise<void> =>
+    api.delete(`/v1/groups/${encodeURIComponent(id)}`),
+  listMembers: (id: string): Promise<Member[]> =>
+    api.get<{ items: Member[] }>(`/v1/groups/${encodeURIComponent(id)}/members`).then(r => r.items || []),
+  addMember: (id: string, userId: string, role = 'member'): Promise<Member> =>
+    api.post<Member>(`/v1/groups/${encodeURIComponent(id)}/members`, { user_id: userId, role }),
+  removeMember: (id: string, userId: string): Promise<void> =>
+    api.delete(`/v1/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`),
+}
+
+// ------------------------------------------------------------------
+// Project API (ADR-020: sealed primitive)
+// ------------------------------------------------------------------
+export interface Project {
+  id: string
+  org_id: string
+  name: string
+  description: string
+  state: string
+  metadata?: Record<string, unknown>
+  member_count: number
+  created_at: string
+  updated_at: string
+}
+
+export const projectApi = {
+  list: (orgId?: string): Promise<Project[]> => {
+    const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
+    return api.get<{ items: Project[] }>(`/v1/projects${qs}`).then(r => r.items || [])
+  },
+  get: (id: string): Promise<Project> =>
+    api.get<Project>(`/v1/projects/${encodeURIComponent(id)}`),
+  create: (data: { name: string; description?: string; metadata?: Record<string, unknown> }): Promise<Project> =>
+    api.post<Project>('/v1/projects', data),
+  update: (id: string, data: Partial<{ name: string; description: string; state: string; metadata: Record<string, unknown> }>): Promise<Project> =>
+    api.patch<Project>(`/v1/projects/${encodeURIComponent(id)}`, data),
+  delete: (id: string): Promise<void> =>
+    api.delete(`/v1/projects/${encodeURIComponent(id)}`),
+  listMembers: (id: string): Promise<Member[]> =>
+    api.get<{ items: Member[] }>(`/v1/projects/${encodeURIComponent(id)}/members`).then(r => r.items || []),
+  addMember: (id: string, userId: string, role = 'member'): Promise<Member> =>
+    api.post<Member>(`/v1/projects/${encodeURIComponent(id)}/members`, { user_id: userId, role }),
+  removeMember: (id: string, userId: string): Promise<void> =>
+    api.delete(`/v1/projects/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`),
+}
+
+// ------------------------------------------------------------------
+// Module API (ADR-020: marketplace modules)
+// ------------------------------------------------------------------
+export interface Module {
+  name: string
+  description: string
+  enabled: boolean
+}
+
+export const moduleApi = {
+  list: (): Promise<Module[]> =>
+    api.get<{ items: Module[] }>('/v1/modules').then(r => r.items || []),
+  enable: (name: string): Promise<void> =>
+    api.post<void>(`/v1/modules/${encodeURIComponent(name)}/enable`, {}),
+  disable: (name: string): Promise<void> =>
+    api.post<void>(`/v1/modules/${encodeURIComponent(name)}/disable`, {}),
+}

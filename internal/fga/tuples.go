@@ -96,49 +96,50 @@ func (s *Service) OnBootstrap(ctx context.Context, adminID string) error {
 	)
 }
 
-// OnResourceCreated writes tuples when a new entity is created:
-//   - entity:{id} ← org relation → org:{orgID}
-//   - user:{creatorID} → owner → entity:{id}
+// OnResourceCreated writes tuples when a new resource (identity) is created:
+//   - user:{id} ← org relation → org:{orgID}  (note: identity FGA uses “user” type)
+//   - user:{creatorID} → owner → user:{id}
+//
+// Since ADR-020 removed the generic “entity” FGA type, identities are scoped
+// via org-level permissions (can_create_resource, can_read_resource, etc.)
+// rather than resource-level entity:* checks.
 func (s *Service) OnResourceCreated(ctx context.Context, userID, creatorID, orgID string) error {
-	return s.WriteTuples(ctx,
-		[3]string{"org:" + orgID, "org", "entity:" + userID},
-		[3]string{"user:" + creatorID, "owner", "entity:" + userID},
-	)
+	// Add the user as an org member so org-level checks work.
+	return s.AddOrgMember(ctx, userID, orgID)
 }
 
-// OnResourceDeleted removes all tuples where the entity is the object.
+// OnResourceDeleted removes all tuples where user:{id} is the subject.
+// Uses direct SQL since OpenFGA's Read API requires an object type filter.
 func (s *Service) OnResourceDeleted(ctx context.Context, userID string) error {
-	// Read all tuples for this entity and delete them.
-	resp, err := s.srv.Read(ctx, &openfgav1.ReadRequest{
-		StoreId: s.storeID,
-		TupleKey: &openfgav1.ReadRequestTupleKey{
-			Object: "entity:" + userID,
-		},
-	})
+	userKey := "user:" + userID
+
+	// Query all tuples where this user is the subject.
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT object_type || ':' || object_id, relation
+		 FROM tuple WHERE store = ? AND user_object_type = 'user' AND user_object_id = ?`,
+		s.storeID, userID)
 	if err != nil {
-		return fmt.Errorf("fga: read tuples for entity %s: %w", userID, err)
+		return fmt.Errorf("fga: read tuples for user %s: %w", userID, err)
+	}
+	defer rows.Close()
+
+	var tuples [][3]string
+	for rows.Next() {
+		var object, relation string
+		if err := rows.Scan(&object, &relation); err != nil {
+			continue
+		}
+		tuples = append(tuples, [3]string{userKey, relation, object})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("fga: read tuples iter: %w", err)
 	}
 
-	if len(resp.GetTuples()) == 0 {
+	if len(tuples) == 0 {
 		return nil
 	}
 
-	keys := make([]*openfgav1.TupleKeyWithoutCondition, len(resp.GetTuples()))
-	for i, t := range resp.GetTuples() {
-		keys[i] = &openfgav1.TupleKeyWithoutCondition{
-			User:     t.GetKey().GetUser(),
-			Relation: t.GetKey().GetRelation(),
-			Object:   t.GetKey().GetObject(),
-		}
-	}
-
-	_, err = s.srv.Write(ctx, &openfgav1.WriteRequest{
-		StoreId: s.storeID,
-		Deletes: &openfgav1.WriteRequestDeletes{
-			TupleKeys: keys,
-		},
-	})
-	return err
+	return s.DeleteTuples(ctx, tuples...)
 }
 
 // OnAppCreated writes tuples when a new app is created.
@@ -196,4 +197,26 @@ func (s *Service) OnSessionCreated(ctx context.Context, sessionID, userID, orgID
 		[3]string{"user:" + userID, "subject", "session:" + sessionID},
 		[3]string{"org:" + orgID, "org", "session:" + sessionID},
 	)
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Project lifecycle helpers (ADR-020: project is a sealed primitive)
+// ──────────────────────────────────────────────────────────────────
+
+// OnProjectCreated writes tuples when a new project is created.
+func (s *Service) OnProjectCreated(ctx context.Context, projectID, creatorID, orgID string) error {
+	return s.WriteTuples(ctx,
+		[3]string{"org:" + orgID, "org", "project:" + projectID},
+		[3]string{"user:" + creatorID, "owner", "project:" + projectID},
+	)
+}
+
+// AddProjectMember adds a user to a project.
+func (s *Service) AddProjectMember(ctx context.Context, userID, projectID string) error {
+	return s.WriteTuple(ctx, "user:"+userID, "member", "project:"+projectID)
+}
+
+// RemoveProjectMember removes a user from a project.
+func (s *Service) RemoveProjectMember(ctx context.Context, userID, projectID string) error {
+	return s.DeleteTuple(ctx, "user:"+userID, "member", "project:"+projectID)
 }
