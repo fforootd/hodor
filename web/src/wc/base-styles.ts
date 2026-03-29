@@ -5,7 +5,8 @@
  * via Vue's `<style>` block (CE mode inlines them automatically).
  *
  * Keeping them here avoids the 60+ lines of duplicate CSS that was
- * previously copy-pasted across LoginApp.ce.vue and CreateUserWizard.ce.vue.
+ * previously copy-pasted across LoginApp.ce.vue and CreateUserWizar
+ * d.ce.vue.
  */
 
 /** Light-mode token values. */

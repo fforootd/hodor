@@ -84,9 +84,10 @@ func init() {
 	}()
 }
 
-// RegisterOTelRoutes mounts the OTel ingest endpoint.
-func (a *API) RegisterOTelRoutes(mux *http.ServeMux) {
+// RegisterTelemetryRoutes mounts the telemetry and OTel ingest endpoints.
+func (a *API) RegisterTelemetryRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/otel/traces", a.ingestOTelTraces)
+	mux.HandleFunc("POST /v1/telemetry/fingerprints", a.ingestFingerprint)
 }
 
 // OTelSpan represents a simplified OTLP span for storage.

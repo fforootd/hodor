@@ -273,6 +273,16 @@ CREATE TABLE IF NOT EXISTS keys (
 CREATE INDEX IF NOT EXISTS idx_keys_type ON keys(type);
 
 -- ============================================================================
+-- FINGERPRINTS — generalized device/browser fingerprint payload storage
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS fingerprints (
+    id         TEXT PRIMARY KEY,
+    type       TEXT NOT NULL DEFAULT 'client_fingerprint',
+    raw_data   JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================================
 -- EVENTS — audit log / event stream
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (

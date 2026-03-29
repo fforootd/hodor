@@ -84,8 +84,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Hierarchical settings CRUD (ADR-009)
 	a.RegisterSettingsRoutes(mux)
 
-	// OTel traces ingest (from browser SDK)
-	a.RegisterOTelRoutes(mux)
+	// Mount generic Telemetry routes under /v1/telemetry
+	a.RegisterTelemetryRoutes(mux)
 
 	// Login Flow management (dedicated handlers with audience targeting)
 	a.RegisterLoginFlowRoutes(mux)

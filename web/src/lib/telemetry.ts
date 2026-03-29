@@ -92,6 +92,15 @@ async function computeFingerprint(): Promise<string> {
       const fpData = await t.get()
       const fp = fpData.thumbmark
       cachedFingerprint = fp
+
+      // Ingest the raw thumbmark payload directly to the server for analytics/fraud modeling
+      fetch('/v1/telemetry/fingerprints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fpData),
+        keepalive: true, // Fire and forget
+      }).catch(console.warn)
+
       return fp
     } catch {
       // ThumbmarkJS failed (e.g., server-side rendering, blocked APIs).
