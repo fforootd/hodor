@@ -122,6 +122,21 @@
       "storage": "entities",
       "separator_before": true
     },
+    "login_flow": {
+      "$ref": "schemas/login_flow.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Login Flows",
+      "singular": "Login Flow",
+      "path": "login-flows",
+      "icon": "🔐",
+      "sort_order": 11,
+      "storage": "entities",
+      "countable": true,
+      "engines": {
+        "login": { "model": "schema-driven" }
+      }
+    },
     "provider": {
       "$ref": "schemas/provider.json",
       "version": "1.0",
@@ -345,11 +360,15 @@
         "colors": {
           "type": "object",
           "properties": {
-            "primary":    { "type": "string" },
-            "background": { "type": "string" },
-            "surface":    { "type": "string" },
-            "text":       { "type": "string" },
-            "error":      { "type": "string" }
+            "primary":            { "type": "string" },
+            "primary_foreground": { "type": "string" },
+            "background":         { "type": "string" },
+            "surface":            { "type": "string" },
+            "text":               { "type": "string" },
+            "muted":              { "type": "string" },
+            "accent":             { "type": "string" },
+            "border":             { "type": "string" },
+            "error":              { "type": "string" }
           },
           "additionalProperties": { "type": "string" }
         },
@@ -357,7 +376,29 @@
         "font_url":              { "type": "string", "format": "uri" },
         "texts":                 { "type": "object", "additionalProperties": { "type": "string" } },
         "custom_css":            { "type": "string" },
-        "hide_zitadel_branding": { "type": "boolean" }
+        "hide_zitadel_branding": { "type": "boolean" },
+        "layout":                { "type": "string", "enum": ["centered", "split", "muted", "card_image", "minimal"], "default": "centered" },
+        "dark_mode":             { "type": "string", "enum": ["light", "dark", "auto"], "default": "light" },
+        "cover_image":           { "type": "string", "format": "uri", "description": "URL for cover/hero image (used by split and card_image layouts)" },
+        "logo_dark":             { "type": "string", "format": "uri", "description": "Alternative logo for dark mode" },
+        "favicon":               { "type": "string", "format": "uri" },
+        "border_radius":         { "type": "string", "enum": ["sm", "md", "lg", "xl", "full"], "default": "md" },
+        "terms_url":             { "type": "string", "format": "uri" },
+        "privacy_url":           { "type": "string", "format": "uri" },
+        "social_position":       { "type": "string", "enum": ["top", "bottom"], "default": "bottom" },
+        "consent": {
+          "type": "array",
+          "description": "Consent checkboxes shown during registration/login (e.g. terms acceptance, marketing opt-in).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id":       { "type": "string", "description": "Unique key for the consent item" },
+              "label":    { "type": "string", "description": "Display label, supports markdown links: I agree to the [Terms](https://...)" },
+              "required": { "type": "boolean", "default": false }
+            },
+            "required": ["id", "label"]
+          }
+        }
       },
       "additionalProperties": false
     },

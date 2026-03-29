@@ -130,9 +130,11 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 }
 
 func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
-	// Skip if exists by name.
+	// Skip if exists by name in entities table.
 	var existing string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM providers WHERE name = ?`, p.Name).Scan(&existing)
+	err := tx.QueryRowContext(ctx,
+		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider' AND e.identifier = ?`, p.Name).Scan(&existing)
 	if err == nil {
 		logging.Printf("[seed] provider %q already exists, skipping", p.Name)
 		return nil
@@ -148,25 +150,35 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 	if p.Template == "" {
 		p.Template = "custom"
 	}
-	configJSON := "{}"
+	configMap := map[string]any{}
 	if p.Config != nil {
-		b, _ := json.Marshal(p.Config)
-		configJSON = string(b)
+		configMap = p.Config
 	}
-	overridesJSON := "{}"
+	overrideMap := map[string]string{}
 	if p.ClaimOverrides != nil {
-		b, _ := json.Marshal(p.ClaimOverrides)
-		overridesJSON = string(b)
+		overrideMap = p.ClaimOverrides
 	}
 	autoReg := true
 	if p.AutoRegister != nil {
 		autoReg = *p.AutoRegister
 	}
 
+	// Build entity data JSONB.
+	data := map[string]any{
+		"protocol":        p.Protocol,
+		"template":        p.Template,
+		"config":          configMap,
+		"claim_overrides": overrideMap,
+		"auto_register":   autoReg,
+		"enabled":         true,
+		"display_order":   0,
+	}
+	dataJSON, _ := json.Marshal(data)
+
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, 1, 0, datetime('now'), datetime('now'))`,
-		provID, p.Name, p.Protocol, p.Template, configJSON, overridesJSON, autoReg)
+		`INSERT INTO entities (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
+		 VALUES (?, '1', 'provider_v1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
+		provID, p.Name, p.Name, string(dataJSON))
 	if err != nil {
 		return err
 	}
@@ -344,9 +356,12 @@ func seedPATs(ctx context.Context, tx *sql.Tx, entityID string, pats []SeedPAT) 
 }
 
 func seedLinkedAccount(ctx context.Context, tx *sql.Tx, identityID string, la SeedLinkedAccount) {
-	// Resolve provider by name or ID.
+	// Resolve provider by name or ID from entities table.
 	var providerID string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM providers WHERE name = ? OR id = ?`, la.Provider, la.Provider).Scan(&providerID)
+	err := tx.QueryRowContext(ctx,
+		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider' AND (e.identifier = ? OR e.id = ?)`,
+		la.Provider, la.Provider).Scan(&providerID)
 	if err != nil {
 		logging.Printf("[seed] linked_account: provider %q not found, skipping", la.Provider)
 		return

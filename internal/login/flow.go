@@ -42,6 +42,13 @@ type LoginConfig struct {
 	RegistrationAllowed bool   `json:"registration_allowed"`
 }
 
+// ConsentItem represents a checkbox with optional links (terms, marketing opt-in, etc.).
+type ConsentItem struct {
+	ID       string `json:"id"`       // unique key, e.g. "terms", "marketing"
+	Label    string `json:"label"`    // supports markdown links: "I agree to the [Terms](https://...)"
+	Required bool   `json:"required"` // must be checked to proceed
+}
+
 // BrandingConfig represents the x-branding schema-level annotation.
 type BrandingConfig struct {
 	Heading     string            `json:"heading"`
@@ -54,6 +61,67 @@ type BrandingConfig struct {
 	Texts       map[string]string `json:"texts"`
 	CustomCSS   string            `json:"custom_css"`
 	HideZitadel bool              `json:"hide_zitadel_branding"`
+
+	// Layout & visual presets
+	Layout       string `json:"layout"`        // "centered" | "split" | "muted" | "card_image" | "minimal"
+	DarkMode     string `json:"dark_mode"`     // "light" | "dark" | "auto"
+	CoverImage   string `json:"cover_image"`   // URL for split/card_image layouts
+	LogoDark     string `json:"logo_dark"`     // Alt logo for dark mode
+	Favicon      string `json:"favicon"`       // Custom favicon URL
+	BorderRadius string `json:"border_radius"` // "sm" | "md" | "lg" | "xl" | "full"
+
+	// Legal/terms links
+	TermsURL   string `json:"terms_url"`
+	PrivacyURL string `json:"privacy_url"`
+
+	// Social provider display
+	SocialPosition string `json:"social_position"` // "top" | "bottom" (relative to email/password form)
+
+	// Consent checkboxes (registration & login)
+	Consent []ConsentItem `json:"consent"`
+}
+
+// CaptchaConfig represents x-captcha on the login flow schema.
+type CaptchaConfig struct {
+	Provider  string   `json:"provider"`            // "altcha" | "hcaptcha" | "recaptcha" | "turnstile"
+	Mode      string   `json:"mode"`                // "invisible" | "checkbox" | "floating"
+	On        []string `json:"on"`                  // ["register", "forgot_password", "login"]
+	Algorithm string   `json:"algorithm,omitempty"` // "SHA-256" | "SHA-384" | "SHA-512" (Altcha PoW hash)
+	MaxNumber int      `json:"max_number,omitempty"` // PoW difficulty range (default: 100000)
+	SiteKey   string   `json:"site_key,omitempty"`  // for third-party providers
+	SecretKey string   `json:"secret_key,omitempty"` // server-side only, never sent to client
+	Threshold float64  `json:"threshold,omitempty"` // score threshold for score-based providers
+}
+
+// FingerprintConfig represents x-fingerprint on the login flow schema.
+type FingerprintConfig struct {
+	Enabled  bool     `json:"enabled"`            // enable browser fingerprinting
+	Provider string   `json:"provider"`           // "thumbmarkjs" (extensible)
+	Persist  bool     `json:"persist"`            // persist visitor ID across sessions
+	On       []string `json:"on,omitempty"`       // ["login", "register"] — when to collect
+}
+
+// RateLimitConfig represents x-rate-limit on the login flow schema.
+type RateLimitConfig struct {
+	MaxAttempts    int `json:"max_attempts"`    // per IP per window
+	WindowSeconds  int `json:"window_seconds"`
+	LockoutSeconds int `json:"lockout_seconds"`
+}
+
+// LoginFlowRef links a login flow schema to a user schema.
+type LoginFlowRef struct {
+	UserSchema string `json:"user_schema"` // schema type identifier
+	Version    string `json:"version"`     // semver constraint, e.g. ">=1"
+}
+
+// LoginFlowConfig is the fully extracted config from a login flow schema.
+type LoginFlowConfig struct {
+	Ref         LoginFlowRef    `json:"ref"`
+	Login       LoginConfig     `json:"login"`
+	Branding    BrandingConfig  `json:"branding"`
+	Captcha     *CaptchaConfig     `json:"captcha,omitempty"`
+	Fingerprint *FingerprintConfig `json:"fingerprint,omitempty"`
+	RateLimit   *RateLimitConfig   `json:"rate_limit,omitempty"`
 }
 
 // SchemaFieldDef represents a single field from a schema's properties block.
@@ -82,6 +150,11 @@ type SchemaAuthConfig struct {
 	Login       LoginConfig
 	Branding    BrandingConfig
 	SchemaProps []SchemaFieldDef // all visible schema fields (for registration)
+	// Login flow specific (populated when a login flow schema is linked)
+	LoginFlowID string             `json:"-"` // ID of the linked login flow schema
+	Captcha     *CaptchaConfig     `json:"-"` // from login flow x-captcha
+	Fingerprint *FingerprintConfig `json:"-"` // from login flow x-fingerprint
+	RateLimit   *RateLimitConfig   `json:"-"` // from login flow x-rate-limit
 }
 
 // ─── Annotation Extraction ──────────────────────────────────
@@ -140,6 +213,149 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	config.Branding = mergeBrandingDefaults(config.Branding)
 
 	return config
+}
+
+// ExtractLoginFlowConfig parses a login flow schema JSON to extract
+// x-login-flow, x-login, x-branding, x-captcha, x-fingerprint, x-rate-limit.
+// This is the login flow schema counterpart to ExtractAuthConfig (which reads user schemas).
+func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
+	var raw struct {
+		XLoginFlow   json.RawMessage `json:"x-login-flow"`
+		XLogin       json.RawMessage `json:"x-login"`
+		XBranding    json.RawMessage `json:"x-branding"`
+		XCaptcha     json.RawMessage `json:"x-captcha"`
+		XFingerprint json.RawMessage `json:"x-fingerprint"`
+		XRateLimit   json.RawMessage `json:"x-rate-limit"`
+	}
+	if err := json.Unmarshal([]byte(flowSchemaJSON), &raw); err != nil {
+		return &LoginFlowConfig{
+			Login:    defaultLoginConfig(),
+			Branding: defaultBrandingConfig(),
+		}
+	}
+
+	cfg := &LoginFlowConfig{
+		Login:    defaultLoginConfig(),
+		Branding: defaultBrandingConfig(),
+	}
+
+	if len(raw.XLoginFlow) > 0 {
+		_ = json.Unmarshal(raw.XLoginFlow, &cfg.Ref)
+	}
+	if len(raw.XLogin) > 0 {
+		_ = json.Unmarshal(raw.XLogin, &cfg.Login)
+	}
+	if len(raw.XBranding) > 0 {
+		_ = json.Unmarshal(raw.XBranding, &cfg.Branding)
+	}
+	if len(raw.XCaptcha) > 0 {
+		var cc CaptchaConfig
+		if json.Unmarshal(raw.XCaptcha, &cc) == nil {
+			if cc.Algorithm == "" {
+				cc.Algorithm = "SHA-256"
+			}
+			if cc.MaxNumber == 0 {
+				cc.MaxNumber = 100000
+			}
+			cfg.Captcha = &cc
+		}
+	}
+	if len(raw.XFingerprint) > 0 {
+		var fp FingerprintConfig
+		if json.Unmarshal(raw.XFingerprint, &fp) == nil {
+			if fp.Provider == "" {
+				fp.Provider = "thumbmarkjs"
+			}
+			cfg.Fingerprint = &fp
+		}
+	}
+	if len(raw.XRateLimit) > 0 {
+		var rl RateLimitConfig
+		if json.Unmarshal(raw.XRateLimit, &rl) == nil {
+			if rl.MaxAttempts == 0 {
+				rl.MaxAttempts = 5
+			}
+			if rl.WindowSeconds == 0 {
+				rl.WindowSeconds = 300
+			}
+			if rl.LockoutSeconds == 0 {
+				rl.LockoutSeconds = 900
+			}
+			cfg.RateLimit = &rl
+		}
+	}
+
+	cfg.Login = mergeLoginDefaults(cfg.Login)
+	cfg.Branding = mergeBrandingDefaults(cfg.Branding)
+	return cfg
+}
+
+// ResolveFlowConfig merges a user schema's field-level auth config with a
+// login flow schema's UX config. The login flow's Login, Branding, Captcha,
+// Fingerprint, and RateLimit override whatever was on the user schema.
+func ResolveFlowConfig(userConfig *SchemaAuthConfig, flowConfig *LoginFlowConfig) *SchemaAuthConfig {
+	if flowConfig == nil {
+		return userConfig
+	}
+
+	// Clone the user config so we don't mutate the original.
+	merged := *userConfig
+
+	// Login flow takes precedence for UX-level settings.
+	merged.Login = flowConfig.Login
+	merged.Branding = flowConfig.Branding
+	merged.Captcha = flowConfig.Captcha
+	merged.Fingerprint = flowConfig.Fingerprint
+	merged.RateLimit = flowConfig.RateLimit
+
+	return &merged
+}
+
+// captchaActiveForStep returns true if the captcha should be shown on the given step.
+func captchaActiveForStep(cc *CaptchaConfig, step StepType) bool {
+	if cc == nil {
+		return false
+	}
+	stepName := ""
+	switch step {
+	case StepIdentifier, StepAuthSelect, StepPassword:
+		stepName = "login"
+	case StepRegister:
+		stepName = "register"
+	default:
+		return false
+	}
+	for _, s := range cc.On {
+		if s == stepName {
+			return true
+		}
+	}
+	return false
+}
+
+// fingerprintActiveForStep returns true if fingerprinting should collect on the given step.
+func fingerprintActiveForStep(fp *FingerprintConfig, step StepType) bool {
+	if fp == nil || !fp.Enabled {
+		return false
+	}
+	if len(fp.On) == 0 {
+		return true // collect on all steps if no filter specified
+	}
+	stepName := ""
+	switch step {
+	case StepIdentifier, StepAuthSelect, StepPassword:
+		stepName = "login"
+	case StepRegister:
+		stepName = "register"
+	default:
+		return false
+	}
+	for _, s := range fp.On {
+		if s == stepName {
+			return true
+		}
+	}
+	return false
 }
 
 // extractFieldConfig parses auth annotations and schema metadata from a single
@@ -253,13 +469,21 @@ func defaultBrandingConfig() BrandingConfig {
 		Description: "Sign in to your account",
 		OrgName:     "Zitadel",
 		Colors: map[string]string{
-			"primary":    "#6366f1",
-			"background": "#f0f2ff",
-			"surface":    "#ffffff",
-			"text":       "#1a1a2e",
-			"error":      "#ef4444",
+			"primary":            "#6366f1",
+			"primary_foreground": "#ffffff",
+			"background":         "#f0f2ff",
+			"surface":            "#ffffff",
+			"text":               "#1a1a2e",
+			"muted":              "#f4f4f5",
+			"accent":             "#6366f1",
+			"border":             "#e4e4e7",
+			"error":              "#ef4444",
 		},
-		FontFamily: "Inter, system-ui, sans-serif",
+		FontFamily:     "Inter, system-ui, sans-serif",
+		Layout:         "centered",
+		DarkMode:       "light",
+		BorderRadius:   "md",
+		SocialPosition: "bottom",
 	}
 }
 
@@ -284,6 +508,18 @@ func mergeBrandingDefaults(bc BrandingConfig) BrandingConfig {
 	if bc.FontFamily == "" {
 		bc.FontFamily = defaults.FontFamily
 	}
+	if bc.Layout == "" {
+		bc.Layout = defaults.Layout
+	}
+	if bc.DarkMode == "" {
+		bc.DarkMode = defaults.DarkMode
+	}
+	if bc.BorderRadius == "" {
+		bc.BorderRadius = defaults.BorderRadius
+	}
+	if bc.SocialPosition == "" {
+		bc.SocialPosition = defaults.SocialPosition
+	}
 	if bc.Colors == nil {
 		bc.Colors = defaults.Colors
 	} else {
@@ -294,6 +530,97 @@ func mergeBrandingDefaults(bc BrandingConfig) BrandingConfig {
 		}
 	}
 	return bc
+}
+
+// ResolveBranding merges branding from schema (base) with optional org and app overrides.
+// Per ADR-009, settings cascade: instance → org → app.
+func ResolveBranding(schema, org, app *BrandingConfig) BrandingConfig {
+	base := defaultBrandingConfig()
+	if schema != nil {
+		base = mergeBrandingOver(base, *schema)
+	}
+	if org != nil {
+		base = mergeBrandingOver(base, *org)
+	}
+	if app != nil {
+		base = mergeBrandingOver(base, *app)
+	}
+	return base
+}
+
+// mergeBrandingOver overlays non-zero fields from overlay onto base.
+func mergeBrandingOver(base, overlay BrandingConfig) BrandingConfig {
+	if overlay.Heading != "" {
+		base.Heading = overlay.Heading
+	}
+	if overlay.Description != "" {
+		base.Description = overlay.Description
+	}
+	if overlay.LogoURL != "" {
+		base.LogoURL = overlay.LogoURL
+	}
+	if overlay.OrgName != "" {
+		base.OrgName = overlay.OrgName
+	}
+	if overlay.FontFamily != "" {
+		base.FontFamily = overlay.FontFamily
+	}
+	if overlay.FontURL != "" {
+		base.FontURL = overlay.FontURL
+	}
+	if overlay.Layout != "" {
+		base.Layout = overlay.Layout
+	}
+	if overlay.DarkMode != "" {
+		base.DarkMode = overlay.DarkMode
+	}
+	if overlay.CoverImage != "" {
+		base.CoverImage = overlay.CoverImage
+	}
+	if overlay.LogoDark != "" {
+		base.LogoDark = overlay.LogoDark
+	}
+	if overlay.Favicon != "" {
+		base.Favicon = overlay.Favicon
+	}
+	if overlay.BorderRadius != "" {
+		base.BorderRadius = overlay.BorderRadius
+	}
+	if overlay.TermsURL != "" {
+		base.TermsURL = overlay.TermsURL
+	}
+	if overlay.PrivacyURL != "" {
+		base.PrivacyURL = overlay.PrivacyURL
+	}
+	if overlay.SocialPosition != "" {
+		base.SocialPosition = overlay.SocialPosition
+	}
+	if overlay.CustomCSS != "" {
+		base.CustomCSS = overlay.CustomCSS
+	}
+	if overlay.HideZitadel {
+		base.HideZitadel = true
+	}
+	if len(overlay.Consent) > 0 {
+		base.Consent = overlay.Consent
+	}
+	if overlay.Texts != nil {
+		if base.Texts == nil {
+			base.Texts = map[string]string{}
+		}
+		for k, v := range overlay.Texts {
+			base.Texts[k] = v
+		}
+	}
+	if overlay.Colors != nil {
+		if base.Colors == nil {
+			base.Colors = map[string]string{}
+		}
+		for k, v := range overlay.Colors {
+			base.Colors[k] = v
+		}
+	}
+	return base
 }
 
 // ─── Flow State Machine ────────────────────────────────────
@@ -383,6 +710,16 @@ type Flow struct {
 	RedirectURI  string            // OIDC redirect_uri (stored from auth request)
 	OIDCState    string            // OIDC state parameter
 	RegData      map[string]string // registration form data (accumulated)
+	LoginFlowID  string            // if set, login flow schema was used
+
+	// Client signal accumulation (populated during flow, sent to session on complete)
+	CaptchaProvider string  // "altcha", "hcaptcha", etc.
+	CaptchaVerified bool    // was captcha successfully verified?
+	CaptchaScore    float64 // score from score-based providers
+	PoWCompleted    bool    // was PoW challenge solved?
+	PoWDurationMs   float64 // how long the PoW solve took (client-reported)
+	VisitorID       string  // ThumbmarkJS persistent fingerprint
+	FingerprintHash string  // composite component hash
 }
 
 // FlowStore is an in-memory store for active login flows.
@@ -428,17 +765,18 @@ func BuildNodes(flow *Flow) []UINode {
 		texts = map[string]string{}
 	}
 
+	var nodes []UINode
 	switch flow.CurrentStep {
 	case StepIdentifier:
-		return buildIdentifierNodes(flow, cfg, texts)
+		nodes = buildIdentifierNodes(flow, cfg, texts)
 	case StepAuthSelect:
-		return buildAuthSelectNodes(flow, cfg, texts)
+		nodes = buildAuthSelectNodes(flow, cfg, texts)
 	case StepPassword:
-		return buildPasswordNodes(flow, texts)
+		nodes = buildPasswordNodes(flow, texts)
 	case StepMagicLink:
-		return buildMagicLinkSentNodes(flow, texts)
+		nodes = buildMagicLinkSentNodes(flow, texts)
 	case StepRegister:
-		return buildRegisterNodes(flow, cfg, texts)
+		nodes = buildRegisterNodes(flow, cfg, texts)
 	case StepComplete:
 		return []UINode{
 			{Type: "heading", Text: "Welcome!"},
@@ -448,40 +786,144 @@ func BuildNodes(flow *Flow) []UINode {
 	default:
 		return []UINode{{Type: "heading", Text: "Unknown step"}}
 	}
+
+	// Append captcha node if configured for this step.
+	if captchaActiveForStep(cfg.Captcha, flow.CurrentStep) {
+		cc := cfg.Captcha
+		attrs := map[string]string{}
+		switch cc.Provider {
+		case "altcha":
+			attrs["algorithm"] = cc.Algorithm
+			attrs["max-number"] = fmt.Sprintf("%d", cc.MaxNumber)
+			if cc.Mode != "" {
+				attrs["mode"] = cc.Mode
+			}
+			nodes = append(nodes, UINode{
+				Type:       "captcha_altcha",
+				Name:       "altcha_payload",
+				Attributes: attrs,
+			})
+		default:
+			// Generic captcha (hcaptcha, recaptcha, turnstile)
+			attrs["provider"] = cc.Provider
+			if cc.SiteKey != "" {
+				attrs["site-key"] = cc.SiteKey
+			}
+			if cc.Mode != "" {
+				attrs["mode"] = cc.Mode
+			}
+			nodes = append(nodes, UINode{
+				Type:       "captcha_checkbox",
+				Name:       "captcha_token",
+				Attributes: attrs,
+			})
+		}
+	}
+
+	// Append fingerprint collector node if configured for this step.
+	if fingerprintActiveForStep(cfg.Fingerprint, flow.CurrentStep) {
+		fp := cfg.Fingerprint
+		nodes = append(nodes, UINode{
+			Type: "fingerprint_collect",
+			Name: "visitor_id",
+			Attributes: map[string]string{
+				"provider": fp.Provider,
+				"persist":  fmt.Sprintf("%v", fp.Persist),
+			},
+		})
+	}
+
+	return nodes
 }
 
 func buildIdentifierNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]string) []UINode {
 	label := textOr(texts, "identifier_label", "Email or username")
 	placeholder := textOr(texts, "identifier_placeholder", "you@example.com")
 
-	nodes := []UINode{
-		{Type: "heading", Text: cfg.Branding.Heading},
-		{Type: "description", Text: cfg.Branding.Description},
-		{Type: "input", Name: "identifier", InputType: "text",
-			Label: label, Placeholder: placeholder,
-			Autocomplete: "username", Required: true,
-			Value: flow.Identifier}, // Pre-fill on back navigation
-		{Type: "submit", Label: textOr(texts, "continue_button", "Continue"), Action: "identifier"},
-	}
+	nodes := []UINode{}
 
 	// If passkey_first, add passkey button before identifier.
 	if cfg.Login.Preset == "passkey_first" {
 		if m := cfg.AuthMethods["passkey"]; m != nil && m.Enabled {
-			nodes = append([]UINode{
-				{Type: "heading", Text: cfg.Branding.Heading},
-				{Type: "description", Text: cfg.Branding.Description},
-				{Type: "button", Label: "🔑 Sign in with a passkey", Action: "passkey"},
-				{Type: "divider"},
-			}, nodes[2:]...) // keep input + submit, drop the duplicate heading
+			nodes = append(nodes,
+				UINode{Type: "heading", Text: cfg.Branding.Heading},
+				UINode{Type: "description", Text: cfg.Branding.Description},
+				UINode{Type: "button", Label: "🔑 Sign in with a passkey", Action: "passkey"},
+				UINode{Type: "divider"},
+			)
 		}
 	}
 
-	// Add registration link if allowed.
+	// Social providers at top (if configured).
+	if cfg.Branding.SocialPosition == "top" {
+		if m := cfg.AuthMethods["sso"]; m != nil && m.Enabled && len(flow.SSOProviders) > 0 {
+			children := make([]UINode, 0, len(flow.SSOProviders))
+			for _, p := range flow.SSOProviders {
+				children = append(children, UINode{
+					Type:         "sso_button",
+					ProviderID:   fmt.Sprintf("%v", p["id"]),
+					ProviderName: fmt.Sprintf("%v", p["name"]),
+					Template:     fmt.Sprintf("%v", p["template"]),
+					Label:        fmt.Sprintf("Login with %v", p["name"]),
+					Action:       "sso",
+				})
+			}
+			nodes = append(nodes, UINode{Type: "social_group", Children: children})
+			nodes = append(nodes, UINode{Type: "divider"})
+		}
+	}
+
+	// Heading + description (only if not already emitted by passkey_first).
+	if cfg.Login.Preset != "passkey_first" {
+		nodes = append(nodes,
+			UINode{Type: "heading", Text: cfg.Branding.Heading},
+			UINode{Type: "description", Text: cfg.Branding.Description},
+		)
+	}
+
+	// Identifier input + submit.
+	nodes = append(nodes,
+		UINode{Type: "input", Name: "identifier", InputType: "text",
+			Label: label, Placeholder: placeholder,
+			Autocomplete: "username", Required: true,
+			Value: flow.Identifier},
+		UINode{Type: "submit", Label: textOr(texts, "continue_button", "Continue"), Action: "identifier"},
+	)
+
+	// Social providers at bottom (default).
+	if cfg.Branding.SocialPosition == "bottom" {
+		if m := cfg.AuthMethods["sso"]; m != nil && m.Enabled && len(flow.SSOProviders) > 0 {
+			nodes = append(nodes, UINode{Type: "divider"})
+			for _, p := range flow.SSOProviders {
+				nodes = append(nodes, UINode{
+					Type:         "sso_button",
+					ProviderID:   fmt.Sprintf("%v", p["id"]),
+					ProviderName: fmt.Sprintf("%v", p["name"]),
+					Template:     fmt.Sprintf("%v", p["template"]),
+					Label:        fmt.Sprintf("Login with %v", p["name"]),
+					Action:       "sso",
+				})
+			}
+		}
+	}
+
+	// Registration link if allowed.
 	if cfg.Login.RegistrationAllowed {
 		nodes = append(nodes,
 			UINode{Type: "divider"},
 			UINode{Type: "registration_link", Label: textOr(texts, "register_link", "Don't have an account? Create one"), Action: "register"},
 		)
+	}
+
+	// Terms/privacy footer.
+	if cfg.Branding.TermsURL != "" || cfg.Branding.PrivacyURL != "" {
+		nodes = append(nodes, UINode{
+			Type: "terms_footer",
+			Attributes: map[string]string{
+				"terms_url":   cfg.Branding.TermsURL,
+				"privacy_url": cfg.Branding.PrivacyURL,
+			},
+		})
 	}
 
 	return nodes
@@ -507,6 +949,23 @@ func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 			UINode{Type: "input", Name: "password", InputType: "password",
 				Label:       textOr(texts, "password_label", "Password"),
 				Placeholder: "••••••••", Autocomplete: "current-password", Required: true},
+		)
+		// Password hint (forgot password) — auto-generated when any field has x-recover.
+		hasRecovery := false
+		for _, fc := range cfg.Fields {
+			if fc.Recovery != "" {
+				hasRecovery = true
+				break
+			}
+		}
+		if hasRecovery {
+			nodes = append(nodes, UINode{
+				Type:   "password_hint",
+				Label:  textOr(texts, "forgot_password", "Forgot your password?"),
+				Action: "forgot_password",
+			})
+		}
+		nodes = append(nodes,
 			UINode{Type: "submit", Label: textOr(texts, "signin_button", "Sign in with password"), Action: "password"},
 		)
 	}
@@ -580,7 +1039,7 @@ func buildMagicLinkSentNodes(flow *Flow, texts map[string]string) []UINode {
 
 // buildRegisterNodes generates registration form nodes from schema field definitions.
 func buildRegisterNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]string) []UINode {
-	nodes := make([]UINode, 0, 2+len(cfg.SchemaProps)+2)
+	nodes := make([]UINode, 0, 2+len(cfg.SchemaProps)*2+len(cfg.Branding.Consent)+2)
 	nodes = append(nodes,
 		UINode{Type: "heading", Text: textOr(texts, "register_heading", "Create your account")},
 		UINode{Type: "description", Text: textOr(texts, "register_description", "Enter your details to get started")},
@@ -627,6 +1086,25 @@ func buildRegisterNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]stri
 		}
 
 		nodes = append(nodes, node)
+
+		// Emit field_description node after the input for helper text.
+		if field.Description != "" {
+			nodes = append(nodes, UINode{
+				Type: "field_description",
+				Text: field.Description,
+				Name: field.Name,
+			})
+		}
+	}
+
+	// Consent checkboxes (from x-branding).
+	for _, consent := range cfg.Branding.Consent {
+		nodes = append(nodes, UINode{
+			Type:     "consent_checkbox",
+			Name:     "consent_" + consent.ID,
+			Label:    consent.Label,
+			Required: consent.Required,
+		})
 	}
 
 	nodes = append(nodes,

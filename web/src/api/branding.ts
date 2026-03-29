@@ -37,6 +37,12 @@ export interface UINode {
   pattern?: string
 }
 
+export interface ConsentItem {
+  id: string
+  label: string       // supports markdown links
+  required: boolean
+}
+
 export interface FlowBranding {
   heading: string
   description: string
@@ -48,6 +54,20 @@ export interface FlowBranding {
   texts: Record<string, string>
   custom_css: string
   hide_zitadel_branding: boolean
+  // Layout & visual
+  layout: string          // "centered" | "split" | "muted" | "card_image" | "minimal"
+  dark_mode: string       // "light" | "dark" | "auto"
+  cover_image: string     // URL for split/card_image layouts
+  logo_dark: string       // Alt logo for dark mode
+  favicon: string
+  border_radius: string   // "sm" | "md" | "lg" | "xl" | "full"
+  // Legal
+  terms_url: string
+  privacy_url: string
+  // Social
+  social_position: string // "top" | "bottom"
+  // Consent
+  consent: ConsentItem[]
 }
 
 export interface FlowError {

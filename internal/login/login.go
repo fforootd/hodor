@@ -5,6 +5,7 @@ package login
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/captcha"
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/httputil"
@@ -29,10 +31,15 @@ type Handler struct {
 	baseURL   string
 	flows     *FlowStore
 	cookies   *session.CookieConfig
+	captcha   *captcha.AltchaVerifier
 }
 
 // New creates a new login API handler.
 func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API, cookies *session.CookieConfig) *Handler {
+	// Generate a random HMAC key for Altcha PoW challenges.
+	// In production, this should come from config/secrets.
+	hmacKey, _ := captcha.GenerateHMACKey()
+
 	return &Handler{
 		db:        db,
 		passwords: passwords,
@@ -41,6 +48,7 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API, cookies *
 		baseURL:   "http://localhost:8080",
 		flows:     NewFlowStore(),
 		cookies:   cookies,
+		captcha:   captcha.NewAltchaVerifier(hmacKey, "SHA-256", 100000),
 	}
 }
 
@@ -54,6 +62,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/login/flows", h.handleFlowCreate)
 	mux.HandleFunc("POST /v1/login/flows/", h.handleFlowSubmit)
 	mux.HandleFunc("GET /v1/login/flows/", h.handleFlowGet)
+
+	// Captcha API — PoW challenge generation.
+	mux.HandleFunc("GET /v1/captcha/challenge", h.handleCaptchaChallenge)
 
 	// Magic Link (verification endpoint — used by email links).
 	mux.HandleFunc("POST /v1/auth/magic-link", h.handleMagicLinkRequest)
@@ -117,18 +128,26 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// loadSSOProviders reads enabled SSO providers from the database.
+// loadSSOProviders reads enabled SSO providers from the entities table.
 func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
+	je := h.db.JSONExtract
 	var ssoProviders []map[string]any
 	rows, err := h.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, template, protocol FROM providers WHERE enabled = 1 ORDER BY display_order, name`)
+		fmt.Sprintf(`SELECT e.id, e.identifier, e.data FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider' AND e.state = 'active'
+		 ORDER BY CAST(%s AS INTEGER), e.identifier`, je("e.data", "display_order")))
 	if err != nil {
 		return ssoProviders
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var pid, pname, ptemplate, pprotocol string
-		if rows.Scan(&pid, &pname, &ptemplate, &pprotocol) == nil {
+		var pid, pname, dataStr string
+		if rows.Scan(&pid, &pname, &dataStr) == nil {
+			var data map[string]any
+			json.Unmarshal([]byte(dataStr), &data)
+			ptemplate, _ := data["template"].(string)
+			pprotocol, _ := data["protocol"].(string)
 			ssoProviders = append(ssoProviders, map[string]any{
 				"id": pid, "name": pname, "template": ptemplate, "protocol": pprotocol,
 			})
@@ -318,7 +337,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 		`UPDATE entities SET state = 'active' WHERE id = ? AND state = 'pending'`, identityID)
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)
+	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return

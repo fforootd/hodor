@@ -84,6 +84,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Hierarchical settings CRUD (ADR-009)
 	a.RegisterSettingsRoutes(mux)
 
+	// OTel traces ingest (from browser SDK)
+	a.RegisterOTelRoutes(mux)
+
 	// Dynamic OpenAPI (generated from registry)
 	a.registerOpenAPIOperations()
 	mux.HandleFunc("GET /openapi.json", a.openAPISpecFromRegistry)
@@ -1059,12 +1062,8 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 		_ = rows.Err()
 	}
 
-	// Count providers separately (dedicated table).
-	var providerCount int
-	if err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM providers`).Scan(&providerCount); err == nil {
-		counts["provider"] = providerCount
-	}
+	// Providers are now entities — their count appears via the schema type join above.
+	// No separate provider count needed.
 
 	// Count orgs separately (dedicated table, org_id on entities).
 	var orgCount int
@@ -1083,7 +1082,7 @@ func (a *API) getMetaSchema(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(schema.MetaSchema))
 }
 
-// validateSchemaAnnotations validates x-auth-methods keys against the allowed set.
+// validateSchemaAnnotations validates x-* annotation keys against allowed sets.
 func validateSchemaAnnotations(schemaJSON []byte) string {
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(schemaJSON, &raw) != nil {
@@ -1103,6 +1102,98 @@ func validateSchemaAnnotations(schemaJSON []byte) string {
 		for key := range methods {
 			if !allowed[key] {
 				return fmt.Sprintf("unknown auth method %q in x-auth-methods; allowed: password, passkey, magic_link, sso, pat, api_key, client_cert", key)
+			}
+		}
+	}
+
+	// Validate x-captcha keys.
+	if captchaRaw, ok := raw["x-captcha"]; ok {
+		var captcha map[string]any
+		if json.Unmarshal(captchaRaw, &captcha) != nil {
+			return "x-captcha must be an object"
+		}
+		allowed := map[string]bool{
+			"provider": true, "mode": true, "difficulty": true,
+			"algorithm": true, "steps": true, "site_key": true, "secret_key": true,
+		}
+		for key := range captcha {
+			if !allowed[key] {
+				return fmt.Sprintf("unknown key %q in x-captcha; allowed: provider, mode, difficulty, algorithm, steps, site_key, secret_key", key)
+			}
+		}
+		// Validate provider value.
+		if p, ok := captcha["provider"].(string); ok {
+			validProviders := map[string]bool{
+				"altcha": true, "hcaptcha": true, "recaptcha": true, "turnstile": true, "none": true,
+			}
+			if !validProviders[p] {
+				return fmt.Sprintf("unknown captcha provider %q; allowed: altcha, hcaptcha, recaptcha, turnstile, none", p)
+			}
+		}
+		// Validate mode value.
+		if m, ok := captcha["mode"].(string); ok {
+			validModes := map[string]bool{"always": true, "risk_based": true, "never": true}
+			if !validModes[m] {
+				return fmt.Sprintf("unknown captcha mode %q; allowed: always, risk_based, never", m)
+			}
+		}
+	}
+
+	// Validate x-fingerprint keys.
+	if fpRaw, ok := raw["x-fingerprint"]; ok {
+		var fp map[string]any
+		if json.Unmarshal(fpRaw, &fp) != nil {
+			return "x-fingerprint must be an object"
+		}
+		allowed := map[string]bool{
+			"enabled": true, "provider": true, "persist": true, "steps": true,
+		}
+		for key := range fp {
+			if !allowed[key] {
+				return fmt.Sprintf("unknown key %q in x-fingerprint; allowed: enabled, provider, persist, steps", key)
+			}
+		}
+		if p, ok := fp["provider"].(string); ok {
+			if p != "thumbmarkjs" && p != "built_in" {
+				return fmt.Sprintf("unknown fingerprint provider %q; allowed: thumbmarkjs, built_in", p)
+			}
+		}
+	}
+
+	// Validate x-rate-limit keys.
+	if rlRaw, ok := raw["x-rate-limit"]; ok {
+		var rl map[string]any
+		if json.Unmarshal(rlRaw, &rl) != nil {
+			return "x-rate-limit must be an object"
+		}
+		allowed := map[string]bool{
+			"max_attempts": true, "window_seconds": true, "lockout_seconds": true, "scope": true,
+		}
+		for key := range rl {
+			if !allowed[key] {
+				return fmt.Sprintf("unknown key %q in x-rate-limit; allowed: max_attempts, window_seconds, lockout_seconds, scope", key)
+			}
+		}
+		if s, ok := rl["scope"].(string); ok {
+			validScopes := map[string]bool{"ip": true, "identifier": true, "fingerprint": true}
+			if !validScopes[s] {
+				return fmt.Sprintf("unknown rate limit scope %q; allowed: ip, identifier, fingerprint", s)
+			}
+		}
+	}
+
+	// Validate x-login-flow keys.
+	if lfRaw, ok := raw["x-login-flow"]; ok {
+		var lf map[string]any
+		if json.Unmarshal(lfRaw, &lf) != nil {
+			return "x-login-flow must be an object"
+		}
+		allowed := map[string]bool{
+			"flow_id": true, "inherit": true, "override": true,
+		}
+		for key := range lf {
+			if !allowed[key] {
+				return fmt.Sprintf("unknown key %q in x-login-flow; allowed: flow_id, inherit, override", key)
 			}
 		}
 	}
@@ -1395,9 +1486,10 @@ func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchR
 
 func (a *API) searchProviders(r *http.Request, pattern string, limit int) []SearchResult {
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, protocol, template FROM providers
-		 WHERE name LIKE ? OR template LIKE ?
-		 ORDER BY name LIMIT ?`,
+		`SELECT e.id, e.identifier, e.data FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider' AND (e.identifier LIKE ? OR e.display_name LIKE ?)
+		 ORDER BY e.identifier LIMIT ?`,
 		pattern, pattern, limit)
 	if err != nil {
 		return nil
@@ -1405,10 +1497,14 @@ func (a *API) searchProviders(r *http.Request, pattern string, limit int) []Sear
 	defer rows.Close()
 	var results []SearchResult
 	for rows.Next() {
-		var provID, name, protocol, tmpl string
-		if err := rows.Scan(&provID, &name, &protocol, &tmpl); err != nil {
+		var provID, name, dataStr string
+		if err := rows.Scan(&provID, &name, &dataStr); err != nil {
 			continue
 		}
+		var data map[string]any
+		json.Unmarshal([]byte(dataStr), &data)
+		protocol, _ := data["protocol"].(string)
+		tmpl, _ := data["template"].(string)
 		results = append(results, SearchResult{
 			ResourceType: "provider",
 			ID:           provID,

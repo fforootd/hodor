@@ -15,7 +15,8 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@zitadel/client-js": ["./src/lib/zitadel-client-stub.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.vue"],

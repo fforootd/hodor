@@ -1,0 +1,174 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, and layout behavior. Inherits from the instance default and can be overridden at org/project/app level (ADR-009).",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable flow name (e.g. 'Passkey-First Login', 'High-Security MFA')"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional longer description of this flow's purpose"
+    },
+    "is_default": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, this flow is the default for its scope (instance/org/app)"
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["instance", "org", "project", "app"],
+      "default": "instance",
+      "description": "Level at which this flow applies (ADR-009 cascade)"
+    },
+    "app_id": {
+      "type": "string",
+      "description": "If scope=app, the specific app this flow is bound to"
+    },
+    "captcha": {
+      "type": "object",
+      "description": "Captcha configuration (x-captcha)",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["altcha", "hcaptcha", "recaptcha", "turnstile", "none"],
+          "default": "altcha"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["always", "risk_based", "never"],
+          "default": "risk_based"
+        },
+        "difficulty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 3
+        },
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["identifier", "password"],
+          "description": "Which login steps require captcha"
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "description": "Browser fingerprinting configuration (x-fingerprint)",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["thumbmarkjs", "built_in"],
+          "default": "thumbmarkjs"
+        },
+        "persist": {
+          "type": "boolean",
+          "default": true,
+          "description": "Store fingerprint across sessions for returning-user detection"
+        },
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["identifier"],
+          "description": "Which login steps trigger fingerprint collection"
+        }
+      }
+    },
+    "rate_limit": {
+      "type": "object",
+      "description": "Rate limiting configuration (x-rate-limit)",
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "default": 5
+        },
+        "window_seconds": {
+          "type": "integer",
+          "default": 300
+        },
+        "lockout_seconds": {
+          "type": "integer",
+          "default": 900
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["ip", "identifier", "fingerprint"],
+          "default": "ip"
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "OTel telemetry configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Collect browser telemetry (page load, interactions)"
+        },
+        "sample_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1.0,
+          "description": "Client-side sampling rate (1.0 = all, 0.1 = 10%)"
+        }
+      }
+    },
+    "branding": {
+      "type": "object",
+      "description": "Layout and branding overrides for this flow",
+      "properties": {
+        "layout": {
+          "type": "string",
+          "enum": ["centered", "split", "muted", "card_image", "minimal"],
+          "description": "Override the default layout"
+        },
+        "dark_mode": {
+          "type": "string",
+          "enum": ["light", "dark", "auto"]
+        },
+        "cover_image": {
+          "type": "string",
+          "description": "URL for split/card_image layouts"
+        },
+        "hide_registration": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "description": "Per-step overrides (keyed by step name)",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "skip": { "type": "boolean", "default": false },
+          "captcha_required": { "type": "boolean" },
+          "mfa_required": { "type": "boolean" },
+          "custom_heading": { "type": "string" },
+          "custom_description": { "type": "string" }
+        }
+      }
+    },
+    "template_id": {
+      "type": "string",
+      "description": "Marketplace template this flow was installed from"
+    },
+    "template_version": {
+      "type": "string",
+      "description": "Version of the marketplace template"
+    }
+  },
+  "required": [
+    "display_name"
+  ]
+}

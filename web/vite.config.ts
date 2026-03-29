@@ -27,7 +27,10 @@ function spaFallback(): Plugin {
 export default defineConfig({
   plugins: [vue(), tailwindcss(), spaFallback()],
   resolve: {
-    alias: { '@': resolve(__dirname, 'src') },
+    alias: {
+      '@': resolve(__dirname, 'src'),
+      '@zitadel/client-js': resolve(__dirname, 'src/lib/zitadel-client-stub.ts'),
+    },
   },
   build: {
     outDir: 'dist',

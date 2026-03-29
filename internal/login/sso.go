@@ -52,27 +52,34 @@ func (h *Handler) RegisterSSORoutes(mux *http.ServeMux) {
 func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	providerID := r.PathValue("provider_id")
 
-	// Load provider config.
-	var configJSON, protocol string
-	var enabled bool
+	// Load provider config from entities table.
+	var dataJSON, entityState string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT protocol, config, enabled FROM providers WHERE id = ?`, providerID,
-	).Scan(&protocol, &configJSON, &enabled)
+		`SELECT e.data, e.state FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE e.id = ? AND s.type = 'provider'`, providerID,
+	).Scan(&dataJSON, &entityState)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
-	if !enabled {
+	if entityState != "active" {
 		httputil.WriteError(w, http.StatusForbidden, "provider is disabled")
 		return
 	}
+	var provData map[string]any
+	_ = json.Unmarshal([]byte(dataJSON), &provData)
+	protocol, _ := provData["protocol"].(string)
+	configMap, _ := provData["config"].(map[string]any)
+	configJSON, _ := json.Marshal(configMap)
 	if protocol != "oidc" {
 		httputil.WriteError(w, http.StatusBadRequest, "only OIDC providers are supported")
 		return
 	}
+	configJSONStr := string(configJSON)
 
 	var cfg oidcConfig
-	_ = json.Unmarshal([]byte(configJSON), &cfg)
+	_ = json.Unmarshal([]byte(configJSONStr), &cfg)
 
 	// Substitute tenant_id in issuer if present.
 	issuer := cfg.Issuer
@@ -153,20 +160,29 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	// Delete used state.
 	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM sso_states WHERE state = ?`, state)
 
-	// Load provider.
-	var configJSON, overridesJSON, template string
-	var autoRegister bool
+	// Load provider from entities table.
+	var provDataJSON string
 	err = h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT config, claim_overrides, template, auto_register FROM providers WHERE id = ?`, providerID,
-	).Scan(&configJSON, &overridesJSON, &template, &autoRegister)
+		`SELECT e.data FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE e.id = ? AND s.type = 'provider'`, providerID,
+	).Scan(&provDataJSON)
 	if err != nil {
 		logging.Printf("[sso] provider lookup failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_config", http.StatusFound)
 		return
 	}
+	var provData2 map[string]any
+	_ = json.Unmarshal([]byte(provDataJSON), &provData2)
+	configMap2, _ := provData2["config"].(map[string]any)
+	configJSON2, _ := json.Marshal(configMap2)
+	overrideMap, _ := provData2["claim_overrides"].(map[string]any)
+	overridesJSON2, _ := json.Marshal(overrideMap)
+	template, _ := provData2["template"].(string)
+	autoRegister, _ := provData2["auto_register"].(bool)
 
 	var cfg oidcConfig
-	_ = json.Unmarshal([]byte(configJSON), &cfg)
+	_ = json.Unmarshal(configJSON2, &cfg)
 
 	issuer := cfg.Issuer
 	if cfg.TenantID != "" {
@@ -214,7 +230,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Find or create linked account.
-	identityID, err := h.findOrCreateLinkedIdentity(r.Context(), providerID, externalSub, externalEmail, claims, overridesJSON, autoRegister)
+	identityID, err := h.findOrCreateLinkedIdentity(r.Context(), providerID, externalSub, externalEmail, claims, string(overridesJSON2), autoRegister)
 	if err != nil {
 		logging.Printf("[sso] link/create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_link_failed", http.StatusFound)
@@ -222,7 +238,7 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)
+	sessResp, err := h.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		logging.Printf("[sso] session create failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_session", http.StatusFound)

@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/captcha"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/session"
@@ -92,6 +94,10 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		h.flowTransitionToRegister(w, r, flow)
 	case "register_submit":
 		h.flowSubmitRegister(w, r, flow, req)
+	case "captcha_submit":
+		h.flowSubmitCaptcha(w, r, flow, req)
+	case "fingerprint_submit":
+		h.flowSubmitFingerprint(w, r, flow, req)
 	case "back":
 		flow.CurrentStep = StepIdentifier
 		flow.IdentityID = ""
@@ -384,7 +390,18 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 
 func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	// Create session via the existing API.
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IdentityID, r.UserAgent(), r.RemoteAddr)
+	// Collect accumulated client signals from the flow.
+	signals := &api.ClientSignals{
+		CaptchaProvider: flow.CaptchaProvider,
+		CaptchaVerified: flow.CaptchaVerified,
+		CaptchaScore:    flow.CaptchaScore,
+		PoWCompleted:    flow.PoWCompleted,
+		PoWDurationMs:   flow.PoWDurationMs,
+		VisitorID:       flow.VisitorID,
+		FingerprintHash: flow.FingerprintHash,
+		TraceID:         r.Header.Get("traceparent"),
+	}
+	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IdentityID, r.UserAgent(), r.RemoteAddr, signals)
 	if err != nil {
 		flow.Errors = append(flow.Errors, FlowError{Code: "session_failed", Message: "Failed to create session. Please try again."})
 		h.flows.Put(flow)
@@ -449,4 +466,50 @@ func extractFlowIDFromPath(path string) string {
 	rest := strings.TrimPrefix(path, prefix)
 	rest = strings.TrimSuffix(rest, "/")
 	return rest
+}
+
+// handleCaptchaChallenge generates an Altcha PoW challenge.
+// GET /v1/captcha/challenge
+func (h *Handler) handleCaptchaChallenge(w http.ResponseWriter, r *http.Request) {
+	challenge, err := h.captcha.CreateChallenge()
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to create challenge")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, challenge)
+}
+
+// flowSubmitCaptcha handles the "captcha_submit" action.
+// The client sends the Altcha PoW payload after solving the challenge.
+func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow *Flow, req map[string]string) {
+	payload := req["altcha_payload"]
+	if payload == "" {
+		flow.Errors = append(flow.Errors, FlowError{Code: "captcha_missing", Message: "Captcha verification required."})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		return
+	}
+
+	result := captcha.VerifyAltcha(h.captcha, payload)
+	flow.CaptchaProvider = "altcha"
+	flow.CaptchaVerified = result.Valid
+	flow.CaptchaScore = result.Score
+	flow.PoWCompleted = result.PoWCompleted
+	flow.PoWDurationMs = result.PoWDurationMs
+
+	if !result.Valid {
+		flow.Errors = append(flow.Errors, FlowError{Code: "captcha_failed", Message: "Captcha verification failed. Please try again."})
+	}
+
+	h.flows.Put(flow)
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+}
+
+// flowSubmitFingerprint handles the "fingerprint_submit" action.
+// The client sends the ThumbmarkJS visitor ID after collecting it.
+func (h *Handler) flowSubmitFingerprint(w http.ResponseWriter, r *http.Request, flow *Flow, req map[string]string) {
+	flow.VisitorID = req["visitor_id"]
+	flow.FingerprintHash = req["fingerprint_hash"]
+	h.flows.Put(flow)
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }

@@ -3,6 +3,12 @@
   "$version": "1.0",
   "type": "object",
   "description": "External identity provider (OIDC, SAML, social login).",
+  "x-storage": "entities",
+  "x-display": {
+    "alias": "Providers",
+    "path": "providers",
+    "icon": "shield"
+  },
   "properties": {
     "display_name": {
       "type": "string",
@@ -17,6 +23,10 @@
         "ldap"
       ],
       "description": "Protocol type"
+    },
+    "template": {
+      "type": "string",
+      "description": "Template ID (google, entraid, gitlab, apple, custom)"
     },
     "issuer": {
       "type": "string",
@@ -41,9 +51,17 @@
         "email"
       ]
     },
+    "config": {
+      "type": "object",
+      "description": "Protocol-specific configuration (issuer, client_id, scopes, etc.)"
+    },
     "claim_mapping": {
       "type": "object",
       "description": "Map external claims to Zitadel fields"
+    },
+    "claim_overrides": {
+      "type": "object",
+      "description": "Expression-based claim override mappings"
     },
     "auto_register": {
       "type": "boolean",
@@ -67,6 +85,11 @@
     "enabled": {
       "type": "boolean",
       "default": true
+    },
+    "display_order": {
+      "type": "integer",
+      "default": 0,
+      "description": "Sort order for login page display"
     }
   },
   "required": [

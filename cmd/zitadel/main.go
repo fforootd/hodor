@@ -160,13 +160,16 @@ func startCmd() *cobra.Command {
 
 				// Auto-provision mock provider if not exists.
 				var count int
-				db.SQL().QueryRow(`SELECT COUNT(*) FROM providers WHERE id = 'prov_mock_oidc'`).Scan(&count)
+				db.SQL().QueryRow(`SELECT COUNT(*) FROM entities WHERE id = 'prov_mock_oidc'`).Scan(&count)
 				if count == 0 {
+					mockConfig := fmt.Sprintf(`{"issuer":"%s","client_id":"%s","client_secret":"%s","scopes":"openid email profile"}`,
+						mock.Issuer(), mock.ClientID(), mock.ClientSecret())
+					data := fmt.Sprintf(`{"protocol":"oidc","template":"custom","config":%s,"claim_overrides":{},"auto_register":true,"enabled":true,"display_order":99}`,
+						mockConfig)
 					db.SQL().Exec(
-						`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
-						 VALUES ('prov_mock_oidc', 1, 'Mock OIDC (dev)', 'oidc', 'custom', ?, '{}', 1, 1, 99, datetime('now'), datetime('now'))`,
-						fmt.Sprintf(`{"issuer":"%s","client_id":"%s","client_secret":"%s","scopes":"openid email profile"}`,
-							mock.Issuer(), mock.ClientID(), mock.ClientSecret()),
+						`INSERT INTO entities (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
+						 VALUES ('prov_mock_oidc', '1', 'provider_v1', 'Mock OIDC (dev)', 'Mock OIDC (dev)', 'active', ?, datetime('now'), datetime('now'))`,
+						data,
 					)
 					logging.Printf("[mock-oidc] provider auto-provisioned (id: prov_mock_oidc)")
 				}

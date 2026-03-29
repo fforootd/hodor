@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/crypto"
+	"github.com/zitadel/zitadel/internal/id"
 )
 
 // ProviderTemplate defines a preconfigured IDP preset.
@@ -71,6 +72,9 @@ var providerTemplates = []ProviderTemplate{
 		},
 	},
 }
+
+// providerSchemaID is the schema_id used for provider entities.
+const providerSchemaID = "provider_v1"
 
 // RegisterProviderRoutes mounts provider CRUD endpoints.
 func (a *API) RegisterProviderRoutes(mux *http.ServeMux) {
@@ -144,14 +148,7 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	providerID := fmt.Sprintf("prov_%s", generateShortID())
-
-	configJSON, _ := json.Marshal(req.Config)
-	overridesJSON := "{}"
-	if req.ClaimOverrides != nil {
-		b, _ := json.Marshal(req.ClaimOverrides)
-		overridesJSON = string(b)
-	}
+	providerID := id.New()
 
 	autoReg := true
 	if req.AutoRegister != nil {
@@ -162,15 +159,34 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
+	// Build entity data JSONB.
+	overrides := map[string]string{}
+	if req.ClaimOverrides != nil {
+		overrides = req.ClaimOverrides
+	}
+	data := map[string]any{
+		"protocol":        req.Protocol,
+		"template":        req.Template,
+		"config":          req.Config,
+		"claim_overrides": overrides,
+		"auto_register":   autoReg,
+		"enabled":         enabled,
+		"display_order":   req.DisplayOrder,
+	}
+	dataJSON, _ := json.Marshal(data)
+
+	state := "active"
+	if !enabled {
+		state = "inactive"
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		providerID, req.Name, req.Protocol, req.Template,
-		string(configJSON), overridesJSON,
-		autoReg, enabled, req.DisplayOrder,
-		now, now,
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, data, created_at, updated_at)
+		 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?)`,
+		providerID, req.Name, req.Name, state, providerSchemaID,
+		string(dataJSON), now, now,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "create provider failed: "+err.Error())
@@ -193,9 +209,13 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 // --- List ---
 
 func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
+	je := a.db.JSONExtract
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at
-		 FROM providers ORDER BY display_order, name`)
+		fmt.Sprintf(`SELECT e.id, e.identifier, e.display_name, e.state, e.data, e.created_at, e.updated_at
+		 FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider'
+		 ORDER BY CAST(%s AS INTEGER), e.display_name`, je("e.data", "display_order")))
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -204,24 +224,34 @@ func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
 
 	var providers []map[string]any
 	for rows.Next() {
-		var id, name, protocol, template, config, overrides, createdAt, updatedAt string
-		var autoReg, enabled bool
-		var displayOrder int
-		if err := rows.Scan(&id, &name, &protocol, &template, &config, &overrides, &autoReg, &enabled, &displayOrder, &createdAt, &updatedAt); err != nil {
+		var eid, identifier, state, dataStr, createdAt, updatedAt string
+		var displayName string
+		if err := rows.Scan(&eid, &identifier, &displayName, &state, &dataStr, &createdAt, &updatedAt); err != nil {
 			continue
 		}
 
-		var configMap map[string]any
-		json.Unmarshal([]byte(config), &configMap)
-		// Strip client_secret from list responses.
-		delete(configMap, "client_secret")
+		var data map[string]any
+		json.Unmarshal([]byte(dataStr), &data)
 
-		var overridesMap map[string]string
-		json.Unmarshal([]byte(overrides), &overridesMap)
+		// Extract fields from data for backward-compatible response shape.
+		configMap, _ := data["config"].(map[string]any)
+		if configMap != nil {
+			// Strip client_secret from list responses.
+			delete(configMap, "client_secret")
+		}
+		overridesMap, _ := data["claim_overrides"].(map[string]any)
+		autoReg, _ := data["auto_register"].(bool)
+		enabled, _ := data["enabled"].(bool)
+		displayOrder := 0
+		if do, ok := data["display_order"].(float64); ok {
+			displayOrder = int(do)
+		}
+		protocol, _ := data["protocol"].(string)
+		template, _ := data["template"].(string)
 
 		providers = append(providers, map[string]any{
-			"id":              id,
-			"name":            name,
+			"id":              eid,
+			"name":            identifier,
 			"protocol":        protocol,
 			"template":        template,
 			"config":          configMap,
@@ -247,29 +277,37 @@ func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
 // --- Get ---
 
 func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	pid := r.PathValue("id")
 
-	var name, protocol, template, config, overrides, createdAt, updatedAt string
-	var autoReg, enabled bool
-	var displayOrder int
+	var identifier, displayName, state, dataStr, createdAt, updatedAt string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at
-		 FROM providers WHERE id = ?`, id,
-	).Scan(&name, &protocol, &template, &config, &overrides, &autoReg, &enabled, &displayOrder, &createdAt, &updatedAt)
+		`SELECT e.identifier, e.display_name, e.state, e.data, e.created_at, e.updated_at
+		 FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE e.id = ? AND s.type = 'provider'`, pid,
+	).Scan(&identifier, &displayName, &state, &dataStr, &createdAt, &updatedAt)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
-	var configMap map[string]any
-	json.Unmarshal([]byte(config), &configMap)
+	var data map[string]any
+	json.Unmarshal([]byte(dataStr), &data)
 
-	var overridesMap map[string]string
-	json.Unmarshal([]byte(overrides), &overridesMap)
+	configMap, _ := data["config"].(map[string]any)
+	overridesMap, _ := data["claim_overrides"].(map[string]any)
+	autoReg, _ := data["auto_register"].(bool)
+	enabled, _ := data["enabled"].(bool)
+	displayOrder := 0
+	if do, ok := data["display_order"].(float64); ok {
+		displayOrder = int(do)
+	}
+	protocol, _ := data["protocol"].(string)
+	template, _ := data["template"].(string)
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"id":              id,
-		"name":            name,
+		"id":              pid,
+		"name":            identifier,
 		"protocol":        protocol,
 		"template":        template,
 		"config":          configMap,
@@ -285,7 +323,7 @@ func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
 // --- Update ---
 
 func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	pid := r.PathValue("id")
 
 	var req map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -293,38 +331,60 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load current entity data.
+	var currentDataStr string
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT e.data FROM entities e
+		 JOIN schemas s ON e.schema_id = s.id
+		 WHERE e.id = ? AND s.type = 'provider'`, pid,
+	).Scan(&currentDataStr)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "provider not found")
+		return
+	}
+
+	var data map[string]any
+	json.Unmarshal([]byte(currentDataStr), &data)
+
+	// Apply updates to the data map.
 	sets := []string{"updated_at = datetime('now')"}
+	if a.db.Dialect() == "postgres" {
+		sets = []string{"updated_at = NOW()"}
+	}
 	args := []any{}
 
 	if v, ok := req["name"].(string); ok {
-		sets = append(sets, "name = ?")
-		args = append(args, v)
+		sets = append(sets, "identifier = ?", "display_name = ?")
+		args = append(args, v, v)
 	}
 	if v, ok := req["enabled"].(bool); ok {
-		sets = append(sets, "enabled = ?")
-		args = append(args, v)
+		data["enabled"] = v
+		if v {
+			sets = append(sets, "state = 'active'")
+		} else {
+			sets = append(sets, "state = 'inactive'")
+		}
 	}
 	if v, ok := req["auto_register"].(bool); ok {
-		sets = append(sets, "auto_register = ?")
-		args = append(args, v)
+		data["auto_register"] = v
 	}
 	if v, ok := req["display_order"].(float64); ok {
-		sets = append(sets, "display_order = ?")
-		args = append(args, int(v))
+		data["display_order"] = int(v)
 	}
 	if v, ok := req["config"].(map[string]any); ok {
-		b, _ := json.Marshal(v)
-		sets = append(sets, "config = ?")
-		args = append(args, string(b))
+		data["config"] = v
 	}
 	if v, ok := req["claim_overrides"].(map[string]any); ok {
-		b, _ := json.Marshal(v)
-		sets = append(sets, "claim_overrides = ?")
-		args = append(args, string(b))
+		data["claim_overrides"] = v
 	}
 
-	args = append(args, id)
-	query := fmt.Sprintf("UPDATE providers SET %s WHERE id = ?", strings.Join(sets, ", "))
+	// Serialize updated data.
+	dataJSON, _ := json.Marshal(data)
+	sets = append(sets, "data = ?")
+	args = append(args, string(dataJSON))
+
+	args = append(args, pid)
+	query := fmt.Sprintf("UPDATE entities SET %s WHERE id = ?", strings.Join(sets, ", "))
 
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
@@ -343,9 +403,10 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 // --- Delete ---
 
 func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	pid := r.PathValue("id")
 
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM providers WHERE id = ?`, id)
+	result, err := a.db.SQL().ExecContext(r.Context(),
+		`DELETE FROM entities WHERE id = ? AND schema_id IN (SELECT id FROM schemas WHERE type = 'provider')`, pid)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -357,9 +418,9 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Also delete linked accounts.
-	a.db.SQL().ExecContext(r.Context(), `DELETE FROM linked_accounts WHERE provider_id = ?`, id)
+	a.db.SQL().ExecContext(r.Context(), `DELETE FROM linked_accounts WHERE provider_id = ?`, pid)
 
-	emitEventSimple(r.Context(), a.db.SQL(), "provider.deleted", "", id, "provider", map[string]any{"provider_id": id})
+	emitEventSimple(r.Context(), a.db.SQL(), "provider.deleted", "", pid, "provider", map[string]any{"provider_id": pid})
 	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "deleted"})

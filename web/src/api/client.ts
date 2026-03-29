@@ -49,6 +49,17 @@ function handleUnauthorized() {
   }, 1500)
 }
 
+// Dynamic credentials mode: 'include' for cross-origin (WC embedding), 'same-origin' for same-origin.
+function credentialsMode(): RequestCredentials {
+  if (!BASE_URL) return 'same-origin'
+  try {
+    const apiOrigin = new URL(BASE_URL, window.location.origin).origin
+    return apiOrigin !== window.location.origin ? 'include' : 'same-origin'
+  } catch {
+    return 'same-origin'
+  }
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const resp = await fetch(`${BASE_URL}${path}`, {
     ...opts,
@@ -56,7 +67,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
       'Content-Type': 'application/json',
       ...opts.headers,
     },
-    credentials: 'same-origin',
+    credentials: credentialsMode(),
   })
 
   if (!resp.ok) {

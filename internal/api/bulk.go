@@ -166,9 +166,11 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: "name required"}
 	}
 
-	// Check conflict.
+	// Check conflict in entities table.
 	var existing string
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM providers WHERE name = ?`, p.Name).Scan(&existing)
+	err := tx.QueryRowContext(r.Context(),
+		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider' AND e.identifier = ?`, p.Name).Scan(&existing)
 	if err == nil {
 		if onConflict == "skip" {
 			return ImportResult{Index: idx, Resource: "provider", Status: "skipped", ID: existing, Reason: "name exists"}
@@ -187,25 +189,34 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 		p.Template = "custom"
 	}
 
-	configJSON := "{}"
+	configMap := map[string]any{}
 	if p.Config != nil {
-		b, _ := json.Marshal(p.Config)
-		configJSON = string(b)
+		configMap = p.Config
 	}
-	overridesJSON := "{}"
+	overrideMap := map[string]string{}
 	if p.ClaimOverrides != nil {
-		b, _ := json.Marshal(p.ClaimOverrides)
-		overridesJSON = string(b)
+		overrideMap = p.ClaimOverrides
 	}
 	autoReg := true
 	if p.AutoRegister != nil {
 		autoReg = *p.AutoRegister
 	}
 
+	data := map[string]any{
+		"protocol":        p.Protocol,
+		"template":        p.Template,
+		"config":          configMap,
+		"claim_overrides": overrideMap,
+		"auto_register":   autoReg,
+		"enabled":         true,
+		"display_order":   0,
+	}
+	dataJSON, _ := json.Marshal(data)
+
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, ?, 1, 0, datetime('now'), datetime('now'))`,
-		provID, p.Name, p.Protocol, p.Template, configJSON, overridesJSON, autoReg)
+		`INSERT INTO entities (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
+		 VALUES (?, '1', 'provider_v1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
+		provID, p.Name, p.Name, string(dataJSON))
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: err.Error()}
 	}
@@ -289,9 +300,11 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "identity not found: " + la.IdentityIdentifier}
 	}
 
-	// Resolve provider by name.
+	// Resolve provider by name from entities table.
 	var providerID string
-	err = tx.QueryRowContext(r.Context(), `SELECT id FROM providers WHERE name = ?`, la.ProviderName).Scan(&providerID)
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT e.id FROM entities e JOIN schemas s ON e.schema_id = s.id
+		 WHERE s.type = 'provider' AND e.identifier = ?`, la.ProviderName).Scan(&providerID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "provider not found: " + la.ProviderName}
 	}

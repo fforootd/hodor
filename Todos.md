@@ -1,5 +1,6 @@
 # Hodor Todos
 
+- Should we also store the flows? In the events... also we want to instrument them meaning the client provides trace context and so on
 - Timestamps should be local time not UTC in the UI
 - Secrets generator defaults.... I think we should store that on the user schemas
 - toml really the best idea? Should we consider creating a schema for the config instead?
@@ -15,7 +16,7 @@
 - Use Goose for DB migrations
 - User Uniqeness per org not per instance
 - Make sure uniqness is given for ids as well as username or other fields from schemas
-- Test onboarding wizard... a) if it even works and b) security wise
+- Test first time onboarding wizard... a) if it even works and b) security wise
 - ~~Caching, etag, cache control, hot path in-memory, redis, sql? (some after load tests)~~ ✅ ADR-017: tiered caching (L1 in-db, L2 SQLite, L3 Redis opt-in, L4 HTTP/ETag)
 - Frontend Packages and webcomponents
 - ~~Circuit Breakers for non critical stuff OTEL... Analytics, to be sure OLPT keeps stable~~ ✅ CB on OTEL sink, drainer, and analytics
@@ -39,3 +40,4 @@
 - Implement L4 HTTP caching: ETag for OIDC Discovery, JWKS, schema definitions
 - Implement SQLite kv_cache + query_cache tables (ADR-017 L2 expansion)
 - Generic Cache[K,V] interface implementation (SQLite + in-memory + Redis backends)
+- Token settings per instance - per org - per project - per app

@@ -122,7 +122,7 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session via api package (emits session.created).
-	sessResp, err := u.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr)
+	sessResp, err := u.api.CreateSessionInternal(r.Context(), identityID, r.UserAgent(), r.RemoteAddr, nil)
 	if err != nil {
 		logging.Printf("create session failed: %v", err)
 		renderLoginPage(w, "Failed to create session", redirectTo)
