@@ -61,7 +61,7 @@ type ImportResult struct {
 // RegisterBulkRoutes mounts import and bulk endpoints.
 func (a *API) RegisterBulkRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/import", a.requireAdmin(a.handleImport))
-	mux.HandleFunc("POST /v1/entities/bulk", a.requireAdmin(a.handleEntitiesBulk))
+	mux.HandleFunc("POST /v1/admin/bulk", a.requireAdmin(a.handleEntitiesBulk))
 }
 
 // --- Global Import ---

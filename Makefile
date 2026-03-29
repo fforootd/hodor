@@ -1,4 +1,4 @@
-.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt fmt-check vet release-snapshot quality check
+.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt fmt-check vet release-snapshot quality check openapi-export client-js
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
@@ -39,11 +39,11 @@ webdist-only:
 
 # Development — run server with embedded assets.
 dev: webdist
-	go run ./cmd/zitadel serve
+	go run ./cmd/zitadel start
 
 # Development with mock OIDC + seed data.
 dev-full: webdist
-	go run ./cmd/zitadel serve -c fixtures/zitadel.dev.toml
+	go run ./cmd/zitadel start -c fixtures/zitadel.dev.toml
 
 # Hot reload development — Vite HMR on :5173 proxying to Go on :8080.
 # Access the app at http://localhost:5173 for instant CSS/JS reloads.
@@ -57,7 +57,7 @@ dev-hot: node_modules
 	@sleep 0.5
 	@trap 'kill 0' EXIT; \
 	npm run dev & \
-	go run ./cmd/zitadel serve -c fixtures/zitadel.dev.toml
+	go run ./cmd/zitadel start -c fixtures/zitadel.dev.toml
 
 # Clean start — wipe DB and restart with dev config.
 dev-clean:
@@ -117,11 +117,19 @@ build: webdist
 release-snapshot: webdist
 	goreleaser release --snapshot --clean
 
-# Generate code (proto, templ, sqlc — placeholders).
-generate:
-	@echo "TODO: buf generate"
-	@echo "TODO: templ generate"
-	@echo "TODO: sqlc generate"
+# ─── SDK Generation ────────────────────────────────────────
+
+# Export OpenAPI 3.1 spec from Go types (no server/DB needed).
+openapi-export: webdist
+	go run ./cmd/zitadel openapi-export > packages/openapi.json
+
+# Generate TypeScript SDK from OpenAPI spec.
+client-js: openapi-export node_modules
+	npm run generate -w packages/client-js
+
+# Generate all code.
+generate: client-js
+	@echo "✅ SDK generated"
 
 # ─── Quality (all-in-one) ──────────────────────────────────
 

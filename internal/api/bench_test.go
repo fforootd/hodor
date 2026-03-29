@@ -139,7 +139,7 @@ func BenchmarkAPICreateIdentity(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		status, _ := benchDoJSON(b, bs, "POST", "/v1/entities", map[string]any{
+		status, _ := benchDoJSON(b, bs, "POST", "/v1/users", map[string]any{
 			"identifier":   fmt.Sprintf("api-create-%d", i),
 			"display_name": fmt.Sprintf("API Create %d", i),
 		})
@@ -158,7 +158,7 @@ func BenchmarkAPIGetIdentity(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		target := bs.ids[benchRandN(len(bs.ids))]
-		status, _ := benchDoJSON(b, bs, "GET", "/v1/entities/"+target, nil)
+		status, _ := benchDoJSON(b, bs, "GET", "/v1/users/"+target, nil)
 		if status != http.StatusOK {
 			b.Fatalf("get: got %d", status)
 		}
@@ -173,7 +173,7 @@ func BenchmarkAPIListIdentities(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		status, _ := benchDoJSON(b, bs, "GET", "/v1/entities?limit=50", nil)
+		status, _ := benchDoJSON(b, bs, "GET", "/v1/users?limit=50", nil)
 		if status != http.StatusOK {
 			b.Fatalf("list: got %d", status)
 		}
@@ -207,7 +207,7 @@ func BenchmarkAPIResolveToken(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		status, _ := benchDoJSON(b, bs, "GET", "/v1/entities?limit=1", nil)
+		status, _ := benchDoJSON(b, bs, "GET", "/v1/users?limit=1", nil)
 		if status != http.StatusOK {
 			b.Fatalf("resolve: got %d", status)
 		}
@@ -228,7 +228,7 @@ func BenchmarkAPIParallelReads(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			target := bs.ids[benchRandN(len(bs.ids))]
-			req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil)
+			req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/users/"+target, nil)
 			req.Header.Set("Authorization", "Bearer "+bs.token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -256,7 +256,7 @@ func BenchmarkAPIParallelMixed(b *testing.B) {
 					"identifier":   fmt.Sprintf("par-mixed-%s", id.New()),
 					"display_name": "Parallel Mixed",
 				})
-				req, _ := http.NewRequest("POST", bs.ts.URL+"/v1/entities", bytes.NewReader(body))
+				req, _ := http.NewRequest("POST", bs.ts.URL+"/v1/users", bytes.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Authorization", "Bearer "+bs.token)
 				resp, err := http.DefaultClient.Do(req)
@@ -268,7 +268,7 @@ func BenchmarkAPIParallelMixed(b *testing.B) {
 			} else {
 				// 80% reads
 				target := bs.ids[benchRandN(len(bs.ids))]
-				req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/entities/"+target, nil)
+				req, _ := http.NewRequest("GET", bs.ts.URL+"/v1/users/"+target, nil)
 				req.Header.Set("Authorization", "Bearer "+bs.token)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {

@@ -16,11 +16,9 @@
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem as-child>
-            <router-link to="/s/human_user/new">
-              <Users class="mr-2 size-4" />
-              New User
-            </router-link>
+          <DropdownMenuItem @click="isCreateWizardOpen = true">
+            <Users class="mr-2 size-4" />
+            New User
           </DropdownMenuItem>
           <DropdownMenuItem as-child>
             <router-link to="/s/service_user/new">
@@ -107,6 +105,7 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
+    <CreateUserWizard v-model:open="isCreateWizardOpen" @created="onUserCreated" />
   </div>
 </template>
 
@@ -115,6 +114,7 @@ import { ref, onMounted, computed, h, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { type Identity, metaSchemaApi } from '@/api/resources'
 import { api } from '@/api/client'
+import CreateUserWizard from '@/console/components/CreateUserWizard.vue'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
@@ -141,6 +141,7 @@ const allIdentities = ref<IdentityWithType[]>([])
 const selectedRows = ref({})
 const globalSearch = ref('')
 const loading = ref(true)
+const isCreateWizardOpen = ref(false)
 
 // Schema type display metadata
 const typeLabels: Record<string, string> = {
@@ -203,11 +204,12 @@ function getSortIcon(column: any) {
 // Data loading
 const identityTypes = ['human_user', 'service_user', 'ai_agent']
 
-onMounted(async () => {
+async function loadIdentities() {
+  loading.value = true
   // Resolve paths from meta schema
   let typePathMap: Record<string, string> = {}
   try {
-    const meta = await metaSchemaApi.get()
+    const meta = await metaSchemaApi.get() as any
     const catalog = meta['x-catalog'] || {}
     for (const typeName of identityTypes) {
       const entry = catalog[typeName]
@@ -238,7 +240,16 @@ onMounted(async () => {
 
   allIdentities.value = merged
   loading.value = false
+}
+
+onMounted(async () => {
+  await loadIdentities()
 })
+
+const onUserCreated = async (id: string) => {
+  // optionally navigate or just refresh
+  await loadIdentities()
+}
 
 // Watch tab changes to reset search
 watch(activeTab, () => {

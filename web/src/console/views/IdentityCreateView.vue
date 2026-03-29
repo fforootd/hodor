@@ -307,7 +307,7 @@ async function submit() {
     }
     const created = await entityApi.create(payload)
     if (form.password && created.id && isInteractiveIdentity.value) {
-      await api.post(`/v1/entities/${created.id}/password`, { password: form.password }).catch(() => {})
+      await api.post(`/v1/users/${created.id}/password`, { password: form.password }).catch(() => {})
     }
     if (sendInvite.value && hasLogin.value && created.id) {
       await magicLinkApi.send(form.identifier.trim()).catch(() => {})

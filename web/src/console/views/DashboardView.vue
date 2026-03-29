@@ -60,10 +60,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Users, FileJson, Globe, Activity } from 'lucide-vue-next'
-import { api } from '@/api/client'
+import { countsApi, schemaApi, providerApi, eventApi } from '@/api/resources'
 
 const stats = ref([
-  { label: 'Entities', value: '—', icon: Users, description: 'Total entities' },
+  { label: 'Identities', value: '—', icon: Users, description: 'Total identities' },
   { label: 'Schemas', value: '—', icon: FileJson, description: 'Active schemas' },
   { label: 'Providers', value: '—', icon: Globe, description: 'Configured providers' },
   { label: 'Events', value: '—', icon: Activity, description: 'Last 24 hours' },
@@ -81,19 +81,22 @@ function timeAgo(ts: string): string {
 
 onMounted(async () => {
   try {
-    const [identities, schemas, providers, events] = await Promise.allSettled([
-      api.get<any>('/v1/identities?limit=0'),
-      api.get<any>('/v1/schemas'),
-      api.get<any>('/v1/providers'),
-      api.get<any>('/v1/events?limit=10&order=desc'),
+    const [counts, schemas, providers, events] = await Promise.allSettled([
+      countsApi.get(),
+      schemaApi.list(),
+      providerApi.list(),
+      eventApi.list({ limit: 10 }),
     ])
 
-    if (identities.status === 'fulfilled') stats.value[0].value = String(identities.value.total ?? identities.value.items?.length ?? 0)
-    if (schemas.status === 'fulfilled') stats.value[1].value = String(schemas.value.items?.length ?? 0)
-    if (providers.status === 'fulfilled') stats.value[2].value = String(providers.value.items?.length ?? 0)
+    if (counts.status === 'fulfilled') {
+      const total = Object.values(counts.value).reduce((sum, n) => sum + Number(n), 0)
+      stats.value[0].value = String(total)
+    }
+    if (schemas.status === 'fulfilled') stats.value[1].value = String(schemas.value.length ?? 0)
+    if (providers.status === 'fulfilled') stats.value[2].value = String(providers.value.length ?? 0)
     if (events.status === 'fulfilled') {
-      const items = events.value.items || []
-      stats.value[3].value = String(events.value.total ?? items.length)
+      const items = events.value || []
+      stats.value[3].value = String(items.length)
       recentEvents.value = items.slice(0, 10).map((e: any) => ({
         id: e.id,
         event_type: e.event_type,

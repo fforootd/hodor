@@ -1,0 +1,3767 @@
+{
+  "components": {
+    "schemas": {
+      "ActivityResponse": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events",
+          "count"
+        ],
+        "type": "object"
+      },
+      "AuthSettingsResponse": {
+        "properties": {
+          "external_providers": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "magic_link_enabled": {
+            "type": "boolean"
+          },
+          "password_enabled": {
+            "type": "boolean"
+          },
+          "register_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "password_enabled",
+          "magic_link_enabled",
+          "register_enabled",
+          "external_providers"
+        ],
+        "type": "object"
+      },
+      "BrandingResponse": {
+        "properties": {
+          "background_url": {
+            "type": "string"
+          },
+          "fav_icon_url": {
+            "type": "string"
+          },
+          "logo_url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "primary_color": {
+            "type": "string"
+          },
+          "welcome_message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CatalogInstallRequest": {
+        "properties": {
+          "variables": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "variables"
+        ],
+        "type": "object"
+      },
+      "CatalogInstallResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "template_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "template_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "CatalogRefreshResponse": {
+        "properties": {
+          "new": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "new"
+        ],
+        "type": "object"
+      },
+      "CatalogTemplateDetailResponse": {
+        "properties": {
+          "payload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "template": {
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "variables": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "template",
+          "variables",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "CountsResponse": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "type": "object"
+      },
+      "CreatePATRequest": {
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreatePATResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "entity_id",
+          "token",
+          "scopes",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CreateProviderRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "config",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "CreateSessionRequest": {
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "ip_address": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id"
+        ],
+        "type": "object"
+      },
+      "CreateSessionResponse": {
+        "properties": {
+          "session": {
+            "properties": {
+              "created_at": {
+                "type": "string"
+              },
+              "entity_id": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "ip_address": {
+                "type": "string"
+              },
+              "org_id": {
+                "type": "string"
+              },
+              "revoked_at": {
+                "type": "string"
+              },
+              "user_agent": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "token"
+        ],
+        "type": "object"
+      },
+      "DiffSchemaResponse": {
+        "properties": {
+          "changes": {
+            "items": {},
+            "type": "array"
+          },
+          "left": {},
+          "right": {}
+        },
+        "required": [
+          "left",
+          "right",
+          "changes"
+        ],
+        "type": "object"
+      },
+      "FGABatchTestRequest": {
+        "properties": {
+          "assertions": {
+            "items": {
+              "properties": {
+                "expected": {
+                  "type": "boolean"
+                },
+                "object": {
+                  "type": "string"
+                },
+                "relation": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assertions"
+        ],
+        "type": "object"
+      },
+      "FGABatchTestResponse": {
+        "properties": {
+          "failed": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "properties": {
+                "actual": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "expected": {
+                  "type": "boolean"
+                },
+                "object": {
+                  "type": "string"
+                },
+                "pass": {
+                  "type": "boolean"
+                },
+                "relation": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "total",
+          "passed",
+          "failed"
+        ],
+        "type": "object"
+      },
+      "FGACheckRequest": {
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "relation",
+          "object"
+        ],
+        "type": "object"
+      },
+      "FGACheckResponse": {
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "object": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed",
+          "user",
+          "relation",
+          "object"
+        ],
+        "type": "object"
+      },
+      "FGADeleteTuplesResponse": {
+        "properties": {
+          "deleted": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "FGAExpandRequest": {
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation",
+          "object"
+        ],
+        "type": "object"
+      },
+      "FGAExpandResponse": {
+        "properties": {
+          "tree": {}
+        },
+        "required": [
+          "tree"
+        ],
+        "type": "object"
+      },
+      "FGAListObjectsRequest": {
+        "properties": {
+          "relation": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "relation",
+          "type"
+        ],
+        "type": "object"
+      },
+      "FGAListObjectsResponse": {
+        "properties": {
+          "objects": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "objects"
+        ],
+        "type": "object"
+      },
+      "FGAModelGraphResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "relation": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "permissions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relations": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "type": "object"
+      },
+      "FGAModelResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "types": {
+            "items": {
+              "properties": {
+                "relations": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "types"
+        ],
+        "type": "object"
+      },
+      "FGAReadTuplesResponse": {
+        "properties": {
+          "tuples": {
+            "items": {
+              "properties": {
+                "object": {
+                  "type": "string"
+                },
+                "relation": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tuples"
+        ],
+        "type": "object"
+      },
+      "FGAWriteTuplesRequest": {
+        "properties": {
+          "tuples": {
+            "items": {
+              "properties": {
+                "object": {
+                  "type": "string"
+                },
+                "relation": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tuples"
+        ],
+        "type": "object"
+      },
+      "FGAWriteTuplesResponse": {
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "written": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "written"
+        ],
+        "type": "object"
+      },
+      "IdentityRequest": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "metadata": {},
+          "profile": {},
+          "schema_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "type": "object"
+      },
+      "IdentityResponse": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {},
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "metadata": {},
+          "org_id": {
+            "type": "string"
+          },
+          "profile": {},
+          "state": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "org_id",
+          "identifier",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ImportRequest": {
+        "properties": {
+          "entities": {
+            "items": {
+              "properties": {
+                "display_name": {
+                  "type": "string"
+                },
+                "identifier": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                },
+                "profile": {
+                  "additionalProperties": {},
+                  "type": "object"
+                },
+                "schema_id": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "linked_accounts": {
+            "items": {
+              "properties": {
+                "entity_identifier": {
+                  "type": "string"
+                },
+                "external_email": {
+                  "type": "string"
+                },
+                "external_sub": {
+                  "type": "string"
+                },
+                "provider_name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "on_conflict": {
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "properties": {
+                "auto_register": {
+                  "type": "boolean"
+                },
+                "claim_overrides": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "config": {
+                  "additionalProperties": {},
+                  "type": "object"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "protocol": {
+                  "type": "string"
+                },
+                "template": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "on_conflict"
+        ],
+        "type": "object"
+      },
+      "ImportResult": {
+        "properties": {
+          "id": {},
+          "index": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "resource",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ListResponse": {
+        "properties": {
+          "items": {},
+          "next_cursor": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "MagicLinkRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "MagicLinkResponse": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "purpose",
+          "message"
+        ],
+        "type": "object"
+      },
+      "OwnSessionsResponse": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions",
+          "count"
+        ],
+        "type": "object"
+      },
+      "PreviewSchemaRequest": {
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id"
+        ],
+        "type": "object"
+      },
+      "PreviewSchemaResponse": {
+        "properties": {
+          "changes": {
+            "items": {},
+            "type": "array"
+          },
+          "current_claims": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "draft_claims": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "entity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity",
+          "current_claims",
+          "draft_claims",
+          "changes"
+        ],
+        "type": "object"
+      },
+      "ProfileResponse": {
+        "properties": {
+          "field_permissions": {
+            "additionalProperties": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "identity": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "schema": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "identity",
+          "schema",
+          "field_permissions"
+        ],
+        "type": "object"
+      },
+      "PromoteSchemaResponse": {
+        "properties": {
+          "affected_entities": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "affected_entities"
+        ],
+        "type": "object"
+      },
+      "ProviderResponse": {
+        "properties": {
+          "config": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "protocol",
+          "config",
+          "enabled",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PutSettingsRequest": {
+        "properties": {
+          "data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "scope_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_id",
+          "data"
+        ],
+        "type": "object"
+      },
+      "SchemaIdentityCountResponse": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "type": "object"
+      },
+      "SchemaRequest": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "schema": {},
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "schema",
+          "message"
+        ],
+        "type": "object"
+      },
+      "SchemaResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "schema": {},
+          "type": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "org_id",
+          "schema",
+          "version",
+          "is_default",
+          "message",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": "string"
+                },
+                "resource_type": {
+                  "type": "string"
+                },
+                "subtitle": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "results",
+          "query",
+          "count"
+        ],
+        "type": "object"
+      },
+      "SessionResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ip_address": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "entity_id",
+          "org_id",
+          "created_at",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "SetEntityPasswordRequest": {
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      },
+      "SettingsResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "scope_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "scope",
+          "scope_id",
+          "data"
+        ],
+        "type": "object"
+      },
+      "StatusResponse": {
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "UpdateIdentityRequest": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "profile": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateProfileRequest": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "profile": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateProfileResponse": {
+        "properties": {
+          "fields_changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "fields_changed"
+        ],
+        "type": "object"
+      },
+      "UpdateProviderRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateSchemaRequest": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "schema": {}
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "PAT or session token",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Identity and access management API. Schema-driven, extensible, open source.",
+    "title": "Zitadel API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/account/activity": {
+      "get": {
+        "operationId": "listOwnActivity",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": "List own activity"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List own activity",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/v1/account/profile": {
+      "get": {
+        "operationId": "getProfile",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Get own profile"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get own profile",
+        "tags": [
+          "Account"
+        ]
+      },
+      "patch": {
+        "operationId": "updateProfile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProfileResponse"
+                }
+              }
+            },
+            "description": "Update own profile"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update own profile",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/v1/account/sessions": {
+      "get": {
+        "operationId": "listOwnSessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnSessionsResponse"
+                }
+              }
+            },
+            "description": "List own sessions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List own sessions",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/v1/account/sessions/revoke-others": {
+      "post": {
+        "operationId": "revokeOtherSessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Revoke all other sessions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke all other sessions",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/v1/account/sessions/{id}/revoke": {
+      "post": {
+        "operationId": "revokeOwnSession",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Revoke own session"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke own session",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/v1/admin/bulk": {
+      "post": {
+        "operationId": "adminBulk",
+        "responses": {
+          "200": {
+            "description": "Bulk create entities (admin)"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bulk create entities (admin)",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/v1/auth/magic-link": {
+      "post": {
+        "operationId": "sendMagicLink",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MagicLinkResponse"
+                }
+              }
+            },
+            "description": "Send a magic link"
+          }
+        },
+        "summary": "Send a magic link",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/auth/magic-link/verify": {
+      "get": {
+        "operationId": "verifyMagicLink",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verify a magic link token"
+          }
+        },
+        "summary": "Verify a magic link token",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/auth/settings": {
+      "get": {
+        "operationId": "getAuthSettings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSettingsResponse"
+                }
+              }
+            },
+            "description": "Get authentication settings"
+          }
+        },
+        "summary": "Get authentication settings",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/auth/sso/callback": {
+      "get": {
+        "operationId": "ssoCallback",
+        "responses": {
+          "200": {
+            "description": "SSO callback"
+          }
+        },
+        "summary": "SSO callback",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/auth/sso/{provider_id}/start": {
+      "get": {
+        "operationId": "ssoStart",
+        "parameters": [
+          {
+            "description": "Provider ID",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Start SSO flow"
+          }
+        },
+        "summary": "Start SSO flow",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/branding": {
+      "get": {
+        "operationId": "getBranding",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingResponse"
+                }
+              }
+            },
+            "description": "Get branding settings"
+          }
+        },
+        "summary": "Get branding settings",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/catalog": {
+      "get": {
+        "operationId": "listCatalog",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tags",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List catalog templates"
+          }
+        },
+        "summary": "List catalog templates",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/v1/catalog/refresh": {
+      "post": {
+        "operationId": "refreshCatalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogRefreshResponse"
+                }
+              }
+            },
+            "description": "Refresh catalog templates"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Refresh catalog templates",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/v1/catalog/{id}": {
+      "get": {
+        "operationId": "getCatalogEntry",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogTemplateDetailResponse"
+                }
+              }
+            },
+            "description": "Get a catalog template"
+          }
+        },
+        "summary": "Get a catalog template",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/v1/catalog/{id}/install": {
+      "post": {
+        "operationId": "installFromCatalog",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogInstallResponse"
+                }
+              }
+            },
+            "description": "Install a catalog template"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Install a catalog template",
+        "tags": [
+          "Catalog"
+        ]
+      }
+    },
+    "/v1/counts": {
+      "get": {
+        "operationId": "entityCounts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountsResponse"
+                }
+              }
+            },
+            "description": "Get entity counts by type"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get entity counts by type",
+        "tags": [
+          "Entities"
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Comma-separated event types",
+            "in": "query",
+            "name": "types",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "aggregate_type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "aggregate_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "ISO 8601 timestamp",
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List events"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List events",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/v1/events/aggregate": {
+      "get": {
+        "operationId": "aggregateEvents",
+        "parameters": [
+          {
+            "description": "Aggregate query name",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "org_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregate events"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Aggregate events",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/v1/events/stream": {
+      "get": {
+        "description": "Server-Sent Events stream for real-time event notifications.",
+        "operationId": "streamEvents",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream events via SSE"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stream events via SSE",
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/v1/fga/check": {
+      "post": {
+        "operationId": "fgaCheck",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGACheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGACheckResponse"
+                }
+              }
+            },
+            "description": "Check authorization"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Check authorization",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/fga/expand": {
+      "post": {
+        "operationId": "fgaExpand",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAExpandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAExpandResponse"
+                }
+              }
+            },
+            "description": "Expand relationship tree"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Expand relationship tree",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/fga/list-objects": {
+      "post": {
+        "operationId": "fgaListObjects",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAListObjectsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAListObjectsResponse"
+                }
+              }
+            },
+            "description": "List authorized objects"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List authorized objects",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/fga/model": {
+      "get": {
+        "operationId": "fgaGetModel",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAModelResponse"
+                }
+              }
+            },
+            "description": "Get authorization model"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get authorization model",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/fga/model/graph": {
+      "get": {
+        "operationId": "fgaModelGraph",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAModelGraphResponse"
+                }
+              }
+            },
+            "description": "Get authorization model as graph"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get authorization model as graph",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/fga/test": {
+      "post": {
+        "operationId": "fgaBatchTest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGABatchTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGABatchTestResponse"
+                }
+              }
+            },
+            "description": "Batch test authorization assertions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Batch test authorization assertions",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/fga/tuples": {
+      "delete": {
+        "operationId": "fgaDeleteTuples",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAWriteTuplesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGADeleteTuplesResponse"
+                }
+              }
+            },
+            "description": "Delete relationship tuples"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete relationship tuples",
+        "tags": [
+          "Authorization"
+        ]
+      },
+      "get": {
+        "operationId": "fgaReadTuples",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relation",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "object",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAReadTuplesResponse"
+                }
+              }
+            },
+            "description": "Read relationship tuples"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read relationship tuples",
+        "tags": [
+          "Authorization"
+        ]
+      },
+      "post": {
+        "operationId": "fgaWriteTuples",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAWriteTuplesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAWriteTuplesResponse"
+                }
+              }
+            },
+            "description": "Write relationship tuples"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Write relationship tuples",
+        "tags": [
+          "Authorization"
+        ]
+      }
+    },
+    "/v1/import": {
+      "post": {
+        "operationId": "importData",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            },
+            "description": "Import entities and providers"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import entities and providers",
+        "tags": [
+          "Import"
+        ]
+      }
+    },
+    "/v1/login/flows": {
+      "post": {
+        "operationId": "createFlow",
+        "responses": {
+          "200": {
+            "description": "Create a login flow"
+          }
+        },
+        "summary": "Create a login flow",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/login/flows/{id}": {
+      "get": {
+        "operationId": "getFlow",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get login flow state"
+          }
+        },
+        "summary": "Get login flow state",
+        "tags": [
+          "Auth"
+        ]
+      },
+      "post": {
+        "operationId": "submitFlow",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Submit a login flow step"
+          }
+        },
+        "summary": "Submit a login flow step",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/v1/orgs": {
+      "get": {
+        "operationId": "listOrgs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List organizations"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List organizations",
+        "tags": [
+          "Organizations"
+        ]
+      }
+    },
+    "/v1/pats": {
+      "get": {
+        "operationId": "listPATs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List personal access tokens"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List personal access tokens",
+        "tags": [
+          "PATs"
+        ]
+      },
+      "post": {
+        "operationId": "createPAT",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePATRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePATResponse"
+                }
+              }
+            },
+            "description": "Create a personal access token"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a personal access token",
+        "tags": [
+          "PATs"
+        ]
+      }
+    },
+    "/v1/pats/{id}": {
+      "delete": {
+        "operationId": "revokePAT",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoke a personal access token"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a personal access token",
+        "tags": [
+          "PATs"
+        ]
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "operationId": "listProviders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List identity providers"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List identity providers",
+        "tags": [
+          "Providers"
+        ]
+      },
+      "post": {
+        "operationId": "createProvider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            },
+            "description": "Create a provider"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a provider",
+        "tags": [
+          "Providers"
+        ]
+      }
+    },
+    "/v1/providers/templates": {
+      "get": {
+        "operationId": "listProviderTemplates",
+        "responses": {
+          "200": {
+            "description": "List provider templates"
+          }
+        },
+        "summary": "List provider templates",
+        "tags": [
+          "Providers"
+        ]
+      }
+    },
+    "/v1/providers/{id}": {
+      "delete": {
+        "operationId": "deleteProvider",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Delete a provider"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a provider",
+        "tags": [
+          "Providers"
+        ]
+      },
+      "get": {
+        "operationId": "getProvider",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            },
+            "description": "Get a provider"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a provider",
+        "tags": [
+          "Providers"
+        ]
+      },
+      "patch": {
+        "operationId": "updateProvider",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            },
+            "description": "Update a provider"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a provider",
+        "tags": [
+          "Providers"
+        ]
+      }
+    },
+    "/v1/schemas": {
+      "get": {
+        "operationId": "listSchemas",
+        "parameters": [
+          {
+            "description": "Filter by schema type",
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List schemas"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List schemas",
+        "tags": [
+          "Schemas"
+        ]
+      },
+      "post": {
+        "operationId": "createSchema",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchemaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaResponse"
+                }
+              }
+            },
+            "description": "Create a schema"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a schema",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/schemas/$meta": {
+      "get": {
+        "operationId": "getMetaSchema",
+        "responses": {
+          "200": {
+            "description": "Get the meta schema"
+          }
+        },
+        "summary": "Get the meta schema",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/schemas/{id}": {
+      "get": {
+        "operationId": "getSchema",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaResponse"
+                }
+              }
+            },
+            "description": "Get a schema"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a schema",
+        "tags": [
+          "Schemas"
+        ]
+      },
+      "patch": {
+        "operationId": "updateSchema",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSchemaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaResponse"
+                }
+              }
+            },
+            "description": "Update a schema"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a schema",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/schemas/{id}/diff": {
+      "get": {
+        "operationId": "diffSchema",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of schema to compare against",
+            "in": "query",
+            "name": "compare",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffSchemaResponse"
+                }
+              }
+            },
+            "description": "Diff two schema versions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Diff two schema versions",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/schemas/{id}/identity-count": {
+      "get": {
+        "operationId": "schemaIdentityCount",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaIdentityCountResponse"
+                }
+              }
+            },
+            "description": "Count entities using a schema"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Count entities using a schema",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/schemas/{id}/preview": {
+      "post": {
+        "operationId": "previewSchema",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewSchemaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewSchemaResponse"
+                }
+              }
+            },
+            "description": "Preview schema changes on an entity"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Preview schema changes on an entity",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/schemas/{id}/promote": {
+      "post": {
+        "operationId": "promoteSchema",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoteSchemaResponse"
+                }
+              }
+            },
+            "description": "Promote a schema version"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Promote a schema version",
+        "tags": [
+          "Schemas"
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "operationId": "search",
+        "parameters": [
+          {
+            "description": "Search query",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Universal search across all resources"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Universal search across all resources",
+        "tags": [
+          "Search"
+        ]
+      }
+    },
+    "/v1/service-accounts": {
+      "get": {
+        "operationId": "listServiceAccounts",
+        "parameters": [
+          {
+            "description": "Pagination cursor",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max results (default 50)",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter by org",
+            "in": "query",
+            "name": "org_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by state",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List service accounts"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List service accounts",
+        "tags": [
+          "Service Accounts"
+        ]
+      },
+      "post": {
+        "operationId": "createServiceAccount",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityResponse"
+                }
+              }
+            },
+            "description": "Create a service account"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a service account",
+        "tags": [
+          "Service Accounts"
+        ]
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List sessions"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List sessions",
+        "tags": [
+          "Sessions"
+        ]
+      },
+      "post": {
+        "operationId": "createSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSessionResponse"
+                }
+              }
+            },
+            "description": "Create a session"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a session",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{id}": {
+      "get": {
+        "operationId": "getSession",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Get a session"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a session",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{id}/revoke": {
+      "post": {
+        "operationId": "revokeSession",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Revoke a session"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a session",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/v1/settings/{type}": {
+      "delete": {
+        "operationId": "deleteSettings",
+        "parameters": [
+          {
+            "description": "Setting type",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Delete settings"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete settings",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "get": {
+        "operationId": "getSettings",
+        "parameters": [
+          {
+            "description": "Setting type",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            },
+            "description": "Get settings"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get settings",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "put": {
+        "operationId": "putSettings",
+        "parameters": [
+          {
+            "description": "Setting type",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Create or update settings"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create or update settings",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "parameters": [
+          {
+            "description": "Pagination cursor",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max results (default 50)",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter by org",
+            "in": "query",
+            "name": "org_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by state",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List users"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List users",
+        "tags": [
+          "Users"
+        ]
+      },
+      "post": {
+        "operationId": "createUser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityResponse"
+                }
+              }
+            },
+            "description": "Create a user"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a user",
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/v1/users/{id}": {
+      "delete": {
+        "operationId": "deleteUser",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Delete a user"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a user",
+        "tags": [
+          "Users"
+        ]
+      },
+      "get": {
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityResponse"
+                }
+              }
+            },
+            "description": "Get a user"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a user",
+        "tags": [
+          "Users"
+        ]
+      },
+      "patch": {
+        "operationId": "updateUser",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIdentityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityResponse"
+                }
+              }
+            },
+            "description": "Update a user"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a user",
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/v1/users/{id}/password": {
+      "post": {
+        "operationId": "setUserPassword",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEntityPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Set a user password"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set a user password",
+        "tags": [
+          "Users"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "This instance",
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Account"
+    },
+    {
+      "name": "Admin"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Authorization"
+    },
+    {
+      "name": "Catalog"
+    },
+    {
+      "name": "Entities"
+    },
+    {
+      "name": "Events"
+    },
+    {
+      "name": "Import"
+    },
+    {
+      "name": "Organizations"
+    },
+    {
+      "name": "PATs"
+    },
+    {
+      "name": "Providers"
+    },
+    {
+      "name": "Schemas"
+    },
+    {
+      "name": "Search"
+    },
+    {
+      "name": "Service Accounts"
+    },
+    {
+      "name": "Sessions"
+    },
+    {
+      "name": "Settings"
+    },
+    {
+      "name": "Users"
+    }
+  ]
+}

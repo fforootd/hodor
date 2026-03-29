@@ -4,6 +4,10 @@
 // x-auth-methods, x-login (schema-level), and x-branding
 // annotations from entity schemas to determine step ordering
 // and generate UI node trees.
+//
+// ADR-019: Server-Driven Login UI + Web Components
+// The FlowStep + UINode contract is the SOLE interface between the
+// server and client. The client is a dumb renderer.
 package login
 
 import (
@@ -52,6 +56,24 @@ type BrandingConfig struct {
 	HideZitadel bool              `json:"hide_zitadel_branding"`
 }
 
+// SchemaFieldDef represents a single field from a schema's properties block.
+// Used by the registration step to generate input nodes from the schema.
+type SchemaFieldDef struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Format      string   `json:"format,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required"`
+	Hidden      bool     `json:"hidden"`
+	Sensitive   bool     `json:"sensitive"`
+	Identifier  bool     `json:"identifier"`
+	MinLength   int      `json:"min_length,omitempty"`
+	MaxLength   int      `json:"max_length,omitempty"`
+	Pattern     string   `json:"pattern,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+}
+
 // SchemaAuthConfig is the fully extracted auth/login/branding config from a schema.
 type SchemaAuthConfig struct {
 	Identifiers []string                    // field names that can be used as identifiers
@@ -59,6 +81,7 @@ type SchemaAuthConfig struct {
 	AuthMethods map[string]*AuthMethodEntry // method name → config (from x-auth-methods)
 	Login       LoginConfig
 	Branding    BrandingConfig
+	SchemaProps []SchemaFieldDef // all visible schema fields (for registration)
 }
 
 // ─── Annotation Extraction ──────────────────────────────────
@@ -67,6 +90,7 @@ type SchemaAuthConfig struct {
 func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	var raw struct {
 		Properties   map[string]map[string]any `json:"properties"`
+		Required     []string                  `json:"required"`
 		XAuthMethods json.RawMessage           `json:"x-auth-methods"`
 		XLogin       json.RawMessage           `json:"x-login"`
 		XBranding    json.RawMessage           `json:"x-branding"`
@@ -82,29 +106,15 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 		Branding:    defaultBrandingConfig(),
 	}
 
-	// Extract per-field auth annotations (flat: x-identifier, x-verify, x-recover, x-mfa).
+	// Build required set for fast lookup.
+	requiredSet := make(map[string]bool, len(raw.Required))
+	for _, r := range raw.Required {
+		requiredSet[r] = true
+	}
+
+	// Extract per-field auth annotations and schema field definitions.
 	for name, def := range raw.Properties {
-		var fc AuthFieldConfig
-
-		if v, ok := def["x-identifier"].(bool); ok {
-			fc.Identifier = v
-		}
-		if v, ok := def["x-verify"].(string); ok {
-			fc.Verification = v
-		}
-		if v, ok := def["x-recover"].(string); ok {
-			fc.Recovery = v
-		}
-		if v, ok := def["x-mfa"].(string); ok {
-			fc.MFA = v
-		}
-
-		if fc.Identifier || fc.Verification != "" || fc.Recovery != "" || fc.MFA != "" {
-			config.Fields[name] = fc
-			if fc.Identifier {
-				config.Identifiers = append(config.Identifiers, name)
-			}
-		}
+		extractFieldConfig(config, name, def, requiredSet)
 	}
 
 	// Extract x-auth-methods.
@@ -130,6 +140,81 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	config.Branding = mergeBrandingDefaults(config.Branding)
 
 	return config
+}
+
+// extractFieldConfig parses auth annotations and schema metadata from a single
+// property definition and appends it to the config.
+func extractFieldConfig(config *SchemaAuthConfig, name string, def map[string]any, requiredSet map[string]bool) {
+	var fc AuthFieldConfig
+	if v, ok := def["x-identifier"].(bool); ok {
+		fc.Identifier = v
+	}
+	if v, ok := def["x-verify"].(string); ok {
+		fc.Verification = v
+	}
+	if v, ok := def["x-recover"].(string); ok {
+		fc.Recovery = v
+	}
+	if v, ok := def["x-mfa"].(string); ok {
+		fc.MFA = v
+	}
+	if fc.Identifier || fc.Verification != "" || fc.Recovery != "" || fc.MFA != "" {
+		config.Fields[name] = fc
+		if fc.Identifier {
+			config.Identifiers = append(config.Identifiers, name)
+		}
+	}
+
+	sfd := buildSchemaFieldDef(name, def, requiredSet[name], fc.Identifier)
+	if !sfd.Hidden {
+		config.SchemaProps = append(config.SchemaProps, sfd)
+	}
+}
+
+// buildSchemaFieldDef creates a SchemaFieldDef from a JSON schema property definition.
+func buildSchemaFieldDef(name string, def map[string]any, required, identifier bool) SchemaFieldDef {
+	sfd := SchemaFieldDef{
+		Name:        name,
+		Type:        stringOr(def, "type", "string"),
+		Format:      stringOr(def, "format", ""),
+		Title:       stringOr(def, "title", ""),
+		Description: stringOr(def, "description", ""),
+		Required:    required,
+		Hidden:      boolOr(def, "x-hidden", false),
+		Sensitive:   boolOr(def, "x-sensitive", false),
+		Identifier:  identifier,
+	}
+	if v, ok := def["minLength"].(float64); ok {
+		sfd.MinLength = int(v)
+	}
+	if v, ok := def["maxLength"].(float64); ok {
+		sfd.MaxLength = int(v)
+	}
+	if v, ok := def["pattern"].(string); ok {
+		sfd.Pattern = v
+	}
+	if v, ok := def["enum"].([]any); ok {
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				sfd.Enum = append(sfd.Enum, s)
+			}
+		}
+	}
+	return sfd
+}
+
+func stringOr(m map[string]any, key, fallback string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return fallback
+}
+
+func boolOr(m map[string]any, key string, fallback bool) bool {
+	if v, ok := m[key].(bool); ok {
+		return v
+	}
+	return fallback
 }
 
 func defaultConfig() *SchemaAuthConfig {
@@ -223,24 +308,46 @@ const (
 	StepPasskey    StepType = "passkey"
 	StepMagicLink  StepType = "magic_link_sent"
 	StepMFA        StepType = "mfa"
+	StepRegister   StepType = "register"
 	StepComplete   StepType = "complete"
 )
 
 // UINode represents a single renderable element in the login UI.
+// The client maps UINode.Type → DOM element. No business logic in the client.
 type UINode struct {
-	Type         string `json:"type"`                 // "heading", "input", "submit", "button", "divider", "sso_button", etc.
-	Name         string `json:"name,omitempty"`       // form field name
-	InputType    string `json:"input_type,omitempty"` // "text", "password", "email"
-	Label        string `json:"label,omitempty"`      // display label
-	Text         string `json:"text,omitempty"`       // heading/description text
-	Placeholder  string `json:"placeholder,omitempty"`
-	Autocomplete string `json:"autocomplete,omitempty"`
-	Required     bool   `json:"required,omitempty"`
-	Action       string `json:"action,omitempty"` // "identifier", "password", "magic_link", "sso", "back"
-	ProviderID   string `json:"provider_id,omitempty"`
-	ProviderName string `json:"provider_name,omitempty"`
-	Template     string `json:"template,omitempty"` // SSO template (google, entraid, etc.)
-	Initial      string `json:"initial,omitempty"`  // avatar initial
+	Type         string            `json:"type"`                 // "heading", "input", "submit", "button", "divider", "sso_button", "error", "group", "hidden", "registration_link", etc.
+	Name         string            `json:"name,omitempty"`       // form field name
+	InputType    string            `json:"input_type,omitempty"` // "text", "password", "email"
+	Label        string            `json:"label,omitempty"`      // display label
+	Text         string            `json:"text,omitempty"`       // heading/description text
+	Placeholder  string            `json:"placeholder,omitempty"`
+	Autocomplete string            `json:"autocomplete,omitempty"`
+	Required     bool              `json:"required,omitempty"`
+	Action       string            `json:"action,omitempty"` // "identifier", "password", "magic_link", "sso", "back", "register", "register_submit"
+	ProviderID   string            `json:"provider_id,omitempty"`
+	ProviderName string            `json:"provider_name,omitempty"`
+	Template     string            `json:"template,omitempty"`   // SSO template (google, entraid, etc.)
+	Initial      string            `json:"initial,omitempty"`    // avatar initial
+	Value        string            `json:"value,omitempty"`      // pre-filled value
+	Disabled     bool              `json:"disabled,omitempty"`   // disable input/button
+	Errors       []string          `json:"errors,omitempty"`     // per-field validation errors
+	Attributes   map[string]string `json:"attributes,omitempty"` // arbitrary HTML attrs
+	Children     []UINode          `json:"children,omitempty"`   // nested nodes (e.g. form groups)
+	MinLength    int               `json:"min_length,omitempty"`
+	MaxLength    int               `json:"max_length,omitempty"`
+	Pattern      string            `json:"pattern,omitempty"`
+}
+
+// FlowError represents a global error in the flow.
+type FlowError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// FlowMessage represents an info/warning message in the flow.
+type FlowMessage struct {
+	Type string `json:"type"` // "info", "warning", "success"
+	Text string `json:"text"`
 }
 
 // FlowStep is the current step response sent to the UI.
@@ -250,6 +357,9 @@ type FlowStep struct {
 	Nodes    []UINode       `json:"nodes"`
 	Branding BrandingConfig `json:"branding"`
 	Identity *FlowIdentity  `json:"identity,omitempty"`
+	Errors   []FlowError    `json:"errors,omitempty"`
+	Messages []FlowMessage  `json:"messages,omitempty"`
+	CSS      string         `json:"css,omitempty"`
 }
 
 // FlowIdentity is the resolved identity info shown during auth steps.
@@ -268,6 +378,11 @@ type Flow struct {
 	DisplayName  string
 	Verified     bool
 	SSOProviders []map[string]any
+	Errors       []FlowError       // accumulated errors for current step
+	Messages     []FlowMessage     // accumulated messages for current step
+	RedirectURI  string            // OIDC redirect_uri (stored from auth request)
+	OIDCState    string            // OIDC state parameter
+	RegData      map[string]string // registration form data (accumulated)
 }
 
 // FlowStore is an in-memory store for active login flows.
@@ -315,13 +430,15 @@ func BuildNodes(flow *Flow) []UINode {
 
 	switch flow.CurrentStep {
 	case StepIdentifier:
-		return buildIdentifierNodes(cfg, texts)
+		return buildIdentifierNodes(flow, cfg, texts)
 	case StepAuthSelect:
 		return buildAuthSelectNodes(flow, cfg, texts)
 	case StepPassword:
 		return buildPasswordNodes(flow, texts)
 	case StepMagicLink:
 		return buildMagicLinkSentNodes(flow, texts)
+	case StepRegister:
+		return buildRegisterNodes(flow, cfg, texts)
 	case StepComplete:
 		return []UINode{
 			{Type: "heading", Text: "Welcome!"},
@@ -333,7 +450,7 @@ func BuildNodes(flow *Flow) []UINode {
 	}
 }
 
-func buildIdentifierNodes(cfg *SchemaAuthConfig, texts map[string]string) []UINode {
+func buildIdentifierNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]string) []UINode {
 	label := textOr(texts, "identifier_label", "Email or username")
 	placeholder := textOr(texts, "identifier_placeholder", "you@example.com")
 
@@ -342,7 +459,8 @@ func buildIdentifierNodes(cfg *SchemaAuthConfig, texts map[string]string) []UINo
 		{Type: "description", Text: cfg.Branding.Description},
 		{Type: "input", Name: "identifier", InputType: "text",
 			Label: label, Placeholder: placeholder,
-			Autocomplete: "username", Required: true},
+			Autocomplete: "username", Required: true,
+			Value: flow.Identifier}, // Pre-fill on back navigation
 		{Type: "submit", Label: textOr(texts, "continue_button", "Continue"), Action: "identifier"},
 	}
 
@@ -356,6 +474,14 @@ func buildIdentifierNodes(cfg *SchemaAuthConfig, texts map[string]string) []UINo
 				{Type: "divider"},
 			}, nodes[2:]...) // keep input + submit, drop the duplicate heading
 		}
+	}
+
+	// Add registration link if allowed.
+	if cfg.Login.RegistrationAllowed {
+		nodes = append(nodes,
+			UINode{Type: "divider"},
+			UINode{Type: "registration_link", Label: textOr(texts, "register_link", "Don't have an account? Create one"), Action: "register"},
+		)
 	}
 
 	return nodes
@@ -452,6 +578,109 @@ func buildMagicLinkSentNodes(flow *Flow, texts map[string]string) []UINode {
 	}
 }
 
+// buildRegisterNodes generates registration form nodes from schema field definitions.
+func buildRegisterNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]string) []UINode {
+	nodes := make([]UINode, 0, 2+len(cfg.SchemaProps)+2)
+	nodes = append(nodes,
+		UINode{Type: "heading", Text: textOr(texts, "register_heading", "Create your account")},
+		UINode{Type: "description", Text: textOr(texts, "register_description", "Enter your details to get started")},
+	)
+
+	// Generate an input node per visible schema field.
+	for _, field := range cfg.SchemaProps {
+		inputType := fieldInputType(field)
+		label := field.Title
+		if label == "" {
+			label = humanize(field.Name)
+		}
+		placeholder := ""
+		if field.Format == "email" {
+			placeholder = "you@example.com"
+		}
+
+		node := UINode{
+			Type:        "input",
+			Name:        field.Name,
+			InputType:   inputType,
+			Label:       label,
+			Placeholder: placeholder,
+			Required:    field.Required,
+			MinLength:   field.MinLength,
+			MaxLength:   field.MaxLength,
+			Pattern:     field.Pattern,
+		}
+
+		// Pre-fill from accumulated reg data.
+		if flow.RegData != nil {
+			if v, ok := flow.RegData[field.Name]; ok {
+				node.Value = v
+			}
+		}
+
+		// Auto-fill identifier from the identifier step.
+		if field.Identifier && node.Value == "" && flow.Identifier != "" {
+			node.Value = flow.Identifier
+		}
+
+		if field.Description != "" {
+			node.Attributes = map[string]string{"data-description": field.Description}
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	nodes = append(nodes,
+		UINode{Type: "submit", Label: textOr(texts, "register_button", "Create account"), Action: "register_submit"},
+		UINode{Type: "link", Label: textOr(texts, "register_back_link", "← Already have an account? Sign in"), Action: "back"},
+	)
+
+	return nodes
+}
+
+// fieldInputType maps a SchemaFieldDef to an HTML input type.
+func fieldInputType(f SchemaFieldDef) string {
+	if f.Sensitive {
+		return "password"
+	}
+	switch f.Format {
+	case "email":
+		return "email"
+	case "uri":
+		return "url"
+	case "date":
+		return "date"
+	default:
+		switch f.Type {
+		case "integer", "number":
+			return "number"
+		case "boolean":
+			return "checkbox"
+		default:
+			return "text"
+		}
+	}
+}
+
+// humanize converts "display_name" → "Display Name".
+func humanize(s string) string {
+	result := make([]byte, 0, len(s))
+	upper := true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '_' || c == '-' {
+			result = append(result, ' ')
+			upper = true
+			continue
+		}
+		if upper && c >= 'a' && c <= 'z' {
+			c -= 32 // ASCII lowercase to uppercase
+		}
+		result = append(result, c)
+		upper = false
+	}
+	return string(result)
+}
+
 func textOr(texts map[string]string, key, fallback string) string {
 	if v, ok := texts[key]; ok && v != "" {
 		return v
@@ -466,6 +695,9 @@ func (f *Flow) ToFlowStep() *FlowStep {
 		Step:     f.CurrentStep,
 		Nodes:    BuildNodes(f),
 		Branding: f.SchemaConfig.Branding,
+		Errors:   f.Errors,
+		Messages: f.Messages,
+		CSS:      f.SchemaConfig.Branding.CustomCSS,
 	}
 	if f.DisplayName != "" {
 		initial := string([]rune(f.DisplayName)[0])
@@ -474,5 +706,10 @@ func (f *Flow) ToFlowStep() *FlowStep {
 			AvatarInitial: initial,
 		}
 	}
+
+	// Clear transient errors/messages after rendering.
+	f.Errors = nil
+	f.Messages = nil
+
 	return step
 }

@@ -278,3 +278,171 @@ func TestToFlowStep(t *testing.T) {
 		t.Error("expected nodes in step")
 	}
 }
+
+func TestBuildNodes_Register(t *testing.T) {
+	cfg := ExtractAuthConfig(testSchema)
+	flow := &Flow{
+		ID:           "f_test",
+		SchemaConfig: cfg,
+		CurrentStep:  StepRegister,
+		Identifier:   "jane@acme.com",
+	}
+
+	nodes := BuildNodes(flow)
+	if len(nodes) == 0 {
+		t.Fatal("expected nodes for register step")
+	}
+
+	types := map[string]int{}
+	for _, n := range nodes {
+		types[n.Type]++
+	}
+
+	if types["heading"] < 1 {
+		t.Error("missing heading node")
+	}
+	if types["input"] < 1 {
+		t.Error("expected at least one input for schema fields")
+	}
+	if types["submit"] < 1 {
+		t.Error("missing submit button")
+	}
+
+	// Check that the identifier field is pre-filled.
+	for _, n := range nodes {
+		if n.Type == "input" && n.Name == "email" {
+			if n.Value != "jane@acme.com" {
+				t.Errorf("email input value = %q, want %q", n.Value, "jane@acme.com")
+			}
+			if n.InputType != "email" {
+				t.Errorf("email input_type = %q, want %q", n.InputType, "email")
+			}
+		}
+	}
+
+	// Submit button should have register_submit action.
+	for _, n := range nodes {
+		if n.Type == "submit" && n.Action != "register_submit" {
+			t.Errorf("submit action = %q, want %q", n.Action, "register_submit")
+		}
+	}
+}
+
+func TestBuildNodes_IdentifierWithRegistration(t *testing.T) {
+	cfg := ExtractAuthConfig(testSchema) // registration_allowed = true
+	flow := &Flow{
+		ID:           "f_test",
+		SchemaConfig: cfg,
+		CurrentStep:  StepIdentifier,
+	}
+
+	nodes := BuildNodes(flow)
+	hasRegLink := false
+	for _, n := range nodes {
+		if n.Type == "registration_link" {
+			hasRegLink = true
+			if n.Action != "register" {
+				t.Errorf("registration_link action = %q, want %q", n.Action, "register")
+			}
+		}
+	}
+	if !hasRegLink {
+		t.Error("expected registration_link when registration_allowed=true")
+	}
+}
+
+func TestFlowErrors_ClearedAfterRender(t *testing.T) {
+	cfg := ExtractAuthConfig(testSchema)
+	flow := &Flow{
+		ID:           "f_test",
+		SchemaConfig: cfg,
+		CurrentStep:  StepIdentifier,
+		Errors: []FlowError{
+			{Code: "test", Message: "Test error"},
+		},
+		Messages: []FlowMessage{
+			{Type: "info", Text: "Test info"},
+		},
+	}
+
+	step := flow.ToFlowStep()
+	if len(step.Errors) != 1 {
+		t.Errorf("expected 1 error in step, got %d", len(step.Errors))
+	}
+	if len(step.Messages) != 1 {
+		t.Errorf("expected 1 message in step, got %d", len(step.Messages))
+	}
+
+	// After rendering, errors/messages should be cleared from flow.
+	if len(flow.Errors) != 0 {
+		t.Error("flow errors should be cleared after ToFlowStep()")
+	}
+	if len(flow.Messages) != 0 {
+		t.Error("flow messages should be cleared after ToFlowStep()")
+	}
+}
+
+func TestExtractAuthConfig_SchemaProps(t *testing.T) {
+	cfg := ExtractAuthConfig(testSchema)
+
+	if len(cfg.SchemaProps) == 0 {
+		t.Fatal("expected schema props to be populated")
+	}
+
+	found := map[string]bool{}
+	for _, f := range cfg.SchemaProps {
+		found[f.Name] = true
+		if f.Name == "email" {
+			if f.Format != "email" {
+				t.Errorf("email format = %q, want %q", f.Format, "email")
+			}
+			if !f.Identifier {
+				t.Error("email should be marked as identifier")
+			}
+		}
+	}
+
+	if !found["email"] {
+		t.Error("expected email in schema props")
+	}
+	if !found["display_name"] {
+		t.Error("expected display_name in schema props")
+	}
+}
+
+func TestHumanize(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"display_name", "Display Name"},
+		{"email", "Email"},
+		{"first-name", "First Name"},
+		{"id", "Id"},
+	}
+	for _, tt := range tests {
+		got := humanize(tt.input)
+		if got != tt.want {
+			t.Errorf("humanize(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestFieldInputType(t *testing.T) {
+	tests := []struct {
+		field SchemaFieldDef
+		want  string
+	}{
+		{SchemaFieldDef{Format: "email"}, "email"},
+		{SchemaFieldDef{Sensitive: true}, "password"},
+		{SchemaFieldDef{Type: "integer"}, "number"},
+		{SchemaFieldDef{Type: "boolean"}, "checkbox"},
+		{SchemaFieldDef{Type: "string"}, "text"},
+	}
+	for _, tt := range tests {
+		got := fieldInputType(tt.field)
+		if got != tt.want {
+			t.Errorf("fieldInputType(%+v) = %q, want %q", tt.field, got, tt.want)
+		}
+	}
+}

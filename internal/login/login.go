@@ -5,7 +5,6 @@ package login
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/notify"
 	"github.com/zitadel/zitadel/internal/session"
-	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // Handler provides login-flow API endpoints.
@@ -47,19 +45,17 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI *api.API, cookies *
 }
 
 // Register mounts the login API routes onto the given mux.
+// ADR-019: All login UI is driven by the flow API. Legacy routes removed.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/branding", h.handleBranding)
 	mux.HandleFunc("GET /v1/auth/settings", h.handleAuthSettings)
 
-	// Flow API (schema-driven).
+	// Flow API (schema-driven) — the sole interface for login UI.
 	mux.HandleFunc("POST /v1/login/flows", h.handleFlowCreate)
 	mux.HandleFunc("POST /v1/login/flows/", h.handleFlowSubmit)
 	mux.HandleFunc("GET /v1/login/flows/", h.handleFlowGet)
 
-	// Legacy routes (thin wrappers around flow API).
-	mux.HandleFunc("POST /v1/login/start", h.handleLoginStart)
-	mux.HandleFunc("POST /v1/login/password", h.handleLoginPassword)
-	mux.HandleFunc("POST /v1/login/complete", h.handleLoginComplete)
+	// Magic Link (verification endpoint — used by email links).
 	mux.HandleFunc("POST /v1/auth/magic-link", h.handleMagicLinkRequest)
 	mux.HandleFunc("GET /v1/auth/magic-link/verify", h.handleMagicLinkVerify)
 
@@ -165,146 +161,9 @@ func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
 	return ExtractAuthConfig(schemaJSON)
 }
 
-// --- Login Start ---
-
-type loginSession struct {
-	ID         string
-	IdentityID string
-	Identifier string
-	Display    string
-	Verified   bool
-	CreatedAt  time.Time
-}
-
-var loginSessions = map[string]*loginSession{}
-
-func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Identifier string `json:"identifier"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	identifier := strings.TrimSpace(req.Identifier)
-	if identifier == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
-		return
-	}
-
-	// Resolve identifier via unique_fields (ADR-016).
-	orgID := httputil.ResolveOrgID(r, "")
-
-	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
-	if errors.Is(err, uniqueness.ErrIdentityNotFound) {
-		httputil.WriteError(w, http.StatusNotFound, "account not found")
-		return
-	}
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
-	identityID := resolved.EntityID
-	displayName := resolved.DisplayName
-
-	sid := id.NewLoginSession()
-	loginSessions[sid] = &loginSession{
-		ID:         sid,
-		IdentityID: identityID,
-		Identifier: identifier,
-		Display:    displayName,
-		CreatedAt:  time.Now(),
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"login_session_id": sid,
-		"entity_id":        identityID,
-		"org_id":           "",
-		"display_name":     displayName,
-		"auth_methods":     []string{"password", "magic_link"},
-		"next_step":        "password",
-	})
-}
-
-// --- Password Verification ---
-
-func (h *Handler) handleLoginPassword(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		LoginSessionID string `json:"login_session_id"`
-		Password       string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	sess, ok := loginSessions[req.LoginSessionID]
-	if !ok {
-		httputil.WriteError(w, http.StatusNotFound, "login session not found")
-		return
-	}
-
-	valid, err := h.passwords.CheckPassword(r.Context(), sess.IdentityID, req.Password)
-	if err != nil || !valid {
-		h.api.EmitAuthEvent(r.Context(), "auth.login_failed", sess.IdentityID, map[string]any{
-			"reason":           "invalid_password",
-			"login_session_id": sess.ID,
-		})
-		httputil.WriteJSON(w, http.StatusOK, map[string]any{"error": "invalid_password"})
-		return
-	}
-
-	sess.Verified = true
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"next_step": "complete"})
-}
-
-// --- Login Complete ---
-
-func (h *Handler) handleLoginComplete(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		LoginSessionID string `json:"login_session_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	sess, ok := loginSessions[req.LoginSessionID]
-	if !ok {
-		httputil.WriteError(w, http.StatusNotFound, "login session not found")
-		return
-	}
-	if !sess.Verified {
-		httputil.WriteError(w, http.StatusForbidden, "login not verified")
-		return
-	}
-
-	// Create a real session via the existing API (emits session.created event).
-	sessResp, err := h.api.CreateSessionInternal(r.Context(), sess.IdentityID, r.UserAgent(), r.RemoteAddr)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
-		return
-	}
-
-	// Set the session cookie (HMAC-signed).
-	session.SetSessionCookie(w, sessResp.Token, h.cookies)
-
-	delete(loginSessions, req.LoginSessionID)
-	logging.Printf("[login] completed for %s (identity=%s, session=%s)", sess.Identifier, sess.IdentityID, sessResp.Session.ID)
-
-	// Emit auth event.
-	h.api.EmitAuthEvent(r.Context(), "auth.login_success", sess.IdentityID, map[string]any{
-		"session_id": sessResp.Session.ID,
-		"method":     "password",
-	})
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"session_id":   sessResp.Session.ID,
-		"redirect_uri": "/console",
-	})
-}
+// Legacy login routes (handleLoginStart, handleLoginPassword, handleLoginComplete)
+// and the loginSessions map have been removed per ADR-019.
+// All login state is now managed by the Flow API.
 
 // --- Magic Link ---
 

@@ -29,6 +29,7 @@
       v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
+        <div style="display:none">{{ __setTable(table) }}</div>
         <div class="flex items-center justify-between w-full mb-4">
           <!-- Unified Search Bar with Autocomplete Chips -->
           <div class="w-full max-w-lg relative" ref="searchContainerRef">
@@ -156,7 +157,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, h } from 'vue'
 import { onClickOutside } from '@vueuse/core'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { sessionApi, entityApi, type Session } from '@/api/resources'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
@@ -178,6 +179,8 @@ const userDict = ref<Record<string, {name: string, identifier: string}>>({})
 const globalSearch = ref('')
 const isSearchOpen = ref(false)
 
+const route = useRoute()
+
 const searchInputRef = ref<any>(null)
 const searchContainerRef = ref<HTMLElement | null>(null)
 
@@ -186,6 +189,14 @@ onClickOutside(searchContainerRef, () => {
 })
 
 let activeTable: any = null
+
+function __setTable(t: any) {
+  if (!activeTable && t) {
+    activeTable = t
+    if (globalSearch.value) applySearchQuery(globalSearch.value, t)
+  }
+  return ''
+}
 
 function getSortIcon(column: any) {
   const isSorted = column.getIsSorted()
@@ -301,6 +312,12 @@ onMounted(async () => {
       }
     }
     userDict.value = dict
+
+    const user = route.query.user as string | undefined
+    if (user) {
+        globalSearch.value = `user:${user} `
+        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+    }
   } catch (err) {
     console.error('Failed to load sessions', err)
   }

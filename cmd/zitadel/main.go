@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/bootstrap"
 	"github.com/zitadel/zitadel/internal/cli"
 	"github.com/zitadel/zitadel/internal/config"
@@ -34,6 +36,7 @@ func main() {
 	root.AddCommand(startCmd())
 	root.AddCommand(migrateCmd())
 	root.AddCommand(versionCmd())
+	root.AddCommand(openapiExportCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -315,4 +318,38 @@ func versionCmd() *cobra.Command {
 			fmt.Printf("zitadel %s\n", version)
 		},
 	}
+}
+
+func openapiExportCmd() *cobra.Command {
+	var pretty bool
+	cmd := &cobra.Command{
+		Use:   "openapi-export",
+		Short: "Export the OpenAPI 3.1 spec to stdout",
+		Long:  "Generate the complete OpenAPI 3.1 specification from registered API operations. No server or database required.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Create a minimal API instance — just need the registry.
+			a := api.New(nil, nil, nil)
+			// Populate only the OpenAPI operations (no HTTP handlers, no DB needed).
+			a.RegisterOpenAPIOnly()
+
+			if pretty {
+				data, err := a.Spec().SpecJSON()
+				if err != nil {
+					return fmt.Errorf("marshal spec: %w", err)
+				}
+				os.Stdout.Write(data)
+				fmt.Println()
+			} else {
+				data, err := json.Marshal(a.Spec().Spec())
+				if err != nil {
+					return fmt.Errorf("marshal spec: %w", err)
+				}
+				os.Stdout.Write(data)
+				fmt.Println()
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&pretty, "pretty", true, "pretty-print the JSON output")
+	return cmd
 }

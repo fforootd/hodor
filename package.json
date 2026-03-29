@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "web",
-    "e2e"
+    "e2e",
+    "packages/client-js"
   ],
   "scripts": {
     "build": "npm run build -w web",

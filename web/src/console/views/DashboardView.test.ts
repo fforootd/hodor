@@ -25,21 +25,22 @@ vi.mock('lucide-vue-next', () => ({
   Activity: { template: '<span class="icon-activity" />' },
 }))
 
-/** Helper: create a mock Response compatible with the api client. */
-function mockResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
-}
+// Mock the resources module — this is the actual import used by DashboardView.
+vi.mock('@/api/resources', () => ({
+  countsApi: { get: vi.fn() },
+  schemaApi: { list: vi.fn() },
+  providerApi: { list: vi.fn() },
+  eventApi: { list: vi.fn() },
+}))
+
+import { countsApi, schemaApi, providerApi, eventApi } from '@/api/resources'
 
 describe('DashboardView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.restoreAllMocks()
   })
 
-  function mountView(fetchImpl?: typeof fetch) {
-    if (fetchImpl) {
-      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchImpl)
-    }
+  function mountView() {
     return mount(DashboardView, {
       global: {
         stubs: stubComponents,
@@ -48,8 +49,11 @@ describe('DashboardView', () => {
   }
 
   it('renders stat cards with placeholder values initially', () => {
-    // Fetch never resolves — test initial state.
-    vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => {}))
+    // APIs never resolve — test initial state.
+    vi.mocked(countsApi.get).mockReturnValue(new Promise(() => {}))
+    vi.mocked(schemaApi.list).mockReturnValue(new Promise(() => {}))
+    vi.mocked(providerApi.list).mockReturnValue(new Promise(() => {}))
+    vi.mocked(eventApi.list).mockReturnValue(new Promise(() => {}))
 
     const wrapper = mountView()
     const cards = wrapper.findAll('.card')
@@ -65,39 +69,29 @@ describe('DashboardView', () => {
   })
 
   it('loads and displays stats from API', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
-      const urlStr = typeof url === 'string' ? url : url.toString()
-      if (urlStr.includes('/v1/identities'))
-        return Promise.resolve(mockResponse({ total: 2, items: [{ id: 1 }, { id: 2 }] }))
-      if (urlStr.includes('/v1/schemas'))
-        return Promise.resolve(mockResponse({ items: [{ id: 's1' }] }))
-      if (urlStr.includes('/v1/providers'))
-        return Promise.resolve(mockResponse({ items: [{ id: 'p1' }, { id: 'p2' }] }))
-      if (urlStr.includes('/v1/events'))
-        return Promise.resolve(
-          mockResponse({
-            total: 1,
-            items: [{ id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z' }],
-          }),
-        )
-      return Promise.resolve(mockResponse({}))
-    })
+    vi.mocked(countsApi.get).mockResolvedValue({ human_user: 2, org: 1 })
+    vi.mocked(schemaApi.list).mockResolvedValue([{ id: 's1' }])
+    vi.mocked(providerApi.list).mockResolvedValue([{ id: 'p1' }, { id: 'p2' }])
+    vi.mocked(eventApi.list).mockResolvedValue([
+      { id: 'e1', event_type: 'identity.created', created_at: '2026-01-01T00:00:00Z' },
+    ])
 
     const wrapper = mountView()
     await flushPromises()
 
     const cardContents = wrapper.findAll('.card-content')
     const statValues = cardContents.slice(0, 4).map((c) => c.find('.text-2xl').text())
-    expect(statValues[0]).toBe('2') // identities
+    expect(statValues[0]).toBe('3') // identities (2 human_user + 1 org)
     expect(statValues[1]).toBe('1') // schemas
     expect(statValues[2]).toBe('2') // providers
     expect(statValues[3]).toBe('1') // events
   })
 
   it('displays "No recent events" when empty', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
-      Promise.resolve(mockResponse({ items: [] })),
-    )
+    vi.mocked(countsApi.get).mockResolvedValue({})
+    vi.mocked(schemaApi.list).mockResolvedValue([])
+    vi.mocked(providerApi.list).mockResolvedValue([])
+    vi.mocked(eventApi.list).mockResolvedValue([])
 
     const wrapper = mountView()
     await flushPromises()
@@ -106,19 +100,13 @@ describe('DashboardView', () => {
   })
 
   it('renders recent events with badges', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
-      const urlStr = typeof url === 'string' ? url : url.toString()
-      if (urlStr.includes('/v1/events'))
-        return Promise.resolve(
-          mockResponse({
-            items: [
-              { id: '1', event_type: 'identity.created', created_at: '2026-01-01T10:00:00Z' },
-              { id: '2', event_type: 'session.deleted', created_at: '2026-01-01T11:00:00Z' },
-            ],
-          }),
-        )
-      return Promise.resolve(mockResponse({ items: [] }))
-    })
+    vi.mocked(countsApi.get).mockResolvedValue({})
+    vi.mocked(schemaApi.list).mockResolvedValue([])
+    vi.mocked(providerApi.list).mockResolvedValue([])
+    vi.mocked(eventApi.list).mockResolvedValue([
+      { id: '1', event_type: 'identity.created', created_at: '2026-01-01T10:00:00Z' },
+      { id: '2', event_type: 'session.deleted', created_at: '2026-01-01T11:00:00Z' },
+    ])
 
     const wrapper = mountView()
     await flushPromises()

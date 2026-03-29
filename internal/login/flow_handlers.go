@@ -23,11 +23,20 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	cfg := h.getDefaultSchemaConfig(r)
 	ssoProviders := h.loadSSOProviders(r)
 
+	// Optional: accept OIDC redirect context.
+	var req struct {
+		RedirectURI string `json:"redirect_uri,omitempty"`
+		State       string `json:"state,omitempty"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
 	flowID := id.NewFlow()
 	flow := &Flow{
 		ID:           flowID,
 		SchemaConfig: cfg,
 		SSOProviders: ssoProviders,
+		RedirectURI:  req.RedirectURI,
+		OIDCState:    req.State,
 	}
 
 	// Determine entry step based on preset.
@@ -61,36 +70,40 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Action     string `json:"action"`      // "identifier", "password", "magic_link", "passkey", "sso", "back"
-		Identifier string `json:"identifier"`  // for identifier step
-		Password   string `json:"password"`    // for password step
-		ProviderID string `json:"provider_id"` // for SSO
-	}
+	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	switch req.Action {
+	action := req["action"]
+	switch action {
 	case "identifier":
-		h.flowSubmitIdentifier(w, r, flow, req.Identifier)
+		h.flowSubmitIdentifier(w, r, flow, req["identifier"])
 	case "password":
-		h.flowSubmitPassword(w, r, flow, req.Password)
+		h.flowSubmitPassword(w, r, flow, req["password"])
 	case "magic_link":
 		h.flowSubmitMagicLink(w, r, flow)
+	case "resend_magic_link":
+		h.flowSubmitMagicLink(w, r, flow) // same as initial send
 	case "sso":
-		h.flowSubmitSSO(w, r, flow, req.ProviderID)
+		h.flowSubmitSSO(w, r, flow, req["provider_id"])
+	case "register":
+		h.flowTransitionToRegister(w, r, flow)
+	case "register_submit":
+		h.flowSubmitRegister(w, r, flow, req)
 	case "back":
 		flow.CurrentStep = StepIdentifier
 		flow.IdentityID = ""
 		flow.Identifier = ""
 		flow.DisplayName = ""
 		flow.Verified = false
+		flow.Errors = nil
+		flow.Messages = nil
 		h.flows.Put(flow)
 		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 	default:
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown action: %s", req.Action))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown action: %s", action))
 	}
 }
 
@@ -117,7 +130,9 @@ func (h *Handler) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, flow *Flow, identifier string) {
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
+		flow.Errors = append(flow.Errors, FlowError{Code: "identifier_required", Message: "Email or username is required"})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
@@ -126,7 +141,10 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 
 	resolved, err := uniqueness.ResolveIdentifier(r.Context(), h.db.SQL(), identifier, orgID)
 	if errors.Is(err, uniqueness.ErrIdentityNotFound) {
-		httputil.WriteError(w, http.StatusNotFound, "account not found")
+		flow.Identifier = identifier // preserve for registration
+		flow.Errors = append(flow.Errors, FlowError{Code: "not_found", Message: "Account not found"})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 	if err != nil {
@@ -138,6 +156,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	flow.Identifier = identifier
 	flow.DisplayName = resolved.DisplayName
 	flow.CurrentStep = StepAuthSelect
+	flow.Errors = nil
 	h.flows.Put(flow)
 
 	logging.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.EntityID)
@@ -146,7 +165,9 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 
 func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flow *Flow, password string) {
 	if password == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "password is required")
+		flow.Errors = append(flow.Errors, FlowError{Code: "password_required", Message: "Password is required"})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
@@ -157,15 +178,19 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	).Scan(&credData)
 	if err != nil {
 		logging.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IdentityID, err)
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Something went wrong. Please try again."})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
-	// Extract hash from credential_data JSON: {"hash":"..."}
+	// Extract hash from credential_data JSON: {"hash":"..."}.
 	hash := auth.DecodeCredentialJSON(credData)
 	if hash == "" {
 		logging.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IdentityID)
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Something went wrong. Please try again."})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
@@ -175,11 +200,14 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 			"reason":  "invalid_password",
 			"flow_id": flow.ID,
 		})
-		httputil.WriteError(w, http.StatusUnauthorized, "invalid_password")
+		flow.Errors = append(flow.Errors, FlowError{Code: "invalid_password", Message: "Invalid password. Please try again."})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
 	flow.Verified = true
+	flow.Errors = nil
 
 	// Check if MFA is required.
 	if flow.SchemaConfig.Login.MFARequired {
@@ -195,20 +223,26 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 
 func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	if flow.Identifier == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "no identifier set")
+		flow.Errors = append(flow.Errors, FlowError{Code: "no_identifier", Message: "No identifier set"})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
 	// Delegate to existing magic link infrastructure.
 	logging.Printf("[flow] %s sending magic link to %s", flow.ID, flow.Identifier)
 	flow.CurrentStep = StepMagicLink
+	flow.Errors = nil
+	flow.Messages = append(flow.Messages, FlowMessage{Type: "success", Text: "Sign-in link sent!"})
 	h.flows.Put(flow)
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
 
 func (h *Handler) flowSubmitSSO(w http.ResponseWriter, r *http.Request, flow *Flow, providerID string) {
 	if providerID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "provider_id is required")
+		flow.Errors = append(flow.Errors, FlowError{Code: "provider_required", Message: "Provider is required"})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
@@ -220,11 +254,141 @@ func (h *Handler) flowSubmitSSO(w http.ResponseWriter, r *http.Request, flow *Fl
 	})
 }
 
+// flowTransitionToRegister moves the flow to the registration step.
+func (h *Handler) flowTransitionToRegister(w http.ResponseWriter, r *http.Request, flow *Flow) {
+	if !flow.SchemaConfig.Login.RegistrationAllowed {
+		flow.Errors = append(flow.Errors, FlowError{Code: "registration_disabled", Message: "Registration is not available"})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		return
+	}
+
+	flow.CurrentStep = StepRegister
+	flow.Errors = nil
+	if flow.RegData == nil {
+		flow.RegData = make(map[string]string)
+	}
+	h.flows.Put(flow)
+	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+}
+
+// flowSubmitRegister handles the registration form submission.
+func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flow *Flow, formData map[string]string) {
+	if flow.RegData == nil {
+		flow.RegData = make(map[string]string)
+	}
+
+	// Accumulate form data (skip "action").
+	for k, v := range formData {
+		if k != "action" {
+			flow.RegData[k] = v
+		}
+	}
+
+	// Validate required fields from schema.
+	var validationErrors []FlowError
+	for _, field := range flow.SchemaConfig.SchemaProps {
+		if field.Required {
+			val := flow.RegData[field.Name]
+			if strings.TrimSpace(val) == "" {
+				label := field.Title
+				if label == "" {
+					label = humanize(field.Name)
+				}
+				validationErrors = append(validationErrors, FlowError{
+					Code:    "field_required",
+					Message: fmt.Sprintf("%s is required", label),
+				})
+			}
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		flow.Errors = validationErrors
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		return
+	}
+
+	// Find the primary identifier from the form data.
+	identifier := ""
+	for _, field := range flow.SchemaConfig.SchemaProps {
+		if field.Identifier {
+			if v, ok := flow.RegData[field.Name]; ok && v != "" {
+				identifier = v
+				break
+			}
+		}
+	}
+	if identifier == "" {
+		// Fallback: use email or first available field.
+		identifier = flow.RegData["email"]
+		if identifier == "" {
+			for _, v := range flow.RegData {
+				if v != "" {
+					identifier = v
+					break
+				}
+			}
+		}
+	}
+
+	displayName := flow.RegData["display_name"]
+	if displayName == "" {
+		displayName = identifier
+	}
+
+	// Create the entity via the database.
+	newID := id.New()
+	profileJSON := "{}"
+	if len(flow.RegData) > 0 {
+		if b, err := json.Marshal(flow.RegData); err == nil {
+			profileJSON = string(b)
+		}
+	}
+
+	_, err := h.db.SQL().ExecContext(r.Context(),
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, 'active', ?, '{}', datetime('now'), datetime('now'))`,
+		newID, identifier, displayName, profileJSON,
+	)
+	if err != nil {
+		logging.Printf("[flow] %s registration failed: %v", flow.ID, err)
+		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "unique") {
+			flow.Errors = append(flow.Errors, FlowError{Code: "already_exists", Message: "An account with this identifier already exists"})
+		} else {
+			flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Registration failed. Please try again."})
+		}
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		return
+	}
+
+	logging.Printf("[flow] %s registered new identity %s (%s)", flow.ID, newID, identifier)
+
+	// Set flow state to the new identity and complete.
+	flow.IdentityID = newID
+	flow.Identifier = identifier
+	flow.DisplayName = displayName
+	flow.Verified = true
+	flow.Errors = nil
+
+	h.api.EmitAuthEvent(r.Context(), "auth.registration_completed", newID, map[string]any{
+		"flow_id":    flow.ID,
+		"identifier": identifier,
+	})
+
+	// Complete the flow (creates session, sets cookie).
+	h.flowComplete(w, r, flow)
+}
+
 func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	// Create session via the existing API.
 	sessResp, err := h.api.CreateSessionInternal(r.Context(), flow.IdentityID, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "session creation failed")
+		flow.Errors = append(flow.Errors, FlowError{Code: "session_failed", Message: "Failed to create session. Please try again."})
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 		return
 	}
 
@@ -242,11 +406,17 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		"method":     "flow",
 	})
 
+	// Determine redirect URI: OIDC redirect_uri if present, otherwise /console.
+	redirectURI := "/console"
+	if flow.RedirectURI != "" {
+		redirectURI = flow.RedirectURI
+	}
+
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"flow_id":      flow.ID,
 		"step":         "complete",
 		"session_id":   sessResp.Session.ID,
-		"redirect_uri": "/console",
+		"redirect_uri": redirectURI,
 	})
 
 	// Clean up flow.

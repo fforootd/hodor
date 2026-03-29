@@ -239,8 +239,7 @@
         <CardContent>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <RouterLink
-              :to="{ path: '/events', query: { session_id: undefined } }"
-              @click.prevent="router.push({ path: '/observability/explore', query: { table: 'events', func: 'NONE', mcol: '*', filters: JSON.stringify([{ col: 'actor_id', op: '=', val: identity?.id }]) } })"
+              :to="{ path: '/events', query: { actor: identity?.id } }"
               class="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors group cursor-pointer"
             >
               <div class="p-2 rounded-md bg-primary/10 text-primary">
@@ -254,8 +253,7 @@
             </RouterLink>
 
             <RouterLink
-              :to="{ path: '/sessions', query: {} }"
-              @click.prevent="router.push({ path: '/observability/explore', query: { table: 'sessions', func: 'NONE', mcol: '*', filters: JSON.stringify([{ col: 'entity_id', op: '=', val: identity?.id }]) } })"
+              :to="{ path: '/sessions', query: { user: identity?.id } }"
               class="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors group cursor-pointer"
             >
               <div class="p-2 rounded-md bg-green-500/10 text-green-600">
@@ -269,7 +267,7 @@
             </RouterLink>
 
             <RouterLink
-              :to="{ path: '/observability/traces' }"
+              :to="{ path: '/traces', query: { id: identity?.id } }"
               class="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors group"
             >
               <div class="p-2 rounded-md bg-amber-500/10 text-amber-600">

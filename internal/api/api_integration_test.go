@@ -121,7 +121,7 @@ func TestAdmin_CanCreateIdentity(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithBearer("/v1/entities", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/users", map[string]any{
 		"identifier":   "new@test.com",
 		"display_name": "New User",
 		"schema_id":    "human_user_v1",
@@ -217,7 +217,7 @@ func TestIdentitiesBulk_Creates(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
 
-	code, body := srv.PostJSONWithBearer("/v1/entities/bulk", map[string]any{
+	code, body := srv.PostJSONWithBearer("/v1/admin/bulk", map[string]any{
 		"entities": []map[string]any{
 			{"identifier": "batch1@test.com", "display_name": "Batch 1"},
 			{"identifier": "batch2@test.com", "display_name": "Batch 2"},
@@ -278,7 +278,7 @@ func TestIdentity_CRUD(t *testing.T) {
 	token := srv.LoginAdmin()
 
 	// List should have at least admin.
-	code, body := srv.GetWithBearer("/v1/entities", token)
+	code, body := srv.GetWithBearer("/v1/users", token)
 	if code != 200 {
 		t.Fatalf("list: expected 200, got %d", code)
 	}
@@ -291,7 +291,7 @@ func TestIdentity_CRUD(t *testing.T) {
 	firstItem, _ := items[0].(map[string]any)
 	adminID := fmt.Sprintf("%v", firstItem["id"])
 
-	code, body = srv.GetWithBearer("/v1/entities/"+adminID, token)
+	code, body = srv.GetWithBearer("/v1/users/"+adminID, token)
 	if code != 200 {
 		t.Fatalf("get: expected 200, got %d", code)
 	}

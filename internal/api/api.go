@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/httputil"
@@ -29,23 +30,21 @@ type API struct {
 	db      *database.DB
 	bus     *eventbus.Bus
 	cookies *session.CookieConfig
+	spec    *OpenAPIRegistry
 }
 
 // New creates a new API handler.
 func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API {
-	return &API{db: db, bus: bus, cookies: cookies}
+	return &API{db: db, bus: bus, cookies: cookies, spec: &OpenAPIRegistry{}}
 }
 
 // RegisterRoutes mounts all REST API routes on the given mux.
 // Authorization is handled by the FGA middleware (FGAGate) in the
 // server middleware chain — individual routes no longer wrap requireAdmin.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
-	// Identity CRUD — FGA middleware handles authz.
-	mux.HandleFunc("POST /v1/entities", a.createIdentity)
-	mux.HandleFunc("GET /v1/entities", a.listIdentities)
-	mux.HandleFunc("GET /v1/entities/{id}", a.getIdentity)
-	mux.HandleFunc("PATCH /v1/entities/{id}", a.updateIdentity)
-	mux.HandleFunc("DELETE /v1/entities/{id}", a.deleteIdentity)
+	// Entity CRUD is exposed exclusively through schema-driven alias routes
+	// (e.g. /v1/users, /v1/orgs, /v1/apps). See registerAliasRoutes().
+	// The generic /v1/entities endpoint has been removed from the public API.
 
 	// Schema CRUD
 	mux.HandleFunc("POST /v1/schemas", a.createSchema)
@@ -85,8 +84,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Hierarchical settings CRUD (ADR-009)
 	a.RegisterSettingsRoutes(mux)
 
-	// Dynamic OpenAPI
-	mux.HandleFunc("GET /openapi.json", a.openAPISpec)
+	// Dynamic OpenAPI (generated from registry)
+	a.registerOpenAPIOperations()
+	mux.HandleFunc("GET /openapi.json", a.openAPISpecFromRegistry)
 
 	// Well-known discovery
 	mux.HandleFunc("GET /.well-known/zitadel-identity-schema", func(w http.ResponseWriter, r *http.Request) {
@@ -96,16 +96,18 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Batch entity counts for sidebar badges
 	mux.HandleFunc("GET /v1/counts", a.entityCounts)
 
-	// Schema-driven route aliases (e.g. /v1/users → entities?schema_type=human_user)
-	a.registerAliasRoutes(mux)
+	// Schema-driven entity routes (e.g. /v1/users, /v1/orgs, /v1/apps).
+	// These are the primary public API — no generic /v1/entities.
+	a.registerEntityRoutes(mux)
 }
 
-// registerAliasRoutes reads the x-catalog from the meta schema and registers
-// /v1/{path} aliases for entity types.
-func (a *API) registerAliasRoutes(mux *http.ServeMux) {
+// registerEntityRoutes reads the x-catalog from the meta schema and registers
+// /v1/{path} routes for each entity type. Each route injects schema_type
+// automatically, so consumers don't need to pass it.
+func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	catalog, err := schema.Catalog()
 	if err != nil {
-		logging.Printf("[alias] failed to load catalog: %v", err)
+		logging.Printf("[api] failed to load catalog: %v", err)
 		return
 	}
 
@@ -117,18 +119,24 @@ func (a *API) registerAliasRoutes(mux *http.ServeMux) {
 		st := typeName
 		prefix := "/v1/" + entry.Path
 
-		mux.HandleFunc("GET "+prefix, a.aliasHandler(st, a.listIdentities))
-		mux.HandleFunc("POST "+prefix, a.aliasHandler(st, a.createIdentity))
+		// Collection routes — inject schema_type for list/create.
+		mux.HandleFunc("GET "+prefix, a.typeHandler(st, a.listIdentities))
+		mux.HandleFunc("POST "+prefix, a.typeHandler(st, a.createIdentity))
+
+		// Resource routes — {id} routes are type-agnostic (fetch by ID).
+		// GET/PATCH/DELETE work the same regardless of type since IDs are globally unique.
 		mux.HandleFunc("GET "+prefix+"/{id}", a.getIdentity)
 		mux.HandleFunc("PATCH "+prefix+"/{id}", a.updateIdentity)
 		mux.HandleFunc("DELETE "+prefix+"/{id}", a.deleteIdentity)
+		mux.HandleFunc("POST "+prefix+"/{id}/password", a.typeHandler(st, a.setEntityPassword))
 
-		logging.Printf("[alias] registered /v1/%s → entities (type=%s)", entry.Path, st)
+		logging.Printf("[api] registered /v1/%s (type=%s)", entry.Path, st)
 	}
 }
 
-// aliasHandler wraps a handler to inject schema_type into query params.
-func (a *API) aliasHandler(schemaType string, next http.HandlerFunc) http.HandlerFunc {
+// typeHandler wraps a handler to inject schema_type into query params.
+// This ensures list/create operations are scoped to the correct entity type.
+func (a *API) typeHandler(schemaType string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if q.Get("schema_type") == "" {
@@ -142,9 +150,11 @@ func (a *API) aliasHandler(schemaType string, next http.HandlerFunc) http.Handle
 // --- Identity types ---
 
 type IdentityRequest struct {
+	SchemaID     string   `json:"schema_id,omitempty"`
 	Identifier   string   `json:"identifier"`
 	DisplayName  string   `json:"display_name,omitempty"`
 	Profile      any      `json:"profile,omitempty"`
+	Metadata     any      `json:"metadata,omitempty"`
 	State        string   `json:"state,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
 }
@@ -210,13 +220,26 @@ func (a *API) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	metadataJSON := "{}"
+	if req.Metadata != nil {
+		if b, err := json.Marshal(req.Metadata); err == nil {
+			metadataJSON = string(b)
+		}
+	}
+
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO entities (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'active', ?, '{}', ?, ?)`,
-		identityID, req.Identifier, req.DisplayName, profileJSON, now, now,
+		`INSERT INTO entities (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+		identityID, req.Identifier, req.DisplayName, req.SchemaID, profileJSON, metadataJSON, now, now,
 	)
 	if err != nil {
-		httputil.WriteError(w, http.StatusConflict, "identity already exists or database error")
+		// Do not swallow the actual SQL error message!
+		logging.Printf("[createIdentity] DB insert failed: %v", err)
+		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
+			"error":   "database error",
+			"code":    409,
+			"details": err.Error(),
+		})
 		return
 	}
 
@@ -490,6 +513,32 @@ func (a *API) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 		if err := svc.OnEntityDeleted(r.Context(), identityID); err != nil {
 			logging.Printf("[fga] warn: failed to delete entity tuples: %v", err)
 		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) setEntityPassword(w http.ResponseWriter, r *http.Request) {
+	identityID := r.PathValue("id")
+	if identityID == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid identity id")
+		return
+	}
+
+	var req SetEntityPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Password == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	pwd := auth.NewPasswords(a.db)
+	if err := pwd.SetPassword(r.Context(), identityID, req.Password); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to set password")
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

@@ -27,7 +27,7 @@ func TestNonAdmin_CannotCreateEntity(t *testing.T) {
 	identityID := srv.CreateIdentity("user-entity@test.com", "Entity User")
 	userToken := srv.CreateSession(identityID)
 
-	code, _ := srv.PostJSONWithCookie("/v1/entities", map[string]any{
+	code, _ := srv.PostJSONWithCookie("/v1/users", map[string]any{
 		"identifier":   "hacker@test.com",
 		"display_name": "Hacker",
 	}, userToken)
@@ -161,7 +161,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 
 	cases := []testCase{
 		{"POST", "/v1/schemas", map[string]any{"type": "t", "schema": map[string]any{"type": "object"}}, 401, 403, 201},
-		{"POST", "/v1/entities", map[string]any{"identifier": "matrix@test.com"}, 401, 403, 201},
+		{"POST", "/v1/users", map[string]any{"identifier": "matrix@test.com"}, 401, 403, 201},
 		{"GET", "/v1/sessions", nil, 401, 403, 200},
 		{"POST", "/v1/pats", map[string]any{"name": "p", "entity_id": 1, "scopes": []string{"admin"}}, 401, 403, 201},
 		{"POST", "/v1/import", map[string]any{"identities": []any{}}, 401, 403, 200},

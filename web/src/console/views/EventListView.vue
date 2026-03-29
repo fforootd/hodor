@@ -30,6 +30,7 @@
       v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
+        <div style="display:none">{{ __setTable(table) }}</div>
         <div class="flex items-center justify-between w-full mb-4">
           <!-- Unified Search Bar -->
           <div class="w-full max-w-lg relative" ref="searchContainerRef">
@@ -158,6 +159,14 @@ onClickOutside(searchContainerRef, () => {
 
 let activeTable: any = null
 
+function __setTable(t: any) {
+  if (!activeTable && t) {
+    activeTable = t
+    if (globalSearch.value) applySearchQuery(globalSearch.value, t)
+  }
+  return ''
+}
+
 function getSortIcon(column: any) {
   const isSorted = column.getIsSorted()
   if (isSorted === 'asc') return ArrowUp
@@ -240,16 +249,18 @@ function applySearchQuery(query: string, table: any) {
 onMounted(async () => {
   try { 
     const session_id = route.query.session_id as string | undefined
-    const res = await eventApi.list({ limit: 500, session_id })
+    const actor = route.query.actor as string | undefined
+    const res = await eventApi.list({ limit: 500, session_id }) as Event[]
     events.value = res
     eventTypes.value = [...new Set(res.map(e => e.event_type))]
     
-    // Auto-apply session filter chip to the UI if present
+    // Auto-apply filters to the UI if present
     if (session_id) {
        globalSearch.value = `session:${session_id} `
-       // Note: we don't need to applySearchQuery filtering on 'session' column locally 
-       // because the backend already pre-filtered it. But leaving the chip shows the user it is filtered!
-       // But let's actually make sure applying it locally doesn't break if `session` isn't a column!
+       if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+    } else if (actor) {
+       globalSearch.value = `actor:${actor} `
+       if (activeTable) applySearchQuery(globalSearch.value, activeTable)
     }
   } catch (err) {
     console.error('Failed to load events', err)

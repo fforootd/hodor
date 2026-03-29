@@ -95,8 +95,8 @@ func TestAPIRoute(t *testing.T) {
 		path   string
 		want   string
 	}{
-		{"", "POST", "/v1/entities", "POST /v1/entities"},
-		{"/auth", "POST", "/v1/entities", "POST /auth/v1/entities"},
+		{"", "POST", "/v1/users", "POST /v1/users"},
+		{"/auth", "POST", "/v1/users", "POST /auth/v1/users"},
 		{"/auth", "GET", "/v1/schemas", "GET /auth/v1/schemas"},
 	}
 

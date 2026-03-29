@@ -14,8 +14,8 @@ func TestResolveRouteType(t *testing.T) {
 		wantType string
 		wantID   string
 	}{
-		{"/v1/entities", "entity", ""},
-		{"/v1/entities/abc123", "entity", "abc123"},
+		{"/v1/users", "entity", ""},
+		{"/v1/users/abc123", "entity", "abc123"},
 		{"/v1/users", "entity", ""},
 		{"/v1/users/xyz", "entity", "xyz"},
 		{"/v1/apps", "app", ""},
@@ -99,8 +99,8 @@ func TestIsPublicRoute(t *testing.T) {
 		{"GET", "/v1/schemas/human_user_v1", true},
 		{"GET", "/v1/branding", true},
 		{"POST", "/v1/login/password", true},
-		{"GET", "/v1/entities", false},
-		{"POST", "/v1/entities", false},
+		{"GET", "/v1/users", false},
+		{"POST", "/v1/users", false},
 		{"GET", "/v1/fga/model", false},
 		{"POST", "/v1/fga/check", false},
 	}
@@ -125,7 +125,7 @@ func TestGate_UnauthenticatedPassthrough(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/v1/entities", nil)
+	req := httptest.NewRequest("GET", "/v1/users", nil)
 	// No X-Identity-Id header → unauthenticated
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -143,7 +143,7 @@ func TestGate_DeniesUnauthorized(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("POST", "/v1/entities", nil)
+	req := httptest.NewRequest("POST", "/v1/users", nil)
 	req.Header.Set("X-Identity-Id", "user-with-no-grants")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -167,8 +167,8 @@ func TestGate_AllowsAuthorized(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Admin POSTing to /v1/entities (checks can_create_entity against org).
-	req := httptest.NewRequest("POST", "/v1/entities", nil)
+	// Admin POSTing to /v1/users (checks can_create_entity against org).
+	req := httptest.NewRequest("POST", "/v1/users", nil)
 	req.Header.Set("X-Identity-Id", "admin")
 	req.Header.Set("X-Org-Id", "org1")
 	rec := httptest.NewRecorder()

@@ -249,7 +249,7 @@ onMounted(async () => {
   try {
     let url = `/v1/${apiPath}`
     const orgId = localStorage.getItem('zitadel_org')
-    if (orgId) url += `?org_id=${orgId}`
+    if (orgId && apiPath !== 'orgs' && props.schemaType !== 'org') url += `?org_id=${orgId}`
 
     const data = await api.get<any>(url)
 

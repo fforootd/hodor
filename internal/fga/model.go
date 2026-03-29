@@ -517,7 +517,6 @@ var PermissionMap = map[string]map[string]string{
 // RouteToFGAType maps API route prefixes to FGA type names.
 // Built at startup from x-catalog, but these are the defaults.
 var RouteToFGAType = map[string]string{
-	"/v1/entities":         "entity",
 	"/v1/users":            "entity",
 	"/v1/service-accounts": "entity",
 	"/v1/ai-agents":        "entity",

@@ -110,7 +110,7 @@ func TestBearer_ValidPAT(t *testing.T) {
 	}
 
 	// Use PAT via Bearer header.
-	code, _ = srv.GetWithBearer("/v1/entities", patToken)
+	code, _ = srv.GetWithBearer("/v1/users", patToken)
 	if code != 200 {
 		t.Fatalf("expected 200 using PAT, got %d", code)
 	}
@@ -120,7 +120,7 @@ func TestBearer_MalformedHeader_Returns401(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 
 	// Send with Basic instead of Bearer.
-	req, _ := http.NewRequest("GET", srv.URL()+"/v1/entities", nil)
+	req, _ := http.NewRequest("GET", srv.URL()+"/v1/users", nil)
 	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestBearer_MalformedHeader_Returns401(t *testing.T) {
 
 func TestBearer_EmptyToken_Returns401(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	code, _ := srv.GetWithBearer("/v1/entities", "")
+	code, _ := srv.GetWithBearer("/v1/users", "")
 	if code != 401 {
 		t.Fatalf("expected 401 for empty bearer, got %d", code)
 	}
@@ -144,7 +144,7 @@ func TestBearer_EmptyToken_Returns401(t *testing.T) {
 
 func TestUniform_NoToken_Returns401(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	code, body := srv.GetRaw("/v1/entities")
+	code, body := srv.GetRaw("/v1/users")
 	if code != 401 {
 		t.Fatalf("expected 401, got %d", code)
 	}
@@ -158,10 +158,10 @@ func TestUniform_InvalidToken_SameAs_ExpiredToken(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 
 	// Invalid token.
-	code1, body1 := srv.GetWithBearer("/v1/entities", "zit_ses_invalid_garbage_token_value_1234")
+	code1, body1 := srv.GetWithBearer("/v1/users", "zit_ses_invalid_garbage_token_value_1234")
 
 	// Fabricated expired token.
-	code2, body2 := srv.GetWithBearer("/v1/entities", "zit_ses_0000000000000000000000000000000000000000000000000000000000000000")
+	code2, body2 := srv.GetWithBearer("/v1/users", "zit_ses_0000000000000000000000000000000000000000000000000000000000000000")
 
 	if code1 != 401 || code2 != 401 {
 		t.Fatalf("expected both 401, got %d and %d", code1, code2)
@@ -177,7 +177,7 @@ func TestUniform_InvalidToken_SameAs_ExpiredToken(t *testing.T) {
 
 func TestNoSensitiveData_In401Body(t *testing.T) {
 	srv := testutil.NewTestServer(t)
-	_, body := srv.GetWithBearer("/v1/entities", "zit_ses_bad_token")
+	_, body := srv.GetWithBearer("/v1/users", "zit_ses_bad_token")
 
 	// Must not leak stack traces, SQL errors, or internal paths.
 	for _, key := range []string{"stack", "trace", "sql", "path", "file"} {
