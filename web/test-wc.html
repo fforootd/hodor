@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zitadel Web Components — Test Page</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #f5f5f7;
+      padding: 2rem;
+      color: #1a1a2e;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: #6b7280;
+      font-size: 0.875rem;
+      margin-bottom: 2rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+      gap: 1.5rem;
+    }
+    .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      overflow: hidden;
+    }
+    .card-header {
+      background: #fafafa;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 0.75rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-header h3 {
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+    .tag {
+      font-family: 'SF Mono', monospace;
+      font-size: 0.75rem;
+      background: #f0f0f0;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      color: #6b7280;
+    }
+    .card-body {
+      padding: 0;
+    }
+    .log {
+      margin-top: 2rem;
+      background: #1a1a2e;
+      color: #a3e635;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.75rem;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .log p { margin-bottom: 0.25rem; }
+    .log .time { color: #6b7280; }
+    .log .event { color: #60a5fa; }
+    .log .data { color: #fbbf24; }
+    .toggle-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .toggle-bar button {
+      padding: 0.5rem 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.5rem;
+      background: white;
+      font-size: 0.813rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .toggle-bar button:hover {
+      background: #f5f5f7;
+    }
+    .toggle-bar button.active {
+      background: #1a1a2e;
+      color: white;
+      border-color: #1a1a2e;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧩 Zitadel Web Components</h1>
+  <p class="subtitle">
+    Test harness for <code>&lt;zitadel-*&gt;</code> custom elements.
+    All events are logged below. Connect to <code>http://localhost:8080</code> backend.
+  </p>
+
+  <div class="toggle-bar">
+    <button onclick="toggleDark()" id="dark-btn">🌙 Dark Mode</button>
+    <button onclick="clearLog()">🗑 Clear Log</button>
+  </div>
+
+  <div class="grid">
+    <!-- Identity List -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Identity List</h3>
+        <span class="tag">&lt;zitadel-identity-list&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-identity-list
+          api-base-url="http://localhost:8080"
+          show-search
+          show-create
+        ></zitadel-identity-list>
+      </div>
+    </div>
+
+    <!-- Identity Create -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Identity Create</h3>
+        <span class="tag">&lt;zitadel-identity-create&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-identity-create
+          api-base-url="http://localhost:8080"
+          schema-type="human_user"
+        ></zitadel-identity-create>
+      </div>
+    </div>
+
+    <!-- User Invite -->
+    <div class="card">
+      <div class="card-header">
+        <h3>User Invite</h3>
+        <span class="tag">&lt;zitadel-user-invite&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-user-invite
+          api-base-url="http://localhost:8080"
+        ></zitadel-user-invite>
+      </div>
+    </div>
+
+    <!-- Session Manager -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Session Manager</h3>
+        <span class="tag">&lt;zitadel-session-manager&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-session-manager
+          api-base-url="http://localhost:8080"
+        ></zitadel-session-manager>
+      </div>
+    </div>
+
+    <!-- Organizations -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Organizations</h3>
+        <span class="tag">&lt;zitadel-org-list&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-org-list
+          api-base-url="http://localhost:8080"
+          show-search
+          show-create
+        ></zitadel-org-list>
+      </div>
+    </div>
+
+    <!-- Sessions (Admin) -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Sessions (Admin)</h3>
+        <span class="tag">&lt;zitadel-session-list&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-session-list
+          api-base-url="http://localhost:8080"
+          show-search
+        ></zitadel-session-list>
+      </div>
+    </div>
+
+    <!-- Providers -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <div class="card-header">
+        <h3>Providers</h3>
+        <span class="tag">&lt;zitadel-provider-list&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-provider-list
+          api-base-url="http://localhost:8080"
+          show-search
+          show-create
+        ></zitadel-provider-list>
+      </div>
+    </div>
+
+    <!-- Account -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <div class="card-header">
+        <h3>Account (Self-Service)</h3>
+        <span class="tag">&lt;zitadel-account&gt;</span>
+      </div>
+      <div class="card-body">
+        <zitadel-account
+          api-base-url="http://localhost:8080"
+          show-sessions
+          show-activity
+        ></zitadel-account>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event Log -->
+  <div class="log" id="log">
+    <p><span class="time">[init]</span> Listening for custom events…</p>
+  </div>
+
+  <!-- Load all WCs from dev server -->
+  <script type="module">
+    // In dev mode, import directly from source
+    import './src/wc/zitadel-identity-list-wc.ts'
+    import './src/wc/zitadel-identity-detail-wc.ts'
+    import './src/wc/zitadel-identity-create-wc.ts'
+    import './src/wc/zitadel-account-wc.ts'
+    import './src/wc/zitadel-session-manager-wc.ts'
+    import './src/wc/zitadel-user-invite-wc.ts'
+    import './src/wc/zitadel-org-list-wc.ts'
+    import './src/wc/zitadel-session-list-wc.ts'
+    import './src/wc/zitadel-provider-list-wc.ts'
+  </script>
+
+  <script>
+    const logEl = document.getElementById('log')
+    const events = [
+      'identity-selected', 'identity-create', 'identity-updated', 'identity-deleted',
+      'identity-created', 'create-cancelled', 'create-error',
+      'profile-updated', 'session-revoked', 'all-sessions-revoked', 'sign-out',
+      'invite-sent', 'invite-error',
+      'user-created', 'wizard-closed', 'wizard-error',
+      'org-selected', 'org-created', 'org-error',
+      'session-selected',
+      'provider-selected', 'provider-created', 'provider-toggled', 'provider-deleted', 'provider-error',
+    ]
+
+    events.forEach(name => {
+      document.addEventListener(name, (e) => {
+        const time = new Date().toLocaleTimeString()
+        const detail = JSON.stringify(e.detail, null, 0)
+        const p = document.createElement('p')
+        p.innerHTML = `<span class="time">[${time}]</span> <span class="event">${name}</span> <span class="data">${detail}</span>`
+        logEl.appendChild(p)
+        logEl.scrollTop = logEl.scrollHeight
+      })
+    })
+
+    let dark = false
+    function toggleDark() {
+      dark = !dark
+      document.querySelectorAll('[class*="zitadel-"]').forEach(el => {
+        // Toggle dark class on the WC host elements
+        if (el.shadowRoot) {
+          el.setAttribute('dark-mode', dark ? 'dark' : 'light')
+        }
+      })
+      document.querySelectorAll('zitadel-identity-list, zitadel-identity-detail, zitadel-identity-create, zitadel-account, zitadel-session-manager, zitadel-user-invite, zitadel-org-list, zitadel-session-list, zitadel-provider-list').forEach(el => {
+        el.setAttribute('dark-mode', dark ? 'dark' : 'light')
+      })
+      document.getElementById('dark-btn').classList.toggle('active', dark)
+      if (dark) {
+        document.body.style.background = '#0a0a0f'
+        document.body.style.color = '#f5f5f7'
+      } else {
+        document.body.style.background = '#f5f5f7'
+        document.body.style.color = '#1a1a2e'
+      }
+    }
+
+    function clearLog() {
+      logEl.innerHTML = '<p><span class="time">[cleared]</span> Log cleared.</p>'
+    }
+  </script>
+</body>
+</html>

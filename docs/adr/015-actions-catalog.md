@@ -366,23 +366,23 @@ else                         → Forked
 
 ### 9. Console UI Architecture
 
-The catalog experience is **centralized for management, contextual for creation**.
+The catalog experience is **split across two views**: Marketplace for browsing/installing, Schemas for admin.
 
 ```
 Console Nav
 │
-├── Schemas                          ← CENTRALIZED command center
-│   ├── Entity Schemas               — human_user, action, provider, etc.
-│   │   └── [schema card]            — view/edit JSON schema, version history
-│   ├── Catalog                      — full catalog browser (all types)
-│   │   ├── Filter: [All] [Actions] [Providers] [Authorization] [Schemas]
-│   │   ├── Search: [________________]
-│   │   ├── Source: [Embedded (9)] [Remote (23)] 
-│   │   └── [template card]          — name, desc, tags, [Install] / [Preview]
-│   └── Installed                    — all entities installed from catalog
-│       ├── Filter: [Linked ✓] [Forked ✎] [All]
-│       ├── [entity card]            — state badge, version, [Upgrade] / [Diff]
-│       └── Bulk: [Check for updates] [Auto-upgrade linked]
+├── Schemas                          ← ADMIN tool (System section)
+│   ├── Schema type cards            — human_user, action, provider, etc.
+│   │   └── [schema card]           — view/edit JSON schema, version history
+│   ├── [+ New Schema Type]         — create blank schema
+│   └── [Browse Marketplace →]      — links to /marketplace
+│
+├── Marketplace                      ← CATALOG browser (own section)
+│   ├── Filter: [All] [Actions] [Providers] [Authorization] [Schemas] [Login Flows]
+│   ├── Search: [________________]
+│   ├── [Refresh]                   — re-fetch from git source
+│   └── [template card]            — name, desc, tags, type badge, [Install]
+│       └── Install dialog         — variable form, one-click install
 │
 ├── Actions                          ← RESOURCE view
 │   ├── My Actions                   — installed actions
@@ -390,28 +390,23 @@ Console Nav
 │   │   └── origin: "from catalog: Rate Limit by Path v1.0.0" (if applicable)
 │   └── [+ New Action]
 │       ├── [Blank]                  — Monaco editor, empty
-│       └── [From Catalog →]         — opens catalog filtered to type=action
+│       └── [From Marketplace →]     — opens marketplace filtered to type=action
 │
 ├── Providers                        ← RESOURCE view
 │   ├── My Providers                 — configured providers
 │   │   ├── [provider card]          — status, origin badge
-│   │   └── origin: "from catalog: Google OIDC v1.0.0" 
+│   │   └── origin: "from catalog: Google OIDC v1.0.0"
 │   └── [+ New Provider]
 │       ├── [Custom OIDC]            — manual config
 │       ├── [Custom OAuth]           — manual config
-│       └── [From Catalog →]         — catalog filtered to type=provider
-│           ├── Google               — one-click: enter client_id + secret
-│           ├── GitHub               — one-click: enter app credentials
-│           ├── GitLab               — one-click: enter app credentials + URL
-│           ├── Entra ID             — one-click: enter tenant + credentials
-│           └── ...community...
+│       └── [From Marketplace →]     — marketplace filtered to type=provider
 │
 ├── Authorization                    ← RESOURCE view
 │   ├── My Models                    — installed FGA models
 │   │   └── origin: "from catalog: Basic RBAC v1.0.0"
 │   └── [+ New Model]
 │       ├── [Blank]                  — DSL editor
-│       └── [From Catalog →]         — catalog filtered to type=authorization
+│       └── [From Marketplace →]     — marketplace filtered to type=authorization
 │
 └── Settings
     └── Catalog Source               — URL, local path, refresh interval
@@ -419,11 +414,13 @@ Console Nav
 
 **Key UX principles:**
 
-1. **Schemas is the admin hub** — see everything, manage lifecycle, check for updates, control catalog source
-2. **Resource views are contextual** — show only what's relevant, "From Catalog" is a progressive disclosure button
-3. **Origin badges everywhere** — every entity installed from catalog shows its origin, version, and state (linked/forked)
-4. **One-click providers** — the catalog turns provider setup from "OIDC configuration + claim mapping puzzle" into "enter credentials → done"
-5. **Upgrade notifications** — when a catalog refresh finds newer versions, show a badge count on the Schemas nav item
+1. **Marketplace is the shopping experience** — browse templates, filter by type, search, one-click install
+2. **Schemas is the admin tool** — schema type definitions, version management, JSON Schema editing
+3. **Resource views are contextual** — show only what's relevant, "From Marketplace" is a progressive disclosure button
+4. **Origin badges everywhere** — every entity installed from catalog shows its origin, version, and state (linked/forked)
+5. **One-click providers** — the marketplace turns provider setup from "OIDC configuration + claim mapping puzzle" into "enter credentials → done"
+6. **Upgrade notifications** — when a catalog refresh finds newer versions, show a badge count on the Marketplace nav item
+
 
 ### 10. Catalog API Extensions
 

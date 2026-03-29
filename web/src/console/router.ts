@@ -22,6 +22,7 @@ const router = createRouter({
     // System views
     { path: '/schemas', name: 'schemas', component: () => import('./views/SchemaListView.vue') },
     { path: '/schemas/:id', name: 'schema-detail', component: () => import('./views/SchemaDetailView.vue') },
+    { path: '/marketplace', name: 'marketplace', component: () => import('./views/MarketplaceView.vue') },
     { path: '/providers', name: 'providers', component: () => import('./views/ProviderListView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionListView.vue') },
     { path: '/events', name: 'events', component: () => import('./views/EventListView.vue') },

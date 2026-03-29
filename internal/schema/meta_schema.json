@@ -159,6 +159,18 @@
       "storage": "dedicated",
       "route": "/schemas"
     },
+    "marketplace": {
+      "group": "nav",
+      "alias": "Marketplace",
+      "singular": "Marketplace",
+      "path": "marketplace",
+      "icon": "📦",
+      "sort_order": 13,
+      "storage": "virtual",
+      "route": "/marketplace",
+      "separator_before": true,
+      "group_label": "Marketplace"
+    },
     "overview": {
       "version": "1.0",
       "group": "nav",

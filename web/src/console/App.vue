@@ -215,6 +215,10 @@
                 <FileJson class="mr-2 size-4 shrink-0" />
                 <span>View Schemas</span>
               </CommandItem>
+              <CommandItem value="action-marketplace" @select="navigateTo('/marketplace')">
+                <Package class="mr-2 size-4 shrink-0" />
+                <span>Browse Marketplace</span>
+              </CommandItem>
               <CommandItem value="action-events" @select="navigateTo('/events')">
                 <Activity class="mr-2 size-4 shrink-0" />
                 <span>View Audit Log</span>
@@ -262,7 +266,7 @@ import {
 import {
   Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow,
   Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
-  Bot, AppWindow, Activity, Calendar, ShieldCheck,
+  Bot, AppWindow, Activity, Calendar, ShieldCheck, Package,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -378,7 +382,7 @@ const iconMap: Record<string, any> = {
   org: Building2, rule: Zap, provider: Globe, session: Clock,
   event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
   overview: BarChart3, explore: Search, trace: Workflow,
-  authorization: ShieldCheck,
+  authorization: ShieldCheck, marketplace: Package,
 }
 
 function getIcon(type: string) {
@@ -465,6 +469,7 @@ const pageTitle = computed(() => {
     'identity-create': 'New User',
     schemas: 'Schemas',
     'schema-detail': 'Schema Editor',
+    marketplace: 'Marketplace',
     providers: 'Providers',
     sessions: 'Sessions',
     events: 'Events',

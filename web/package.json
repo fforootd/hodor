@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:wc": "vite build --config vite.config.wc.ts",
+    "build:all": "npm run build && npm run build:wc",
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",

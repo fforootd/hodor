@@ -45,8 +45,12 @@ jobs:
         run: |
           go test -bench=. -benchmem -count=5 -timeout 600s \
             ./internal/database/ ./internal/api/ 2>&1 \
-            | grep -v 'schema ready\|Columns in\|seeded\|bootstrapped\|alias.*registered\|analytics.*OLTP\|OIDC Provider\|Path config\|No entities\|net/http.*invalid byte' \
-            | tee bench-${{ matrix.gomaxprocs }}.txt
+            | tee bench-raw-${{ matrix.gomaxprocs }}.txt
+
+          # Produce a clean file with only benchmark lines + ok/FAIL summary.
+          grep -E '^(Benchmark|ok |FAIL|goos:|goarch:|pkg:|cpu:)' \
+            bench-raw-${{ matrix.gomaxprocs }}.txt \
+            > bench-${{ matrix.gomaxprocs }}.txt || true
 
       - name: Upload benchmark results
         if: always()
@@ -59,11 +63,83 @@ jobs:
       - name: Benchmark summary
         if: always()
         run: |
-          echo "### 🏎️ GOMAXPROCS=${{ matrix.gomaxprocs }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat bench-${{ matrix.gomaxprocs }}.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          FILE="bench-${{ matrix.gomaxprocs }}.txt"
+          {
+            echo "### 🏎️ Benchmarks — GOMAXPROCS=${{ matrix.gomaxprocs }}"
+            echo ""
+
+            # Parse benchmark results into a summary table.
+            # Each benchmark may have a custom metric (identities/sec, reads/sec, etc.).
+            # We average across the -count=5 runs per benchmark.
+            echo "| Benchmark | ns/op | custom metric | B/op | allocs/op |"
+            echo "|-----------|------:|:-------------:|-----:|----------:|"
+
+            awk '
+              /^Benchmark/ {
+                name = $1
+                sub(/-[0-9]+$/, "", name)       # strip GOMAXPROCS suffix
+                ns   = $3                         # ns/op value
+                bop  = $(NF-3)                    # B/op
+                aop  = $(NF-1)                    # allocs/op
+
+                # Find the custom metric (field between ns/op and B/op).
+                custom_val = ""
+                custom_unit = ""
+                for (i = 5; i <= NF-4; i += 2) {
+                  custom_val = $i
+                  custom_unit = $(i+1)
+                }
+
+                # Accumulate for averaging.
+                count[name]++
+                sum_ns[name]   += ns
+                sum_bop[name]  += bop
+                sum_aop[name]  += aop
+                if (custom_val != "") {
+                  sum_custom[name] += custom_val
+                  unit[name] = custom_unit
+                }
+
+                # Preserve insertion order.
+                if (count[name] == 1) {
+                  order[++n] = name
+                }
+              }
+              END {
+                for (i = 1; i <= n; i++) {
+                  nm = order[i]
+                  c  = count[nm]
+                  avg_ns  = int(sum_ns[nm] / c)
+                  avg_bop = int(sum_bop[nm] / c)
+                  avg_aop = int(sum_aop[nm] / c)
+
+                  # Format custom metric.
+                  if (unit[nm] != "") {
+                    avg_custom = int(sum_custom[nm] / c)
+                    cm = avg_custom " " unit[nm]
+                  } else {
+                    cm = "—"
+                  }
+
+                  # Shorten name: strip "Benchmark" prefix.
+                  short = nm
+                  sub(/^Benchmark/, "", short)
+
+                  printf "| `%s` | %d | %s | %d | %d |\n", short, avg_ns, cm, avg_bop, avg_aop
+                }
+              }
+            ' "$FILE"
+
+            echo ""
+
+            # Package timing.
+            grep -E '^ok\s' "$FILE" | while read -r line; do
+              pkg=$(echo "$line" | awk '{print $2}' | sed 's|github.com/zitadel/zitadel/||')
+              dur=$(echo "$line" | awk '{print $3}')
+              echo "- \`$pkg\`: $dur"
+            done
+
+          } >> $GITHUB_STEP_SUMMARY
 
   # ── Compare branch vs base on PRs to catch regressions ──
   compare:
@@ -100,8 +176,10 @@ jobs:
           make webdist-only
           GOMAXPROCS=4 go test -bench=. -benchmem -count=5 -timeout 600s \
             ./internal/database/ ./internal/api/ 2>&1 \
-            | grep -v 'schema ready\|Columns in\|seeded\|bootstrapped\|alias.*registered\|analytics.*OLTP\|OIDC Provider\|Path config\|No entities\|net/http.*invalid byte' \
-            | tee base-bench.txt
+            | tee base-bench-raw.txt
+
+          grep -E '^(Benchmark|ok |FAIL|goos:|goarch:|pkg:|cpu:)' \
+            base-bench-raw.txt > base-bench.txt || true
 
       - name: Compare (benchstat)
         if: always()

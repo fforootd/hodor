@@ -1,5 +1,5 @@
 <template>
-  <div class="zitadel-create-user-ce">
+  <div class="zitadel-create-user-ce" :class="{ dark: isDark }">
     <CreateUserWizard
       :open="true"
       :standalone="true"
@@ -19,50 +19,53 @@
  *
  * This .ce.vue file is consumed by defineCustomElement().
  * Styles are inlined via <style> (Vue CE mode auto-injects them into shadow DOM).
+ *
+ * FIXED: Host element discovery now uses getCurrentInstance() + closest()
+ * instead of document.querySelector() which broke with multiple instances
+ * and nested Shadow DOMs.
  */
 import CreateUserWizard from './CreateUserWizard.vue'
+import { computed, watch, onMounted } from 'vue'
+import { dispatchWCEvent, injectCustomCSS, isDarkMode } from '@/wc/host-utils'
+
+const TAG_NAME = 'zitadel-create-user'
 
 const props = withDefaults(defineProps<{
   schemaType?: string
   orgId?: string
   apiBaseUrl?: string
+  darkMode?: string
+  primaryColor?: string
+  customCss?: string
 }>(), {
   schemaType: 'human_user',
   orgId: '',
   apiBaseUrl: '',
+  darkMode: '',
+  primaryColor: '',
+  customCss: '',
 })
 
-const emit = defineEmits<{
-  (e: 'user-created', detail: { entityId: string }): void
-  (e: 'wizard-closed'): void
-  (e: 'wizard-error', detail: { error: string }): void
-}>()
+const isDark = computed(() => isDarkMode(props.darkMode))
+
+// Inject custom CSS into shadow DOM
+onMounted(() => {
+  if (props.customCss) injectCustomCSS(props.customCss)
+})
+watch(() => props.customCss, (css) => {
+  if (css) injectCustomCSS(css)
+})
 
 function onCreated(entityId: string) {
-  // Dispatch native CustomEvent for non-Vue consumers
-  const el = document.querySelector('zitadel-create-user')
-  el?.dispatchEvent(new CustomEvent('user-created', {
-    detail: { entityId },
-    bubbles: true,
-    composed: true,
-  }))
+  dispatchWCEvent(TAG_NAME, 'user-created', { entityId })
 }
 
 function onClose() {
-  const el = document.querySelector('zitadel-create-user')
-  el?.dispatchEvent(new CustomEvent('wizard-closed', {
-    bubbles: true,
-    composed: true,
-  }))
+  dispatchWCEvent(TAG_NAME, 'wizard-closed')
 }
 
 function onError(error: string) {
-  const el = document.querySelector('zitadel-create-user')
-  el?.dispatchEvent(new CustomEvent('wizard-error', {
-    detail: { error },
-    bubbles: true,
-    composed: true,
-  }))
+  dispatchWCEvent(TAG_NAME, 'wizard-error', { error })
 }
 </script>
 
@@ -93,8 +96,32 @@ function onError(error: string) {
   --radius: 0.5rem;
 }
 
+:host(.dark) {
+  --color-background: hsl(240 10% 3.9%);
+  --color-foreground: hsl(0 0% 98%);
+  --color-card: hsl(240 10% 3.9%);
+  --color-card-foreground: hsl(0 0% 98%);
+  --color-primary: hsl(0 0% 98%);
+  --color-primary-foreground: hsl(240 5.9% 10%);
+  --color-secondary: hsl(240 3.7% 15.9%);
+  --color-secondary-foreground: hsl(0 0% 98%);
+  --color-muted: hsl(240 3.7% 15.9%);
+  --color-muted-foreground: hsl(240 5% 64.9%);
+  --color-accent: hsl(240 3.7% 15.9%);
+  --color-accent-foreground: hsl(0 0% 98%);
+  --color-destructive: hsl(0 62.8% 30.6%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-input: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(240 4.9% 83.9%);
+}
+
 .zitadel-create-user-ce {
   color: var(--color-foreground);
   background: var(--color-background);
+}
+
+.zitadel-create-user-ce.dark {
+  color-scheme: dark;
 }
 </style>
