@@ -19,6 +19,12 @@ const router = createRouter({
     // Backward compat redirects
     { path: '/identities', redirect: '/users' },
     { path: '/identities/:id', redirect: to => `/users/${to.params.id}` },
+    // Orgs — dedicated routes (not a schema type)
+    { path: '/orgs', name: 'orgs', component: () => import('./views/OrgListView.vue') },
+    { path: '/orgs/new', name: 'org-create', component: () => import('./views/OrgCreateView.vue') },
+    { path: '/orgs/:id', name: 'org-detail', component: () => import('./views/OrgDetailView.vue') },
+    { path: '/s/org', redirect: '/orgs' },
+    { path: '/s/org/new', redirect: '/orgs/new' },
     // System views
     { path: '/schemas', name: 'schemas', component: () => import('./views/SchemaListView.vue') },
     { path: '/schemas/:id', name: 'schema-detail', component: () => import('./views/SchemaDetailView.vue') },

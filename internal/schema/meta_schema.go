@@ -28,29 +28,30 @@ type EngineBinding struct {
 
 // CatalogEntry represents a single entry in the x-catalog of the meta schema.
 type CatalogEntry struct {
-	Ref             string                   `json:"$ref,omitempty"`
-	Version         string                   `json:"version,omitempty"`
-	Group           string                   `json:"group"`
-	Alias           string                   `json:"alias"`
-	Singular        string                   `json:"singular"`
-	Path            string                   `json:"path"`
-	Icon            string                   `json:"icon"`
-	SortOrder       int                      `json:"sort_order"`
-	Required        bool                     `json:"required,omitempty"`
-	Storage         string                   `json:"storage"`
-	Route           string                   `json:"route,omitempty"`
-	Nav             string                   `json:"nav,omitempty"`
-	Countable       bool                     `json:"countable,omitempty"`
-	Aggregates      []string                 `json:"aggregates,omitempty"`
-	SeparatorBefore bool                     `json:"separator_before,omitempty"`
-	Engines         map[string]EngineBinding `json:"engines,omitempty"`
+	Ref        string                   `json:"$ref,omitempty"`
+	Version    string                   `json:"version,omitempty"`
+	Group      string                   `json:"group"`
+	NavGroup   string                   `json:"nav_group,omitempty"`
+	Alias      string                   `json:"alias"`
+	Singular   string                   `json:"singular"`
+	Path       string                   `json:"path"`
+	Icon       string                   `json:"icon"`
+	SortOrder  int                      `json:"sort_order"`
+	Required   bool                     `json:"required,omitempty"`
+	Storage    string                   `json:"storage"`
+	Route      string                   `json:"route,omitempty"`
+	Nav        string                   `json:"nav,omitempty"`
+	Countable  bool                     `json:"countable,omitempty"`
+	Aggregates []string                 `json:"aggregates,omitempty"`
+	Engines    map[string]EngineBinding `json:"engines,omitempty"`
 }
 
 // GroupEntry represents a nav group definition from x-groups.
 type GroupEntry struct {
 	Label     string `json:"label"`
-	Icon      string `json:"icon"`
+	Icon      string `json:"icon,omitempty"`
 	SortOrder int    `json:"sort_order"`
+	Display   string `json:"display,omitempty"`
 	Nav       string `json:"nav,omitempty"`
 }
 

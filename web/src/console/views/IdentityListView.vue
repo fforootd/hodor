@@ -253,7 +253,17 @@ onMounted(async () => {
 
     const data = await api.get<any>(url)
 
-    identities.value = data.items || []
+    // Normalize: orgs use `name` whereas the DataTable expects `identifier`/`display_name`.
+    const items = data.items || []
+    if (props.schemaType === 'org') {
+      identities.value = items.map((o: any) => ({
+        ...o,
+        identifier: o.name || o.identifier || '',
+        display_name: o.name || o.display_name || '',
+      }))
+    } else {
+      identities.value = items
+    }
   } catch { /* ignore */ }
 })
 

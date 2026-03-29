@@ -106,16 +106,23 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 	}
 	defer tx.Rollback()
 
+	// Look up the default org ID from the orgs table (populated by bootstrap).
+	var defaultOrgID string
+	_ = tx.QueryRowContext(ctx, `SELECT id FROM orgs WHERE name = 'Default' LIMIT 1`).Scan(&defaultOrgID)
+	if defaultOrgID == "" {
+		defaultOrgID = "1" // fallback for pre-bootstrap DBs
+	}
+
 	// Phase 1: Providers.
 	for _, p := range seed.Providers {
-		if err := seedProvider(ctx, tx, p); err != nil {
+		if err := seedProvider(ctx, tx, p, defaultOrgID); err != nil {
 			return fmt.Errorf("seed provider %q: %w", p.Name, err)
 		}
 	}
 
 	// Phase 2: Identities (with inline linked accounts, capabilities, PATs).
 	for _, ident := range seed.Identities {
-		if err := seedIdentity(ctx, tx, ident); err != nil {
+		if err := seedIdentity(ctx, tx, ident, defaultOrgID); err != nil {
 			return fmt.Errorf("seed identity %q: %w", ident.Identifier, err)
 		}
 	}
@@ -129,7 +136,7 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 	return nil
 }
 
-func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
+func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider, orgID string) error {
 	// Skip if exists by name in providers table.
 	var existing string
 	err := tx.QueryRowContext(ctx,
@@ -176,8 +183,8 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, metadata, created_at, updated_at)
-		 VALUES (?, '1', ?, ?, ?, ?, ?, ?, TRUE, 0, '{}', datetime('now'), datetime('now'))`,
-		provID, p.Name, p.Protocol, p.Template, string(dataJSON), "{}", autoReg)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, 0, '{}', datetime('now'), datetime('now'))`,
+		provID, orgID, p.Name, p.Protocol, p.Template, string(dataJSON), "{}", autoReg)
 	if err != nil {
 		return err
 	}
@@ -186,7 +193,7 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider) error {
 	return nil
 }
 
-func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
+func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID string) error {
 	onConflict := ident.OnConflict
 	if onConflict == "" {
 		onConflict = "skip"
@@ -235,8 +242,8 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity) error {
 
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		newID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		newID, orgID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON)
 	if err != nil {
 		return err
 	}

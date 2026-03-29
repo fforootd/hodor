@@ -164,28 +164,35 @@ func createRandomAdmin(ctx context.Context, db *database.DB) error {
 func createAdmin(ctx context.Context, db *database.DB, username, email, password string) error {
 	userID := id.New()
 
+	// Seed the default org first so we can reference its real ID.
+	orgID, err := seedDefaultOrg(ctx, db)
+	if err != nil {
+		logging.Printf("WARN: seed default org: %v", err)
+		orgID = "org_default" // fallback
+	}
+
 	tx, err := db.SQL().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Create the admin user in the users table.
+	// Create the admin user with the actual default org ID.
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, '1', ?, 'Admin', 'human', 'active', 'human_user_v1', ?, datetime('now'), datetime('now'))`,
-		userID, username, fmt.Sprintf(`{"email":%q}`, email),
+		 VALUES (?, ?, ?, 'Admin', 'human', 'active', 'human_user_v1', ?, datetime('now'), datetime('now'))`,
+		userID, orgID, username, fmt.Sprintf(`{"email":%q}`, email),
 	)
 	if err != nil {
 		return fmt.Errorf("insert admin user: %w", err)
 	}
 
 	// Enforce uniqueness (ADR-016): register identifier + email in unique_fields.
-	if err := uniqueness.EnforceFromIdentifier(ctx, tx, userID, "1", username); err != nil {
+	if err := uniqueness.EnforceFromIdentifier(ctx, tx, userID, orgID, username); err != nil {
 		logging.Printf("WARN: bootstrap unique identifier: %v", err)
 	}
 	// Also register email at instance scope.
-	_ = uniqueness.Enforce(ctx, tx, userID, "1",
+	_ = uniqueness.Enforce(ctx, tx, userID, orgID,
 		[]uniqueness.FieldConstraint{{FieldName: "email", Scope: uniqueness.ScopeInstance}},
 		map[string]any{"email": email},
 	)
@@ -200,31 +207,17 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 		return fmt.Errorf("set admin password: %w", err)
 	}
 
-	// Seed the default org.
-	if err := seedDefaultOrg(ctx, db); err != nil {
-		logging.Printf("WARN: seed default org: %v", err)
-	}
-
 	// Seed the default console OIDC client.
 	if err := seedConsoleClient(ctx, db); err != nil {
 		logging.Printf("WARN: seed console client: %v", err)
 	}
 
-	// Bootstrap FGA tuples: admin → instance:owner, org parent, org owner.
+	// Bootstrap FGA tuples using the real org ID.
 	if fgaSvc := api.FGAService; fgaSvc != nil {
-		var orgID string
-		err := db.SQL().QueryRowContext(ctx,
-			`SELECT org_id FROM users WHERE identifier = ? LIMIT 1`,
-			username,
-		).Scan(&orgID)
-		if err != nil || orgID == "" {
-			logging.Printf("WARN: could not find org_id for FGA bootstrap: %v", err)
+		if err := fgaSvc.OnBootstrap(ctx, userID, orgID); err != nil {
+			logging.Printf("WARN: FGA bootstrap tuples failed: %v", err)
 		} else {
-			if err := fgaSvc.OnBootstrap(ctx, userID, orgID); err != nil {
-				logging.Printf("WARN: FGA bootstrap tuples failed: %v", err)
-			} else {
-				logging.Printf("[fga] bootstrap tuples written: admin=%s org=%s", userID, orgID)
-			}
+			logging.Printf("[fga] bootstrap tuples written: admin=%s org=%s", userID, orgID)
 		}
 	}
 
@@ -232,14 +225,13 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 }
 
 // seedDefaultOrg creates the default organization in the orgs table if it doesn't exist.
-func seedDefaultOrg(ctx context.Context, db *database.DB) error {
-	var exists int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM orgs WHERE name = 'Default'`).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("check default org: %w", err)
-	}
-	if exists > 0 {
-		return nil
+// Returns the org ID (existing or newly created).
+func seedDefaultOrg(ctx context.Context, db *database.DB) (string, error) {
+	// Check if default org already exists and return its ID.
+	var existingID string
+	err := db.SQL().QueryRowContext(ctx, `SELECT id FROM orgs WHERE name = 'Default' LIMIT 1`).Scan(&existingID)
+	if err == nil && existingID != "" {
+		return existingID, nil
 	}
 
 	orgID := id.New()
@@ -250,11 +242,11 @@ func seedDefaultOrg(ctx context.Context, db *database.DB) error {
 		orgID,
 	)
 	if err != nil {
-		return fmt.Errorf("insert default org: %w", err)
+		return "", fmt.Errorf("insert default org: %w", err)
 	}
 
 	logging.Println("seeded default organization (name=Default)")
-	return nil
+	return orgID, nil
 }
 
 // seedConsoleClient creates the default console OIDC client in the apps table.

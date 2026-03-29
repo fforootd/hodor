@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS unique_fields (
     field_name       TEXT NOT NULL,
     normalized_value TEXT NOT NULL,
     resource_type    TEXT NOT NULL DEFAULT '',
-    user_id          TEXT NOT NULL,
+    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(scope_id, field_name, normalized_value)
 );
 CREATE INDEX IF NOT EXISTS idx_unique_fields_resource ON unique_fields(user_id);

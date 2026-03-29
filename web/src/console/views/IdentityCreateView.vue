@@ -160,7 +160,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { userApi, magicLinkApi, schemaApi, metaSchemaApi, type Schema } from '@/api/resources'
+import { userApi, magicLinkApi, schemaApi, metaSchemaApi, orgApi, type Schema } from '@/api/resources'
 import { api } from '@/api/client'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
@@ -304,6 +304,14 @@ async function submit() {
         profile, capabilities: isInteractiveIdentity.value ? form.capabilities : [],
         schema_id: selectedSchema.value,
       }
+    }
+    // Orgs use their dedicated API with `name` field.
+    if (props.schemaType === 'org') {
+      const orgPayload = { name: form.identifier.trim() || (payload.identifier as string) }
+      const created = await orgApi.create(orgPayload)
+      success.value = true
+      setTimeout(() => router.push(`/s/${props.schemaType}`), 800)
+      return
     }
     const created = await userApi.create(payload)
     if (form.password && created.id && isInteractiveIdentity.value) {

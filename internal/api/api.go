@@ -123,10 +123,17 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/users/{id}/password", a.setEntityPassword)
 	logging.Printf("[api] registered /v1/users (all user types)")
 
+	// Dedicated Org CRUD routes.
+	mux.HandleFunc("GET /v1/orgs", a.listResource("orgs"))
+	mux.HandleFunc("POST /v1/orgs", a.createOrg)
+	mux.HandleFunc("GET /v1/orgs/{id}", a.getResource("orgs"))
+	mux.HandleFunc("PATCH /v1/orgs/{id}", a.updateOrg)
+	mux.HandleFunc("DELETE /v1/orgs/{id}", a.deleteOrg)
+	logging.Printf("[api] registered /v1/orgs (full CRUD)")
+
 	// Generic CRUD routes for other dedicated resource tables.
 	resourceTables := map[string]string{
 		"action":     "actions",
-		"org":        "orgs",
 		"app":        "apps",
 		"login_flow": "login_flows",
 	}
@@ -144,6 +151,189 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 
 		logging.Printf("[api] registered /v1/%s (table=%s)", entry.Path, tbl)
 	}
+}
+
+// --- Org types ---
+
+type OrgRequest struct {
+	Name     string `json:"name"`
+	State    string `json:"state,omitempty"`
+	Metadata any    `json:"metadata,omitempty"`
+}
+
+type OrgResponse struct {
+	ID         string `json:"id"`
+	InstanceID string `json:"instance_id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Metadata   any    `json:"metadata,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+// --- Org handlers ---
+
+func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
+	var req OrgRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	orgID := id.New()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	metadataJSON := "{}"
+	if req.Metadata != nil {
+		if b, err := json.Marshal(req.Metadata); err == nil {
+			metadataJSON = string(b)
+		}
+	}
+
+	// Look up instance_id (default to inst_default).
+	instanceID := "inst_default"
+
+	_, err := a.db.SQL().ExecContext(r.Context(),
+		`INSERT INTO orgs (id, instance_id, name, state, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+		orgID, instanceID, req.Name, metadataJSON, now, now,
+	)
+	if err != nil {
+		logging.Printf("[createOrg] DB insert failed: %v", err)
+		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
+			"error":   "database error",
+			"code":    409,
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Emit event.
+	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
+	if tx != nil {
+		emitEvent(r.Context(), tx, "org.created", orgID, orgID, "org", map[string]any{
+			"name": req.Name,
+		})
+		_ = tx.Commit()
+	}
+
+	a.bus.Signal()
+
+	// Wire FGA: write ownership tuples for the new org.
+	if svc := FGAService; svc != nil {
+		creatorID := r.Header.Get("X-Identity-Id")
+		if creatorID == "" {
+			creatorID = "admin"
+		}
+		if err := svc.OnOrgCreated(r.Context(), orgID, creatorID); err != nil {
+			logging.Printf("[fga] warn: failed to write org tuples: %v", err)
+		}
+	}
+
+	httputil.WriteJSON(w, http.StatusCreated, OrgResponse{
+		ID:         orgID,
+		InstanceID: instanceID,
+		Name:       req.Name,
+		State:      "active",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+}
+
+func (a *API) updateOrg(w http.ResponseWriter, r *http.Request) {
+	orgID, err := parseID(r, "id")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req OrgRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	setClauses := []string{"updated_at = ?"}
+	args := []any{now}
+
+	if req.Name != "" {
+		setClauses = append(setClauses, "name = ?")
+		args = append(args, req.Name)
+	}
+	if req.State != "" {
+		setClauses = append(setClauses, "state = ?")
+		args = append(args, req.State)
+	}
+	if req.Metadata != nil {
+		metaJSON, _ := json.Marshal(req.Metadata)
+		setClauses = append(setClauses, "metadata = ?")
+		args = append(args, string(metaJSON))
+	}
+	args = append(args, orgID)
+
+	query := "UPDATE orgs SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		httputil.WriteError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	a.bus.Signal()
+
+	// Re-read and return updated org.
+	var resp OrgResponse
+	var metaStr string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, instance_id, name, state, COALESCE(metadata,'{}'), created_at, updated_at FROM orgs WHERE id = ?`, orgID,
+	).Scan(&resp.ID, &resp.InstanceID, &resp.Name, &resp.State, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "read-back failed")
+		return
+	}
+	json.Unmarshal([]byte(metaStr), &resp.Metadata)
+
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
+	orgID, err := parseID(r, "id")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM orgs WHERE id = ?`, orgID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		httputil.WriteError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	a.bus.Signal()
+
+	// Wire FGA: clean up tuples.
+	if svc := FGAService; svc != nil {
+		if err := svc.OnResourceDeleted(r.Context(), orgID); err != nil {
+			logging.Printf("[fga] warn: failed to delete org tuples: %v", err)
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- User types ---
@@ -472,6 +662,12 @@ func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// Release unique_fields before deleting the user row (ADR-016).
+	// This is the primary cleanup — the FK CASCADE is a safety net.
+	if err := uniqueness.Release(r.Context(), tx, userID); err != nil {
+		logging.Printf("[deleteUser] warn: failed to release unique fields: %v", err)
+	}
 
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {
@@ -1047,11 +1243,25 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 	// Providers are now entities — their count appears via the schema type join above.
 	// No separate provider count needed.
 
-	// Count orgs separately (dedicated table, org_id on entities).
+	// Count orgs from the dedicated orgs table.
 	var orgCount int
 	if err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(DISTINCT org_id) FROM users WHERE org_id > 0`).Scan(&orgCount); err == nil {
+		`SELECT COUNT(*) FROM orgs`).Scan(&orgCount); err == nil {
 		counts["org"] = orgCount
+	}
+
+	// Count apps from the apps table.
+	var appCount int
+	if err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM apps`).Scan(&appCount); err == nil {
+		counts["apps"] = appCount
+	}
+
+	// Total user count (all types).
+	var userCount int
+	if err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM users`).Scan(&userCount); err == nil {
+		counts["users"] = userCount
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, counts)

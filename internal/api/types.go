@@ -416,13 +416,7 @@ type AnalyticsQueryResponse struct {
 }
 
 // --- Orgs ---
-
-// OrgResponse is a single organization.
-type OrgResponse struct {
-	ID          string `json:"id"`
-	Identifier  string `json:"identifier"`
-	DisplayName string `json:"display_name"`
-}
+// OrgResponse and OrgRequest are declared in api.go (org handlers section).
 
 // SetUserPasswordRequest is the payload for setting an entity's password.
 type SetUserPasswordRequest struct {

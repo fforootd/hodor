@@ -29,6 +29,8 @@ export { ZitadelUserInvite } from './zitadel-user-invite-wc'
 
 // Admin: Orgs, Sessions, Providers
 export { ZitadelOrgList } from './zitadel-org-list-wc'
+export { ZitadelOrgCreate } from './zitadel-org-create-wc'
+export { ZitadelOrgDetail } from './zitadel-org-detail-wc'
 export { ZitadelSessionList } from './zitadel-session-list-wc'
 export { ZitadelProviderList } from './zitadel-provider-list-wc'
 

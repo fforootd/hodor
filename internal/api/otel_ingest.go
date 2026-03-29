@@ -90,14 +90,17 @@ func (a *API) RegisterOTelRoutes(mux *http.ServeMux) {
 
 // OTelSpan represents a simplified OTLP span for storage.
 type OTelSpan struct {
-	TraceID    string         `json:"traceId"`
-	SpanID     string         `json:"spanId"`
-	Name       string         `json:"name"`
-	Kind       int            `json:"kind"`
-	StartTime  int64          `json:"startTimeUnixNano,string"`
-	EndTime    int64          `json:"endTimeUnixNano,string"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-	Status     *SpanStatus    `json:"status,omitempty"`
+	TraceID    string `json:"traceId"`
+	SpanID     string `json:"spanId"`
+	Name       string `json:"name"`
+	Kind       int    `json:"kind"`
+	StartTime  int64  `json:"startTimeUnixNano,string"`
+	EndTime    int64  `json:"endTimeUnixNano,string"`
+	Attributes []struct {
+		Key   string `json:"key"`
+		Value any    `json:"value"`
+	} `json:"attributes,omitempty"`
+	Status *SpanStatus `json:"status,omitempty"`
 }
 
 type SpanStatus struct {

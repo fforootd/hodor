@@ -48,9 +48,11 @@ jobs:
             | tee bench-raw-${{ matrix.gomaxprocs }}.txt
 
           # Produce a clean file with only benchmark lines + ok/FAIL summary.
-          grep -E '^(Benchmark|ok |FAIL|goos:|goarch:|pkg:|cpu:)' \
-            bench-raw-${{ matrix.gomaxprocs }}.txt \
-            > bench-${{ matrix.gomaxprocs }}.txt || true
+          awk '
+            /^goos:/ || /^goarch:/ || /^pkg:/ || /^cpu:/ || /^PASS/ || /^FAIL/ || /^ok / { print; next }
+            /^Benchmark/ { bname = $1; next }
+            /^[ \t]+[0-9]+/ && bname != "" { print bname $0; bname = ""; next }
+          ' bench-raw-${{ matrix.gomaxprocs }}.txt > bench-${{ matrix.gomaxprocs }}.txt || true
 
       - name: Upload benchmark results
         if: always()
@@ -178,8 +180,11 @@ jobs:
             ./internal/database/ ./internal/api/ 2>&1 \
             | tee base-bench-raw.txt
 
-          grep -E '^(Benchmark|ok |FAIL|goos:|goarch:|pkg:|cpu:)' \
-            base-bench-raw.txt > base-bench.txt || true
+          awk '
+            /^goos:/ || /^goarch:/ || /^pkg:/ || /^cpu:/ || /^PASS/ || /^FAIL/ || /^ok / { print; next }
+            /^Benchmark/ { bname = $1; next }
+            /^[ \t]+[0-9]+/ && bname != "" { print bname $0; bname = ""; next }
+          ' base-bench-raw.txt > base-bench.txt || true
 
       - name: Compare (benchstat)
         if: always()

@@ -17,29 +17,38 @@ func setupTestDB(t *testing.T) *sql.DB {
 	}
 
 	// Create minimal schema.
+	// Enable foreign keys for CASCADE to work in SQLite.
+	db.Exec(`PRAGMA foreign_keys = ON`)
+
+	// Mirror production DDL exactly (see migrations/sqlite/00001_initial.sql).
 	_, err = db.Exec(`
 		CREATE TABLE users (
-			id           TEXT PRIMARY KEY,
-			org_id       TEXT NOT NULL DEFAULT '0',
-			identifier   TEXT NOT NULL DEFAULT '',
-			display_name TEXT DEFAULT '',
-			state        TEXT NOT NULL DEFAULT 'active',
-			schema_id    TEXT DEFAULT '',
-			data         TEXT DEFAULT '{}',
-			created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-			updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+			id            TEXT PRIMARY KEY,
+			org_id        TEXT NOT NULL DEFAULT '1',
+			identifier    TEXT NOT NULL,
+			display_name  TEXT DEFAULT '',
+			user_type     TEXT NOT NULL DEFAULT 'human',
+			state         TEXT NOT NULL DEFAULT 'active',
+			schema_id     TEXT DEFAULT '',
+			metadata      TEXT DEFAULT '{}',
+			created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(org_id, identifier)
 		);
-		CREATE UNIQUE INDEX idx_users_identifier ON users(org_id, identifier);
+		CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+		CREATE INDEX IF NOT EXISTS idx_users_type ON users(user_type);
+		CREATE INDEX IF NOT EXISTS idx_users_state ON users(state);
 
 		CREATE TABLE unique_fields (
 			scope_id         TEXT NOT NULL DEFAULT '',
 			field_name       TEXT NOT NULL,
 			normalized_value TEXT NOT NULL,
-			user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			resource_type    TEXT NOT NULL DEFAULT '',
+			user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			UNIQUE(scope_id, field_name, normalized_value)
 		);
-		CREATE INDEX idx_unique_fields_entity ON unique_fields(user_id);
-		CREATE INDEX idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
+		CREATE INDEX IF NOT EXISTS idx_unique_fields_resource ON unique_fields(user_id);
+		CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
 	`)
 	if err != nil {
 		t.Fatalf("create schema: %v", err)
@@ -903,9 +912,6 @@ func TestCascadeDelete(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()
 
-	// SQLite needs PRAGMA foreign_keys = ON for CASCADE to work.
-	db.Exec(`PRAGMA foreign_keys = ON`)
-
 	insertEntity(t, db, "e1", "org1", "alice")
 
 	tx, _ := db.BeginTx(ctx, nil)
@@ -923,7 +929,7 @@ func TestCascadeDelete(t *testing.T) {
 		t.Fatalf("expected 1 unique_fields row, got %d", count)
 	}
 
-	// Delete entity.
+	// Delete entity — CASCADE should clean up unique_fields.
 	db.ExecContext(ctx, `DELETE FROM users WHERE id = 'e1'`)
 
 	// unique_fields should be cascaded.
@@ -931,4 +937,83 @@ func TestCascadeDelete(t *testing.T) {
 	if count != 0 {
 		t.Errorf("unique_fields should be 0 after cascade delete, got %d", count)
 	}
+}
+
+// --- Create → Delete → Recreate: the exact bug scenario ---
+
+func TestCreateDeleteRecreate(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+
+	// Step 1: Create user with unique identifier.
+	insertEntity(t, db, "e1", "1", "user123")
+
+	tx, _ := db.BeginTx(ctx, nil)
+	err := EnforceFromIdentifier(ctx, tx, "e1", "1", "user123")
+	if err != nil {
+		t.Fatalf("initial enforce failed: %v", err)
+	}
+	commitTx(t, tx)
+
+	// Step 2: Delete user — simulate what deleteUser handler does.
+	// Must Release unique_fields BEFORE deleting the user row.
+	tx2, _ := db.BeginTx(ctx, nil)
+	if err := Release(ctx, tx2, "e1"); err != nil {
+		t.Fatalf("release failed: %v", err)
+	}
+	_, err = tx2.ExecContext(ctx, `DELETE FROM users WHERE id = 'e1'`)
+	if err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+	commitTx(t, tx2)
+
+	// Step 3: Re-create user with same identifier — must NOT get uniqueness_violation.
+	insertEntity(t, db, "e2", "1", "user123")
+
+	tx3, _ := db.BeginTx(ctx, nil)
+	err = EnforceFromIdentifier(ctx, tx3, "e2", "1", "user123")
+	if err != nil {
+		t.Fatalf("re-create should succeed after delete, got: %v", err)
+	}
+	commitTx(t, tx3)
+}
+
+// --- Create → Delete (cascade only, no Release) → Recreate ---
+
+func TestCreateDeleteRecreate_CascadeOnly(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+
+	// Step 1: Create user with unique identifier.
+	insertEntity(t, db, "e1", "1", "user456")
+
+	tx, _ := db.BeginTx(ctx, nil)
+	err := EnforceFromIdentifier(ctx, tx, "e1", "1", "user456")
+	if err != nil {
+		t.Fatalf("initial enforce failed: %v", err)
+	}
+	commitTx(t, tx)
+
+	// Step 2: Delete user WITHOUT explicit Release — rely on FK CASCADE.
+	_, err = db.ExecContext(ctx, `DELETE FROM users WHERE id = 'e1'`)
+	if err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	// Verify unique_fields cleaned up by cascade.
+	var count int
+	db.QueryRow(`SELECT COUNT(*) FROM unique_fields WHERE user_id = 'e1'`).Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 unique_fields after cascade delete, got %d", count)
+	}
+
+	// Step 3: Re-create user with same identifier.
+	insertEntity(t, db, "e2", "1", "user456")
+
+	tx2, _ := db.BeginTx(ctx, nil)
+	err = EnforceFromIdentifier(ctx, tx2, "e2", "1", "user456")
+	if err != nil {
+		t.Fatalf("re-create should succeed after cascade delete, got: %v", err)
+	}
+	commitTx(t, tx2)
 }

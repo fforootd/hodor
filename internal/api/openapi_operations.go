@@ -455,4 +455,27 @@ func (a *API) registerOpenAPIOperations() {
 		Summary: "List organizations", Tags: []string{"Organizations"},
 		Response: ListResponse{}, Security: true,
 	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "POST", Path: "/v1/orgs", ID: "createOrg",
+		Summary: "Create an organization", Tags: []string{"Organizations"},
+		Request: OrgRequest{}, Response: OrgResponse{},
+		StatusCode: 201, Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "GET", Path: "/v1/orgs/{id}", ID: "getOrg",
+		Summary: "Get an organization", Tags: []string{"Organizations"},
+		Response: OrgResponse{}, PathParams: []OpenAPIParam{idParam},
+		Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "PATCH", Path: "/v1/orgs/{id}", ID: "updateOrg",
+		Summary: "Update an organization", Tags: []string{"Organizations"},
+		Request: OrgRequest{}, Response: OrgResponse{},
+		PathParams: []OpenAPIParam{idParam}, Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "DELETE", Path: "/v1/orgs/{id}", ID: "deleteOrg",
+		Summary: "Delete an organization", Tags: []string{"Organizations"},
+		PathParams: []OpenAPIParam{idParam}, StatusCode: 204, Security: true,
+	})
 }

@@ -37,17 +37,33 @@
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <!-- Flat catalog-driven nav -->
-        <SidebarGroup>
+        <!-- Ungrouped primary resources (no nav_group) -->
+        <SidebarGroup v-if="ungroupedItems.length">
           <SidebarGroupContent>
             <SidebarMenu>
-              <template v-for="(item, idx) in navItems" :key="item.type">
-                <!-- Optional visual separator with group label -->
-                <div v-if="item.separatorBefore && idx > 0" class="my-2 mx-2 border-t border-border/40" />
-                <div v-if="item.groupLabel" class="px-2 pt-1 pb-0.5">
-                  <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">{{ item.groupLabel }}</span>
-                </div>
-                <SidebarMenuItem>
+              <SidebarMenuItem v-for="item in ungroupedItems" :key="item.type">
+                <SidebarMenuButton as-child :data-active="isNavActive(item)">
+                  <router-link :to="item.route">
+                    <component :is="getIcon(item.type)" class="size-4" />
+                    <span>{{ item.label }}</span>
+                    <span
+                      v-if="item.count !== undefined && item.count > 0"
+                      class="ml-auto text-xs text-muted-foreground tabular-nums"
+                    >{{ item.count }}</span>
+                  </router-link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <!-- Flat groups (items with separator, no group label) -->
+        <template v-for="group in flatGroups" :key="group.key">
+          <SidebarSeparator />
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem v-for="item in group.items" :key="item.type">
                   <SidebarMenuButton as-child :data-active="isNavActive(item)">
                     <router-link :to="item.route">
                       <component :is="getIcon(item.type)" class="size-4" />
@@ -59,10 +75,41 @@
                     </router-link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              </template>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </template>
+
+        <!-- Collapsible groups (Observability, System) -->
+        <template v-for="group in collapsibleGroups" :key="group.key">
+          <SidebarSeparator />
+          <SidebarGroup>
+            <SidebarMenu>
+              <Collapsible :default-open="isGroupActive(group)" class="group/collapsible">
+                <SidebarMenuItem>
+                  <CollapsibleTrigger as-child>
+                    <SidebarMenuButton>
+                      <component :is="getGroupIcon(group.key)" class="size-4" />
+                      <span>{{ group.label }}</span>
+                      <ChevronRight class="ml-auto size-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenuSub>
+                      <SidebarMenuSubItem v-for="item in group.items" :key="item.type">
+                        <SidebarMenuSubButton as-child :data-active="isNavActive(item)">
+                          <router-link :to="item.route">
+                            <span>{{ item.label }}</span>
+                          </router-link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    </SidebarMenuSub>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
             </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+          </SidebarGroup>
+        </template>
       </SidebarContent>
 
       <SidebarFooter>
@@ -246,8 +293,10 @@ import { Toaster } from '@/components/ui/sonner'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
   SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
-  SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger,
+  SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem,
+  SidebarProvider, SidebarRail, SidebarSeparator, SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -264,9 +313,9 @@ import {
 
 // Lucide icons
 import {
-  Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow,
+  Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow, Lock,
   Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
-  Bot, AppWindow, Activity, Calendar, ShieldCheck, Package,
+  Bot, AppWindow, Activity, Calendar, ShieldCheck, Package, ChevronRight, Settings,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -275,10 +324,10 @@ const router = useRouter()
 const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
 
 // ─── Org Switcher ───
-interface OrgEntry { id: number; display_name: string; identifier: string }
+interface OrgEntry { id: string; display_name: string; name: string }
 const orgs = ref<OrgEntry[]>([])
 const showOrgDropdown = ref(false)
-const selectedOrgId = ref<number | null>(null)
+const selectedOrgId = ref<string | null>(null)
 const selectedOrg = computed(() => orgs.value.find(o => o.id === selectedOrgId.value) || null)
 
 function selectOrg(org: OrgEntry | null) {
@@ -348,7 +397,7 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => document.addEventListener('keydown', handleKeydown))
 onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 
-// ─── Flat catalog-driven nav ───
+// ─── Grouped catalog-driven nav ───
 interface NavItem {
   type: string
   label: string
@@ -356,14 +405,62 @@ interface NavItem {
   sortOrder: number
   storage: string
   countable: boolean
-  separatorBefore: boolean
-  groupLabel?: string
+  navGroup?: string
   count?: number
   aggregates?: string[]
 }
 
+interface NavGroupDef {
+  label: string
+  sort_order: number
+  display?: string
+  icon?: string
+}
+
 const navItems = ref<NavItem[]>([])
+const navGroupDefs = ref<Record<string, NavGroupDef>>({})
 const entityCounts = ref<Record<string, number>>({})
+
+const ungroupedItems = computed(() =>
+  navItems.value.filter(i => !i.navGroup).sort((a, b) => a.sortOrder - b.sortOrder)
+)
+
+function buildGroups(displayFilter: string) {
+  const grouped = new Map<string, NavItem[]>()
+  for (const item of navItems.value) {
+    if (!item.navGroup) continue
+    const def = navGroupDefs.value[item.navGroup]
+    if ((def?.display || 'flat') !== displayFilter) continue
+    if (!grouped.has(item.navGroup)) grouped.set(item.navGroup, [])
+    grouped.get(item.navGroup)!.push(item)
+  }
+  for (const items of grouped.values()) {
+    items.sort((a, b) => a.sortOrder - b.sortOrder)
+  }
+  return Array.from(grouped.entries())
+    .map(([key, items]) => ({
+      key,
+      label: navGroupDefs.value[key]?.label || key.charAt(0).toUpperCase() + key.slice(1),
+      sortOrder: navGroupDefs.value[key]?.sort_order ?? 99,
+      items,
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+const flatGroups = computed(() => buildGroups('flat'))
+const collapsibleGroups = computed(() => buildGroups('collapsible'))
+
+function isGroupActive(group: { items: NavItem[] }): boolean {
+  return group.items.some(item => isNavActive(item))
+}
+
+const groupIconMap: Record<string, any> = {
+  observability: Activity,
+  system: Settings,
+}
+function getGroupIcon(key: string) {
+  return groupIconMap[key] || Database
+}
 
 function isNavActive(item: NavItem): boolean {
   const r = route
@@ -379,7 +476,7 @@ function isNavActive(item: NavItem): boolean {
 const iconMap: Record<string, any> = {
   users: Users, applications: AppWindow,
   human_user: Users, service_user: KeyRound, ai_agent: Bot, app: AppWindow,
-  org: Building2, rule: Zap, provider: Globe, session: Clock,
+  org: Building2, action: Zap, login_flow: Lock, provider: Globe, session: Clock,
   event: Activity, schema: FileJson, job: Calendar, analytics: BarChart3,
   overview: BarChart3, explore: Search, trace: Workflow,
   authorization: ShieldCheck, marketplace: Package,
@@ -394,6 +491,9 @@ onMounted(async () => {
   try {
     const meta = await metaSchemaApi.get()
     const catalog = meta['x-catalog'] || {}
+    const groups = meta['x-groups'] || {}
+
+    navGroupDefs.value = groups
 
     const items: NavItem[] = []
     for (const [typeName, entry] of Object.entries(catalog) as [string, any][]) {
@@ -415,8 +515,7 @@ onMounted(async () => {
         storage: entry.storage || 'entities',
         route: itemRoute,
         countable: !!entry.countable,
-        separatorBefore: !!entry.separator_before,
-        groupLabel: entry.group_label,
+        navGroup: entry.nav_group,
         aggregates: entry.aggregates,
       })
     }
@@ -446,8 +545,8 @@ onMounted(async () => {
     const items = await orgApi.list()
     orgs.value = items.map((o: any) => ({
       id: o.id,
-      display_name: o.display_name || o.identifier,
-      identifier: o.identifier,
+      display_name: o.name || o.display_name || o.identifier || '',
+      name: o.name || '',
     }))
     if (selectedOrgId.value && !orgs.value.find(o => o.id === selectedOrgId.value)) {
       selectOrg(null)
@@ -467,6 +566,9 @@ const pageTitle = computed(() => {
     dashboard: 'Dashboard',
     'user-detail': 'User Detail',
     'identity-create': 'New User',
+    orgs: 'Organizations',
+    'org-create': 'New Organization',
+    'org-detail': 'Organization',
     schemas: 'Schemas',
     'schema-detail': 'Schema Editor',
     marketplace: 'Marketplace',

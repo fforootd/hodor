@@ -10,8 +10,8 @@
  *   ></zitadel-org-list>
  *
  * Events:
- *   - 'org-selected' — { detail: { id, identifier, display_name } }
- *   - 'org-created'  — { detail: { id, identifier } }
+ *   - 'org-selected' — { detail: { id, name } }
+ *   - 'org-created'  — { detail: { id, name } }
  *   - 'org-error'    — { detail: { error } }
  */
 

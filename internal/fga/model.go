@@ -528,5 +528,5 @@ var RouteToFGAType = map[string]string{
 	"/v1/providers":        "provider",
 	"/v1/sessions":         "session",
 	"/v1/rules":            "entity",
-	"/v1/fga":              "org", // customer FGA — checked against org
+	"/v1/fga":              "schema", // FGA admin introspection — instance-level
 }

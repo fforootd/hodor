@@ -4,6 +4,13 @@
   "title": "Zitadel Entity Meta-Schema",
   "description": "Catalog of entity types and annotation validation.",
 
+  "x-groups": {
+    "configure":     { "label": "Configure",     "sort_order": 2, "display": "flat" },
+    "marketplace":   { "label": "Marketplace",   "sort_order": 3, "display": "flat" },
+    "observability": { "label": "Observability", "sort_order": 4, "display": "collapsible", "icon": "activity" },
+    "system":        { "label": "System",        "sort_order": 5, "display": "collapsible", "icon": "settings" }
+  },
+
   "x-catalog": {
     "users": {
       "group": "nav",
@@ -15,7 +22,6 @@
       "storage": "virtual",
       "route": "/users",
       "countable": true,
-      "separator_before": true,
       "aggregates": ["human_user", "service_user", "ai_agent"]
     },
     "applications": {
@@ -104,7 +110,7 @@
       "icon": "🏢",
       "sort_order": 3,
       "storage": "dedicated",
-      "route": "/s/org",
+      "route": "/orgs",
       "countable": true,
       "engines": {
         "authorization": { "model": "fga", "relations": ["member", "owner", "admin"] }
@@ -114,18 +120,19 @@
       "$ref": "schemas/action.json",
       "version": "1.0",
       "group": "nav",
+      "nav_group": "configure",
       "alias": "Actions",
       "singular": "Action",
       "path": "actions",
       "icon": "⚡",
       "sort_order": 10,
-      "storage": "dedicated",
-      "separator_before": true
+      "storage": "dedicated"
     },
     "login_flow": {
       "$ref": "schemas/login_flow.json",
       "version": "1.0",
       "group": "nav",
+      "nav_group": "configure",
       "alias": "Login Flows",
       "singular": "Login Flow",
       "path": "login-flows",
@@ -141,51 +148,53 @@
       "$ref": "schemas/provider.json",
       "version": "1.0",
       "group": "nav",
+      "nav_group": "configure",
       "alias": "Providers",
       "singular": "Provider",
       "path": "providers",
       "icon": "🔗",
-      "sort_order": 11,
+      "sort_order": 12,
       "storage": "dedicated",
       "route": "/providers"
     },
     "schema": {
       "group": "nav",
+      "nav_group": "system",
       "alias": "Schemas",
       "singular": "Schema",
       "path": "schemas",
       "icon": "📐",
-      "sort_order": 12,
+      "sort_order": 200,
       "storage": "dedicated",
       "route": "/schemas"
     },
     "marketplace": {
       "group": "nav",
+      "nav_group": "marketplace",
       "alias": "Marketplace",
       "singular": "Marketplace",
       "path": "marketplace",
       "icon": "📦",
-      "sort_order": 13,
+      "sort_order": 50,
       "storage": "virtual",
-      "route": "/marketplace",
-      "separator_before": true,
-      "group_label": "Marketplace"
+      "route": "/marketplace"
     },
     "overview": {
       "version": "1.0",
       "group": "nav",
+      "nav_group": "observability",
       "alias": "Overview",
       "singular": "Overview",
       "path": "observability",
       "icon": "📊",
       "sort_order": 100,
       "storage": "virtual",
-      "route": "/observability",
-      "separator_before": true
+      "route": "/observability"
     },
     "explore": {
       "version": "1.0",
       "group": "nav",
+      "nav_group": "observability",
       "alias": "Explore",
       "singular": "Explore",
       "path": "explore",
@@ -198,6 +207,7 @@
       "$ref": "schemas/event.json",
       "version": "1.0",
       "group": "nav",
+      "nav_group": "observability",
       "alias": "Events",
       "singular": "Event",
       "path": "events",
@@ -209,6 +219,7 @@
     "trace": {
       "version": "1.0",
       "group": "nav",
+      "nav_group": "observability",
       "alias": "Traces",
       "singular": "Trace",
       "path": "traces",
@@ -221,6 +232,7 @@
       "$ref": "schemas/session.json",
       "version": "1.0",
       "group": "nav",
+      "nav_group": "observability",
       "alias": "Sessions",
       "singular": "Session",
       "path": "sessions",
@@ -233,23 +245,24 @@
       "$ref": "schemas/job.json",
       "version": "1.0",
       "group": "nav",
+      "nav_group": "system",
       "alias": "Jobs",
       "singular": "Job",
       "path": "jobs",
       "icon": "⚙️",
-      "sort_order": 200,
+      "sort_order": 201,
       "storage": "dedicated",
-      "route": "/jobs",
-      "separator_before": true
+      "route": "/jobs"
     },
     "authorization": {
       "version": "1.0",
       "group": "nav",
+      "nav_group": "system",
       "alias": "Authorization",
       "singular": "Authorization",
       "path": "authorization",
       "icon": "🛡️",
-      "sort_order": 201,
+      "sort_order": 202,
       "storage": "virtual",
       "route": "/authorization"
     },

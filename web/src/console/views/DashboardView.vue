@@ -6,7 +6,7 @@
     </div>
 
     <!-- Quick Stats -->
-    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
       <Card v-for="stat in stats" :key="stat.label">
         <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle class="text-sm font-medium">{{ stat.label }}</CardTitle>
@@ -59,14 +59,16 @@ import { ref, onMounted } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Users, FileJson, Globe, Activity } from 'lucide-vue-next'
-import { countsApi, schemaApi, providerApi, eventApi } from '@/api/resources'
+import { Users, Building2, AppWindow, FileJson, Globe, Activity } from 'lucide-vue-next'
+import { countsApi, schemaApi, providerApi, eventApi, orgApi } from '@/api/resources'
 
 const stats = ref([
   { label: 'Users', value: '—', icon: Users, description: 'Total users' },
+  { label: 'Organizations', value: '—', icon: Building2, description: 'Active orgs' },
+  { label: 'Applications', value: '—', icon: AppWindow, description: 'Registered apps' },
   { label: 'Schemas', value: '—', icon: FileJson, description: 'Active schemas' },
   { label: 'Providers', value: '—', icon: Globe, description: 'Configured providers' },
-  { label: 'Events', value: '—', icon: Activity, description: 'Last 24 hours' },
+  { label: 'Events', value: '—', icon: Activity, description: 'Last 1 hour' },
 ])
 
 const recentEvents = ref<any[]>([])
@@ -81,22 +83,30 @@ function timeAgo(ts: string): string {
 
 onMounted(async () => {
   try {
-    const [counts, schemas, providers, events] = await Promise.allSettled([
+    const [counts, orgs, schemas, providers, events] = await Promise.allSettled([
       countsApi.get(),
+      orgApi.list(),
       schemaApi.list(),
       providerApi.list(),
       eventApi.list({ limit: 10 }),
     ])
 
     if (counts.status === 'fulfilled') {
-      const total = Object.values(counts.value).reduce((sum, n) => sum + Number(n), 0)
-      stats.value[0].value = String(total)
+      const c = counts.value as Record<string, number>
+      stats.value[0].value = String(c.users ?? Object.values(c).reduce((sum, n) => sum + Number(n), 0))
+      stats.value[2].value = String(c.apps ?? 0)
     }
-    if (schemas.status === 'fulfilled') stats.value[1].value = String(schemas.value.length ?? 0)
-    if (providers.status === 'fulfilled') stats.value[2].value = String(providers.value.length ?? 0)
+    if (orgs.status === 'fulfilled') {
+      stats.value[1].value = String(Array.isArray(orgs.value) ? orgs.value.length : 0)
+    }
+    if (schemas.status === 'fulfilled') stats.value[3].value = String(schemas.value.length ?? 0)
+    if (providers.status === 'fulfilled') stats.value[4].value = String(providers.value.length ?? 0)
     if (events.status === 'fulfilled') {
       const items = events.value || []
-      stats.value[3].value = String(items.length)
+      // Count events from the last 1 hour
+      const oneHourAgo = Date.now() - 3600000
+      const recentCount = items.filter((e: any) => new Date(e.created_at).getTime() > oneHourAgo).length
+      stats.value[5].value = String(recentCount)
       recentEvents.value = items.slice(0, 10).map((e: any) => ({
         id: e.id,
         event_type: e.event_type,
@@ -107,3 +117,4 @@ onMounted(async () => {
   } catch { /* demo fallback */ }
 })
 </script>
+

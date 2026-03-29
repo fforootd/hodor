@@ -266,13 +266,24 @@ export const metaSchemaApi = {
 // Organization API
 // ------------------------------------------------------------------
 export interface Org {
-  id: number
-  identifier: string
-  display_name: string
+  id: string
+  instance_id?: string
+  name: string
+  state?: string
+  metadata?: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
 }
 
 export const orgApi = {
   list: (): Promise<Org[]> => unwrapItems<Org>(listOrgs()),
+  get: (id: string): Promise<Org> => api.get<Org>(`/v1/orgs/${encodeURIComponent(id)}`),
+  create: (data: { name: string; metadata?: Record<string, unknown> }): Promise<Org> =>
+    api.post<Org>('/v1/orgs', data),
+  update: (id: string, data: Partial<{ name: string; state: string; metadata: Record<string, unknown> }>): Promise<Org> =>
+    api.patch<Org>(`/v1/orgs/${encodeURIComponent(id)}`, data),
+  delete: (id: string): Promise<void> =>
+    api.delete(`/v1/orgs/${encodeURIComponent(id)}`),
 }
 
 // ------------------------------------------------------------------

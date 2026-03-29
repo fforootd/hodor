@@ -211,10 +211,23 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Post-init FGA bootstrap: if admin exists but has no FGA tuples, seed them now.
 	// This handles the case where EnsureAdmin ran before FGA was initialized.
 	{
-		var adminID, orgID string
+		var adminID string
 		if err := db.SQL().QueryRowContext(ctx,
-			`SELECT id, org_id FROM users WHERE identifier = 'admin' LIMIT 1`,
-		).Scan(&adminID, &orgID); err == nil && adminID != "" {
+			`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`,
+		).Scan(&adminID); err == nil && adminID != "" {
+			// Get the actual org ID from the orgs table (not users.org_id which may be stale).
+			var orgID string
+			if err := db.SQL().QueryRowContext(ctx,
+				`SELECT id FROM orgs WHERE name = 'Default' LIMIT 1`,
+			).Scan(&orgID); err != nil || orgID == "" {
+				// Fallback to users.org_id if orgs table lookup fails.
+				_ = db.SQL().QueryRowContext(ctx,
+					`SELECT org_id FROM users WHERE id = ? LIMIT 1`, adminID,
+				).Scan(&orgID)
+			}
+			if orgID == "" {
+				orgID = "_global"
+			}
 			// Check if tuples already exist for this admin.
 			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:default")
 			if len(tuples) == 0 {
