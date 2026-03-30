@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -39,13 +38,12 @@ func (a *API) fgaCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	req, ok := decodeBody[struct {
 		User     string `json:"user"`
 		Relation string `json:"relation"`
 		Object   string `json:"object"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	}](w, r)
+	if !ok {
 		return
 	}
 	if req.User == "" || req.Relation == "" || req.Object == "" {
@@ -77,15 +75,14 @@ func (a *API) fgaWriteTuples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	req, ok := decodeBody[struct {
 		Tuples []struct {
 			User     string `json:"user"`
 			Relation string `json:"relation"`
 			Object   string `json:"object"`
 		} `json:"tuples"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	}](w, r)
+	if !ok {
 		return
 	}
 	if len(req.Tuples) == 0 {
@@ -123,15 +120,14 @@ func (a *API) fgaDeleteTuples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	req, ok := decodeBody[struct {
 		Tuples []struct {
 			User     string `json:"user"`
 			Relation string `json:"relation"`
 			Object   string `json:"object"`
 		} `json:"tuples"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	}](w, r)
+	if !ok {
 		return
 	}
 
@@ -198,13 +194,12 @@ func (a *API) fgaListObjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	req, ok := decodeBody[struct {
 		User     string `json:"user"`
 		Relation string `json:"relation"`
 		Type     string `json:"type"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	}](w, r)
+	if !ok {
 		return
 	}
 	if req.User == "" || req.Relation == "" || req.Type == "" {
@@ -256,12 +251,11 @@ func (a *API) fgaExpand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	req, ok := decodeBody[struct {
 		Relation string `json:"relation"`
 		Object   string `json:"object"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	}](w, r)
+	if !ok {
 		return
 	}
 	if req.Relation == "" || req.Object == "" {
@@ -354,16 +348,15 @@ func (a *API) fgaBatchTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
+	req, ok := decodeBody[struct {
 		Assertions []struct {
 			User     string `json:"user"`
 			Relation string `json:"relation"`
 			Object   string `json:"object"`
 			Expected bool   `json:"expected"`
 		} `json:"assertions"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	}](w, r)
+	if !ok {
 		return
 	}
 
