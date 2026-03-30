@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	cryptotls "crypto/tls"
 	"embed"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/catalog"
 	"github.com/zitadel/zitadel/internal/config"
+	zcrypto "github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/fga"
@@ -154,15 +156,32 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	uiHandlers := ui.New(db, bus, restAPI, cookieCfg)
 	uiHandlers.RegisterRoutes(mux)
 
+	// --- Initialize Application-Level Encryption (ALE) ---
+	// SecretBox provides AES-256-GCM envelope encryption for all secrets at rest.
+	// In dev mode with no keys configured, operates in plaintext passthrough.
+	secretBox, err := zcrypto.NewSecretBox(cfg.Encryption.ActiveKeyID, cfg.Encryption.KeyMap())
+	if err != nil {
+		logging.Fatalf("encryption init: %v", err)
+	}
+	if secretBox.Plaintext() {
+		logging.Println("[WARN] encryption: no keys configured — secrets stored in plaintext (dev mode)")
+	} else {
+		logging.Printf("[encryption] active_key=%s, ring_size=%d", cfg.Encryption.ActiveKeyID, len(cfg.Encryption.Keys))
+	}
+	secretStore := zcrypto.NewSecretStore(db.SQL(), secretBox)
+
 	// Mount OIDC Provider (OP) — handles /.well-known/openid-configuration,
 	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
 	issues := "http://" + net.JoinHostPort(cfg.Server.ExternalDomain, strconv.Itoa(cfg.Server.Port))
-	oidcStorage := oidcop.NewStorage(db)
+	oidcStorage := oidcop.NewStorage(db, secretStore)
 	var firstCookieSecret string
 	if len(cfg.Server.CookieSecrets) > 0 {
 		firstCookieSecret = cfg.Server.CookieSecrets[0]
 	}
-	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil, cfg.Server.OIDCEncryptionKey, firstCookieSecret)
+	// The OIDC encryption key now lives in the secrets table (type 'oidc_encryption').
+	// On first boot it's auto-generated and stored encrypted.
+	oidcEncKey := getOrCreateOIDCEncryptionKey(secretStore)
+	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil, oidcEncKey, firstCookieSecret)
 	if err != nil {
 		logging.Printf("WARN: OIDC Provider setup failed: %v", err)
 	} else {
@@ -282,7 +301,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Initialize TLS manager.
 	isDev := cfg.Dev.MockOIDC || cfg.Dev.SeedFile != ""
-	tlsMgr, err := ztls.NewManager(cfg.TLS, &cfg.Server, db.SQL(), isDev)
+	tlsMgr, err := ztls.NewManager(cfg.TLS, &cfg.Server, db.SQL(), secretBox, isDev)
 	if err != nil {
 		logging.Printf("WARN: TLS manager init failed: %v", err)
 	}
@@ -379,4 +398,32 @@ func (s *Server) ListenAndServe() error {
 	}
 
 	return nil
+}
+
+// getOrCreateOIDCEncryptionKey retrieves the OIDC encryption key from the
+// secrets table, or generates and stores a new one. Returns a 64-char hex
+// string suitable for op.Config.CryptoKey.
+func getOrCreateOIDCEncryptionKey(store *zcrypto.SecretStore) string {
+	ctx := context.Background()
+
+	// Try to load existing OIDC encryption key.
+	_, keyBytes, err := store.GetByType(ctx, "oidc_encryption")
+	if err == nil {
+		return fmt.Sprintf("%x", keyBytes)
+	}
+
+	// Generate a new 32-byte key.
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		logging.Fatalf("generate OIDC encryption key: %v", err)
+	}
+
+	// Store it (envelope-encrypted by the key ring).
+	id := fmt.Sprintf("oidc_enc_%d", time.Now().UnixMilli())
+	if err := store.Put(ctx, id, "oidc_encryption", key, zcrypto.WithAlgorithm("AES256")); err != nil {
+		logging.Fatalf("store OIDC encryption key: %v", err)
+	}
+	logging.Println("[secrets] generated and stored OIDC encryption key")
+
+	return fmt.Sprintf("%x", key)
 }

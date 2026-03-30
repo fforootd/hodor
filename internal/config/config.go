@@ -5,6 +5,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 type Config struct {
 	Server        ServerConfig        `toml:"server"`
 	TLS           TLSConfig           `toml:"tls"`
+	Encryption    EncryptionConfig    `toml:"encryption"`
 	Database      DatabaseConfig      `toml:"database"`
 	Observability ObservabilityConfig `toml:"observability"`
 	Workers       WorkersConfig       `toml:"workers"`
@@ -32,8 +34,7 @@ type ServerConfig struct {
 	ExternalDomain    string   `toml:"external_domain"`
 	TLSCert           string   `toml:"tls_cert"`
 	TLSKey            string   `toml:"tls_key"`
-	CookieSecrets     []string `toml:"cookie_secrets"`      // HMAC keys for session cookies; first signs, all verify
-	OIDCEncryptionKey string   `toml:"oidc_encryption_key"` // 32-byte hex-encoded key for OIDC token encryption
+	CookieSecrets []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
 
 	// Sub-path deployment: host all routes under a prefix (e.g., "/auth").
 	BasePath      string             `toml:"base_path"`
@@ -104,6 +105,34 @@ type TLSConfig struct {
 	CADir     string `toml:"ca_dir"`     // Custom ACME CA directory URL (optional, default: Let's Encrypt production)
 	HTTPPort  int    `toml:"http_port"`  // Port for HTTP redirect + ACME challenges (default: 80)
 	HTTPSPort int    `toml:"https_port"` // Port for HTTPS (default: 443)
+}
+
+// EncryptionConfig controls application-level envelope encryption (AES-256-GCM)
+// for secrets stored in the database (signing keys, TLS certs, IdP secrets).
+//
+// When no keys are configured, the system runs in plaintext mode (dev default).
+// On first boot in dev mode, a random key is auto-generated.
+type EncryptionConfig struct {
+	// ActiveKeyID selects which key from the ring encrypts new writes.
+	ActiveKeyID string `toml:"active_key_id"`
+
+	// Keys is the full key ring. Old keys remain for decryption during rotation.
+	Keys []EncryptionKey `toml:"keys"`
+}
+
+// EncryptionKey is a named 32-byte symmetric key for AES-256-GCM.
+type EncryptionKey struct {
+	ID     string `toml:"id"`     // e.g. "key_v1_2025"
+	Secret string `toml:"secret"` // 64-char hex string (32 bytes)
+}
+
+// KeyMap returns the key ring as a map[id]hexSecret suitable for crypto.NewSecretBox.
+func (e *EncryptionConfig) KeyMap() map[string]string {
+	m := make(map[string]string, len(e.Keys))
+	for _, k := range e.Keys {
+		m[k.ID] = k.Secret
+	}
+	return m
 }
 
 // ResolveMode determines the effective TLS mode from config + server state.
@@ -387,6 +416,7 @@ func Load(path string) (*Config, error) {
 func applyEnv(cfg *Config) {
 	applyServerEnv(cfg)
 	applyTLSEnv(cfg)
+	applyEncryptionEnv(cfg)
 	applyDatabaseEnv(cfg)
 	applyObservabilityEnv(cfg)
 	applyDevEnv(cfg)
@@ -524,6 +554,19 @@ func applyRateLimitEnv(cfg *Config) {
 	}
 	if v := os.Getenv("ZITADEL_RATE_LIMIT_BATCH_WRITE"); v == "true" || v == "1" {
 		cfg.RateLimit.BatchWrite = true
+	}
+}
+
+func applyEncryptionEnv(cfg *Config) {
+	if v := os.Getenv("ZITADEL_ENCRYPTION_ACTIVE_KEY_ID"); v != "" {
+		cfg.Encryption.ActiveKeyID = v
+	}
+	// ZITADEL_ENCRYPTION_KEYS expects JSON: [{"id":"k1","secret":"hex..."},...]
+	if v := os.Getenv("ZITADEL_ENCRYPTION_KEYS"); v != "" {
+		var keys []EncryptionKey
+		if err := json.Unmarshal([]byte(v), &keys); err == nil {
+			cfg.Encryption.Keys = keys
+		}
 	}
 }
 

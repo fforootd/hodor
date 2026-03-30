@@ -13,6 +13,7 @@ import (
 	"github.com/caddyserver/certmagic"
 
 	"github.com/zitadel/zitadel/internal/config"
+	zcrypto "github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/logging"
 )
 
@@ -21,16 +22,18 @@ type Manager struct {
 	magic  *certmagic.Config
 	issuer *certmagic.ACMEIssuer
 	db     *sql.DB
+	box    *zcrypto.SecretBox
 	mode   string // resolved TLS mode: auto, manual, external, off
 	cfg    config.TLSConfig
 }
 
 // NewManager creates a TLS manager based on the resolved config mode.
-func NewManager(tlsCfg config.TLSConfig, serverCfg *config.ServerConfig, db *sql.DB, isDev bool) (*Manager, error) {
+func NewManager(tlsCfg config.TLSConfig, serverCfg *config.ServerConfig, db *sql.DB, box *zcrypto.SecretBox, isDev bool) (*Manager, error) {
 	mode := tlsCfg.ResolveMode(serverCfg, isDev)
 
 	m := &Manager{
 		db:   db,
+		box:  box,
 		mode: mode,
 		cfg:  tlsCfg,
 	}
@@ -41,7 +44,7 @@ func NewManager(tlsCfg config.TLSConfig, serverCfg *config.ServerConfig, db *sql
 	}
 
 	// Configure CertMagic for auto mode.
-	storage := &keysStorage{db: db}
+	storage := &secretsStorage{db: db, box: box}
 
 	// Set the default storage globally before creating the config.
 	certmagic.Default.Storage = storage
@@ -66,7 +69,7 @@ func NewManager(tlsCfg config.TLSConfig, serverCfg *config.ServerConfig, db *sql
 	m.magic = cmCfg
 	m.issuer = issuer
 
-	logging.Printf("[tls] mode=auto (CertMagic enabled, storage=keys table)")
+	logging.Printf("[tls] mode=auto (CertMagic enabled, storage=secrets table)")
 	return m, nil
 }
 

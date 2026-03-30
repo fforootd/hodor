@@ -254,17 +254,29 @@ CREATE INDEX IF NOT EXISTS idx_tokens_session ON tokens(session_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_app     ON tokens(application_id) WHERE application_id != '';
 
 -- ============================================================================
--- KEYS — signing keys, encryption keys, webhook keys
+-- SECRETS — encrypted cryptographic material (signing keys, TLS certs, IdP secrets)
+-- Application-level envelope encryption: ciphertext is AES-256-GCM encrypted
+-- by the key identified by encryption_key_id. When encryption_key_id is empty,
+-- ciphertext contains plaintext (dev/zero-config mode).
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS keys (
-    id          TEXT PRIMARY KEY,
-    type        TEXT NOT NULL,     -- 'oidc_signing', 'encryption', 'webhook_signing'
-    algorithm   TEXT NOT NULL DEFAULT 'RS256',
-    key_data    BLOB NOT NULL,
-    public_key  BLOB,
-    expires_at  TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS secrets (
+    id                TEXT PRIMARY KEY,
+    instance_id       TEXT NOT NULL DEFAULT 'inst_root',
+    secret_type       TEXT NOT NULL,      -- 'oidc_signing', 'oidc_encryption', 'certmagic', 'idp_secret', 'webhook_signing'
+    algorithm         TEXT NOT NULL DEFAULT 'RS256',
+
+    -- Envelope encryption metadata
+    encryption_key_id TEXT DEFAULT '',     -- '' = plaintext (dev mode)
+    ciphertext        BLOB NOT NULL,       -- encrypted payload (or plaintext if no key)
+    nonce             BLOB DEFAULT NULL,   -- AES-GCM nonce (12 bytes)
+    public_key        BLOB,                -- public portion (never encrypted, used for JWKS)
+
+    expires_at        TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_secrets_type ON secrets(secret_type);
+CREATE INDEX IF NOT EXISTS idx_secrets_instance ON secrets(instance_id);
+CREATE INDEX IF NOT EXISTS idx_secrets_enc_key ON secrets(encryption_key_id);
 
 -- ============================================================================
 -- AUTH STATES — transient authentication flow state (SSO, OIDC, magic links)
@@ -580,7 +592,7 @@ DROP TABLE IF EXISTS endpoints;
 DROP TABLE IF EXISTS domains;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS auth_states;
-DROP TABLE IF EXISTS keys;
+DROP TABLE IF EXISTS secrets;
 DROP TABLE IF EXISTS tokens;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS linked_identities;

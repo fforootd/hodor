@@ -1,5 +1,6 @@
 // Package crypto provides shared cryptographic utilities for Zitadel.
-// It centralises token hashing, random generation, and encoding so that
+// It centralises token hashing, random generation, encoding, and
+// application-level envelope encryption (AES-256-GCM) so that
 // security-critical operations are implemented once and reused everywhere.
 package crypto
 

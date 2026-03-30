@@ -18,6 +18,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/zitadel/zitadel/internal/auth"
+	zcrypto "github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/login"
 )
@@ -29,12 +30,13 @@ var (
 
 // Storage implements op.Storage backed by the Zitadel database.
 type Storage struct {
-	db *database.DB
+	db      *database.DB
+	secrets *zcrypto.SecretStore
 }
 
 // NewStorage creates a new OIDC Storage.
-func NewStorage(db *database.DB) *Storage {
-	return &Storage{db: db}
+func NewStorage(db *database.DB, secrets *zcrypto.SecretStore) *Storage {
+	return &Storage{db: db, secrets: secrets}
 }
 
 // ---------- Health ----------
@@ -416,11 +418,8 @@ func (pk *publicKey) Use() string                        { return "sig" }
 func (pk *publicKey) Key() any                           { return &pk.key.PublicKey }
 
 func (s *Storage) getOrCreateSigningKey(ctx context.Context) (*signingKeyData, error) {
-	var id string
-	var keyBytes []byte
-	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT id, key_data FROM keys WHERE type = 'oidc_signing' ORDER BY created_at DESC LIMIT 1`,
-	).Scan(&id, &keyBytes)
+	// Try to load the latest signing key from the encrypted secret store.
+	id, keyBytes, err := s.secrets.GetByType(ctx, "oidc_signing")
 	if err == nil {
 		pk, err := x509.ParsePKCS1PrivateKey(keyBytes)
 		if err != nil {
@@ -429,7 +428,7 @@ func (s *Storage) getOrCreateSigningKey(ctx context.Context) (*signingKeyData, e
 		return &signingKeyData{id: id, key: pk}, nil
 	}
 
-	// Generate new key
+	// Generate new key.
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, fmt.Errorf("generate signing key: %w", err)
@@ -437,11 +436,11 @@ func (s *Storage) getOrCreateSigningKey(ctx context.Context) (*signingKeyData, e
 	id = uuid.NewString()
 	keyDER := x509.MarshalPKCS1PrivateKey(key)
 
-	_, err = s.db.SQL().ExecContext(ctx,
-		`INSERT INTO keys (id, type, algorithm, key_data) VALUES (?, 'oidc_signing', 'RS256', ?)`,
-		id, keyDER,
-	)
-	if err != nil {
+	// Store via SecretStore (envelope-encrypted).
+	if err := s.secrets.Put(ctx, id, "oidc_signing", keyDER,
+		zcrypto.WithAlgorithm("RS256"),
+		zcrypto.WithPublicKey(x509.MarshalPKCS1PublicKey(&key.PublicKey)),
+	); err != nil {
 		return nil, fmt.Errorf("store signing key: %w", err)
 	}
 

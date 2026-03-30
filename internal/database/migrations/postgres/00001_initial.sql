@@ -274,17 +274,23 @@ CREATE INDEX IF NOT EXISTS idx_auth_states_code ON auth_states(code) WHERE code 
 CREATE INDEX IF NOT EXISTS idx_auth_states_state ON auth_states(state) WHERE state != '';
 
 -- ============================================================================
--- KEYS — cryptographic keys (OIDC signing, etc.)
+-- SECRETS — encrypted cryptographic material (signing keys, TLS certs, IdP secrets)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS keys (
-    id          TEXT PRIMARY KEY,
-    type        TEXT NOT NULL DEFAULT 'oidc_signing',
-    algorithm   TEXT NOT NULL DEFAULT 'RS256',
-    private_key BYTEA NOT NULL,
-    expires_at  TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS secrets (
+    id                TEXT PRIMARY KEY,
+    instance_id       TEXT NOT NULL DEFAULT 'inst_root',
+    secret_type       TEXT NOT NULL,
+    algorithm         TEXT NOT NULL DEFAULT 'RS256',
+    encryption_key_id TEXT DEFAULT '',
+    ciphertext        BYTEA NOT NULL,
+    nonce             BYTEA DEFAULT NULL,
+    public_key        BYTEA,
+    expires_at        TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_keys_type ON keys(type);
+CREATE INDEX IF NOT EXISTS idx_secrets_type ON secrets(secret_type);
+CREATE INDEX IF NOT EXISTS idx_secrets_instance ON secrets(instance_id);
+CREATE INDEX IF NOT EXISTS idx_secrets_enc_key ON secrets(encryption_key_id);
 
 -- ============================================================================
 -- FINGERPRINTS — generalized device/browser fingerprint payload storage
@@ -518,7 +524,7 @@ DROP TABLE IF EXISTS settings;
 DROP TABLE IF EXISTS unique_fields;
 DROP TABLE IF EXISTS domains;
 DROP TABLE IF EXISTS events;
-DROP TABLE IF EXISTS keys;
+DROP TABLE IF EXISTS secrets;
 DROP TABLE IF EXISTS auth_states;
 DROP TABLE IF EXISTS tokens;
 DROP TABLE IF EXISTS sessions;

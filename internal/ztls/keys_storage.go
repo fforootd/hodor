@@ -9,40 +9,54 @@ import (
 	"time"
 
 	"github.com/caddyserver/certmagic"
+
+	zcrypto "github.com/zitadel/zitadel/internal/crypto"
 )
 
-// keysStorage implements certmagic.Storage using the existing `keys` table.
+// secretsStorage implements certmagic.Storage using the `secrets` table
+// with envelope encryption via SecretBox.
+//
 // CertMagic stores certs, keys, and metadata as key-value blobs.
-// We map these to the keys table:
-//   - id:         CertMagic key path (e.g., "certificates/acme-v02.../example.com/example.com.crt")
-//   - type:       "certmagic"
-//   - key_data:   raw cert/key/metadata bytes
-//   - expires_at: used for cert expiry tracking
-type keysStorage struct {
-	db *sql.DB
+// We map these to the secrets table:
+//   - id:             CertMagic key path (e.g., "certificates/acme-v02.../example.com/example.com.crt")
+//   - secret_type:    "certmagic"
+//   - ciphertext:     encrypted cert/key/metadata bytes
+//   - nonce:          AES-GCM nonce
+//   - encryption_key_id: which key was used
+//   - expires_at:     used for cert expiry tracking
+type secretsStorage struct {
+	db  *sql.DB
+	box *zcrypto.SecretBox
 }
 
 // Verify interface compliance.
-var _ certmagic.Storage = (*keysStorage)(nil)
+var _ certmagic.Storage = (*secretsStorage)(nil)
 
-func (s *keysStorage) Lock(ctx context.Context, key string) error {
+func (s *secretsStorage) Lock(ctx context.Context, key string) error {
 	// For single-instance SQLite, no distributed lock is needed.
 	// CertMagic only uses locks to prevent concurrent ACME operations.
 	// SQLite's WAL mode handles serialization at the DB level.
 	return nil
 }
 
-func (s *keysStorage) Unlock(ctx context.Context, key string) error {
+func (s *secretsStorage) Unlock(ctx context.Context, key string) error {
 	return nil
 }
 
-func (s *keysStorage) Store(ctx context.Context, key string, value []byte) error {
+func (s *secretsStorage) Store(ctx context.Context, key string, value []byte) error {
+	// Encrypt the value before storing.
+	sealed, err := s.box.Seal(value)
+	if err != nil {
+		return fmt.Errorf("certmagic store encrypt: %w", err)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Upsert: try update first, then insert.
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE keys SET key_data = ?, expires_at = ? WHERE id = ? AND type = 'certmagic'`,
-		value, now, key)
+		`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ?, expires_at = ?
+		 WHERE id = ? AND secret_type = 'certmagic'`,
+		sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, key)
 	if err != nil {
 		return fmt.Errorf("certmagic store update: %w", err)
 	}
@@ -52,15 +66,16 @@ func (s *keysStorage) Store(ctx context.Context, key string, value []byte) error
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO keys (id, type, algorithm, key_data, expires_at, created_at)
-		 VALUES (?, 'certmagic', 'none', ?, ?, ?)`,
-		key, value, now, now)
+		`INSERT INTO secrets (id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, expires_at, created_at)
+		 VALUES (?, 'certmagic', 'none', ?, ?, ?, ?, ?)`,
+		key, sealed.KeyID, sealed.Ciphertext, sealed.Nonce, now, now)
 	if err != nil {
 		// If it was a race and the row now exists, try update again.
 		if strings.Contains(err.Error(), "UNIQUE") {
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE keys SET key_data = ?, expires_at = ? WHERE id = ? AND type = 'certmagic'`,
-				value, now, key)
+				`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ?, expires_at = ?
+				 WHERE id = ? AND secret_type = 'certmagic'`,
+				sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, key)
 		}
 		if err != nil {
 			return fmt.Errorf("certmagic store insert: %w", err)
@@ -69,45 +84,45 @@ func (s *keysStorage) Store(ctx context.Context, key string, value []byte) error
 	return nil
 }
 
-func (s *keysStorage) Load(ctx context.Context, key string) ([]byte, error) {
-	var data []byte
+func (s *secretsStorage) Load(ctx context.Context, key string) ([]byte, error) {
+	var ciphertext, nonce []byte
+	var keyID string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT key_data FROM keys WHERE id = ? AND type = 'certmagic'`, key,
-	).Scan(&data)
+		`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key,
+	).Scan(&ciphertext, &nonce, &keyID)
 	if err == sql.ErrNoRows {
 		return nil, fs.ErrNotExist
 	}
 	if err != nil {
 		return nil, fmt.Errorf("certmagic load: %w", err)
 	}
-	return data, nil
+
+	plaintext, err := s.box.Open(ciphertext, nonce, keyID)
+	if err != nil {
+		return nil, fmt.Errorf("certmagic load decrypt: %w", err)
+	}
+	return plaintext, nil
 }
 
-func (s *keysStorage) Delete(ctx context.Context, key string) error {
+func (s *secretsStorage) Delete(ctx context.Context, key string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM keys WHERE id = ? AND type = 'certmagic'`, key)
+		`DELETE FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key)
 	if err != nil {
 		return fmt.Errorf("certmagic delete: %w", err)
 	}
 	return nil
 }
 
-func (s *keysStorage) Exists(ctx context.Context, key string) bool {
+func (s *secretsStorage) Exists(ctx context.Context, key string) bool {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM keys WHERE id = ? AND type = 'certmagic'`, key,
+		`SELECT COUNT(*) FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key,
 	).Scan(&count)
 	return err == nil && count > 0
 }
 
-func (s *keysStorage) List(ctx context.Context, prefix string, recursive bool) ([]string, error) {
-	var query string
-	if recursive {
-		query = `SELECT id FROM keys WHERE type = 'certmagic' AND id LIKE ? ORDER BY id`
-	} else {
-		// Non-recursive: only return direct children (no further slashes after prefix).
-		query = `SELECT id FROM keys WHERE type = 'certmagic' AND id LIKE ? ORDER BY id`
-	}
+func (s *secretsStorage) List(ctx context.Context, prefix string, recursive bool) ([]string, error) {
+	query := `SELECT id FROM secrets WHERE secret_type = 'certmagic' AND id LIKE ? ORDER BY id`
 
 	rows, err := s.db.QueryContext(ctx, query, prefix+"%")
 	if err != nil {
@@ -145,12 +160,12 @@ func (s *keysStorage) List(ctx context.Context, prefix string, recursive bool) (
 	return keys, nil
 }
 
-func (s *keysStorage) Stat(ctx context.Context, key string) (certmagic.KeyInfo, error) {
-	var data []byte
+func (s *secretsStorage) Stat(ctx context.Context, key string) (certmagic.KeyInfo, error) {
+	var ciphertext []byte
 	var modifiedStr string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT key_data, COALESCE(expires_at, created_at) FROM keys WHERE id = ? AND type = 'certmagic'`, key,
-	).Scan(&data, &modifiedStr)
+		`SELECT ciphertext, COALESCE(expires_at, created_at) FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key,
+	).Scan(&ciphertext, &modifiedStr)
 	if err == sql.ErrNoRows {
 		return certmagic.KeyInfo{}, fs.ErrNotExist
 	}
@@ -163,7 +178,7 @@ func (s *keysStorage) Stat(ctx context.Context, key string) (certmagic.KeyInfo, 
 	return certmagic.KeyInfo{
 		Key:        key,
 		Modified:   modified,
-		Size:       int64(len(data)),
+		Size:       int64(len(ciphertext)),
 		IsTerminal: !strings.HasSuffix(key, "/"),
 	}, nil
 }
