@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,7 +27,13 @@ func timeNow() string {
 // returns false on failure.
 func decodeBody[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 	var v T
-	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)) // 1 MiB
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return v, false
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return v, false
 	}
