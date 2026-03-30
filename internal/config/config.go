@@ -439,6 +439,9 @@ func applyServerEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_EXTERNAL_DOMAIN"); v != "" {
 		cfg.Server.ExternalDomain = v
 	}
+	if v := os.Getenv("ZITADEL_COOKIE_SECRETS"); v != "" {
+		cfg.Server.CookieSecrets = splitCSV(v)
+	}
 	if v := os.Getenv("ZITADEL_TLS_CERT"); v != "" {
 		cfg.Server.TLSCert = v
 	}

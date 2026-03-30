@@ -8,13 +8,13 @@ import (
 	cryptotls "crypto/tls"
 	"embed"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -31,6 +31,7 @@ import (
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/loginflow"
+	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/mgmt"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/ratelimit"
@@ -196,7 +197,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Mount OIDC Provider (OP) — handles /.well-known/openid-configuration,
 	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
-	issues := "http://" + net.JoinHostPort(cfg.Server.ExternalDomain, strconv.Itoa(cfg.Server.Port))
+	issues := issuerURL(cfg)
 	oidcStorage := oidcop.NewStorage(db, secretStore)
 	var firstCookieSecret string
 	if len(cfg.Server.CookieSecrets) > 0 {
@@ -434,6 +435,35 @@ func (s *Server) ListenAndServe() error {
 	}
 
 	return nil
+}
+
+func issuerURL(cfg *config.Config) string {
+	host := strings.TrimSpace(cfg.Server.ExternalDomain)
+	if host == "" {
+		host = "localhost"
+	}
+
+	isDev := cfg.Dev.MockOIDC || cfg.Dev.SeedFile != ""
+	tlsMode := cfg.TLS.ResolveMode(&cfg.Server, isDev)
+
+	scheme := "http"
+	port := cfg.Server.Port
+	switch tlsMode {
+	case "auto", "manual":
+		scheme = "https"
+		port = cfg.TLS.ResolveHTTPSPort()
+	case "external":
+		scheme = "https"
+		port = 443
+	}
+
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return scheme + "://" + host
+	}
+	if (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
+		return scheme + "://" + host
+	}
+	return scheme + "://" + net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // getOrCreateOIDCEncryptionKey retrieves the OIDC encryption key from the

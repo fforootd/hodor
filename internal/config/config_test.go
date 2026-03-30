@@ -38,6 +38,7 @@ func TestLoadEmpty(t *testing.T) {
 func TestEnvOverride(t *testing.T) {
 	t.Setenv("ZITADEL_PORT", "9090")
 	t.Setenv("ZITADEL_DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("ZITADEL_COOKIE_SECRETS", "alpha,beta")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -48,6 +49,9 @@ func TestEnvOverride(t *testing.T) {
 	}
 	if cfg.Database.URL != "postgres://localhost/test" {
 		t.Errorf("db url = %q, want postgres://localhost/test", cfg.Database.URL)
+	}
+	if got, want := cfg.Server.CookieSecrets, []string{"alpha", "beta"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("cookie secrets = %#v, want %#v", got, want)
 	}
 }
 

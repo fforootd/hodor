@@ -58,6 +58,64 @@ func TestReadyzReturns503WhenDatabasePingFails(t *testing.T) {
 	}
 }
 
+func TestIssuerURL(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  func() *config.Config
+		want string
+	}{
+		{
+			name: "plain http uses server port",
+			cfg: func() *config.Config {
+				cfg := config.Defaults()
+				cfg.Server.ExternalDomain = "localhost"
+				cfg.Server.Port = 8080
+				return cfg
+			},
+			want: "http://localhost:8080",
+		},
+		{
+			name: "external tls omits default https port",
+			cfg: func() *config.Config {
+				cfg := config.Defaults()
+				cfg.Server.ExternalDomain = "auth.example.com"
+				cfg.TLS.Mode = "external"
+				cfg.Server.Port = 8080
+				return cfg
+			},
+			want: "https://auth.example.com",
+		},
+		{
+			name: "manual tls uses configured https port",
+			cfg: func() *config.Config {
+				cfg := config.Defaults()
+				cfg.Server.ExternalDomain = "auth.example.com"
+				cfg.TLS.Mode = "manual"
+				cfg.TLS.HTTPSPort = 8443
+				return cfg
+			},
+			want: "https://auth.example.com:8443",
+		},
+		{
+			name: "explicit host port is preserved with resolved scheme",
+			cfg: func() *config.Config {
+				cfg := config.Defaults()
+				cfg.Server.ExternalDomain = "127.0.0.1:8787"
+				return cfg
+			},
+			want: "https://127.0.0.1:8787",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := issuerURL(tt.cfg()); got != tt.want {
+				t.Fatalf("issuerURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func newReadyzTestServer(t *testing.T) (*Server, *database.DB) {
 	t.Helper()
 
