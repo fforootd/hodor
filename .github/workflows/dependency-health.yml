@@ -1,0 +1,46 @@
+name: Dependency Health
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - go.mod
+      - package.json
+      - web/package.json
+      - e2e/package.json
+      - packages/client-js/package.json
+      - deploy/cloudflare-containers/package.json
+      - .github/workflows/dependency-health.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  audit:
+    name: Audit Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Run Is It Alive audit
+        id: audit
+        uses: isitalive/audit-action@v0.4.0
+        with:
+          fail-threshold: 0
+          files: |
+            go.mod
+            package.json
+            web/package.json
+            e2e/package.json
+            packages/client-js/package.json
+            deploy/cloudflare-containers/package.json
+
+      - name: Publish audit summary
+        if: always() && steps.audit.outputs.summary != ''
+        env:
+          AUDIT_SUMMARY: ${{ steps.audit.outputs.summary }}
+        run: |
+          echo "$AUDIT_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
