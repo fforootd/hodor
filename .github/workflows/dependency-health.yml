@@ -27,7 +27,7 @@ jobs:
 
       - name: Run Is It Alive audit
         id: audit
-        uses: isitalive/audit-action@v1
+        uses: isitalive/audit-action@v0.4.0
         with:
           fail-threshold: 0
           files: |
