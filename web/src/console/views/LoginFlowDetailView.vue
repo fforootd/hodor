@@ -1,364 +1,630 @@
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <Button variant="ghost" size="icon" @click="$router.push('/login-flows')">
-          <ArrowLeft class="size-4" />
-        </Button>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-2xl font-bold tracking-tight">{{ flow?.name || 'Login Flow' }}</h1>
-            <Badge v-if="flow?.is_default" variant="default">Default</Badge>
-            <Badge :variant="stateVariant(flow?.state)" class="text-xs">{{ flow?.state || 'draft' }}</Badge>
+  <div class="space-y-6 pb-10">
+    <section class="rounded-2xl border bg-card shadow-sm">
+      <div class="flex flex-col gap-5 p-5 lg:flex-row lg:items-start lg:justify-between">
+        <div class="flex items-start gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="mt-0.5 shrink-0"
+            @click="$router.push('/login-flows')"
+          >
+            <ArrowLeft class="size-4" />
+          </Button>
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <Badge v-if="flow?.is_default" variant="default">Default</Badge>
+              <Badge :variant="stateVariant(flow?.state)" class="text-xs capitalize">{{
+                flow?.state || 'draft'
+              }}</Badge>
+              <Badge v-if="templateSource" variant="secondary">Template-backed</Badge>
+            </div>
+            <div class="space-y-1">
+              <h1 class="text-3xl font-semibold tracking-tight">
+                {{ flow?.name || 'Login Flow' }}
+              </h1>
+              <p class="max-w-2xl text-sm text-muted-foreground">
+                <template v-if="flow?.is_default">
+                  Tune the default login experience, protections, and branding used for every user
+                  who does not match a more specific flow.
+                </template>
+                <template v-else>
+                  Configure the strategy, protections, and visual shell for this login flow.
+                </template>
+              </p>
+            </div>
+
+            <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <div class="rounded-full border bg-muted/40 px-3 py-1">
+                Strategy: <span class="font-medium text-foreground">{{ strategyLabel }}</span>
+              </div>
+              <div class="rounded-full border bg-muted/40 px-3 py-1">
+                Layout: <span class="font-medium text-foreground">{{ currentLayoutLabel }}</span>
+              </div>
+              <div class="rounded-full border bg-muted/40 px-3 py-1">
+                Priority: <span class="font-medium text-foreground">{{ form.priority }}</span>
+              </div>
+            </div>
           </div>
-          <p class="text-muted-foreground text-sm mt-0.5">
-            <template v-if="flow?.is_default">
-              Applies to all users not matched by a specific flow
-            </template>
-            <template v-else>
-              Configure strategy, protections, and layout for this login flow
-            </template>
-          </p>
+        </div>
+
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <Button
+            v-if="flow && flow.state !== 'active' && flow.state !== 'archived'"
+            variant="outline"
+            :disabled="promoting"
+            @click="promoteFlow"
+          >
+            <Spinner v-if="promoting" class="mr-2 size-4" />
+            <ArrowUp v-else class="mr-2 size-4" />
+            Promote to {{ flow?.state === 'draft' ? 'Testing' : 'Active' }}
+          </Button>
+          <Button :disabled="saving" @click="saveFlow">
+            <Spinner v-if="saving" class="mr-2 size-4" />
+            Save changes
+          </Button>
         </div>
       </div>
-      <div class="flex items-center gap-2">
-        <Button
-          v-if="flow && flow.state !== 'active' && flow.state !== 'archived'"
-          variant="outline"
-          :disabled="promoting"
-          @click="promoteFlow"
-        >
-          <Spinner v-if="promoting" class="size-4 mr-2" />
-          <ArrowUp v-else class="size-4 mr-2" />
-          Promote to {{ flow?.state === 'draft' ? 'Testing' : 'Active' }}
-        </Button>
-        <Button :disabled="saving" @click="saveFlow">
-          <Spinner v-if="saving" class="size-4 mr-2" />
-          Save
-        </Button>
-      </div>
-    </div>
+    </section>
 
-    <div
+    <Alert
       v-if="flow?.is_default"
-      class="rounded-lg border border-primary/20 bg-primary/[0.03] p-4 flex items-start gap-3"
+      class="border-primary/20 bg-primary/[0.04] text-primary-foreground"
     >
-      <Shield class="size-5 text-primary mt-0.5 shrink-0" />
-      <div>
-        <p class="text-sm font-medium">This is your instance default login flow</p>
-        <p class="text-xs text-muted-foreground mt-0.5">
-          All users who don't match a more specific flow will see this configuration.
-          Changes here affect every login that isn't handled by a targeted flow.
-        </p>
-      </div>
-    </div>
+      <Shield class="size-4 text-primary" />
+      <AlertTitle class="text-sm font-medium text-foreground">Default flow coverage</AlertTitle>
+      <AlertDescription class="text-xs text-muted-foreground">
+        All unmatched users inherit this experience. Changes here affect every login that is not
+        handled by a more specific targeted flow.
+      </AlertDescription>
+    </Alert>
 
-    <Card v-if="templateSource">
-      <CardContent class="py-4 flex items-center justify-between gap-4">
-        <div>
-          <p class="text-sm font-medium">Template source</p>
-          <p class="text-xs text-muted-foreground mt-0.5">
-            This flow was installed from <span class="font-mono">{{ templateSource }}</span>.
-          </p>
-        </div>
-        <Badge variant="secondary">Template-backed</Badge>
-      </CardContent>
-    </Card>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle class="text-sm font-medium">General</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div class="space-y-1.5">
-              <Label for="name">Name</Label>
-              <Input id="name" v-model="form.name" />
-            </div>
-            <div class="space-y-1.5">
-              <Label for="priority">Priority</Label>
-              <Input id="priority" v-model.number="form.priority" type="number" min="0" max="1000" />
-              <p class="text-xs text-muted-foreground">Higher priority flows are evaluated first.</p>
-            </div>
-            <div class="space-y-1.5">
-              <Label for="strategy">Flow Strategy</Label>
-              <select
-                id="strategy"
-                v-model="form.strategy"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="identifier_first">Identifier first</option>
-                <option value="passkey_first">Passkey first</option>
-                <option value="sso_only">SSO only</option>
-                <option value="custom">Custom</option>
-              </select>
-              <p class="text-xs text-muted-foreground">
-                Strategy controls how the flow starts and branches. For complete starting points,
-                use Marketplace templates.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle class="text-sm font-medium">Branding</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-4">
-            <div
-              v-for="assetField in brandingAssetFields"
-              :key="assetField.key"
-              class="rounded-lg border p-3 space-y-3"
-            >
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <p class="text-sm font-medium">{{ assetField.label }}</p>
-                  <p class="text-xs text-muted-foreground">{{ assetField.description }}</p>
-                </div>
-                <Button
-                  v-if="form.branding[assetField.key]"
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  :disabled="assetBusy[assetField.key]"
-                  @click="removeBrandingAsset(assetField.key)"
-                >
-                  Remove
-                </Button>
-              </div>
-
-              <div v-if="form.branding[assetField.key]" class="rounded-md border bg-muted/20 p-2">
-                <img
-                  :src="form.branding[assetField.key]"
-                  :alt="assetField.label"
-                  class="max-h-16 max-w-full rounded object-contain"
-                />
-              </div>
-
-              <div class="space-y-1.5">
-                <Label :for="`upload-${assetField.key}`">Upload file</Label>
-                <input
-                  :id="`upload-${assetField.key}`"
-                  type="file"
-                  accept="image/*,.svg"
-                  class="block w-full text-sm"
-                  :disabled="assetBusy[assetField.key]"
-                  @change="onBrandingFileSelected(assetField.key, $event)"
-                />
-              </div>
-
-              <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
-                <Input
-                  v-model="assetImportUrls[assetField.key]"
-                  :placeholder="assetField.placeholder"
-                  :disabled="assetBusy[assetField.key]"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
-                  @click="importBrandingAsset(assetField.key)"
-                >
-                  {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
-                </Button>
-              </div>
-
-              <p
-                v-if="assetField.key === 'cover_image' && !['split', 'card_image'].includes(form.layout)"
-                class="text-xs text-muted-foreground"
-              >
-                Cover images appear in the shared preview when the layout is Split or Card with image.
-              </p>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <input
-                id="hide-powered-by"
-                v-model="form.branding.hide_zitadel_branding"
-                type="checkbox"
-                class="accent-primary"
-              />
-              <Label for="hide-powered-by">Hide “Powered by Zitadel” footer</Label>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div class="flex items-center justify-between">
-              <CardTitle class="text-sm font-medium">🛡️ Captcha</CardTitle>
-              <Badge :variant="form.captcha.mode !== 'never' ? 'default' : 'outline'" class="text-xs">
-                {{ form.captcha.mode !== 'never' ? 'Active' : 'Disabled' }}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div class="space-y-1.5">
-              <Label>Provider</Label>
-              <select
-                v-model="form.captcha.provider"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="altcha">Altcha (PoW, self-hosted)</option>
-                <option value="hcaptcha">hCaptcha</option>
-                <option value="recaptcha">reCAPTCHA</option>
-                <option value="turnstile">Cloudflare Turnstile</option>
-                <option value="none">None</option>
-              </select>
-            </div>
-            <div class="space-y-1.5">
-              <Label>Mode</Label>
-              <select
-                v-model="form.captcha.mode"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="always">Always show</option>
-                <option value="risk_based">Risk-based (show when suspicious)</option>
-                <option value="never">Disabled</option>
-              </select>
-            </div>
-            <div v-if="form.captcha.provider === 'altcha'" class="space-y-1.5">
-              <Label>Difficulty (1-5)</Label>
-              <div class="flex items-center gap-3">
-                <input v-model.number="form.captcha.difficulty" type="range" min="1" max="5" class="flex-1" />
-                <span class="text-sm font-mono w-6 text-center">{{ form.captcha.difficulty }}</span>
-              </div>
-              <p class="text-xs text-muted-foreground">Higher = more PoW work required. 3 is recommended.</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div class="flex items-center justify-between">
-              <CardTitle class="text-sm font-medium">🔍 Browser Fingerprinting</CardTitle>
-              <Badge :variant="form.fingerprint.enabled ? 'default' : 'outline'" class="text-xs">
-                {{ form.fingerprint.enabled ? 'Active' : 'Disabled' }}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div class="flex items-center gap-2">
-              <input id="fp-on" v-model="form.fingerprint.enabled" type="checkbox" class="accent-primary" />
-              <Label for="fp-on">Enable fingerprinting</Label>
-            </div>
-            <div v-if="form.fingerprint.enabled" class="space-y-1.5">
-              <Label>Provider</Label>
-              <select
-                v-model="form.fingerprint.provider"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="thumbmarkjs">ThumbmarkJS (recommended)</option>
-                <option value="built_in">Built-in (canvas + WebGL)</option>
-              </select>
-            </div>
-            <div v-if="form.fingerprint.enabled" class="flex items-center gap-2">
-              <input id="fp-persist" v-model="form.fingerprint.persist" type="checkbox" class="accent-primary" />
-              <Label for="fp-persist">Persist across sessions (returning-user detection)</Label>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle class="text-sm font-medium">⏱️ Rate Limiting</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
-                <Label for="max-attempts">Max attempts</Label>
-                <Input id="max-attempts" v-model.number="form.rateLimit.maxAttempts" type="number" min="1" max="100" />
-              </div>
-              <div class="space-y-1.5">
-                <Label for="window">Window (seconds)</Label>
-                <Input id="window" v-model.number="form.rateLimit.windowSeconds" type="number" min="60" max="3600" />
-              </div>
-            </div>
-            <div class="space-y-1.5">
-              <Label for="lockout">Lockout (seconds)</Label>
-              <Input id="lockout" v-model.number="form.rateLimit.lockoutSeconds" type="number" min="0" max="86400" />
-            </div>
-            <div class="space-y-1.5">
-              <Label>Scope</Label>
-              <select
-                v-model="form.rateLimit.scope"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="ip">Per IP</option>
-                <option value="identifier">Per identifier</option>
-                <option value="fingerprint">Per fingerprint</option>
-              </select>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div class="flex items-center justify-between">
-              <CardTitle class="text-sm font-medium">📊 Telemetry</CardTitle>
-              <Badge :variant="form.telemetry.enabled ? 'default' : 'outline'" class="text-xs">
-                {{ form.telemetry.enabled ? 'Active' : 'Disabled' }}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div class="flex items-center gap-2">
-              <input id="tel-on" v-model="form.telemetry.enabled" type="checkbox" class="accent-primary" />
-              <Label for="tel-on">Collect browser telemetry</Label>
-            </div>
-            <div v-if="form.telemetry.enabled" class="space-y-1.5">
-              <Label>Sample rate</Label>
-              <div class="flex items-center gap-3">
-                <input
-                  v-model.number="form.telemetry.sampleRate"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  class="flex-1"
-                />
-                <span class="text-sm font-mono w-10 text-right">{{ Math.round(form.telemetry.sampleRate * 100) }}%</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div class="space-y-4">
-        <Card class="sticky top-6">
-          <CardHeader class="space-y-4">
+    <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
+      <div class="min-w-0 space-y-6">
+        <Tabs v-model="activePanel" class="space-y-4">
+          <div
+            class="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+          >
             <div>
-              <CardTitle class="text-sm font-medium">Shared Preview</CardTitle>
-              <p class="text-xs text-muted-foreground mt-1">
-                Uses the same Vue renderer and layout shells as the hosted login page and the
-                published web component.
+              <p class="text-sm font-medium">Flow editor</p>
+              <p class="text-xs text-muted-foreground">
+                Shape the experience first, then layer in the protections and signals.
               </p>
             </div>
+            <TabsList class="grid w-full grid-cols-2 sm:w-[320px]">
+              <TabsTrigger value="experience" class="gap-2">
+                <Palette class="size-4" />
+                Experience
+              </TabsTrigger>
+              <TabsTrigger value="protection" class="gap-2">
+                <ShieldCheck class="size-4" />
+                Protection
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-            <div class="space-y-2">
-              <Label>Layout</Label>
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
+          <TabsContent value="experience" class="mt-0 space-y-6">
+            <Card class="overflow-hidden shadow-sm">
+              <CardHeader class="border-b bg-muted/20 pb-4">
+                <div class="flex items-start gap-3">
+                  <div class="rounded-lg border bg-background p-2">
+                    <LayoutPanelTop class="size-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <CardTitle class="text-base">General</CardTitle>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                      Define the flow identity, evaluation priority, and the strategy that controls
+                      how sign-in starts.
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-5 pt-5">
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <div class="space-y-2">
+                    <Label for="name">Name</Label>
+                    <Input id="name" v-model="form.name" placeholder="Default Login" />
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="priority">Priority</Label>
+                    <Input
+                      id="priority"
+                      v-model.number="form.priority"
+                      type="number"
+                      min="0"
+                      max="1000"
+                    />
+                    <p class="text-xs text-muted-foreground">
+                      Higher priority flows are evaluated first.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="space-y-2">
+                  <Label for="strategy">Flow strategy</Label>
+                  <Select v-model="form.strategy">
+                    <SelectTrigger id="strategy">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="identifier_first">Identifier first</SelectItem>
+                      <SelectItem value="passkey_first">Passkey first</SelectItem>
+                      <SelectItem value="sso_only">SSO only</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p class="text-xs text-muted-foreground">
+                    Strategy controls how the flow starts and branches. For complete starting
+                    points, use Marketplace templates.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card class="overflow-hidden shadow-sm">
+              <CardHeader class="border-b bg-muted/20 pb-4">
+                <div class="flex items-start gap-3">
+                  <div class="rounded-lg border bg-background p-2">
+                    <ImageIcon class="size-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <CardTitle class="text-base">Branding</CardTitle>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                      Upload logos, cover art, and the favicon used by the hosted login page and the
+                      shared web component.
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-5 pt-5">
+                <div class="grid gap-4 lg:grid-cols-2">
+                  <div
+                    v-for="assetField in brandingAssetFields"
+                    :key="assetField.key"
+                    class="rounded-xl border bg-muted/10 p-4"
+                  >
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <p class="text-sm font-medium">{{ assetField.label }}</p>
+                        <p class="mt-1 text-xs text-muted-foreground">
+                          {{ assetField.description }}
+                        </p>
+                      </div>
+                      <Button
+                        v-if="form.branding[assetField.key]"
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        :disabled="assetBusy[assetField.key]"
+                        @click="removeBrandingAsset(assetField.key)"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+
+                    <div class="mt-4 space-y-3">
+                      <div class="rounded-lg border border-dashed bg-background/80 p-3">
+                        <div
+                          v-if="form.branding[assetField.key]"
+                          class="flex min-h-24 items-center justify-center rounded-md bg-muted/20 p-3"
+                        >
+                          <img
+                            :src="form.branding[assetField.key]"
+                            :alt="assetField.label"
+                            class="max-h-20 max-w-full rounded object-contain"
+                          />
+                        </div>
+                        <div
+                          v-else
+                          class="flex min-h-24 flex-col items-center justify-center rounded-md bg-muted/20 text-center"
+                        >
+                          <ImageIcon class="mb-2 size-4 text-muted-foreground" />
+                          <p class="text-xs text-muted-foreground">No asset uploaded yet</p>
+                        </div>
+                      </div>
+
+                      <div class="space-y-2">
+                        <Label :for="`upload-${assetField.key}`">Upload file</Label>
+                        <input
+                          :id="`upload-${assetField.key}`"
+                          type="file"
+                          accept="image/*,.svg"
+                          class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs file:font-medium"
+                          :disabled="assetBusy[assetField.key]"
+                          @change="onBrandingFileSelected(assetField.key, $event)"
+                        />
+                      </div>
+
+                      <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <Input
+                          v-model="assetImportUrls[assetField.key]"
+                          :placeholder="assetField.placeholder"
+                          :disabled="assetBusy[assetField.key]"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
+                          @click="importBrandingAsset(assetField.key)"
+                        >
+                          {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
+                        </Button>
+                      </div>
+
+                      <p
+                        v-if="
+                          assetField.key === 'cover_image' &&
+                          !['split', 'card_image'].includes(form.layout)
+                        "
+                        class="text-xs text-muted-foreground"
+                      >
+                        Cover art only appears in Split and Card with image layouts.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div class="flex items-start gap-3 rounded-xl border bg-muted/10 p-4">
+                  <Checkbox
+                    id="hide-powered-by"
+                    :checked="form.branding.hide_zitadel_branding"
+                    @update:checked="
+                      (value: boolean | 'indeterminate') =>
+                        (form.branding.hide_zitadel_branding = value === true)
+                    "
+                  />
+                  <div class="space-y-1">
+                    <Label for="hide-powered-by" class="text-sm font-medium"
+                      >Hide “Powered by Zitadel” footer</Label
+                    >
+                    <p class="text-xs text-muted-foreground">
+                      Removes the footer signature in both the hosted login page and the shared
+                      preview.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="protection" class="mt-0 space-y-6">
+            <Card class="overflow-hidden shadow-sm">
+              <CardHeader class="border-b bg-muted/20 pb-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex items-start gap-3">
+                    <div class="rounded-lg border bg-background p-2">
+                      <ShieldCheck class="size-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <CardTitle class="text-base">Captcha</CardTitle>
+                      <p class="mt-1 text-sm text-muted-foreground">
+                        Gate login actions with a human check before continuing.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge
+                    :variant="form.captcha.mode !== 'never' ? 'default' : 'outline'"
+                    class="text-xs"
+                  >
+                    {{ form.captcha.mode !== 'never' ? 'Active' : 'Disabled' }}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-5 pt-5">
+                <div class="grid gap-4 lg:grid-cols-2">
+                  <div class="space-y-2">
+                    <Label>Provider</Label>
+                    <Select v-model="form.captcha.provider">
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="altcha">Altcha (PoW, self-hosted)</SelectItem>
+                        <SelectItem value="hcaptcha">hCaptcha</SelectItem>
+                        <SelectItem value="recaptcha">reCAPTCHA</SelectItem>
+                        <SelectItem value="turnstile">Cloudflare Turnstile</SelectItem>
+                        <SelectItem value="none">None</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div class="space-y-2">
+                    <Label>Mode</Label>
+                    <Select v-model="form.captcha.mode">
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="always">Always show</SelectItem>
+                        <SelectItem value="risk_based"
+                          >Risk-based (show when suspicious)</SelectItem
+                        >
+                        <SelectItem value="never">Disabled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <Alert
+                  v-if="form.captcha.mode === 'risk_based'"
+                  class="border-amber-500/30 bg-amber-500/5"
+                >
+                  <Sparkles class="size-4 text-amber-500" />
+                  <AlertTitle class="text-sm font-medium">Risk-based is still cosmetic</AlertTitle>
+                  <AlertDescription class="text-xs text-muted-foreground">
+                    The UI exposes the option, but the runtime does not yet make adaptive challenge
+                    decisions.
+                  </AlertDescription>
+                </Alert>
+
+                <div v-if="form.captcha.provider === 'altcha'" class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <Label>Difficulty (1-5)</Label>
+                    <span class="text-sm font-mono text-muted-foreground">{{
+                      form.captcha.difficulty
+                    }}</span>
+                  </div>
+                  <input
+                    v-model.number="form.captcha.difficulty"
+                    type="range"
+                    min="1"
+                    max="5"
+                    class="w-full accent-primary"
+                  />
+                  <p class="text-xs text-muted-foreground">
+                    Higher values increase the proof-of-work cost. A value of 3 is a good default
+                    for this prototype.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div class="grid gap-6 lg:grid-cols-2">
+              <Card class="overflow-hidden shadow-sm">
+                <CardHeader class="border-b bg-muted/20 pb-4">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="flex items-start gap-3">
+                      <div class="rounded-lg border bg-background p-2">
+                        <Radar class="size-4 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <CardTitle class="text-base">Browser fingerprinting</CardTitle>
+                        <p class="mt-1 text-sm text-muted-foreground">
+                          Collect a stable browser identifier to support returning-user detection.
+                        </p>
+                      </div>
+                    </div>
+                    <Badge
+                      :variant="form.fingerprint.enabled ? 'default' : 'outline'"
+                      class="text-xs"
+                    >
+                      {{ form.fingerprint.enabled ? 'Active' : 'Disabled' }}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent class="space-y-5 pt-5">
+                  <div class="flex items-start gap-3">
+                    <Checkbox
+                      id="fp-on"
+                      :checked="form.fingerprint.enabled"
+                      @update:checked="
+                        (value: boolean | 'indeterminate') =>
+                          (form.fingerprint.enabled = value === true)
+                      "
+                    />
+                    <div class="space-y-1">
+                      <Label for="fp-on" class="text-sm font-medium">Enable fingerprinting</Label>
+                      <p class="text-xs text-muted-foreground">
+                        Adds a passive browser signal to the login flow.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div v-if="form.fingerprint.enabled" class="space-y-4">
+                    <div class="space-y-2">
+                      <Label>Provider</Label>
+                      <Select v-model="form.fingerprint.provider">
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="thumbmarkjs">ThumbmarkJS (recommended)</SelectItem>
+                          <SelectItem value="built_in">Built-in (canvas + WebGL)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div class="flex items-start gap-3 rounded-xl border bg-muted/10 p-4">
+                      <Checkbox
+                        id="fp-persist"
+                        :checked="form.fingerprint.persist"
+                        @update:checked="
+                          (value: boolean | 'indeterminate') =>
+                            (form.fingerprint.persist = value === true)
+                        "
+                      />
+                      <div class="space-y-1">
+                        <Label for="fp-persist" class="text-sm font-medium">
+                          Persist across sessions
+                        </Label>
+                        <p class="text-xs text-muted-foreground">
+                          Reuses the browser signal for returning-user detection.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card class="overflow-hidden shadow-sm">
+                <CardHeader class="border-b bg-muted/20 pb-4">
+                  <div class="flex items-start gap-3">
+                    <div class="rounded-lg border bg-background p-2">
+                      <Gauge class="size-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <CardTitle class="text-base">Rate limiting</CardTitle>
+                      <p class="mt-1 text-sm text-muted-foreground">
+                        Throttle abusive behavior before it becomes a support problem.
+                      </p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent class="space-y-5 pt-5">
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="space-y-2">
+                      <Label for="max-attempts">Max attempts</Label>
+                      <Input
+                        id="max-attempts"
+                        v-model.number="form.rateLimit.maxAttempts"
+                        type="number"
+                        min="1"
+                        max="100"
+                      />
+                    </div>
+                    <div class="space-y-2">
+                      <Label for="window">Window (seconds)</Label>
+                      <Input
+                        id="window"
+                        v-model.number="form.rateLimit.windowSeconds"
+                        type="number"
+                        min="60"
+                        max="3600"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="space-y-2">
+                      <Label for="lockout">Lockout (seconds)</Label>
+                      <Input
+                        id="lockout"
+                        v-model.number="form.rateLimit.lockoutSeconds"
+                        type="number"
+                        min="0"
+                        max="86400"
+                      />
+                    </div>
+                    <div class="space-y-2">
+                      <Label>Scope</Label>
+                      <Select v-model="form.rateLimit.scope">
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ip">Per IP</SelectItem>
+                          <SelectItem value="identifier">Per identifier</SelectItem>
+                          <SelectItem value="fingerprint">Per fingerprint</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card class="overflow-hidden shadow-sm">
+              <CardHeader class="border-b bg-muted/20 pb-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex items-start gap-3">
+                    <div class="rounded-lg border bg-background p-2">
+                      <Activity class="size-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <CardTitle class="text-base">Telemetry</CardTitle>
+                      <p class="mt-1 text-sm text-muted-foreground">
+                        Capture client-side telemetry for debugging and flow quality checks.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge :variant="form.telemetry.enabled ? 'default' : 'outline'" class="text-xs">
+                    {{ form.telemetry.enabled ? 'Active' : 'Disabled' }}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-5 pt-5">
+                <div class="flex items-start gap-3">
+                  <Checkbox
+                    id="tel-on"
+                    :checked="form.telemetry.enabled"
+                    @update:checked="
+                      (value: boolean | 'indeterminate') =>
+                        (form.telemetry.enabled = value === true)
+                    "
+                  />
+                  <div class="space-y-1">
+                    <Label for="tel-on" class="text-sm font-medium"
+                      >Collect browser telemetry</Label
+                    >
+                    <p class="text-xs text-muted-foreground">
+                      Useful for troubleshooting login issues and instrumenting this shared
+                      renderer.
+                    </p>
+                  </div>
+                </div>
+
+                <div v-if="form.telemetry.enabled" class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <Label>Sample rate</Label>
+                    <span class="text-sm font-mono text-muted-foreground">
+                      {{ Math.round(form.telemetry.sampleRate * 100) }}%
+                    </span>
+                  </div>
+                  <input
+                    v-model.number="form.telemetry.sampleRate"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    class="w-full accent-primary"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      <div class="space-y-4 xl:sticky xl:top-6">
+        <Card class="overflow-hidden shadow-sm">
+          <CardHeader class="border-b bg-muted/20 pb-4">
+            <div class="flex items-start gap-3">
+              <div class="rounded-lg border bg-background p-2">
+                <BadgeCheck class="size-4 text-muted-foreground" />
+              </div>
+              <div>
+                <CardTitle class="text-base">Shared preview</CardTitle>
+                <p class="mt-1 text-sm text-muted-foreground">
+                  Uses the same Vue renderer and layout shells as the hosted login page and the
+                  published web component.
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent class="space-y-5 pt-5">
+            <div
+              class="rounded-2xl border bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.14),transparent_45%),linear-gradient(180deg,rgba(244,244,245,0.8),rgba(244,244,245,0.2))] p-4"
+            >
+              <div class="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium">Layout</p>
+                  <p class="text-xs text-muted-foreground">
+                    Visual shell only. Runtime behavior stays shared.
+                  </p>
+                </div>
+                <Badge variant="secondary">{{ currentLayoutLabel }}</Badge>
+              </div>
+
+              <div class="flex flex-wrap gap-2">
+                <Button
                   v-for="layout in layouts"
                   :key="layout.id"
-                  class="text-xs px-2.5 py-1.5 rounded-md border transition-colors"
-                  :class="form.layout === layout.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-accent border-border'"
+                  type="button"
+                  size="sm"
+                  :variant="form.layout === layout.id ? 'default' : 'outline'"
                   @click="form.layout = layout.id"
                 >
                   {{ layout.label }}
-                </button>
+                </Button>
               </div>
-              <p class="text-xs text-muted-foreground">
-                Layout controls the visual shell only. Customers embedding
-                <code>&lt;zitadel-login&gt;</code>
-                can still override layout with web component attributes.
-              </p>
             </div>
-          </CardHeader>
 
-          <CardContent class="space-y-4">
-            <div class="rounded-xl border bg-muted/20 overflow-hidden">
+            <div class="overflow-hidden rounded-2xl border bg-muted/20 p-4">
               <LoginShell :branding="previewBranding" preview>
                 <LoginNodeRenderer
                   :flow-step="previewStep"
@@ -369,18 +635,36 @@
               </LoginShell>
             </div>
 
-            <div class="grid grid-cols-1 gap-2 text-xs text-muted-foreground">
-              <div v-if="form.telemetry.enabled" class="flex items-center gap-2">
-                <div class="size-1.5 rounded-full bg-green-500" />
-                Telemetry active ({{ Math.round(form.telemetry.sampleRate * 100) }}% sample rate)
+            <Separator />
+
+            <div class="grid gap-2 text-xs">
+              <div class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Strategy</span>
+                <span class="text-muted-foreground"> · {{ strategyLabel }}</span>
               </div>
-              <div v-if="form.fingerprint.enabled" class="flex items-center gap-2">
-                <div class="size-1.5 rounded-full bg-blue-500" />
-                Fingerprint provider: {{ form.fingerprint.provider }}
+              <div v-if="templateSource" class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Template source</span>
+                <span class="font-mono text-muted-foreground"> · {{ templateSource }}</span>
               </div>
-              <div class="flex items-center gap-2">
-                <div class="size-1.5 rounded-full bg-orange-500" />
-                Rate limit: {{ form.rateLimit.maxAttempts }} attempts / {{ form.rateLimit.windowSeconds }}s (per {{ form.rateLimit.scope }})
+              <div v-if="form.telemetry.enabled" class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Telemetry</span>
+                <span class="text-muted-foreground">
+                  · {{ Math.round(form.telemetry.sampleRate * 100) }}% sample rate</span
+                >
+              </div>
+              <div
+                v-if="form.fingerprint.enabled"
+                class="rounded-lg border bg-background px-3 py-2"
+              >
+                <span class="font-medium text-foreground">Fingerprinting</span>
+                <span class="text-muted-foreground"> · {{ form.fingerprint.provider }}</span>
+              </div>
+              <div class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Rate limit</span>
+                <span class="text-muted-foreground">
+                  · {{ form.rateLimit.maxAttempts }} attempts / {{ form.rateLimit.windowSeconds }}s
+                  (per {{ form.rateLimit.scope }})
+                </span>
               </div>
             </div>
           </CardContent>
@@ -391,382 +675,433 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { api } from '@/api/client'
-import type { FlowBranding } from '@/api/branding'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Spinner } from '@/components/ui/spinner'
-import { ArrowLeft, ArrowUp, Shield } from 'lucide-vue-next'
-import LoginShell from '@/login/components/LoginShell.vue'
-import LoginNodeRenderer from '@/login/components/LoginNodeRenderer.vue'
-import { buildPreviewFlowStep } from '@/login/preview'
+  import { computed, onMounted, reactive, ref } from 'vue'
+  import { useRoute, useRouter } from 'vue-router'
+  import { api } from '@/api/client'
+  import type { FlowBranding } from '@/api/branding'
+  import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+  import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+  import { Badge } from '@/components/ui/badge'
+  import { Button } from '@/components/ui/button'
+  import { Checkbox } from '@/components/ui/checkbox'
+  import { Input } from '@/components/ui/input'
+  import { Label } from '@/components/ui/label'
+  import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+  } from '@/components/ui/select'
+  import { Separator } from '@/components/ui/separator'
+  import { Spinner } from '@/components/ui/spinner'
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+  import {
+    Activity,
+    ArrowLeft,
+    ArrowUp,
+    BadgeCheck,
+    Gauge,
+    ImageIcon,
+    LayoutPanelTop,
+    Palette,
+    Radar,
+    Shield,
+    ShieldCheck,
+    Sparkles,
+  } from 'lucide-vue-next'
+  import LoginShell from '@/login/components/LoginShell.vue'
+  import LoginNodeRenderer from '@/login/components/LoginNodeRenderer.vue'
+  import { buildPreviewFlowStep } from '@/login/preview'
 
-const route = useRoute()
-const router = useRouter()
+  const route = useRoute()
+  const router = useRouter()
+  const activePanel = ref('experience')
 
-interface LoginFlow {
-  id: string
-  name: string
-  strategy: string
-  is_default: boolean
-  enabled: boolean
-  state: string
-  priority: number
-  audience: any
-  auth_methods: any
-  config: any
-  metadata?: any
-  created_at: string
-  updated_at: string
-}
+  interface LoginFlow {
+    id: string
+    name: string
+    strategy: string
+    is_default: boolean
+    enabled: boolean
+    state: string
+    priority: number
+    audience: any
+    auth_methods: any
+    config: any
+    metadata?: any
+    created_at: string
+    updated_at: string
+  }
 
-type BrandingAssetField = 'logo_url' | 'logo_dark' | 'cover_image' | 'favicon'
+  type BrandingAssetField = 'logo_url' | 'logo_dark' | 'cover_image' | 'favicon'
 
-const flow = ref<LoginFlow | null>(null)
-const currentConfig = ref<Record<string, any>>({})
-const saving = ref(false)
-const promoting = ref(false)
-const previewFormData = reactive<Record<string, any>>({})
-const previewConfirmPasswords = reactive<Record<string, string>>({})
-const assetImportUrls = reactive<Record<string, string>>({
-  logo_url: '',
-  logo_dark: '',
-  cover_image: '',
-  favicon: '',
-})
-const assetBusy = reactive<Record<string, boolean>>({
-  logo_url: false,
-  logo_dark: false,
-  cover_image: false,
-  favicon: false,
-})
-
-const brandingAssetFields = [
-  {
-    key: 'logo_url',
-    label: 'Logo',
-    description: 'Used in the login card header on light backgrounds.',
-    placeholder: 'https://example.com/logo.svg',
-  },
-  {
-    key: 'logo_dark',
-    label: 'Dark Logo',
-    description: 'Used when dark mode is active and a dark-specific logo is available.',
-    placeholder: 'https://example.com/logo-dark.svg',
-  },
-  {
-    key: 'cover_image',
-    label: 'Cover Image',
-    description: 'Used by Split and Card with image layouts.',
-    placeholder: 'https://example.com/cover.jpg',
-  },
-  {
-    key: 'favicon',
-    label: 'Favicon',
-    description: 'Shown in the browser tab for the hosted login page.',
-    placeholder: 'https://example.com/favicon.png',
-  },
-] as const
-
-const layouts = [
-  { id: 'centered', label: 'Centered' },
-  { id: 'split', label: 'Split' },
-  { id: 'muted', label: 'Muted' },
-  { id: 'card_image', label: 'Card with image' },
-  { id: 'minimal', label: 'Minimal' },
-]
-
-const form = reactive({
-  name: '',
-  priority: 0,
-  strategy: 'identifier_first',
-  layout: 'centered',
-  branding: {
+  const flow = ref<LoginFlow | null>(null)
+  const currentConfig = ref<Record<string, any>>({})
+  const saving = ref(false)
+  const promoting = ref(false)
+  const previewFormData = reactive<Record<string, any>>({})
+  const previewConfirmPasswords = reactive<Record<string, string>>({})
+  const assetImportUrls = reactive<Record<string, string>>({
     logo_url: '',
     logo_dark: '',
     cover_image: '',
     favicon: '',
-    hide_zitadel_branding: false,
-  },
-  captcha: {
-    provider: 'altcha',
-    mode: 'risk_based',
-    difficulty: 3,
-  },
-  fingerprint: {
-    enabled: true,
-    provider: 'thumbmarkjs',
-    persist: true,
-  },
-  rateLimit: {
-    maxAttempts: 5,
-    windowSeconds: 300,
-    lockoutSeconds: 900,
-    scope: 'ip',
-  },
-  telemetry: {
-    enabled: true,
-    sampleRate: 1.0,
-  },
-})
+  })
+  const assetBusy = reactive<Record<string, boolean>>({
+    logo_url: false,
+    logo_dark: false,
+    cover_image: false,
+    favicon: false,
+  })
 
-const templateSource = computed(() => {
-  const catalog = flow.value?.metadata?._catalog || flow.value?.metadata?.catalog || null
-  return catalog?.template_id || null
-})
-
-const previewBranding = computed<FlowBranding>(() => {
-  const branding = currentConfig.value.branding || {}
-  return {
-    heading: branding.heading || 'Welcome back',
-    description: branding.description || 'Sign in to your account',
-    logo_url: form.branding.logo_url || '',
-    org_name: branding.org_name || 'Acme Corp',
-    colors: {
-      primary: '#6366f1',
-      primary_foreground: '#ffffff',
-      background: '#f0f2ff',
-      surface: '#ffffff',
-      text: '#1a1a2e',
-      muted: '#f4f4f5',
-      accent: '#6366f1',
-      border: '#e4e4e7',
-      error: '#ef4444',
-      ...(branding.colors || {}),
+  const brandingAssetFields = [
+    {
+      key: 'logo_url',
+      label: 'Logo',
+      description: 'Used in the login card header on light backgrounds.',
+      placeholder: 'https://example.com/logo.svg',
     },
-    font_family: branding.font_family || 'Inter, system-ui, sans-serif',
-    font_url: branding.font_url || '',
-    texts: branding.texts || {},
-    custom_css: branding.custom_css || '',
-    hide_zitadel_branding: form.branding.hide_zitadel_branding,
-    layout: form.layout,
-    dark_mode: branding.dark_mode || 'light',
-    cover_image: form.branding.cover_image || '',
-    logo_dark: form.branding.logo_dark || '',
-    favicon: form.branding.favicon || '',
-    border_radius: branding.border_radius || 'md',
-    terms_url: branding.terms_url || '',
-    privacy_url: branding.privacy_url || '',
-    social_position: branding.social_position || 'bottom',
-    consent: branding.consent || [],
+    {
+      key: 'logo_dark',
+      label: 'Dark Logo',
+      description: 'Used when dark mode is active and a dark-specific logo is available.',
+      placeholder: 'https://example.com/logo-dark.svg',
+    },
+    {
+      key: 'cover_image',
+      label: 'Cover Image',
+      description: 'Used by Split and Card with image layouts.',
+      placeholder: 'https://example.com/cover.jpg',
+    },
+    {
+      key: 'favicon',
+      label: 'Favicon',
+      description: 'Shown in the browser tab for the hosted login page.',
+      placeholder: 'https://example.com/favicon.png',
+    },
+  ] as const
+
+  const layouts = [
+    { id: 'centered', label: 'Centered' },
+    { id: 'split', label: 'Split' },
+    { id: 'muted', label: 'Muted' },
+    { id: 'card_image', label: 'Card with image' },
+    { id: 'minimal', label: 'Minimal' },
+  ]
+
+  const strategyLabels: Record<string, string> = {
+    identifier_first: 'Identifier first',
+    passkey_first: 'Passkey first',
+    sso_only: 'SSO only',
+    custom: 'Custom',
   }
-})
 
-const previewStep = computed(() =>
-  buildPreviewFlowStep({
-    strategy: form.strategy,
-    branding: previewBranding.value,
-    captchaEnabled: form.captcha.mode !== 'never' && form.captcha.provider !== 'none',
-    captchaProvider: form.captcha.provider,
-  }),
-)
+  const form = reactive({
+    name: '',
+    priority: 0,
+    strategy: 'identifier_first',
+    layout: 'centered',
+    branding: {
+      logo_url: '',
+      logo_dark: '',
+      cover_image: '',
+      favicon: '',
+      hide_zitadel_branding: false,
+    },
+    captcha: {
+      provider: 'altcha',
+      mode: 'risk_based',
+      difficulty: 3,
+    },
+    fingerprint: {
+      enabled: true,
+      provider: 'thumbmarkjs',
+      persist: true,
+    },
+    rateLimit: {
+      maxAttempts: 5,
+      windowSeconds: 300,
+      lockoutSeconds: 900,
+      scope: 'ip',
+    },
+    telemetry: {
+      enabled: true,
+      sampleRate: 1.0,
+    },
+  })
 
-function stateVariant(state?: string): 'default' | 'secondary' | 'outline' | 'destructive' {
-  switch (state) {
-    case 'active': return 'default'
-    case 'testing': return 'secondary'
-    case 'archived': return 'destructive'
-    default: return 'outline'
-  }
-}
+  const templateSource = computed(() => {
+    const catalog = flow.value?.metadata?._catalog || flow.value?.metadata?.catalog || null
+    return catalog?.template_id || null
+  })
 
-function safeJSON(value: unknown): Record<string, any> {
-  if (!value) return {}
-  if (typeof value === 'string') {
-    try { return JSON.parse(value) } catch { return {} }
-  }
-  return typeof value === 'object' ? value as Record<string, any> : {}
-}
+  const currentLayoutLabel = computed(
+    () => layouts.find((layout) => layout.id === form.layout)?.label || 'Centered',
+  )
+  const strategyLabel = computed(() => strategyLabels[form.strategy] || 'Identifier first')
 
-function populateForm(f: LoginFlow) {
-  form.name = f.name || ''
-  form.priority = f.priority || 0
-  form.strategy = f.strategy || 'identifier_first'
-
-  const config = safeJSON(f.config)
-  currentConfig.value = config
-
-  form.layout = config.branding?.layout || 'centered'
-  form.branding.logo_url = config.branding?.logo_url || ''
-  form.branding.logo_dark = config.branding?.logo_dark || ''
-  form.branding.cover_image = config.branding?.cover_image || ''
-  form.branding.favicon = config.branding?.favicon || ''
-  form.branding.hide_zitadel_branding = config.branding?.hide_zitadel_branding ?? false
-
-  if (config.captcha) {
-    form.captcha.provider = config.captcha.provider || 'altcha'
-    form.captcha.mode = config.captcha.mode || 'risk_based'
-    form.captcha.difficulty = config.captcha.difficulty || 3
-  }
-  if (config.fingerprint) {
-    form.fingerprint.enabled = config.fingerprint.enabled !== false
-    form.fingerprint.provider = config.fingerprint.provider || 'thumbmarkjs'
-    form.fingerprint.persist = config.fingerprint.persist !== false
-  }
-  if (config.rate_limit) {
-    form.rateLimit.maxAttempts = config.rate_limit.max_attempts || 5
-    form.rateLimit.windowSeconds = config.rate_limit.window_seconds || 300
-    form.rateLimit.lockoutSeconds = config.rate_limit.lockout_seconds || 900
-    form.rateLimit.scope = config.rate_limit.scope || 'ip'
-  }
-  if (config.telemetry) {
-    form.telemetry.enabled = config.telemetry.enabled !== false
-    form.telemetry.sampleRate = config.telemetry.sample_rate ?? 1.0
-  }
-}
-
-async function loadFlow() {
-  const id = route.params.id as string
-  try {
-    const resp = await api.get<LoginFlow>(`/v1/login-flows/${id}`)
-    flow.value = resp
-    populateForm(resp)
-  } catch {
-    router.push('/login-flows')
-  }
-}
-
-async function saveFlow() {
-  if (!flow.value) return
-  saving.value = true
-  try {
-    const nextConfig = {
-      ...currentConfig.value,
-      captcha: {
-        ...(currentConfig.value.captcha || {}),
-        provider: form.captcha.provider,
-        mode: form.captcha.mode,
-        difficulty: form.captcha.difficulty,
-        on: ['login'],
+  const previewBranding = computed<FlowBranding>(() => {
+    const branding = currentConfig.value.branding || {}
+    return {
+      heading: branding.heading || 'Welcome back',
+      description: branding.description || 'Sign in to your account',
+      logo_url: form.branding.logo_url || '',
+      org_name: branding.org_name || 'Acme Corp',
+      colors: {
+        primary: '#6366f1',
+        primary_foreground: '#ffffff',
+        background: '#f0f2ff',
+        surface: '#ffffff',
+        text: '#1a1a2e',
+        muted: '#f4f4f5',
+        accent: '#6366f1',
+        border: '#e4e4e7',
+        error: '#ef4444',
+        ...(branding.colors || {}),
       },
-      fingerprint: {
-        ...(currentConfig.value.fingerprint || {}),
-        enabled: form.fingerprint.enabled,
-        provider: form.fingerprint.provider,
-        persist: form.fingerprint.persist,
-        on: ['login'],
-      },
-      rate_limit: {
-        ...(currentConfig.value.rate_limit || {}),
-        max_attempts: form.rateLimit.maxAttempts,
-        window_seconds: form.rateLimit.windowSeconds,
-        lockout_seconds: form.rateLimit.lockoutSeconds,
-        scope: form.rateLimit.scope,
-      },
-      telemetry: {
-        ...(currentConfig.value.telemetry || {}),
-        enabled: form.telemetry.enabled,
-        sample_rate: form.telemetry.sampleRate,
-      },
-      branding: {
-        ...(currentConfig.value.branding || {}),
-        layout: form.layout,
-        logo_url: form.branding.logo_url,
-        logo_dark: form.branding.logo_dark,
-        cover_image: form.branding.cover_image,
-        favicon: form.branding.favicon,
-        hide_zitadel_branding: form.branding.hide_zitadel_branding,
-      },
+      font_family: branding.font_family || 'Inter, system-ui, sans-serif',
+      font_url: branding.font_url || '',
+      texts: branding.texts || {},
+      custom_css: branding.custom_css || '',
+      hide_zitadel_branding: form.branding.hide_zitadel_branding,
+      layout: form.layout,
+      dark_mode: branding.dark_mode || 'light',
+      cover_image: form.branding.cover_image || '',
+      logo_dark: form.branding.logo_dark || '',
+      favicon: form.branding.favicon || '',
+      border_radius: branding.border_radius || 'md',
+      terms_url: branding.terms_url || '',
+      privacy_url: branding.privacy_url || '',
+      social_position: branding.social_position || 'bottom',
+      consent: branding.consent || [],
     }
+  })
 
-    await api.patch(`/v1/login-flows/${flow.value.id}`, {
-      name: form.name,
+  const previewStep = computed(() =>
+    buildPreviewFlowStep({
       strategy: form.strategy,
-      priority: form.priority,
-      is_default: flow.value.is_default,
-      config: nextConfig,
-    })
-    await loadFlow()
-  } catch (e: any) {
-    console.error('Failed to save login flow:', e)
-  } finally {
-    saving.value = false
-  }
-}
+      branding: previewBranding.value,
+      captchaEnabled: form.captcha.mode !== 'never' && form.captcha.provider !== 'none',
+      captchaProvider: form.captcha.provider,
+    }),
+  )
 
-function extractAssetId(url: string): string {
-  if (!url) return ''
-  try {
-    const parsed = new URL(url, window.location.origin)
-    const match = parsed.pathname.match(/\/assets\/login\/([^/]+)$/)
-    return match?.[1] || ''
-  } catch {
-    return ''
-  }
-}
-
-async function onBrandingFileSelected(field: BrandingAssetField, event: Event) {
-  if (!flow.value) return
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-
-  const body = new FormData()
-  body.append('slot', field)
-  body.append('file', file)
-
-  assetBusy[field] = true
-  try {
-    const resp = await api.postForm<{ url: string }>(`/v1/login-flows/${flow.value.id}/assets`, body)
-    form.branding[field] = resp.url
-  } catch (e) {
-    console.error(`Failed to upload ${field}:`, e)
-  } finally {
-    assetBusy[field] = false
-    input.value = ''
-  }
-}
-
-async function importBrandingAsset(field: BrandingAssetField) {
-  if (!flow.value || !assetImportUrls[field]) return
-  assetBusy[field] = true
-  try {
-    const resp = await api.post<{ url: string }>(`/v1/login-flows/${flow.value.id}/assets/import`, {
-      slot: field,
-      url: assetImportUrls[field],
-    })
-    form.branding[field] = resp.url
-    assetImportUrls[field] = ''
-  } catch (e) {
-    console.error(`Failed to import ${field}:`, e)
-  } finally {
-    assetBusy[field] = false
-  }
-}
-
-async function removeBrandingAsset(field: BrandingAssetField) {
-  if (!flow.value) return
-  const assetID = extractAssetId(form.branding[field])
-  assetBusy[field] = true
-  try {
-    if (assetID) {
-      await api.delete(`/v1/login-flows/${flow.value.id}/assets/${assetID}`)
+  function stateVariant(state?: string): 'default' | 'secondary' | 'outline' | 'destructive' {
+    switch (state) {
+      case 'active':
+        return 'default'
+      case 'testing':
+        return 'secondary'
+      case 'archived':
+        return 'destructive'
+      default:
+        return 'outline'
     }
-    form.branding[field] = ''
-  } catch (e) {
-    console.error(`Failed to remove ${field}:`, e)
-  } finally {
-    assetBusy[field] = false
   }
-}
 
-async function promoteFlow() {
-  if (!flow.value) return
-  promoting.value = true
-  try {
-    await api.post(`/v1/login-flows/${flow.value.id}/promote`, {})
-    await loadFlow()
-  } catch (e: any) {
-    console.error('Failed to promote flow:', e)
-  } finally {
-    promoting.value = false
+  function safeJSON(value: unknown): Record<string, any> {
+    if (!value) return {}
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value)
+      } catch {
+        return {}
+      }
+    }
+    return typeof value === 'object' ? (value as Record<string, any>) : {}
   }
-}
 
-onMounted(loadFlow)
+  function populateForm(f: LoginFlow) {
+    form.name = f.name || ''
+    form.priority = f.priority || 0
+    form.strategy = f.strategy || 'identifier_first'
+
+    const config = safeJSON(f.config)
+    currentConfig.value = config
+
+    form.layout = config.branding?.layout || 'centered'
+    form.branding.logo_url = config.branding?.logo_url || ''
+    form.branding.logo_dark = config.branding?.logo_dark || ''
+    form.branding.cover_image = config.branding?.cover_image || ''
+    form.branding.favicon = config.branding?.favicon || ''
+    form.branding.hide_zitadel_branding = config.branding?.hide_zitadel_branding ?? false
+
+    if (config.captcha) {
+      form.captcha.provider = config.captcha.provider || 'altcha'
+      form.captcha.mode = config.captcha.mode || 'risk_based'
+      form.captcha.difficulty = config.captcha.difficulty || 3
+    }
+    if (config.fingerprint) {
+      form.fingerprint.enabled = config.fingerprint.enabled !== false
+      form.fingerprint.provider = config.fingerprint.provider || 'thumbmarkjs'
+      form.fingerprint.persist = config.fingerprint.persist !== false
+    }
+    if (config.rate_limit) {
+      form.rateLimit.maxAttempts = config.rate_limit.max_attempts || 5
+      form.rateLimit.windowSeconds = config.rate_limit.window_seconds || 300
+      form.rateLimit.lockoutSeconds = config.rate_limit.lockout_seconds || 900
+      form.rateLimit.scope = config.rate_limit.scope || 'ip'
+    }
+    if (config.telemetry) {
+      form.telemetry.enabled = config.telemetry.enabled !== false
+      form.telemetry.sampleRate = config.telemetry.sample_rate ?? 1.0
+    }
+  }
+
+  async function loadFlow() {
+    const id = route.params.id as string
+    try {
+      const resp = await api.get<LoginFlow>(`/v1/login-flows/${id}`)
+      flow.value = resp
+      populateForm(resp)
+    } catch {
+      router.push('/login-flows')
+    }
+  }
+
+  async function saveFlow() {
+    if (!flow.value) return
+    saving.value = true
+    try {
+      const nextConfig = {
+        ...currentConfig.value,
+        captcha: {
+          ...(currentConfig.value.captcha || {}),
+          provider: form.captcha.provider,
+          mode: form.captcha.mode,
+          difficulty: form.captcha.difficulty,
+          on: ['login'],
+        },
+        fingerprint: {
+          ...(currentConfig.value.fingerprint || {}),
+          enabled: form.fingerprint.enabled,
+          provider: form.fingerprint.provider,
+          persist: form.fingerprint.persist,
+          on: ['login'],
+        },
+        rate_limit: {
+          ...(currentConfig.value.rate_limit || {}),
+          max_attempts: form.rateLimit.maxAttempts,
+          window_seconds: form.rateLimit.windowSeconds,
+          lockout_seconds: form.rateLimit.lockoutSeconds,
+          scope: form.rateLimit.scope,
+        },
+        telemetry: {
+          ...(currentConfig.value.telemetry || {}),
+          enabled: form.telemetry.enabled,
+          sample_rate: form.telemetry.sampleRate,
+        },
+        branding: {
+          ...(currentConfig.value.branding || {}),
+          layout: form.layout,
+          logo_url: form.branding.logo_url,
+          logo_dark: form.branding.logo_dark,
+          cover_image: form.branding.cover_image,
+          favicon: form.branding.favicon,
+          hide_zitadel_branding: form.branding.hide_zitadel_branding,
+        },
+      }
+
+      await api.patch(`/v1/login-flows/${flow.value.id}`, {
+        name: form.name,
+        strategy: form.strategy,
+        priority: form.priority,
+        is_default: flow.value.is_default,
+        config: nextConfig,
+      })
+      await loadFlow()
+    } catch (e: any) {
+      console.error('Failed to save login flow:', e)
+    } finally {
+      saving.value = false
+    }
+  }
+
+  function extractAssetId(url: string): string {
+    if (!url) return ''
+    try {
+      const parsed = new URL(url, window.location.origin)
+      const match = parsed.pathname.match(/\/assets\/login\/([^/]+)$/)
+      return match?.[1] || ''
+    } catch {
+      return ''
+    }
+  }
+
+  async function onBrandingFileSelected(field: BrandingAssetField, event: Event) {
+    if (!flow.value) return
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+
+    const body = new FormData()
+    body.append('slot', field)
+    body.append('file', file)
+
+    assetBusy[field] = true
+    try {
+      const resp = await api.postForm<{ url: string }>(
+        `/v1/login-flows/${flow.value.id}/assets`,
+        body,
+      )
+      form.branding[field] = resp.url
+    } catch (e) {
+      console.error(`Failed to upload ${field}:`, e)
+    } finally {
+      assetBusy[field] = false
+      input.value = ''
+    }
+  }
+
+  async function importBrandingAsset(field: BrandingAssetField) {
+    if (!flow.value || !assetImportUrls[field]) return
+    assetBusy[field] = true
+    try {
+      const resp = await api.post<{ url: string }>(
+        `/v1/login-flows/${flow.value.id}/assets/import`,
+        {
+          slot: field,
+          url: assetImportUrls[field],
+        },
+      )
+      form.branding[field] = resp.url
+      assetImportUrls[field] = ''
+    } catch (e) {
+      console.error(`Failed to import ${field}:`, e)
+    } finally {
+      assetBusy[field] = false
+    }
+  }
+
+  async function removeBrandingAsset(field: BrandingAssetField) {
+    if (!flow.value) return
+    const assetID = extractAssetId(form.branding[field])
+    assetBusy[field] = true
+    try {
+      if (assetID) {
+        await api.delete(`/v1/login-flows/${flow.value.id}/assets/${assetID}`)
+      }
+      form.branding[field] = ''
+    } catch (e) {
+      console.error(`Failed to remove ${field}:`, e)
+    } finally {
+      assetBusy[field] = false
+    }
+  }
+
+  async function promoteFlow() {
+    if (!flow.value) return
+    promoting.value = true
+    try {
+      await api.post(`/v1/login-flows/${flow.value.id}/promote`, {})
+      await loadFlow()
+    } catch (e: any) {
+      console.error('Failed to promote flow:', e)
+    } finally {
+      promoting.value = false
+    }
+  }
+
+  onMounted(loadFlow)
 </script>
