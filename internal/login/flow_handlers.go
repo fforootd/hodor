@@ -66,8 +66,8 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 		flow.RevealMode = IdentityRevealModeKnownUser
 	}
 
-	// Determine entry step based on preset.
-	switch cfg.Login.Preset {
+	// Determine entry step based on strategy.
+	switch cfg.Login.Strategy {
 	case "passkey_first":
 		flow.CurrentStep = StepIdentifier
 	case "sso_only":
@@ -77,7 +77,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.flows.Put(flow)
-	logging.Printf("[flow] created %s (preset=%s, step=%s, login_flow=%s, host=%s, org=%s)", flowID, cfg.Login.Preset, flow.CurrentStep, cfg.LoginFlowID, meta.Host, meta.OrgID)
+	logging.Printf("[flow] created %s (strategy=%s, step=%s, login_flow=%s, host=%s, org=%s)", flowID, cfg.Login.Strategy, flow.CurrentStep, cfg.LoginFlowID, meta.Host, meta.OrgID)
 
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }

@@ -94,7 +94,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { catalogApi, type CatalogTemplate } from '@/api/resources'
 import CatalogInstallDialog from '@/console/components/catalog/CatalogInstallDialog.vue'
@@ -110,6 +110,7 @@ import {
 } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 
 // ─── State ───
 const allTemplates = ref<CatalogTemplate[]>([])
@@ -186,6 +187,10 @@ async function refreshCatalog() {
 
 // ─── Init ───
 onMounted(async () => {
+  const initialType = route.query.type
+  if (typeof initialType === 'string') {
+    typeFilter.value = initialType
+  }
   loading.value = true
   try { allTemplates.value = await catalogApi.list() } catch {}
   loading.value = false

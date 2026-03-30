@@ -69,7 +69,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		id          TEXT PRIMARY KEY,
 		org_id      TEXT NOT NULL DEFAULT '1',
 		name        TEXT NOT NULL DEFAULT '',
-		preset      TEXT DEFAULT 'identifier_first',
+		strategy      TEXT DEFAULT 'identifier_first',
 		steps       TEXT NOT NULL DEFAULT '[]',
 		config      TEXT NOT NULL DEFAULT '{}',
 		auth_methods TEXT NOT NULL DEFAULT '{}',
@@ -337,8 +337,8 @@ func TestService_Get_LoginFlow(t *testing.T) {
 	}
 
 	// Verify login flow has expected nested structure.
-	if _, ok := payload.Payload["preset"]; !ok {
-		t.Error("missing preset in payload")
+	if _, ok := payload.Payload["strategy"]; !ok {
+		t.Error("missing strategy in payload")
 	}
 	if _, ok := payload.Payload["auth_methods"]; !ok {
 		t.Error("missing auth_methods in payload")
@@ -450,11 +450,11 @@ func TestService_Install_LoginFlow(t *testing.T) {
 		t.Errorf("branding.colors.primary = %q", colors["primary"])
 	}
 
-	// Verify preset was written to the preset column.
-	var preset string
-	db.QueryRow(`SELECT preset FROM login_flows WHERE id = ?`, userID).Scan(&preset)
-	if preset != "passkey_first" {
-		t.Errorf("preset column = %q, want passkey_first", preset)
+	// Verify strategy was written to the strategy column.
+	var strategy string
+	db.QueryRow(`SELECT strategy FROM login_flows WHERE id = ?`, userID).Scan(&strategy)
+	if strategy != "passkey_first" {
+		t.Errorf("strategy column = %q, want passkey_first", strategy)
 	}
 }
 
@@ -481,11 +481,11 @@ func TestService_Install_SSOEnterprise(t *testing.T) {
 		t.Errorf("heading = %q, want 'Sign in to ACME Corp'", branding["heading"])
 	}
 
-	// Verify preset column.
-	var preset string
-	db.QueryRow(`SELECT preset FROM login_flows WHERE id = ?`, userID).Scan(&preset)
-	if preset != "sso_only" {
-		t.Errorf("preset = %q, want sso_only", preset)
+	// Verify strategy column.
+	var strategy string
+	db.QueryRow(`SELECT strategy FROM login_flows WHERE id = ?`, userID).Scan(&strategy)
+	if strategy != "sso_only" {
+		t.Errorf("strategy = %q, want sso_only", strategy)
 	}
 }
 

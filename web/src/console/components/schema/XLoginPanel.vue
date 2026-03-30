@@ -1,10 +1,10 @@
 <template>
   <div class="space-y-4">
     <div class="space-y-2">
-      <Label class="text-xs font-medium text-muted-foreground">Preset</Label>
-      <Select v-model="preset" @update:model-value="emit('change')">
+      <Label class="text-xs font-medium text-muted-foreground">Strategy</Label>
+      <Select v-model="strategy" @update:model-value="emit('change')">
         <SelectTrigger class="h-8 text-xs">
-          <SelectValue placeholder="Select preset" />
+          <SelectValue placeholder="Select strategy" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="identifier_first">Identifier first</SelectItem>
@@ -53,7 +53,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['change', 'update:config', 'update:authMethods'])
 
-const preset = ref(props.config?.preset || 'identifier_first')
+const strategy = ref(props.config?.strategy || 'identifier_first')
 const mfaRequired = ref(props.config?.mfa_required || false)
 const registrationAllowed = ref(props.config?.registration_allowed ?? true)
 
@@ -64,9 +64,9 @@ const methods = ref([
   { key: 'sso', label: 'SSO', enabled: !!props.authMethods?.sso?.enabled },
 ])
 
-watch([preset, mfaRequired, registrationAllowed, methods], () => {
+watch([strategy, mfaRequired, registrationAllowed, methods], () => {
   emit('update:config', {
-    preset: preset.value,
+    strategy: strategy.value,
     mfa_required: mfaRequired.value,
     registration_allowed: registrationAllowed.value,
   })

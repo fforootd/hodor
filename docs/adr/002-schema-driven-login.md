@@ -63,15 +63,15 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
 
 ## Rationale
 
-1. **Single source of truth.** The user schema defines what an identity looks like (data), how it authenticates per-field (x-auth), and which auth methods are available as narrower overrides (x-auth-methods). The login flow defines the UX: branding, preset, captcha, registration config.
+1. **Single source of truth.** The user schema defines what an identity looks like (data), how it authenticates per-field (x-auth), and which auth methods are available as narrower overrides (x-auth-methods). The login flow defines the UX: branding, strategy, captcha, registration config.
 
 2. **Per-flow login experiences.** Different login flows can target different audiences. "Enterprise" flow uses SSO-only. "Consumer" flow uses identifier-first + password + magic link. Audience targeting (org, schema, app, user) determines which flow is served.
 
 3. **Dynamic via API.** Schemas are created and updated via `POST/PATCH /v1/schemas` — no config files, no restarts. Changes take effect immediately.
 
 4. **Composable with the flow API.** The flow engine reads annotations at runtime and generates UI nodes. Three tiers of customization:
-   - **Preset config** (80%): set `x-login.preset` + toggle methods
-   - **Step array** (15%): set `preset: "custom"` + define step order
+   - **Strategy config** (80%): set `x-login.strategy` + toggle methods
+   - **Step array** (15%): set `strategy: "custom"` + define step order
    - **Headless** (5%): call `POST /v1/login/flows` and render your own UI
 
 5. **JSON Schema is standard.** The `x-*` extension pattern is explicitly supported by JSON Schema spec. Validators ignore unknown extensions. No custom DSL to learn.
@@ -208,7 +208,7 @@ This enables gradual rollout:
 | Auth method narrowing per user type | User schema | `x-auth-methods` |
 | Claim mapping from SSO | User schema | `x-claim` |
 | PII redaction, visibility | User schema | `x-sensitive`, `x-hidden` |
-| Login preset, MFA, registration | **Login flow** | `preset`, `x-login` in flow config |
+| Login strategy, MFA, registration | **Login flow** | `strategy`, `x-login` in flow config |
 | Branding (heading, colors, layout, CSS) | **Login flow** | `branding` in flow config |
 | Captcha, fingerprint, rate limiting | **Login flow** | `captcha`, `fingerprint`, `rate_limit` |
 | Registration field selection | **Login flow** | `registration.fields`, `registration.user_schema` |

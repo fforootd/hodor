@@ -64,7 +64,7 @@ CREATE TABLE <resource> (
 | `providers` | `provider` | `name`, `protocol`, `template`, `config`, `claim_overrides`, `enabled`, `display_order` |
 | `apps` | `app`, `app_saml` | `name`, `app_type`, `client_id`, `redirect_uris`, `grant_types` |
 | `actions` | `action` | `name`, `hook`, `action_type`, `trigger`, `config`, `priority`, `enabled` |
-| `login_flows` | `login_flow` | `name`, `preset`, `steps`, `config` |
+| `login_flows` | `login_flow` | `name`, `strategy`, `steps`, `config` |
 
 ### 3. Schema Role Shifts
 

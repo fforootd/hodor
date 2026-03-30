@@ -1,6 +1,6 @@
 <template>
   <!-- Login-04 / Signup-04: Wide card with embedded image alongside form -->
-  <div class="login-layout-card-image" :style="bgVars">
+  <div class="login-layout-card-image" :class="{ 'is-preview': preview }" :style="bgVars">
     <link v-if="branding?.font_url" rel="stylesheet" :href="branding.font_url" />
     <div class="card-image-outer">
       <div class="card-image-card">
@@ -36,6 +36,7 @@ import type { FlowBranding } from '@/api/branding'
 
 const props = defineProps<{
   branding: FlowBranding | null
+  preview?: boolean
 }>()
 
 const bgVars = computed(() => {
@@ -57,6 +58,10 @@ const bgVars = computed(() => {
   min-height: 100svh;
   width: 100%;
   padding: 1.5rem;
+}
+.login-layout-card-image.is-preview {
+  min-height: 100%;
+  padding: 1rem;
 }
 @media (min-width: 768px) {
   .login-layout-card-image { padding: 2.5rem; }
@@ -81,6 +86,9 @@ const bgVars = computed(() => {
 @media (min-width: 768px) {
   .card-image-card { grid-template-columns: 1fr 1fr; }
 }
+.login-layout-card-image.is-preview .card-image-card {
+  grid-template-columns: 1fr 1fr;
+}
 .card-image-form {
   padding: 2rem;
   display: flex;
@@ -99,6 +107,9 @@ const bgVars = computed(() => {
 }
 @media (min-width: 768px) {
   .card-image-media { display: block; }
+}
+.login-layout-card-image.is-preview .card-image-media {
+  display: block;
 }
 .card-image-img {
   position: absolute;

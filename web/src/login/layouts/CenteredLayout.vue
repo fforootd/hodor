@@ -1,6 +1,6 @@
 <template>
   <!-- Login-01 / Signup-01: Centered card on gradient background -->
-  <div class="login-layout-centered" :style="bgVars">
+  <div class="login-layout-centered" :class="{ 'is-preview': preview }" :style="bgVars">
     <link v-if="branding?.font_url" rel="stylesheet" :href="branding.font_url" />
     <div class="centered-inner">
       <slot />
@@ -15,6 +15,7 @@ import type { FlowBranding } from '@/api/branding'
 
 const props = defineProps<{
   branding: FlowBranding | null
+  preview?: boolean
 }>()
 
 const bgVars = computed(() => {
@@ -37,6 +38,10 @@ const bgVars = computed(() => {
   min-height: 100svh;
   width: 100%;
   padding: 1.5rem;
+}
+.login-layout-centered.is-preview {
+  min-height: 100%;
+  padding: 1rem;
 }
 @media (min-width: 768px) {
   .login-layout-centered { padding: 2.5rem; }

@@ -13,7 +13,7 @@ func TestExtractLoginFlowConfig(t *testing.T) {
 			"version": ">=1"
 		},
 		"x-login": {
-			"preset": "passkey_first",
+			"strategy": "passkey_first",
 			"mfa_required": true,
 			"registration_allowed": false
 		},
@@ -52,8 +52,8 @@ func TestExtractLoginFlowConfig(t *testing.T) {
 	}
 
 	// x-login
-	if cfg.Login.Preset != "passkey_first" {
-		t.Errorf("Login.Preset = %q, want passkey_first", cfg.Login.Preset)
+	if cfg.Login.Strategy != "passkey_first" {
+		t.Errorf("Login.Strategy = %q, want passkey_first", cfg.Login.Strategy)
 	}
 	if !cfg.Login.MFARequired {
 		t.Error("Login.MFARequired = false, want true")
@@ -157,12 +157,53 @@ func TestExtractLoginFlowConfig_Defaults(t *testing.T) {
 	}
 }
 
+func TestExtractLoginFlowConfig_RuntimeConfigShape(t *testing.T) {
+	schema := `{
+		"strategy": "identifier_first",
+		"branding": {
+			"heading": "Runtime Login",
+			"layout": "split"
+		},
+		"captcha": {
+			"provider": "altcha",
+			"mode": "risk_based"
+		},
+		"fingerprint": {
+			"enabled": true
+		},
+		"rate_limit": {
+			"max_attempts": 8
+		}
+	}`
+
+	cfg := ExtractLoginFlowConfig(schema)
+
+	if cfg.Login.Strategy != "identifier_first" {
+		t.Errorf("Login.Strategy = %q, want identifier_first", cfg.Login.Strategy)
+	}
+	if cfg.Branding.Heading != "Runtime Login" {
+		t.Errorf("Branding.Heading = %q, want Runtime Login", cfg.Branding.Heading)
+	}
+	if cfg.Branding.Layout != "split" {
+		t.Errorf("Branding.Layout = %q, want split", cfg.Branding.Layout)
+	}
+	if cfg.Captcha == nil || cfg.Captcha.Provider != "altcha" {
+		t.Fatalf("Captcha = %#v, want provider altcha", cfg.Captcha)
+	}
+	if cfg.Fingerprint == nil || !cfg.Fingerprint.Enabled {
+		t.Fatalf("Fingerprint = %#v, want enabled true", cfg.Fingerprint)
+	}
+	if cfg.RateLimit == nil || cfg.RateLimit.MaxAttempts != 8 {
+		t.Fatalf("RateLimit = %#v, want max_attempts 8", cfg.RateLimit)
+	}
+}
+
 func TestExtractLoginFlowConfig_InvalidJSON(t *testing.T) {
 	cfg := ExtractLoginFlowConfig("not valid json")
 
 	// Should return defaults, not panic.
-	if cfg.Login.Preset != "identifier_first" {
-		t.Errorf("default Preset = %q, want identifier_first", cfg.Login.Preset)
+	if cfg.Login.Strategy != "identifier_first" {
+		t.Errorf("default Strategy = %q, want identifier_first", cfg.Login.Strategy)
 	}
 	if cfg.Captcha != nil {
 		t.Error("Captcha should be nil for invalid JSON")
@@ -180,7 +221,7 @@ func TestResolveFlowConfig(t *testing.T) {
 
 	flowConfig := &LoginFlowConfig{
 		Ref:         LoginFlowRef{UserSchema: "human_user", Version: ">=1"},
-		Login:       LoginConfig{Preset: "passkey_first", MFARequired: true},
+		Login:       LoginConfig{Strategy: "passkey_first", MFARequired: true},
 		Branding:    BrandingConfig{Heading: "Custom Login", Layout: "split"},
 		Captcha:     &CaptchaConfig{Provider: "altcha", On: []string{"login"}},
 		Fingerprint: &FingerprintConfig{Enabled: true, Provider: "thumbmarkjs"},
@@ -197,8 +238,8 @@ func TestResolveFlowConfig(t *testing.T) {
 	}
 
 	// Flow-level UX should override.
-	if merged.Login.Preset != "passkey_first" {
-		t.Errorf("Login.Preset = %q, want passkey_first (from flow)", merged.Login.Preset)
+	if merged.Login.Strategy != "passkey_first" {
+		t.Errorf("Login.Strategy = %q, want passkey_first (from flow)", merged.Login.Strategy)
 	}
 	if merged.Branding.Heading != "Custom Login" {
 		t.Errorf("Branding.Heading = %q, want Custom Login (from flow)", merged.Branding.Heading)

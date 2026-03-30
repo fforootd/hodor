@@ -1,6 +1,6 @@
 <template>
   <!-- Login-02 / Signup-02: Split-screen — form left, cover image right -->
-  <div class="login-layout-split" :style="bgVars">
+  <div class="login-layout-split" :class="{ 'is-preview': preview }" :style="bgVars">
     <link v-if="branding?.font_url" rel="stylesheet" :href="branding.font_url" />
     <div class="split-form-side">
       <!-- Brand logo top-left -->
@@ -43,6 +43,7 @@ import type { FlowBranding } from '@/api/branding'
 
 const props = defineProps<{
   branding: FlowBranding | null
+  preview?: boolean
 }>()
 
 const isDark = computed(() => props.branding?.dark_mode === 'dark')
@@ -65,11 +66,18 @@ const bgVars = computed(() => ({
 @media (min-width: 1024px) {
   .login-layout-split { grid-template-columns: 1fr 1fr; }
 }
+.login-layout-split.is-preview {
+  min-height: 100%;
+  grid-template-columns: 1fr 1fr;
+}
 .split-form-side {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   padding: 1.5rem;
+}
+.login-layout-split.is-preview .split-form-side {
+  padding: 1rem;
 }
 @media (min-width: 768px) {
   .split-form-side { padding: 2.5rem; }
@@ -107,6 +115,9 @@ const bgVars = computed(() => ({
 }
 @media (min-width: 1024px) {
   .split-cover-side { display: block; }
+}
+.login-layout-split.is-preview .split-cover-side {
+  display: block;
 }
 .split-cover-img {
   position: absolute;

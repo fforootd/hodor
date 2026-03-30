@@ -38,7 +38,7 @@ type AuthMethodEntry struct {
 
 // LoginConfig represents the x-login schema-level annotation.
 type LoginConfig struct {
-	Preset              string `json:"preset"` // "identifier_first", "passkey_first", "sso_only", "custom"
+	Strategy              string `json:"strategy"` // "identifier_first", "passkey_first", "sso_only", "custom"
 	MFARequired         bool   `json:"mfa_required"`
 	RegistrationAllowed bool   `json:"registration_allowed"`
 }
@@ -223,10 +223,15 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 	var raw struct {
 		XLoginFlow   json.RawMessage `json:"x-login-flow"`
 		XLogin       json.RawMessage `json:"x-login"`
+		Login        json.RawMessage `json:"login"`
 		XBranding    json.RawMessage `json:"x-branding"`
+		Branding     json.RawMessage `json:"branding"`
 		XCaptcha     json.RawMessage `json:"x-captcha"`
+		Captcha      json.RawMessage `json:"captcha"`
 		XFingerprint json.RawMessage `json:"x-fingerprint"`
+		Fingerprint  json.RawMessage `json:"fingerprint"`
 		XRateLimit   json.RawMessage `json:"x-rate-limit"`
+		RateLimit    json.RawMessage `json:"rate_limit"`
 	}
 	if err := json.Unmarshal([]byte(flowSchemaJSON), &raw); err != nil {
 		return &LoginFlowConfig{
@@ -243,15 +248,15 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 	if len(raw.XLoginFlow) > 0 {
 		_ = json.Unmarshal(raw.XLoginFlow, &cfg.Ref)
 	}
-	if len(raw.XLogin) > 0 {
-		_ = json.Unmarshal(raw.XLogin, &cfg.Login)
+	if source := firstNonEmptyRaw(raw.XLogin, raw.Login); len(source) > 0 {
+		_ = json.Unmarshal(source, &cfg.Login)
 	}
-	if len(raw.XBranding) > 0 {
-		_ = json.Unmarshal(raw.XBranding, &cfg.Branding)
+	if source := firstNonEmptyRaw(raw.XBranding, raw.Branding); len(source) > 0 {
+		_ = json.Unmarshal(source, &cfg.Branding)
 	}
-	if len(raw.XCaptcha) > 0 {
+	if source := firstNonEmptyRaw(raw.XCaptcha, raw.Captcha); len(source) > 0 {
 		var cc CaptchaConfig
-		if json.Unmarshal(raw.XCaptcha, &cc) == nil {
+		if json.Unmarshal(source, &cc) == nil {
 			if cc.Algorithm == "" {
 				cc.Algorithm = "SHA-256"
 			}
@@ -261,18 +266,18 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 			cfg.Captcha = &cc
 		}
 	}
-	if len(raw.XFingerprint) > 0 {
+	if source := firstNonEmptyRaw(raw.XFingerprint, raw.Fingerprint); len(source) > 0 {
 		var fp FingerprintConfig
-		if json.Unmarshal(raw.XFingerprint, &fp) == nil {
+		if json.Unmarshal(source, &fp) == nil {
 			if fp.Provider == "" {
 				fp.Provider = "thumbmarkjs"
 			}
 			cfg.Fingerprint = &fp
 		}
 	}
-	if len(raw.XRateLimit) > 0 {
+	if source := firstNonEmptyRaw(raw.XRateLimit, raw.RateLimit); len(source) > 0 {
 		var rl RateLimitConfig
-		if json.Unmarshal(raw.XRateLimit, &rl) == nil {
+		if json.Unmarshal(source, &rl) == nil {
 			if rl.MaxAttempts == 0 {
 				rl.MaxAttempts = 5
 			}
@@ -289,6 +294,15 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 	cfg.Login = mergeLoginDefaults(cfg.Login)
 	cfg.Branding = mergeBrandingDefaults(cfg.Branding)
 	return cfg
+}
+
+func firstNonEmptyRaw(values ...json.RawMessage) json.RawMessage {
+	for _, value := range values {
+		if len(value) > 0 && string(value) != "null" {
+			return value
+		}
+	}
+	return nil
 }
 
 // ResolveFlowConfig merges a user schema's field-level auth config with a
@@ -458,7 +472,7 @@ func defaultAuthMethods() map[string]*AuthMethodEntry {
 
 func defaultLoginConfig() LoginConfig {
 	return LoginConfig{
-		Preset:              "identifier_first",
+		Strategy:              "identifier_first",
 		MFARequired:         false,
 		RegistrationAllowed: true,
 	}
@@ -489,8 +503,8 @@ func defaultBrandingConfig() BrandingConfig {
 }
 
 func mergeLoginDefaults(lc LoginConfig) LoginConfig {
-	if lc.Preset == "" {
-		lc.Preset = "identifier_first"
+	if lc.Strategy == "" {
+		lc.Strategy = "identifier_first"
 	}
 	return lc
 }
@@ -859,7 +873,7 @@ func buildIdentifierNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 	nodes := []UINode{}
 
 	// If passkey_first, add passkey button before identifier.
-	if cfg.Login.Preset == "passkey_first" {
+	if cfg.Login.Strategy == "passkey_first" {
 		if m := cfg.AuthMethods["passkey"]; m != nil && m.Enabled {
 			nodes = append(nodes,
 				UINode{Type: "heading", Text: cfg.Branding.Heading},
@@ -890,7 +904,7 @@ func buildIdentifierNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 	}
 
 	// Heading + description (only if not already emitted by passkey_first).
-	if cfg.Login.Preset != "passkey_first" {
+	if cfg.Login.Strategy != "passkey_first" {
 		nodes = append(nodes,
 			UINode{Type: "heading", Text: cfg.Branding.Heading},
 			UINode{Type: "description", Text: cfg.Branding.Description},

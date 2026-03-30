@@ -1,31 +1,29 @@
 <template>
   <div class="space-y-6">
-    <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold tracking-tight">Login Flows</h1>
         <p class="text-muted-foreground text-sm mt-1">
-          Manage login experiences. The default flow applies to all users not matched by a specific flow.
+          Manage login experiences. Templates are the fastest way to start, and the default flow
+          applies to users not matched by a more specific flow.
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <Button variant="outline" @click="$router.push('/marketplace?type=login_flow')">
+        <Button @click="$router.push('/marketplace?type=login_flow')">
           <Store class="size-4 mr-2" />
-          From Marketplace
+          Use Template
         </Button>
-        <Button @click="showCreateDialog = true">
+        <Button variant="outline" @click="showCreateDialog = true">
           <Plus class="size-4 mr-2" />
-          Create Flow
+          Start Manually
         </Button>
       </div>
     </div>
 
-    <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-12">
       <Spinner class="size-6" />
     </div>
 
-    <!-- Empty state (should not happen since default always exists) -->
     <div v-else-if="flows.length === 0" class="text-center py-12">
       <div class="text-4xl mb-3">🔐</div>
       <h3 class="text-lg font-semibold">No Login Flows</h3>
@@ -33,7 +31,6 @@
     </div>
 
     <div v-else class="space-y-4">
-      <!-- Default Flow — always shown first, visually distinct -->
       <Card
         v-if="defaultFlow"
         class="border-primary/20 bg-primary/[0.02] hover:shadow-md transition-shadow cursor-pointer"
@@ -54,25 +51,23 @@
             </div>
             <div class="flex items-center gap-2">
               <Badge variant="default" class="text-xs">Default</Badge>
+              <Badge v-if="isTemplateBacked(defaultFlow)" variant="secondary" class="text-xs">Template</Badge>
               <Badge :variant="stateVariant(defaultFlow.state)" class="text-xs">{{ defaultFlow.state }}</Badge>
             </div>
           </div>
         </CardHeader>
         <CardContent class="text-sm text-muted-foreground space-y-2">
-          <!-- Signal badges -->
           <div class="flex flex-wrap gap-1.5">
+            <Badge variant="outline" class="text-xs">Strategy: {{ formatStrategy(defaultFlow.strategy) }}</Badge>
+            <Badge v-if="getLayout(defaultFlow)" variant="outline" class="text-xs">
+              Layout: {{ getLayoutLabel(getLayout(defaultFlow)) }}
+            </Badge>
             <Badge v-if="getCaptcha(defaultFlow)" variant="outline" class="text-xs">
               🛡️ {{ getCaptchaProvider(defaultFlow) }}
             </Badge>
-            <Badge v-if="getFingerprint(defaultFlow)" variant="outline" class="text-xs">
-              🔍 Fingerprint
-            </Badge>
-            <Badge v-if="getRateLimit(defaultFlow)" variant="outline" class="text-xs">
-              ⏱️ Rate limit
-            </Badge>
-            <Badge v-if="getTelemetry(defaultFlow)" variant="outline" class="text-xs">
-              📊 Telemetry
-            </Badge>
+            <Badge v-if="getFingerprint(defaultFlow)" variant="outline" class="text-xs">🔍 Fingerprint</Badge>
+            <Badge v-if="getRateLimit(defaultFlow)" variant="outline" class="text-xs">⏱️ Rate limit</Badge>
+            <Badge v-if="getTelemetry(defaultFlow)" variant="outline" class="text-xs">📊 Telemetry</Badge>
           </div>
           <div class="flex items-center justify-between pt-1 text-xs text-muted-foreground/70">
             <span>Priority: {{ defaultFlow.priority }}</span>
@@ -81,14 +76,12 @@
         </CardContent>
       </Card>
 
-      <!-- Divider between default and custom flows -->
       <div v-if="customFlows.length > 0" class="flex items-center gap-3 py-1">
         <div class="flex-1 h-px bg-border" />
         <span class="text-xs text-muted-foreground font-medium">Custom Flows</span>
         <div class="flex-1 h-px bg-border" />
       </div>
 
-      <!-- Custom Flows Grid -->
       <div v-if="customFlows.length > 0" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card
           v-for="flow in customFlows"
@@ -103,12 +96,12 @@
                 <CardTitle class="text-base">{{ flow.name }}</CardTitle>
               </div>
               <div class="flex items-center gap-1.5">
+                <Badge v-if="isTemplateBacked(flow)" variant="secondary" class="text-xs">Template</Badge>
                 <Badge :variant="stateVariant(flow.state)" class="text-xs">{{ flow.state }}</Badge>
               </div>
             </div>
           </CardHeader>
           <CardContent class="text-sm text-muted-foreground space-y-2">
-            <!-- Audience summary -->
             <div v-if="hasAudience(flow)" class="flex flex-wrap gap-1.5">
               <Badge v-if="audienceSchemaCount(flow)" variant="secondary" class="text-xs">
                 {{ audienceSchemaCount(flow) }} schema{{ audienceSchemaCount(flow) > 1 ? 's' : '' }}
@@ -122,17 +115,16 @@
             </div>
             <div v-else class="text-xs text-muted-foreground/60 italic">No audience targeting</div>
 
-            <!-- Signal badges -->
             <div class="flex flex-wrap gap-1.5">
+              <Badge variant="outline" class="text-xs">Strategy: {{ formatStrategy(flow.strategy) }}</Badge>
+              <Badge v-if="getLayout(flow)" variant="outline" class="text-xs">
+                Layout: {{ getLayoutLabel(getLayout(flow)) }}
+              </Badge>
               <Badge v-if="getCaptcha(flow)" variant="outline" class="text-xs">
                 🛡️ {{ getCaptchaProvider(flow) }}
               </Badge>
-              <Badge v-if="getFingerprint(flow)" variant="outline" class="text-xs">
-                🔍 Fingerprint
-              </Badge>
-              <Badge v-if="getRateLimit(flow)" variant="outline" class="text-xs">
-                ⏱️ Rate limit
-              </Badge>
+              <Badge v-if="getFingerprint(flow)" variant="outline" class="text-xs">🔍 Fingerprint</Badge>
+              <Badge v-if="getRateLimit(flow)" variant="outline" class="text-xs">⏱️ Rate limit</Badge>
             </div>
 
             <div class="flex items-center justify-between pt-1 text-xs text-muted-foreground/70">
@@ -144,56 +136,53 @@
       </div>
     </div>
 
-    <!-- Create Dialog -->
     <Dialog v-model:open="showCreateDialog">
-      <DialogContent class="sm:max-w-lg">
+      <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Login Flow</DialogTitle>
+          <DialogTitle>Start Login Flow Manually</DialogTitle>
           <DialogDescription>
-            Create a custom flow to customize login for specific users, schemas, or orgs.
-            The default flow handles everyone else.
+            Templates are recommended for complete starting points. Manual setup creates a blank
+            flow with the defaults you can refine in the editor.
           </DialogDescription>
         </DialogHeader>
-        <form @submit.prevent="createFlow" class="space-y-4">
+        <form class="space-y-4" @submit.prevent="createFlow">
           <div class="space-y-1.5">
             <Label for="flow-name">Name</Label>
-            <Input id="flow-name" v-model="newFlow.name" placeholder="e.g. Passkey-First Login" required />
+            <Input id="flow-name" v-model="newFlow.name" placeholder="e.g. B2B Beta Login" required />
           </div>
           <div class="space-y-1.5">
             <Label for="flow-state">Start state</Label>
-            <select id="flow-state" v-model="newFlow.state" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            <select
+              id="flow-state"
+              v-model="newFlow.state"
+              class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
               <option value="draft">Draft (not served)</option>
               <option value="testing">Testing (served to user allowlist only)</option>
               <option value="active">Active (served to all matching users)</option>
             </select>
+          </div>
+          <div class="space-y-1.5">
+            <Label for="flow-strategy">Flow Strategy</Label>
+            <select
+              id="flow-strategy"
+              v-model="newFlow.strategy"
+              class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            >
+              <option value="identifier_first">Identifier first</option>
+              <option value="passkey_first">Passkey first</option>
+              <option value="sso_only">SSO only</option>
+              <option value="custom">Custom</option>
+            </select>
             <p class="text-xs text-muted-foreground">
-              Draft → Testing → Active. You can promote flows from the detail view.
+              Layout defaults to centered. You can edit layout and protections after creation.
             </p>
-          </div>
-          <div class="space-y-1.5">
-            <Label for="flow-preset">Preset</Label>
-            <select id="flow-preset" v-model="newFlow.preset" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="identifier_first">Identifier First</option>
-              <option value="passkey_first">Passkey First</option>
-              <option value="sso_only">SSO Only</option>
-            </select>
-          </div>
-          <div class="space-y-1.5">
-            <Label>Captcha Provider</Label>
-            <select v-model="newFlow.captcha" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-              <option value="altcha">Altcha (PoW, self-hosted)</option>
-              <option value="none">None</option>
-            </select>
-          </div>
-          <div class="flex items-center gap-2">
-            <input type="checkbox" id="fp-enabled" v-model="newFlow.fingerprint" class="accent-primary" />
-            <Label for="fp-enabled">Enable browser fingerprinting</Label>
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" @click="showCreateDialog = false">Cancel</Button>
             <Button type="submit" :disabled="creating">
               <Spinner v-if="creating" class="size-4 mr-2" />
-              Create
+              Create flow
             </Button>
           </div>
         </form>
@@ -203,12 +192,7 @@
 </template>
 
 <script setup lang="ts">
-/**
- * LoginFlowListView — Lists all login flows with the default flow prominent.
- * The default flow is always shown first with a distinct visual treatment.
- * Custom flows show audience targeting and state badges.
- */
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -222,7 +206,7 @@ import { Plus, Shield, Store } from 'lucide-vue-next'
 interface LoginFlow {
   id: string
   name: string
-  preset: string
+  strategy: string
   is_default: boolean
   enabled: boolean
   state: string
@@ -230,6 +214,7 @@ interface LoginFlow {
   audience: any
   auth_methods: any
   config: any
+  metadata?: any
   created_at: string
   updated_at: string
 }
@@ -239,18 +224,15 @@ const loading = ref(true)
 const showCreateDialog = ref(false)
 const creating = ref(false)
 
-const defaultFlow = computed(() => flows.value.find(f => f.is_default))
-const customFlows = computed(() => flows.value.filter(f => !f.is_default))
+const defaultFlow = computed(() => flows.value.find((f) => f.is_default))
+const customFlows = computed(() => flows.value.filter((f) => !f.is_default))
 
 const newFlow = ref({
   name: '',
   state: 'draft',
-  preset: 'identifier_first',
-  captcha: 'altcha',
-  fingerprint: true,
+  strategy: 'identifier_first',
 })
 
-// Config helpers — read from the config JSON blob.
 function getConfig(flow: LoginFlow): any {
   if (!flow.config) return {}
   if (typeof flow.config === 'string') {
@@ -258,47 +240,80 @@ function getConfig(flow: LoginFlow): any {
   }
   return flow.config
 }
-function getCaptcha(flow: LoginFlow): any {
+
+function getCaptcha(flow: LoginFlow) {
   return getConfig(flow).captcha
 }
-function getCaptchaProvider(flow: LoginFlow): string {
+
+function getCaptchaProvider(flow: LoginFlow) {
   return getCaptcha(flow)?.provider || 'altcha'
 }
-function getFingerprint(flow: LoginFlow): any {
+
+function getFingerprint(flow: LoginFlow) {
   const fp = getConfig(flow).fingerprint
-  return fp?.enabled !== false ? fp : null
+  return fp?.enabled === false ? null : fp
 }
-function getRateLimit(flow: LoginFlow): any {
+
+function getRateLimit(flow: LoginFlow) {
   return getConfig(flow).rate_limit
 }
-function getTelemetry(flow: LoginFlow): any {
-  const tel = getConfig(flow).telemetry
-  return tel?.enabled !== false ? tel : null
+
+function getTelemetry(flow: LoginFlow) {
+  const telemetry = getConfig(flow).telemetry
+  return telemetry?.enabled === false ? null : telemetry
 }
 
-// Audience helpers.
-function hasAudience(flow: LoginFlow): boolean {
+function getLayout(flow: LoginFlow) {
+  return getConfig(flow).branding?.layout || ''
+}
+
+function getLayoutLabel(layout: string) {
+  switch (layout) {
+    case 'card_image': return 'Card with image'
+    default:
+      return layout
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+  }
+}
+
+function formatStrategy(strategy: string) {
+  switch (strategy) {
+    case 'identifier_first': return 'Identifier first'
+    case 'passkey_first': return 'Passkey first'
+    case 'sso_only': return 'SSO only'
+    case 'custom': return 'Custom'
+    default: return strategy
+  }
+}
+
+function isTemplateBacked(flow: LoginFlow) {
+  return Boolean(flow.metadata?._catalog?.template_id)
+}
+
+function hasAudience(flow: LoginFlow) {
   if (!flow.audience) return false
-  const a = typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience
-  return (a.schema_ids?.length > 0) || (a.user_ids?.length > 0) || (a.org_ids?.length > 0)
-}
-function audienceSchemaCount(flow: LoginFlow): number {
-  const a = typeof flow.audience === 'string' ? safeJSON(flow.audience) : (flow.audience || {})
-  return a.schema_ids?.length || 0
-}
-function audienceUserCount(flow: LoginFlow): number {
-  const a = typeof flow.audience === 'string' ? safeJSON(flow.audience) : (flow.audience || {})
-  return a.user_ids?.length || 0
-}
-function audienceOrgCount(flow: LoginFlow): number {
-  const a = typeof flow.audience === 'string' ? safeJSON(flow.audience) : (flow.audience || {})
-  return a.org_ids?.length || 0
-}
-function safeJSON(s: string): any {
-  try { return JSON.parse(s) } catch { return {} }
+  const audience = typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience
+  return audience.schema_ids?.length > 0 || audience.user_ids?.length > 0 || audience.org_ids?.length > 0
 }
 
-function stateVariant(state: string): 'default' | 'secondary' | 'outline' | 'destructive' {
+function audienceSchemaCount(flow: LoginFlow) {
+  return (typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience || {}).schema_ids?.length || 0
+}
+
+function audienceUserCount(flow: LoginFlow) {
+  return (typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience || {}).user_ids?.length || 0
+}
+
+function audienceOrgCount(flow: LoginFlow) {
+  return (typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience || {}).org_ids?.length || 0
+}
+
+function safeJSON(value: string) {
+  try { return JSON.parse(value) } catch { return {} }
+}
+
+function stateVariant(state?: string): 'default' | 'secondary' | 'outline' | 'destructive' {
   switch (state) {
     case 'active': return 'default'
     case 'testing': return 'secondary'
@@ -307,16 +322,14 @@ function stateVariant(state: string): 'default' | 'secondary' | 'outline' | 'des
   }
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString()
+function formatDate(value?: string) {
+  return value ? new Date(value).toLocaleDateString() : ''
 }
 
 async function loadFlows() {
   loading.value = true
   try {
-    const resp = await api.get<any>('/v1/login-flows')
-    flows.value = resp.items || []
+    flows.value = (await api.get<{ items: LoginFlow[] }>('/v1/login-flows')).items || []
   } catch {
     flows.value = []
   } finally {
@@ -329,17 +342,17 @@ async function createFlow() {
   try {
     await api.post('/v1/login-flows', {
       name: newFlow.value.name,
-      preset: newFlow.value.preset,
+      strategy: newFlow.value.strategy,
       state: newFlow.value.state,
       config: {
         captcha: {
-          provider: newFlow.value.captcha,
-          mode: newFlow.value.captcha !== 'none' ? 'risk_based' : 'never',
+          provider: 'altcha',
+          mode: 'risk_based',
           difficulty: 3,
           steps: ['identifier', 'password'],
         },
         fingerprint: {
-          enabled: newFlow.value.fingerprint,
+          enabled: true,
           provider: 'thumbmarkjs',
           persist: true,
           steps: ['identifier'],
@@ -354,10 +367,17 @@ async function createFlow() {
           enabled: true,
           sample_rate: 1.0,
         },
+        branding: {
+          layout: 'centered',
+        },
       },
     })
     showCreateDialog.value = false
-    newFlow.value = { name: '', state: 'draft', preset: 'identifier_first', captcha: 'altcha', fingerprint: true }
+    newFlow.value = {
+      name: '',
+      state: 'draft',
+      strategy: 'identifier_first',
+    }
     await loadFlows()
   } catch (e: any) {
     console.error('Failed to create login flow:', e)

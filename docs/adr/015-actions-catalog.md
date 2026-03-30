@@ -459,7 +459,7 @@ Login flows are first-class catalog entries. A login flow template bundles **eve
   "payload": {
     "display_name": "Passkey-First Login",
     "login_policy": {
-      "preset": "passkey_first",
+      "strategy": "passkey_first",
       "passwordless_enabled": true,
       "mfa_required": false,
       "registration_allowed": "{{allow_registration}}"

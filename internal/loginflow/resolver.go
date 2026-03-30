@@ -36,7 +36,7 @@ type LoginFlow struct {
 	ID          string          `json:"id"`
 	OrgID       string          `json:"org_id"`
 	Name        string          `json:"name"`
-	Preset      string          `json:"preset"`
+	Strategy      string          `json:"strategy"`
 	Config      json.RawMessage `json:"config"`
 	IsDefault   bool            `json:"is_default"`
 	Enabled     bool            `json:"enabled"`
@@ -195,7 +195,7 @@ func (r *Resolver) matchFlow(f *LoginFlow, uc UserContext) (int, bool) {
 // (plus instance-level flows where org_id is NULL).
 func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFlow, error) {
 	rows, err := r.db.SQL().QueryContext(ctx,
-		`SELECT id, COALESCE(org_id,''), name, preset, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
+		`SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}')
 		 FROM login_flows
 		 WHERE COALESCE(enabled,1) = 1 AND state IN ('active','testing')
@@ -213,7 +213,7 @@ func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFl
 		var f LoginFlow
 		var configJSON, audienceJSON, authMethodsJSON string
 		var isDefault, enabled int
-		err := rows.Scan(&f.ID, &f.OrgID, &f.Name, &f.Preset, &configJSON,
+		err := rows.Scan(&f.ID, &f.OrgID, &f.Name, &f.Strategy, &configJSON,
 			&isDefault, &enabled, &f.State, &f.Priority,
 			&audienceJSON, &authMethodsJSON)
 		if err != nil {
@@ -238,10 +238,10 @@ func (r *Resolver) TestAudience(ctx context.Context, flowID string, limit int) (
 	var configJSON, audienceJSON, authMethodsJSON string
 	var isDefault, enabled int
 	err := r.db.SQL().QueryRowContext(ctx,
-		`SELECT id, COALESCE(org_id,''), name, preset, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
+		`SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}')
 		 FROM login_flows WHERE id = ?`, flowID,
-	).Scan(&f.ID, &f.OrgID, &f.Name, &f.Preset, &configJSON,
+	).Scan(&f.ID, &f.OrgID, &f.Name, &f.Strategy, &configJSON,
 		&isDefault, &enabled, &f.State, &f.Priority,
 		&audienceJSON, &authMethodsJSON)
 	if err != nil {

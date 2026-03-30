@@ -124,7 +124,7 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"preset":               cfg.Login.Preset,
+		"strategy":               cfg.Login.Strategy,
 		"auth_methods":         authMethods,
 		"mfa_required":         cfg.Login.MFARequired,
 		"registration_allowed": cfg.Login.RegistrationAllowed,
@@ -221,18 +221,18 @@ func (h *Handler) loadFlowConfig(ctx context.Context, flowID string, r *http.Req
 
 func (h *Handler) loadFlowConfigStrict(ctx context.Context, flowID string, r *http.Request) (*SchemaAuthConfig, error) {
 	var configJSON, authMethodsJSON string
-	var preset string
+	var strategy string
 	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT COALESCE(preset,'identifier_first'), COALESCE(config,'{}'), COALESCE(auth_methods,'{}')
+		`SELECT COALESCE(strategy,'identifier_first'), COALESCE(config,'{}'), COALESCE(auth_methods,'{}')
 		 FROM login_flows WHERE id = ?`, flowID,
-	).Scan(&preset, &configJSON, &authMethodsJSON)
+	).Scan(&strategy, &configJSON, &authMethodsJSON)
 	if err != nil {
 		return nil, err
 	}
 
 	lf := &loginflow.LoginFlow{
 		ID:          flowID,
-		Preset:      preset,
+		Strategy:      strategy,
 		Config:      json.RawMessage(configJSON),
 		AuthMethods: json.RawMessage(authMethodsJSON),
 	}
@@ -261,8 +261,8 @@ func (h *Handler) buildConfigFromFlowStrict(ctx context.Context, lf *loginflow.L
 	// Parse the login flow's config JSON to extract branding, captcha, etc.
 	flowCfg := ExtractLoginFlowConfig(string(lf.Config))
 	if flowCfg != nil {
-		// Apply flow's login config (preset, mfa, registration).
-		if flowCfg.Login.Preset != "" {
+		// Apply flow's login config (strategy, mfa, registration).
+		if flowCfg.Login.Strategy != "" {
 			base.Login = flowCfg.Login
 		}
 		// Apply flow's branding (heading, colors, layout, etc.).
@@ -306,9 +306,9 @@ func (h *Handler) buildConfigFromFlowStrict(ctx context.Context, lf *loginflow.L
 		}
 	}
 
-	// Apply flow preset.
-	if lf.Preset != "" {
-		base.Login.Preset = lf.Preset
+	// Apply flow strategy.
+	if lf.Strategy != "" {
+		base.Login.Strategy = lf.Strategy
 	}
 
 	base.LoginFlowID = lf.ID

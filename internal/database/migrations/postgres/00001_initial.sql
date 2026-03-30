@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS login_flows (
     id           TEXT PRIMARY KEY,
     org_id       TEXT,
     name         TEXT NOT NULL,
-    preset       TEXT DEFAULT 'identifier_first',
+    strategy     TEXT DEFAULT 'identifier_first',
     steps        JSONB NOT NULL DEFAULT '[]',
     config       JSONB NOT NULL DEFAULT '{}',
     is_default   BOOLEAN DEFAULT FALSE,

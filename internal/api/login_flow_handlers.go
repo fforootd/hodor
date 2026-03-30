@@ -32,7 +32,7 @@ func (a *API) RegisterLoginFlowRoutes(mux *http.ServeMux) {
 
 type LoginFlowRequest struct {
 	Name        string `json:"name"`
-	Preset      string `json:"preset,omitempty"`
+	Strategy    string `json:"strategy,omitempty"`
 	IsDefault   bool   `json:"is_default,omitempty"`
 	State       string `json:"state,omitempty"`
 	Priority    int    `json:"priority,omitempty"`
@@ -48,7 +48,7 @@ type LoginFlowResponse struct {
 	ID          string `json:"id"`
 	OrgID       string `json:"org_id"`
 	Name        string `json:"name"`
-	Preset      string `json:"preset"`
+	Strategy    string `json:"strategy"`
 	IsDefault   bool   `json:"is_default"`
 	Enabled     bool   `json:"enabled"`
 	State       string `json:"state"`
@@ -82,9 +82,9 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 	flowID := id.New()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	preset := req.Preset
-	if preset == "" {
-		preset = "identifier_first"
+	strategy := req.Strategy
+	if strategy == "" {
+		strategy = "identifier_first"
 	}
 
 	state := req.State
@@ -127,9 +127,9 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO login_flows (id, org_id, name, preset, config, is_default, enabled, state, priority, audience, auth_methods, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-		flowID, orgID, name, preset, configJSON,
+		`INSERT INTO login_flows (id, org_id, name, strategy, config, is_default, enabled, state, priority, audience, auth_methods, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+		flowID, orgID, name, strategy, configJSON,
 		boolToInt(req.IsDefault), state, req.Priority,
 		audienceJSON, authMethodsJSON, now, now,
 	)
@@ -145,7 +145,7 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 		ID:          flowID,
 		OrgID:       orgID,
 		Name:        name,
-		Preset:      preset,
+		Strategy:    strategy,
 		IsDefault:   req.IsDefault,
 		Enabled:     true,
 		State:       state,
@@ -178,13 +178,13 @@ func (a *API) listLoginFlows(w http.ResponseWriter, r *http.Request) {
 
 	var args []any
 
-	query := `SELECT id, COALESCE(org_id,''), name, preset, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
+	query := `SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 	                  COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 	                  COALESCE(metadata,'{}'), created_at, updated_at
 	           FROM login_flows `
 
 	if stateFilter != "" {
-		query += ` AND state = ?`
+		query += ` WHERE state = ?`
 		args = append(args, stateFilter)
 	}
 	query += ` ORDER BY COALESCE(is_default,0) DESC, priority DESC, created_at DESC`
@@ -246,7 +246,7 @@ func (a *API) updateLoginFlow(w http.ResponseWriter, r *http.Request) {
 
 	p := newPatch()
 	p.Set("name", name)
-	p.Set("preset", req.Preset)
+	p.Set("strategy", req.Strategy)
 	p.Set("state", req.State)
 	if req.Priority != 0 {
 		p.SetInt("priority", req.Priority)
@@ -426,12 +426,12 @@ func (a *API) exportLoginFlow(w http.ResponseWriter, r *http.Request) {
 			"type":        "login_flow",
 			"version":     "1.0",
 			"description": fmt.Sprintf("Exported from flow %s", flowID),
-			"tags":        []string{"login", resp.Preset},
+			"tags":        []string{"login", resp.Strategy},
 		},
 		"variables": map[string]any{},
 		"payload": map[string]any{
 			"name":         resp.Name,
-			"preset":       resp.Preset,
+			"strategy":     resp.Strategy,
 			"config":       resp.Config,
 			"audience":     resp.Audience,
 			"auth_methods": resp.AuthMethods,
@@ -484,11 +484,11 @@ func (a *API) loadLoginFlow(ctx interface{ Value(any) any }, flowID string) (Log
 	var isDefault, enabled int
 
 	err := a.db.SQL().QueryRow(
-		`SELECT id, COALESCE(org_id,''), name, preset, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
+		`SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 		        COALESCE(metadata,'{}'), created_at, updated_at
 		 FROM login_flows WHERE id = ?`, flowID,
-	).Scan(&resp.ID, &resp.OrgID, &resp.Name, &resp.Preset, &configStr,
+	).Scan(&resp.ID, &resp.OrgID, &resp.Name, &resp.Strategy, &configStr,
 		&isDefault, &enabled, &resp.State, &resp.Priority,
 		&audienceStr, &authMethodsStr, &metadataStr,
 		&resp.CreatedAt, &resp.UpdatedAt)
@@ -515,7 +515,7 @@ func scanLoginFlowRow(s loginFlowScanner) (LoginFlowResponse, error) {
 	var configStr, audienceStr, authMethodsStr, metadataStr string
 	var isDefault, enabled int
 
-	err := s.Scan(&resp.ID, &resp.OrgID, &resp.Name, &resp.Preset, &configStr,
+	err := s.Scan(&resp.ID, &resp.OrgID, &resp.Name, &resp.Strategy, &configStr,
 		&isDefault, &enabled, &resp.State, &resp.Priority,
 		&audienceStr, &authMethodsStr, &metadataStr,
 		&resp.CreatedAt, &resp.UpdatedAt)

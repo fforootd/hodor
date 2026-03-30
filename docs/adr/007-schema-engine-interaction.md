@@ -231,7 +231,7 @@ The system knows this field's mapping is an **expr** expression (from `x-engine-
     "engine": "built-in"
   },
   "x-login": {
-    "preset": "identifier_first",
+    "strategy": "identifier_first",
     "mfa_required": false,
     "registration_allowed": true
   },

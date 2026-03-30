@@ -22,7 +22,7 @@
   },
   "payload": {
     "display_name": "Passkey-First Login",
-    "preset": "passkey_first",
+    "strategy": "passkey_first",
     "auth_methods": {
       "passkey":    { "enabled": true,  "interactive": true, "position": 0 },
       "password":   { "enabled": true,  "interactive": true, "position": 1 },

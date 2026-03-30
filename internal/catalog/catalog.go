@@ -243,9 +243,9 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		)
 	case "login_flow":
 		// Extract top-level fields that map to dedicated columns.
-		preset, _ := resolved["preset"].(string)
-		if preset == "" {
-			preset = "identifier_first"
+		strategy, _ := resolved["strategy"].(string)
+		if strategy == "" {
+			strategy = "identifier_first"
 		}
 		authMethodsJSON, _ := json.Marshal(resolved["auth_methods"])
 		configJSON, _ := json.Marshal(resolved["config"])
@@ -255,9 +255,9 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		}
 
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO login_flows (id, org_id, name, preset, auth_methods, config, enabled, state, priority, audience, schema_id, metadata, created_at, updated_at)
+			`INSERT INTO login_flows (id, org_id, name, strategy, auth_methods, config, enabled, state, priority, audience, schema_id, metadata, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?, 1, 'active', 10, ?, ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, orgID, displayName, preset,
+			resourceID, orgID, displayName, strategy,
 			string(authMethodsJSON), string(configJSON), string(audienceJSON),
 			schemaID, string(dataJSON),
 		)

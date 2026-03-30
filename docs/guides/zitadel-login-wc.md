@@ -28,12 +28,12 @@ All attributes are optional. When omitted, the component uses server-provided de
 | `api-base-url` | `string` | `""` (same origin) | Base URL of the Zitadel API. **Required for cross-origin embedding.** |
 | `redirect-uri` | `string` | `""` | Where to redirect after successful login (OIDC `redirect_uri`). |
 | `oidc-state` | `string` | `""` | OIDC `state` parameter for CSRF protection. |
-| `layout` | `string` | Server default | Layout preset. Overrides `x-branding.layout`. |
+| `layout` | `string` | Server default | Layout option. Overrides `x-branding.layout`. |
 | `dark-mode` | `string` | Server default | Color scheme. Overrides `x-branding.dark_mode`. |
 | `cover-image` | `string` | Server default | Cover image URL for `split` / `card_image` layouts. |
 | `primary-color` | `string` | Server default | Primary brand color (hex). Overrides `x-branding.colors.primary`. |
 
-### Layout Presets
+### Layout Options
 
 | Value | Pattern | Description |
 |---|---|---|

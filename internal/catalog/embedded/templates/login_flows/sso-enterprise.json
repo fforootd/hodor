@@ -17,7 +17,7 @@
   },
   "payload": {
     "display_name": "SSO Enterprise Login",
-    "preset": "sso_only",
+    "strategy": "sso_only",
     "auth_methods": {
       "passkey":    { "enabled": false, "interactive": true, "position": 0 },
       "password":   { "enabled": false, "interactive": true, "position": 1 },

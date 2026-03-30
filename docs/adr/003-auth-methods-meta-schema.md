@@ -38,7 +38,7 @@ Auth methods move from inside `x-login` to a top-level annotation. Each method d
 
 ```json
 "x-login": {
-  "preset": "identifier_first",
+  "strategy": "identifier_first",
   "mfa_required": false,
   "registration_allowed": true
 }
@@ -59,7 +59,7 @@ Service users gain auth config:
     "password":    { "enabled": true,  "interactive": true,  "position": 1 }
   },
   "x-login": {
-    "preset": "identifier_first"
+    "strategy": "identifier_first"
   },
   "properties": { ... }
 }

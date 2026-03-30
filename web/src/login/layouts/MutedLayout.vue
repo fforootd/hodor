@@ -1,6 +1,6 @@
 <template>
   <!-- Login-03 / Signup-03: Muted background, brand logo centered above card -->
-  <div class="login-layout-muted" :style="bgVars">
+  <div class="login-layout-muted" :class="{ 'is-preview': preview }" :style="bgVars">
     <link v-if="branding?.font_url" rel="stylesheet" :href="branding.font_url" />
     <div class="muted-wrapper">
       <!-- Centered brand logo -->
@@ -26,6 +26,7 @@ import type { FlowBranding } from '@/api/branding'
 
 const props = defineProps<{
   branding: FlowBranding | null
+  preview?: boolean
 }>()
 
 const isDark = computed(() => props.branding?.dark_mode === 'dark')
@@ -49,6 +50,10 @@ const bgVars = computed(() => ({
   min-height: 100svh;
   width: 100%;
   padding: 1.5rem;
+}
+.login-layout-muted.is-preview {
+  min-height: 100%;
+  padding: 1rem;
 }
 @media (min-width: 768px) {
   .login-layout-muted { padding: 2.5rem; }

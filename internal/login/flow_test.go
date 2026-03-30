@@ -13,7 +13,7 @@ const testSchema = `{
     "sso": {"enabled": true, "interactive": true, "position": 3}
   },
   "x-login": {
-    "preset": "identifier_first",
+    "strategy": "identifier_first",
     "mfa_required": false,
     "registration_allowed": true
   },
@@ -86,8 +86,8 @@ func TestExtractAuthConfig_IdentifierFields(t *testing.T) {
 func TestExtractAuthConfig_LoginConfig(t *testing.T) {
 	cfg := ExtractAuthConfig(testSchema)
 
-	if cfg.Login.Preset != "identifier_first" {
-		t.Errorf("preset = %q, want %q", cfg.Login.Preset, "identifier_first")
+	if cfg.Login.Strategy != "identifier_first" {
+		t.Errorf("strategy = %q, want %q", cfg.Login.Strategy, "identifier_first")
 	}
 	if cfg.Login.MFARequired {
 		t.Error("mfa_required should be false")
@@ -134,8 +134,8 @@ func TestExtractAuthConfig_Defaults(t *testing.T) {
 	// Minimal schema with no annotations.
 	cfg := ExtractAuthConfig(`{"type": "object", "properties": {"name": {"type": "string"}}}`)
 
-	if cfg.Login.Preset != "identifier_first" {
-		t.Errorf("default preset = %q, want %q", cfg.Login.Preset, "identifier_first")
+	if cfg.Login.Strategy != "identifier_first" {
+		t.Errorf("default strategy = %q, want %q", cfg.Login.Strategy, "identifier_first")
 	}
 	if cfg.Branding.Heading != "Welcome back" {
 		t.Errorf("default heading = %q, want %q", cfg.Branding.Heading, "Welcome back")
@@ -147,8 +147,8 @@ func TestExtractAuthConfig_InvalidJSON(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("should return default config for invalid JSON")
 	}
-	if cfg.Login.Preset != "identifier_first" {
-		t.Errorf("fallback preset = %q, want %q", cfg.Login.Preset, "identifier_first")
+	if cfg.Login.Strategy != "identifier_first" {
+		t.Errorf("fallback strategy = %q, want %q", cfg.Login.Strategy, "identifier_first")
 	}
 }
 

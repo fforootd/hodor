@@ -189,7 +189,7 @@ const monacoOptions = computed(() => ({
 }))
 
 // Quick settings state
-const loginPreset = ref('identifier_first')
+const loginStrategy = ref('identifier_first')
 const authPassword = ref(true)
 const authMagicLink = ref(true)
 const authPasskey = ref(false)
@@ -351,7 +351,7 @@ function syncSidebarFromJson(json: string) {
     const branding = parsed?.['x-branding'] || {}
     const methods = parsed?.['x-auth-methods'] || login.auth_methods || {}
 
-    loginPreset.value = login.preset || 'identifier_first'
+    loginStrategy.value = login.strategy || 'identifier_first'
     authPassword.value = methods.password?.enabled ?? true
     authMagicLink.value = methods.magic_link?.enabled ?? true
     authPasskey.value = methods.passkey?.enabled ?? false
@@ -381,7 +381,7 @@ function onQuickSettingChange() {
     am.client_cert = { ...(am.client_cert || {}), enabled: authClientCert.value, interactive: false }
 
     if (!parsed['x-login']) parsed['x-login'] = {}
-    parsed['x-login'].preset = loginPreset.value
+    parsed['x-login'].strategy = loginStrategy.value
     parsed['x-login'].mfa_required = mfaRequired.value
     parsed['x-login'].registration_allowed = registrationAllowed.value
     delete parsed['x-login'].auth_methods

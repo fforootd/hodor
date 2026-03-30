@@ -601,7 +601,7 @@
       "type": "object",
       "description": "DEPRECATED on user schemas — use login flow config instead. Interactive login flow configuration (default, overridable via settings). Retained for backward compatibility; if present, used as fallback when no login flow is resolved.",
       "properties": {
-        "preset": {
+        "strategy": {
           "type": "string",
           "enum": [
             "identifier_first",

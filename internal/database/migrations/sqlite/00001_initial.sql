@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS login_flows (
     id           TEXT PRIMARY KEY,
     org_id       TEXT,
     name         TEXT NOT NULL,
-    preset       TEXT DEFAULT 'identifier_first',
+    strategy     TEXT DEFAULT 'identifier_first',
     steps        TEXT NOT NULL DEFAULT '[]',
     config       TEXT NOT NULL DEFAULT '{}',
     is_default   BOOLEAN DEFAULT 0,

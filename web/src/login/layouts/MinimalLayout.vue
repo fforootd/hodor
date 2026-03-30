@@ -1,6 +1,6 @@
 <template>
   <!-- Login-05 / Signup-05: Minimal — clean bg, social-first, email below -->
-  <div class="login-layout-minimal" :style="bgVars">
+  <div class="login-layout-minimal" :class="{ 'is-preview': preview }" :style="bgVars">
     <link v-if="branding?.font_url" rel="stylesheet" :href="branding.font_url" />
     <div class="minimal-inner">
       <slot />
@@ -15,6 +15,7 @@ import type { FlowBranding } from '@/api/branding'
 
 const props = defineProps<{
   branding: FlowBranding | null
+  preview?: boolean
 }>()
 
 const bgVars = computed(() => ({
@@ -32,6 +33,10 @@ const bgVars = computed(() => ({
   width: 100%;
   padding: 1.5rem;
   background: hsl(var(--background, 0 0% 100%));
+}
+.login-layout-minimal.is-preview {
+  min-height: 100%;
+  padding: 1rem;
 }
 @media (min-width: 768px) {
   .login-layout-minimal { padding: 2.5rem; }
