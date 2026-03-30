@@ -17,7 +17,7 @@
 Build B2C login flows, deeply nested B2B SaaS organizations, and machine-to-machine auth on a single, unified API. Our schema-driven model means passkeys, magic links, and SSO are just a toggle away for any identity.
 
 **Key differentiators:**
-- One binary, runs in under 60 seconds (`zitadel serve --db sqlite://./zitadel.db`)
+- One binary, runs in under 60 seconds (`zitadel start` with `sqlite://./data/zitadel.db`)
 - One API — not User + Machine + App
 - Embeddable Web Components (`<zitadel-login>`) or classic OIDC redirect
 - SCIM + REST + CLI + MCP — every interface a developer or agent needs

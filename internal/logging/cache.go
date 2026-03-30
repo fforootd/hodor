@@ -3,6 +3,8 @@ package logging
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -27,7 +29,7 @@ type CacheRecord struct {
 
 // Cache is a local SQLite database used as a durable buffer for analytics writes.
 // It acts as a ring buffer with a configurable maximum row count.
-// The cache file (zitadel-cache.db) survives process restarts and can be
+// The cache file (./data/zitadel-cache.db by default) survives process restarts and can be
 // placed on tmpfs for in-memory speed in multi-machine deployments.
 type Cache struct {
 	db      *sql.DB
@@ -36,9 +38,15 @@ type Cache struct {
 }
 
 // OpenCache opens or creates a local SQLite cache database.
-// The path should point to a file like "zitadel-cache.db".
+// The path should point to a file like "./data/zitadel-cache.db".
 // maxRows controls the ring buffer size (0 = unlimited).
 func OpenCache(path string, maxRows int) (*Cache, error) {
+	if dir := filepath.Dir(path); path != ":memory:" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create cache dir %s: %w", dir, err)
+		}
+	}
+
 	db, err := sql.Open("sqlite", path+"?_journal=WAL&_busy_timeout=5000&_sync=NORMAL")
 	if err != nil {
 		return nil, fmt.Errorf("open cache db: %w", err)

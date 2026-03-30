@@ -26,6 +26,9 @@ type Config struct {
 	RateLimit     RateLimitConfig     `toml:"rate_limit"`
 	Catalog       CatalogConfig       `toml:"catalog"`
 	Dev           DevConfig           `toml:"dev"`
+
+	databaseURLExplicit bool
+	cachePathExplicit   bool
 }
 
 // ServerConfig controls HTTP server behavior.
@@ -230,7 +233,7 @@ func (c *DatabaseConfig) ResolveBootstrapMode() string {
 type ObservabilityConfig struct {
 	LogLevel  string              `toml:"log_level"`
 	LogFormat string              `toml:"log_format"`
-	CachePath string              `toml:"cache_path"` // local SQLite cache file (default: "zitadel-cache.db")
+	CachePath string              `toml:"cache_path"` // local SQLite cache file (default: "./data/zitadel-cache.db")
 	CacheMax  int                 `toml:"cache_max"`  // ring buffer max rows (default: 50000, 0 = unlimited)
 	Streams   StreamRoutingConfig `toml:"streams"`
 	Sinks     SinksConfig         `toml:"sinks"`
@@ -337,7 +340,7 @@ func Defaults() *Config {
 			},
 		},
 		Database: DatabaseConfig{
-			URL:             "sqlite://./zitadel.db",
+			URL:             DefaultDatabaseURL,
 			Migrate:         "", // auto-detect: "auto" for all dialects
 			Bootstrap:       "", // auto-detect: "auto" for all dialects
 			MaxOpenConns:    25,
@@ -347,7 +350,7 @@ func Defaults() *Config {
 		Observability: ObservabilityConfig{
 			LogLevel:  "info",
 			LogFormat: "text",
-			CachePath: "zitadel-cache.db",
+			CachePath: DefaultCachePath,
 			CacheMax:  50000,
 			Streams: StreamRoutingConfig{
 				Runtime: StreamConfig{
@@ -403,9 +406,12 @@ func Load(path string) (*Config, error) {
 	cfg := Defaults()
 
 	if path != "" {
-		if _, err := toml.DecodeFile(path, cfg); err != nil {
+		md, err := toml.DecodeFile(path, cfg)
+		if err != nil {
 			return nil, fmt.Errorf("decode config file %s: %w", path, err)
 		}
+		cfg.databaseURLExplicit = md.IsDefined("database", "url")
+		cfg.cachePathExplicit = md.IsDefined("observability", "cache_path")
 	}
 
 	// Environment variable overrides (ZITADEL_ prefix).
@@ -481,6 +487,7 @@ func applyTLSEnv(cfg *Config) {
 func applyDatabaseEnv(cfg *Config) {
 	if v := os.Getenv("ZITADEL_DATABASE_URL"); v != "" {
 		cfg.Database.URL = v
+		cfg.databaseURLExplicit = true
 	}
 	if v := os.Getenv("ZITADEL_DATABASE_MIGRATE"); v != "" {
 		cfg.Database.Migrate = v

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite" // Pure Go SQLite driver.
@@ -13,7 +15,13 @@ func openSQLite(connStr string) (*DB, error) {
 	// Strip sqlite:// prefix to get the file path.
 	path := strings.TrimPrefix(connStr, "sqlite://")
 	if path == "" {
-		path = "./zitadel.db"
+		path = "./data/zitadel.db"
+	}
+
+	if dir := filepath.Dir(path); path != ":memory:" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create sqlite dir %s: %w", dir, err)
+		}
 	}
 
 	// URL-encode the path to handle special characters (e.g., '#' in

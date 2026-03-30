@@ -8,16 +8,16 @@
 
 ```bash
 # Build & run with defaults (SQLite, port 8080)
-go run ./cmd/zitadel serve
+go run ./cmd/zitadel start
 
 # With mock OIDC provider for SSO testing
-go run ./cmd/zitadel serve --mock-oidc
+go run ./cmd/zitadel start --mock-oidc
 
 # With seed data for local dev
-go run ./cmd/zitadel serve --mock-oidc --seed fixtures/dev-seed.yaml
+go run ./cmd/zitadel start --mock-oidc --seed fixtures/dev-seed.yaml
 
 # Via environment variables (Docker/K8s/Workers)
-ZITADEL_DATABASE_URL=postgres://... ZITADEL_MOCK_OIDC=true go run ./cmd/zitadel serve
+ZITADEL_DATABASE_URL=postgres://... ZITADEL_MOCK_OIDC=true go run ./cmd/zitadel start
 ```
 
 ## Architecture
@@ -51,7 +51,7 @@ Three-layer precedence: `CLI flags > env vars > TOML config > defaults`
 
 | Setting | Env Var | Flag | Default |
 |---|---|---|---|
-| Database URL | `ZITADEL_DATABASE_URL` | — | `sqlite://./zitadel.db` |
+| Database URL | `ZITADEL_DATABASE_URL` | — | `sqlite://./data/zitadel.db` |
 | Server port | `ZITADEL_PORT` | — | `8080` |
 | Mock OIDC | `ZITADEL_MOCK_OIDC` | `--mock-oidc` | `false` |
 | Seed file | `ZITADEL_SEED_FILE` | `--seed` | — |

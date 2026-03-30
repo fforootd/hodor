@@ -33,7 +33,7 @@ Available in every deployment. Uses database features to accelerate repeated rea
 
 Every Zitadel instance maintains a local cache — no network calls, no external deps.
 
-#### SQLite Cache (`zitadel-cache.db`)
+#### SQLite Cache (`./data/zitadel-cache.db`)
 
 The existing log buffer expands into a general-purpose local cache:
 
@@ -180,6 +180,6 @@ func WithMaxEntries(n int) CacheOption  // LRU
 - **Zero-config caching** — SQLite cache works on first run, no Redis needed
 - **Graceful scaling** — add Redis when needed, not before
 - **tmpfs compatible** — SQLite cache can be placed on tmpfs for in-memory speed
-- **Disposable cache** — delete `zitadel-cache.db` at any time, no data loss (just refill delay)
+- **Disposable cache** — delete `./data/zitadel-cache.db` at any time, no data loss (just refill delay)
 - **Query caching reduces DB load** — dashboard pages served from cache
 - **ETag reduces network** — unchanged OIDC Discovery returns 304

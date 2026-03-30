@@ -8,7 +8,7 @@
 
 ```bash
 zitadel start
-# → SQLite at ./zitadel.db (auto-created)
+# → SQLite at ./data/zitadel.db (auto-created)
 # → Schema auto-migrated
 # → Admin bootstrapped
 # → Running on http://localhost:8080
@@ -80,7 +80,7 @@ external_domain = "auth.example.com"
 
 [database]
 dialect = "sqlite"          # "sqlite" | "postgres"
-url = "sqlite://./zitadel.db"
+url = "sqlite://./data/zitadel.db"
 
 [session]
 lifetime = "24h"
@@ -90,6 +90,7 @@ cookie_name = "zitadel_session"
 backend = "oltp"            # default: query same DB
 
 [observability]
+cache_path = "./data/zitadel-cache.db"
 otlp_endpoint = ""          # empty = no export
 ```
 

@@ -220,6 +220,20 @@ func TestCache_Concurrent(t *testing.T) {
 	}
 }
 
+func TestOpenCacheCreatesParentDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "logs", "cache.db")
+
+	cache, err := OpenCache(path, 0)
+	if err != nil {
+		t.Fatalf("OpenCache: %v", err)
+	}
+	defer cache.Close()
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Fatalf("cache database not created at %s", path)
+	}
+}
+
 func TestCache_Persistence(t *testing.T) {
 	path := testCachePath(t)
 

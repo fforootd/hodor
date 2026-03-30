@@ -11,11 +11,14 @@ func TestDefaults(t *testing.T) {
 	if cfg.Server.Port != 8080 {
 		t.Errorf("default port = %d, want 8080", cfg.Server.Port)
 	}
-	if cfg.Database.URL != "sqlite://./zitadel.db" {
-		t.Errorf("default db url = %q, want sqlite://./zitadel.db", cfg.Database.URL)
+	if cfg.Database.URL != DefaultDatabaseURL {
+		t.Errorf("default db url = %q, want %q", cfg.Database.URL, DefaultDatabaseURL)
 	}
 	if cfg.Observability.LogLevel != "info" {
 		t.Errorf("default log level = %q, want info", cfg.Observability.LogLevel)
+	}
+	if cfg.Observability.CachePath != DefaultCachePath {
+		t.Errorf("default cache path = %q, want %q", cfg.Observability.CachePath, DefaultCachePath)
 	}
 	if cfg.Workers.NotificationWorkers != 1 {
 		t.Errorf("default notification workers = %d, want 1", cfg.Workers.NotificationWorkers)
