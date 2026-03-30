@@ -16,19 +16,36 @@
   },
   "payload": {
     "display_name": "Google",
-    "type": "oidc",
-    "issuer": "https://accounts.google.com",
-    "client_id": "{{client_id}}",
-    "client_secret": "{{client_secret}}",
-    "scopes": ["openid", "profile", "email"],
-    "claim_mappings": {
-      "email": "claims.email",
-      "email_verified": "claims.email_verified",
-      "display_name": "claims.name",
-      "first_name": "claims.given_name",
-      "last_name": "claims.family_name",
-      "picture": "claims.picture",
-      "locale": "claims.locale"
-    }
+    "kind": "google",
+    "protocol": "oidc",
+    "connection": {
+      "issuer": "https://accounts.google.com",
+      "client_id": "{{client_id}}",
+      "client_secret": "{{client_secret}}",
+      "scopes": ["openid", "profile", "email"]
+    },
+    "mapping": {
+      "claims": {
+        "email": "claims.email",
+        "email_verified": "claims.email_verified",
+        "display_name": "claims.name",
+        "first_name": "claims.given_name",
+        "last_name": "claims.family_name",
+        "picture": "claims.picture",
+        "locale": "claims.locale"
+      }
+    },
+    "target": {
+      "schema_type": "human_user"
+    },
+    "linking": {
+      "mode": "create_or_link",
+      "match_by": "verified_email"
+    },
+    "session": {},
+    "ui": {
+      "display_order": 10
+    },
+    "enabled": true
   }
 }

@@ -5,9 +5,11 @@
         <h1 class="text-2xl font-semibold tracking-tight">Projects</h1>
         <p class="text-sm text-muted-foreground">{{ loading ? 'Loading…' : `${items.length} project${items.length !== 1 ? 's' : ''}` }}</p>
       </div>
-      <Button @click="showCreate = true">
-        <Plus class="mr-2 size-4" />
-        New Project
+      <Button as-child>
+        <router-link to="/projects/new">
+          <Plus class="mr-2 size-4" />
+          New Project
+        </router-link>
       </Button>
     </div>
 
@@ -23,9 +25,11 @@
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent v-if="!searchQuery">
-        <Button @click="showCreate = true">
-          <Plus class="mr-2 size-4" />
-          New Project
+        <Button as-child>
+          <router-link to="/projects/new">
+            <Plus class="mr-2 size-4" />
+            New Project
+          </router-link>
         </Button>
       </EmptyContent>
     </Empty>
@@ -75,51 +79,23 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
-
-    <!-- Create Dialog -->
-    <Dialog v-model:open="showCreate">
-      <DialogContent class="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create Project</DialogTitle>
-        </DialogHeader>
-        <div class="space-y-3 py-2">
-          <div class="space-y-2">
-            <Label for="project-name">Name</Label>
-            <Input id="project-name" v-model="newProject.name" placeholder="my-app" />
-          </div>
-          <div class="space-y-2">
-            <Label for="project-desc">Description</Label>
-            <Input id="project-desc" v-model="newProject.description" placeholder="Customer-facing web application" />
-          </div>
-        </div>
-        <DialogFooter class="gap-2">
-          <Button variant="outline" @click="showCreate = false">Cancel</Button>
-          <Button @click="createProject" :disabled="!newProject.name">
-            <Plus class="size-3.5 mr-1" /> Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, h, reactive } from 'vue'
+import { ref, onMounted, computed, h } from 'vue'
 import { RouterLink } from 'vue-router'
 import { projectApi, type Project } from '@/api/resources'
 import { useResourceList } from '@/console/composables/useResourceList'
-import { toast } from 'vue-sonner'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
   CheckCircle2, Ban, FolderKanban,
@@ -134,8 +110,6 @@ const { items, loading, searchQuery, filteredItems, fetch: fetchProjects } = use
 
 const selectedRows = ref({})
 const globalSearch = ref('')
-const showCreate = ref(false)
-const newProject = reactive({ name: '', description: '' })
 
 let activeTable: any = null
 
@@ -157,19 +131,6 @@ function getSortIcon(column: any) {
   if (isSorted === 'asc') return ArrowUp
   if (isSorted === 'desc') return ArrowDown
   return ArrowUpDown
-}
-
-async function createProject() {
-  try {
-    await projectApi.create({ name: newProject.name, description: newProject.description })
-    toast.success('Project created')
-    showCreate.value = false
-    newProject.name = ''
-    newProject.description = ''
-    await fetchProjects()
-  } catch (err: any) {
-    toast.error('Failed to create project', { description: err.message })
-  }
 }
 
 onMounted(fetchProjects)

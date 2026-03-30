@@ -60,14 +60,14 @@ type Opts = { path?: Record<string, string>; query?: Record<string, any>; body?:
 export const listUsers = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/users${qs(opts?.query)}`))
 export const createUser = (opts?: Opts) => wrap(api.post<any>('/v1/users', opts?.body))
 export const getUser = (opts?: Opts) => wrap(api.get<any>(`/v1/users/${opts?.path?.id}`))
-export const updateUser = (opts?: Opts) => wrap(api.put<any>(`/v1/users/${opts?.path?.id}`, opts?.body))
+export const updateUser = (opts?: Opts) => wrap(api.patch<any>(`/v1/users/${opts?.path?.id}`, opts?.body))
 export const deleteUser = (opts?: Opts) => wrap(api.delete<any>(`/v1/users/${opts?.path?.id}`))
-export const setUserPassword = (opts?: Opts) => wrap(api.put<any>(`/v1/users/${opts?.path?.id}/password`, opts?.body))
+export const setUserPassword = (opts?: Opts) => wrap(api.post<any>(`/v1/users/${opts?.path?.id}/password`, opts?.body))
 
 // Schemas
 export const listSchemas = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/schemas${qs(opts?.query)}`))
 export const getSchema = (opts?: Opts) => wrap(api.get<any>(`/v1/schemas/${opts?.path?.id}`))
-export const updateSchema = (opts?: Opts) => wrap(api.put<any>(`/v1/schemas/${opts?.path?.id}`, opts?.body))
+export const updateSchema = (opts?: Opts) => wrap(api.patch<any>(`/v1/schemas/${opts?.path?.id}`, opts?.body))
 export const promoteSchema = (opts?: Opts) => wrap(api.post<any>(`/v1/schemas/${opts?.path?.id}/promote`, {}))
 export const diffSchema = (opts?: Opts) => wrap(api.get<any>(`/v1/schemas/${opts?.path?.id}/diff${qs(opts?.query)}`))
 export const previewSchema = (opts?: Opts) => wrap(api.post<any>(`/v1/schemas/${opts?.path?.id}/preview`, opts?.body))
@@ -98,7 +98,7 @@ export const refreshCatalog = () => wrap(api.post<any>('/v1/catalog/refresh', {}
 // Providers
 export const listProviders = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/providers${qs(opts?.query)}`))
 export const createProvider = (opts?: Opts) => wrap(api.post<any>('/v1/providers', opts?.body))
-export const updateProvider = (opts?: Opts) => wrap(api.put<any>(`/v1/providers/${opts?.path?.id}`, opts?.body))
+export const updateProvider = (opts?: Opts) => wrap(api.patch<any>(`/v1/providers/${opts?.path?.id}`, opts?.body))
 export const deleteProvider = (opts?: Opts) => wrap(api.delete<any>(`/v1/providers/${opts?.path?.id}`))
 export const listProviderTemplates = () => wrap(api.get<{ templates: any[] }>('/v1/providers/templates'))
 

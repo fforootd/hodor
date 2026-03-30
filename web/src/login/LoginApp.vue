@@ -68,8 +68,8 @@
   import {
     createReadyzWaiter,
     useAppBootstrap,
-    type LoginErrorDetail,
   } from '@/bootstrap/app-bootstrap'
+  import { toLoginErrorDetail, type LoginErrorDetail } from './init-state'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
   import LoginShell from './components/LoginShell.vue'
   import LoginNodeRenderer from './components/LoginNodeRenderer.vue'

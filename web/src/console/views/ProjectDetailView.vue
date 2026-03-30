@@ -1,246 +1,267 @@
 <template>
-  <div class="space-y-6">
-    <div v-if="loading" class="flex items-center justify-center py-20">
-      <RefreshCw class="size-5 animate-spin text-muted-foreground" />
-    </div>
-    <template v-else-if="project">
-      <!-- Header -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <Button variant="ghost" size="sm" @click="$router.push('/projects')">
-            <ArrowLeft class="size-4" />
-          </Button>
-          <div>
-            <h1 class="text-2xl font-semibold tracking-tight">{{ project.name }}</h1>
-            <p class="text-sm text-muted-foreground mt-0.5">{{ project.description || 'No description' }}</p>
+  <div v-if="project" class="space-y-6">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex items-start gap-3">
+        <Button variant="ghost" size="icon" as-child>
+          <router-link to="/projects"><ArrowLeft class="size-4" /></router-link>
+        </Button>
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">{{ projectTitle }}</h1>
+          <div class="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+            <Badge variant="secondary" class="text-xs">{{ members.length }} members</Badge>
+            <Badge :variant="project.state === 'active' ? 'default' : 'secondary'" class="capitalize text-xs">
+              {{ project.state || 'active' }}
+            </Badge>
           </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <Badge variant="secondary" class="gap-1">
-            <Users class="size-3" />
-            {{ members.length }} member{{ members.length !== 1 ? 's' : '' }}
-          </Badge>
-          <Button variant="destructive" size="sm" @click="showDeleteConfirm = true">
-            <Trash2 class="size-3.5 mr-1" /> Delete
-          </Button>
         </div>
       </div>
+      <div class="flex gap-2">
+        <Button variant="outline" size="sm" :disabled="saving || !jsonValid" @click="save">
+          {{ saving ? 'Saving…' : 'Save' }}
+        </Button>
+        <Button variant="destructive" size="sm" @click="showDeleteConfirm = true">Delete</Button>
+      </div>
+    </div>
 
-      <Tabs v-model="activeTab" class="space-y-4">
-        <TabsList class="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="members" class="gap-1.5">
-            <Users class="size-3.5" /> Members
-          </TabsTrigger>
-          <TabsTrigger value="settings" class="gap-1.5">
-            <Settings class="size-3.5" /> Settings
-          </TabsTrigger>
-        </TabsList>
+    <SchemaTabsEditor
+      v-if="schemaContext.schema"
+      v-model="formData"
+      :schema="schemaContext.schema"
+      :curl-snippets="curlSnippets"
+      form-title="Project Fields"
+      @update:json-valid="(value) => jsonValid = value"
+    />
 
-        <!-- Members tab -->
-        <TabsContent value="members" class="space-y-4">
-          <Card>
-            <div class="p-4 pb-2 flex items-center justify-between">
-              <h3 class="font-medium">Project Members</h3>
-              <Button variant="outline" size="sm" @click="showAddMember = true">
-                <UserPlus class="size-3.5 mr-1" /> Add Member
-              </Button>
-            </div>
-            <div class="border-t">
-              <table class="w-full">
-                <thead>
-                  <tr class="border-b bg-muted/50">
-                    <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">User</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Role</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Added</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!members.length" class="border-b">
-                    <td colspan="4" class="px-4 py-8 text-center text-sm text-muted-foreground">
-                      No members yet.
-                    </td>
-                  </tr>
-                  <tr v-for="m in members" :key="m.user_id" class="border-b hover:bg-muted/30 transition-colors">
-                    <td class="px-4 py-2.5">
-                      <div class="flex items-center gap-2">
-                        <User class="size-4 text-muted-foreground" />
-                        <span class="text-sm font-medium">{{ m.display_name || m.user_id }}</span>
-                        <code class="text-[10px] bg-muted px-1 rounded">{{ m.user_id }}</code>
-                      </div>
-                    </td>
-                    <td class="px-4 py-2.5">
-                      <Badge variant="secondary" class="text-xs">{{ m.role }}</Badge>
-                    </td>
-                    <td class="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">
-                      {{ new Date(m.added_at).toLocaleDateString() }}
-                    </td>
-                    <td class="px-4 py-2.5 text-right">
-                      <Button variant="ghost" size="sm" class="h-7 text-destructive" @click="removeMember(m.user_id)">
-                        <Trash2 class="size-3.5" />
-                      </Button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </TabsContent>
+    <Card v-else>
+      <CardContent class="pt-6 text-sm text-muted-foreground">Loading schema…</CardContent>
+    </Card>
 
-        <!-- Settings tab -->
-        <TabsContent value="settings" class="space-y-4">
-          <Card class="p-4 space-y-4">
-            <h3 class="font-medium">Project Settings</h3>
-            <div class="space-y-3">
-              <div>
-                <label class="text-sm font-medium">Name</label>
-                <Input v-model="editName" class="mt-1" />
-              </div>
-              <div>
-                <label class="text-sm font-medium">Description</label>
-                <Input v-model="editDescription" class="mt-1" />
-              </div>
-            </div>
-            <Button @click="saveSettings" :disabled="!editName">Save Changes</Button>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </template>
-
-    <!-- Add Member Dialog -->
-    <Dialog v-model:open="showAddMember">
-      <DialogContent class="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add Member</DialogTitle>
-        </DialogHeader>
-        <div class="space-y-3 py-2">
-          <div>
-            <label class="text-sm font-medium">User ID</label>
-            <Input v-model="newMemberUserId" placeholder="user ID" class="mt-1" />
-          </div>
-        </div>
-        <div class="flex justify-end gap-2 pt-2">
-          <Button variant="outline" @click="showAddMember = false">Cancel</Button>
-          <Button @click="addMember" :disabled="!newMemberUserId">
-            <UserPlus class="size-3.5 mr-1" /> Add
+    <Card>
+      <CardHeader class="pb-3">
+        <div class="flex items-center justify-between gap-4">
+          <CardTitle class="text-sm">Members</CardTitle>
+          <Button variant="outline" size="sm" @click="showAddMember = true">
+            <UserPlus class="mr-1 size-3.5" /> Add Member
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </CardHeader>
+      <CardContent>
+        <div v-if="members.length" class="space-y-2">
+          <div
+            v-for="member in members"
+            :key="member.user_id"
+            class="flex items-center justify-between rounded-lg border bg-muted/30 p-3"
+          >
+            <div>
+              <p class="text-sm font-medium">{{ member.display_name || member.user_id }}</p>
+              <p class="text-xs text-muted-foreground">{{ member.role }}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="size-8 text-muted-foreground hover:text-destructive"
+              @click="removeMember(member.user_id)"
+            >
+              <Trash2 class="size-3.5" />
+            </Button>
+          </div>
+        </div>
+        <p v-else class="text-sm text-muted-foreground">No members yet. Add users to this project.</p>
+      </CardContent>
+    </Card>
 
-    <!-- Delete Confirmation Dialog -->
+    <Card>
+      <CardHeader class="pb-3">
+        <CardTitle class="text-sm">System Information</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl class="grid grid-cols-[100px_1fr] gap-x-4 gap-y-2 text-sm">
+          <dt class="text-muted-foreground">ID</dt>
+          <dd class="font-mono text-xs break-all">{{ project.id }}</dd>
+          <dt class="text-muted-foreground">Org</dt>
+          <dd>{{ project.org_id || '—' }}</dd>
+          <dt class="text-muted-foreground">Schema</dt>
+          <dd>{{ project.schema_id || '—' }}</dd>
+          <dt class="text-muted-foreground">Created</dt>
+          <dd>{{ formatDateTime(project.created_at) }}</dd>
+          <dt class="text-muted-foreground">Updated</dt>
+          <dd>{{ formatDateTime(project.updated_at) }}</dd>
+        </dl>
+      </CardContent>
+    </Card>
+
+    <div v-if="error" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+      {{ error }}
+    </div>
+
     <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Delete Project</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete <strong>{{ project?.name }}</strong>? This action cannot be undone.
+            Are you sure you want to delete <strong>{{ projectTitle }}</strong>? This action cannot be undone.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter class="gap-2">
           <Button variant="outline" @click="showDeleteConfirm = false">Cancel</Button>
-          <Button variant="destructive" @click="deleteProject" :disabled="deleting">
+          <Button variant="destructive" :disabled="deleting" @click="deleteProject">
             {{ deleting ? 'Deleting…' : 'Delete' }}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog v-model:open="showAddMember">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Member</DialogTitle>
+          <DialogDescription>Add a user by ID to this project.</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-2 py-2">
+          <Label for="project-member-user-id">User ID</Label>
+          <Input id="project-member-user-id" v-model="newMemberUserId" placeholder="user ID" />
+        </div>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showAddMember = false">Cancel</Button>
+          <Button :disabled="!newMemberUserId.trim()" @click="addMember">
+            <UserPlus class="mr-1 size-3.5" /> Add
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Button variant="link" as-child class="px-0 text-muted-foreground">
+      <router-link to="/projects">← Back to Projects</router-link>
+    </Button>
   </div>
+
+  <div v-else class="flex h-48 items-center justify-center text-muted-foreground">Loading…</div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { projectApi, type Project, type Member } from '@/api/resources'
-import { toast } from 'vue-sonner'
-
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { projectApi, type Member, type Project } from '@/api/resources'
+import SchemaTabsEditor from '@/console/components/SchemaTabsEditor.vue'
+import { useOrgContext } from '@/console/composables/useOrgContext'
+import {
+  buildCurlSnippets,
+  buildResourceWriteBody,
+  loadResourceSchemaContext,
+  normalizeResourceData,
+  type ResourceSchemaContext,
+} from '@/console/utils/schema-resource'
+import { formatDateTime } from '@/console/utils/format'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Label } from '@/components/ui/label'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { RefreshCw, ArrowLeft, Users, User, UserPlus, Trash2, Settings } from 'lucide-vue-next'
+import { ArrowLeft, Trash2, UserPlus } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
+const { currentOrgId } = useOrgContext()
 
-const loading = ref(true)
 const project = ref<Project | null>(null)
 const members = ref<Member[]>([])
-const activeTab = ref('members')
+const formData = ref<Record<string, any>>({})
+const schemaContext = ref<ResourceSchemaContext>({
+  display: {},
+  schema: null,
+  schemaId: '',
+  schemaType: 'project',
+  versions: [],
+})
+const jsonValid = ref(true)
+const saving = ref(false)
+const deleting = ref(false)
+const error = ref('')
+const showDeleteConfirm = ref(false)
 const showAddMember = ref(false)
 const newMemberUserId = ref('')
-const editName = ref('')
-const editDescription = ref('')
-const showDeleteConfirm = ref(false)
-const deleting = ref(false)
 
-async function fetchProject() {
-  const id = route.params.id as string
-  loading.value = true
+const projectId = computed(() => String(route.params.id || ''))
+const projectTitle = computed(() => String(formData.value.name || project.value?.name || 'Project'))
+const payload = computed(() => buildResourceWriteBody('project', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
+const curlSnippets = computed(() => buildCurlSnippets({
+  path: `/v1/projects/${encodeURIComponent(projectId.value)}`,
+  body: payload.value,
+  includeOrgHeader: true,
+  orgId: currentOrgId.value,
+  methods: ['GET', 'PATCH'],
+}))
+
+async function loadProject() {
+  if (!projectId.value) return
+  error.value = ''
   try {
-    project.value = await projectApi.get(id)
-    editName.value = project.value.name
-    editDescription.value = project.value.description
-    members.value = await projectApi.listMembers(id)
+    const [loadedProject, loadedMembers] = await Promise.all([
+      projectApi.get(projectId.value),
+      projectApi.listMembers(projectId.value),
+    ])
+    project.value = loadedProject
+    members.value = loadedMembers
+    formData.value = normalizeResourceData(loadedProject.data || {})
+    schemaContext.value = await loadResourceSchemaContext(loadedProject.schema_type || 'project', loadedProject.schema_id || '')
   } catch (err: any) {
-    toast.error('Failed to load project', { description: err.message })
+    error.value = err?.message || 'Failed to load project'
+  }
+}
+
+async function save() {
+  if (!project.value) return
+  saving.value = true
+  error.value = ''
+  try {
+    project.value = await projectApi.update(project.value.id, payload.value)
+    formData.value = normalizeResourceData(project.value.data || {})
+  } catch (err: any) {
+    error.value = err?.message || 'Failed to update project'
   } finally {
-    loading.value = false
-  }
-}
-
-async function addMember() {
-  const id = route.params.id as string
-  try {
-    await projectApi.addMember(id, newMemberUserId.value)
-    toast.success('Member added')
-    showAddMember.value = false
-    newMemberUserId.value = ''
-    members.value = await projectApi.listMembers(id)
-  } catch (err: any) {
-    toast.error('Failed to add member', { description: err.message })
-  }
-}
-
-async function removeMember(userId: string) {
-  const id = route.params.id as string
-  try {
-    await projectApi.removeMember(id, userId)
-    toast.success('Member removed')
-    members.value = await projectApi.listMembers(id)
-  } catch (err: any) {
-    toast.error('Failed to remove member', { description: err.message })
-  }
-}
-
-async function saveSettings() {
-  const id = route.params.id as string
-  try {
-    project.value = await projectApi.update(id, { name: editName.value, description: editDescription.value })
-    toast.success('Project updated')
-  } catch (err: any) {
-    toast.error('Failed to update project', { description: err.message })
+    saving.value = false
   }
 }
 
 async function deleteProject() {
-  const id = route.params.id as string
+  if (!project.value) return
   deleting.value = true
   try {
-    await projectApi.delete(id)
-    toast.success('Project deleted')
+    await projectApi.delete(project.value.id)
     router.push('/projects')
   } catch (err: any) {
-    toast.error('Failed to delete project', { description: err.message })
+    error.value = err?.message || 'Failed to delete project'
     showDeleteConfirm.value = false
   } finally {
     deleting.value = false
   }
 }
 
-onMounted(fetchProject)
+async function addMember() {
+  if (!project.value) return
+  try {
+    await projectApi.addMember(project.value.id, newMemberUserId.value.trim())
+    newMemberUserId.value = ''
+    showAddMember.value = false
+    members.value = await projectApi.listMembers(project.value.id)
+  } catch (err: any) {
+    error.value = err?.message || 'Failed to add member'
+  }
+}
+
+async function removeMember(userId: string) {
+  if (!project.value) return
+  try {
+    await projectApi.removeMember(project.value.id, userId)
+    members.value = await projectApi.listMembers(project.value.id)
+  } catch (err: any) {
+    error.value = err?.message || 'Failed to remove member'
+  }
+}
+
+onMounted(loadProject)
+watch(projectId, loadProject)
 </script>

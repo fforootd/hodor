@@ -11,19 +11,25 @@ import (
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/login"
 )
 
 // --- Session types ---
 
 type SessionResponse struct {
-	ID        string  `json:"id"`
-	IduserID  string  `json:"user_id"`
-	OrgID     string  `json:"org_id"`
-	UserAgent string  `json:"user_agent,omitempty"`
-	IPAddress string  `json:"ip_address,omitempty"`
-	CreatedAt string  `json:"created_at"`
-	ExpiresAt string  `json:"expires_at"`
-	RevokedAt *string `json:"revoked_at,omitempty"`
+	ID           string         `json:"id"`
+	IduserID     string         `json:"user_id"`
+	OrgID        string         `json:"org_id"`
+	AuthMethod   string         `json:"auth_method,omitempty"`
+	ProviderID   string         `json:"provider_id,omitempty"`
+	ProviderKind string         `json:"provider_kind,omitempty"`
+	LoginFlowID  string         `json:"login_flow_id,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	UserAgent    string         `json:"user_agent,omitempty"`
+	IPAddress    string         `json:"ip_address,omitempty"`
+	CreatedAt    string         `json:"created_at"`
+	ExpiresAt    string         `json:"expires_at"`
+	RevokedAt    *string        `json:"revoked_at,omitempty"`
 }
 
 type CreateSessionRequest struct {
@@ -120,7 +126,7 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := a.CreateSessionInternal(r.Context(), req.IduserID, req.UserAgent, req.IPAddress, nil)
+	resp, err := a.CreateSessionInternal(r.Context(), req.IduserID, req.UserAgent, req.IPAddress, nil, nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -131,7 +137,7 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 
 // CreateSessionInternal creates a session programmatically (used by UI login).
 // signals may be nil for legacy callers.
-func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals) (*CreateSessionResponse, error) {
+func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals, provenance *login.SessionProvenance) (*CreateSessionResponse, error) {
 	sessionID := id.New()
 
 	rawToken, tokenHash, err := generatePrefixedToken(PrefixSession)
@@ -165,6 +171,23 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 			metadata["telemetry"] = map[string]any{
 				"request_id": signals.RequestID,
 			}
+		}
+	}
+	if provenance != nil {
+		if provenance.AuthMethod != "" {
+			metadata["auth_method"] = provenance.AuthMethod
+		}
+		if provenance.ProviderID != "" {
+			metadata["provider_id"] = provenance.ProviderID
+		}
+		if provenance.ProviderKind != "" {
+			metadata["provider_kind"] = provenance.ProviderKind
+		}
+		if provenance.LoginFlowID != "" {
+			metadata["login_flow_id"] = provenance.LoginFlowID
+		}
+		if len(provenance.AuthContext) > 0 {
+			metadata["auth_context"] = provenance.AuthContext
 		}
 	}
 	metadataJSON, _ := json.Marshal(metadata)
@@ -210,9 +233,14 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	}
 
 	emitEvent(ctx, tx, "session.created", userID, sessionID, "session", map[string]any{
-		"user_id":    userID,
-		"user_agent": userAgent,
-		"ip_address": ipAddress,
+		"user_id":       userID,
+		"user_agent":    userAgent,
+		"ip_address":    ipAddress,
+		"auth_method":   metadata["auth_method"],
+		"provider_id":   metadata["provider_id"],
+		"provider_kind": metadata["provider_kind"],
+		"login_flow_id": metadata["login_flow_id"],
+		"auth_context":  metadata["auth_context"],
 	})
 
 	if err := tx.Commit(); err != nil {
@@ -235,13 +263,18 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 
 	return &CreateSessionResponse{
 		Session: SessionResponse{
-			ID:        sessionID,
-			IduserID:  userID,
-			OrgID:     "",
-			UserAgent: userAgent,
-			IPAddress: ipAddress,
-			CreatedAt: now.Format(time.RFC3339),
-			ExpiresAt: expiresAt.Format(time.RFC3339),
+			ID:           sessionID,
+			IduserID:     userID,
+			OrgID:        "",
+			AuthMethod:   stringOr(metadata["auth_method"]),
+			ProviderID:   stringOr(metadata["provider_id"]),
+			ProviderKind: stringOr(metadata["provider_kind"]),
+			LoginFlowID:  stringOr(metadata["login_flow_id"]),
+			Metadata:     metadata,
+			UserAgent:    userAgent,
+			IPAddress:    ipAddress,
+			CreatedAt:    now.Format(time.RFC3339),
+			ExpiresAt:    expiresAt.Format(time.RFC3339),
 		},
 		Token: rawToken,
 	}, nil
@@ -267,11 +300,11 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.URL.Query().Get("user_id"), ""
 	limit := 50
 
-	query := `SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+	query := `SELECT id, user_id, org_id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at, revoked_at
 	          FROM sessions ORDER BY created_at DESC LIMIT ?`
 	args := []any{limit}
 	if userID != "" {
-		query = `SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+		query = `SELECT id, user_id, org_id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at, revoked_at
 		         FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
 		args = []any{userID, limit}
 	}
@@ -286,7 +319,9 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	var sessions []SessionResponse
 	for rows.Next() {
 		var s SessionResponse
-		rows.Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
+		var metadataJSON string
+		rows.Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &metadataJSON, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
+		applySessionMetadata(&s, metadataJSON)
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -355,9 +390,33 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 
 func (a *API) loadSession(ctx context.Context, sessionID string) (SessionResponse, error) {
 	var s SessionResponse
+	var metadataJSON string
 	err := a.db.SQL().QueryRowContext(ctx,
-		`SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
+		`SELECT id, user_id, org_id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at, revoked_at
 		 FROM sessions WHERE id = ?`, sessionID,
-	).Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
+	).Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &metadataJSON, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
+	applySessionMetadata(&s, metadataJSON)
 	return s, err
+}
+
+func applySessionMetadata(sess *SessionResponse, metadataJSON string) {
+	if sess == nil {
+		return
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return
+	}
+	sess.Metadata = metadata
+	sess.AuthMethod = stringOr(metadata["auth_method"])
+	sess.ProviderID = stringOr(metadata["provider_id"])
+	sess.ProviderKind = stringOr(metadata["provider_kind"])
+	sess.LoginFlowID = stringOr(metadata["login_flow_id"])
+}
+
+func stringOr(value any) string {
+	if str, ok := value.(string); ok {
+		return str
+	}
+	return ""
 }

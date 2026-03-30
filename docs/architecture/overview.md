@@ -28,6 +28,7 @@ graph TB
         subgraph APIs["API Layer (REST+JSON)"]
             SessionAPI["Session API"]
             IdentityAPI["Identity Service"]
+            CatalogAPI["Catalog / Marketplace API"]
             OIDC_EP["OIDC Provider<br/>(zitadel/oidc)"]
             SCIM_EP["SCIM API"]
             MgmtAPI["Management API"]
@@ -91,6 +92,7 @@ graph TB
 
     SessionMW --> SessionAPI
     SessionMW --> IdentityAPI
+    SessionMW --> CatalogAPI
     SessionMW --> OIDC_EP
     SessionMW --> MgmtAPI
     SessionMW --> AnalyticsAPI
@@ -171,6 +173,7 @@ sequenceDiagram
 2. **FGA is pre-fetched** — authorization context batch-loaded BEFORE handler execution. Zero live FGA calls during request.
 3. **Response before async** — client gets a response immediately after DB commit. Notifications and threat evaluation happen asynchronously.
 4. **Events drive everything** — notifications, OTEL export, and threat detection all consume from the events table.
+5. **Session provenance is persisted** — when available, sessions and auth events record `auth_method`, `provider_id`, `provider_kind`, and `login_flow_id`.
 
 ## External Domain Handling
 
@@ -209,3 +212,9 @@ graph LR
 | **Dev / Homelab** | SQLite (WAL mode) | Local filesystem |
 | **Production** | PostgreSQL (primary + replicas) | Postgres |
 | **Cloud** | PostgreSQL (per-region) | Postgres |
+
+## Provider / Flow / Session Boundaries
+
+- **Provider**: connection settings, inbound claim mapping, target schema, and linking rules
+- **Login Flow**: user-facing UX plus which providers are visible for that flow
+- **Session**: created auth state with provenance about which flow and provider produced it

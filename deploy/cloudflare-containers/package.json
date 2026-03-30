@@ -9,11 +9,11 @@
     "containers:images": "wrangler containers images list"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.1.0"
+    "@cloudflare/containers": "^0.2.1"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0",
+    "@cloudflare/workers-types": "^4.0.0",
     "typescript": "^5.7.0",
-    "@cloudflare/workers-types": "^4.0.0"
+    "wrangler": "^4.0.0"
   }
 }

@@ -113,6 +113,15 @@ function credentialsMode(baseUrl = BASE_URL): RequestCredentials {
   }
 }
 
+function getCurrentOrgHeader(): string | null {
+  try {
+    const orgId = localStorage.getItem('zitadel_org')
+    return orgId && orgId.trim() ? orgId.trim() : null
+  } catch {
+    return null
+  }
+}
+
 // ─── Request Context ───────────────────────────────────────
 // Each page navigation generates a new request_id (transmitted via W3C
 // Traceparent header). The server extracts the trace-id portion and stores
@@ -149,6 +158,12 @@ async function fetchWithContext(
   const headers = new Headers(opts.headers || {})
   if (!(opts.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
+  }
+  if (!headers.has('X-Org-Id')) {
+    const orgId = getCurrentOrgHeader()
+    if (orgId) {
+      headers.set('X-Org-Id', orgId)
+    }
   }
 
   try {

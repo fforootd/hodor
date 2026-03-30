@@ -34,9 +34,15 @@
     {
       "id": "google-oidc",
       "type": "provider",
+      "kind": "google",
+      "protocol": "oidc",
       "name": "Google OIDC",
       "description": "Google identity provider with standard claim mappings for email, name, and profile picture.",
       "tags": ["oidc", "social-login", "google"],
+      "official": true,
+      "capabilities": ["catalog", "social", "oidc", "auto-link"],
+      "logo_url": "https://developers.google.com/identity/images/g-logo.png",
+      "docs_url": "https://developers.google.com/identity/openid-connect/openid-connect",
       "version": "1.0.0",
       "author": "zitadel",
       "path": "templates/providers/google-oidc.json"
@@ -44,9 +50,15 @@
     {
       "id": "entra-id",
       "type": "provider",
+      "kind": "entra",
+      "protocol": "oidc",
       "name": "Microsoft Entra ID",
       "description": "Microsoft Entra ID (Azure AD) provider with tenant-aware OIDC configuration and claim mappings.",
       "tags": ["oidc", "enterprise", "microsoft", "azure"],
+      "official": true,
+      "capabilities": ["catalog", "enterprise", "oidc", "auto-link"],
+      "logo_url": "https://learn.microsoft.com/azure/active-directory/fundamentals/media/new-branding-guidelines/logo.png",
+      "docs_url": "https://learn.microsoft.com/entra/identity-platform/v2-protocols-oidc",
       "version": "1.0.0",
       "author": "zitadel",
       "path": "templates/providers/entra-id.json"
@@ -54,9 +66,13 @@
     {
       "id": "custom-oidc",
       "type": "provider",
+      "kind": "custom",
+      "protocol": "oidc",
       "name": "Custom OIDC Provider",
       "description": "Generic OIDC provider template. Connect any OpenID Connect compliant identity provider.",
       "tags": ["oidc", "generic", "custom"],
+      "official": true,
+      "capabilities": ["catalog", "oidc", "custom"],
       "version": "1.0.0",
       "author": "zitadel",
       "path": "templates/providers/custom-oidc.json"
@@ -64,9 +80,15 @@
     {
       "id": "github",
       "type": "provider",
+      "kind": "github",
+      "protocol": "oauth2",
       "name": "GitHub",
       "description": "GitHub OAuth provider with user profile and email claim mappings.",
       "tags": ["oauth", "social-login", "github", "developer"],
+      "official": true,
+      "capabilities": ["catalog", "social", "oauth2", "auto-link"],
+      "logo_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+      "docs_url": "https://docs.github.com/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
       "version": "1.0.0",
       "author": "zitadel",
       "path": "templates/providers/github.json"
@@ -74,9 +96,15 @@
     {
       "id": "gitlab",
       "type": "provider",
+      "kind": "gitlab",
+      "protocol": "oidc",
       "name": "GitLab",
       "description": "GitLab OIDC provider with profile and email claim mappings. Supports self-hosted instances.",
       "tags": ["oidc", "social-login", "gitlab", "developer"],
+      "official": true,
+      "capabilities": ["catalog", "social", "oidc", "auto-link"],
+      "logo_url": "https://about.gitlab.com/images/press/logo/png/gitlab-icon-rgb.png",
+      "docs_url": "https://docs.gitlab.com/integration/openid_connect_provider/",
       "version": "1.0.0",
       "author": "zitadel",
       "path": "templates/providers/gitlab.json"

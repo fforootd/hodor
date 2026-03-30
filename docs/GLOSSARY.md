@@ -11,6 +11,9 @@ This document defines the core vocabulary and terminology mappings for the Zitad
 | **Group** | A first-class collaborative resource plus a navigation/category concept depending on context. In the current prototype, Groups and Projects both exist as distinct resources. | Group / Team |
 | **Path** | An API route alias (e.g., "users" → `/v1/users`). Defined via `x-display`. | - |
 | **App** | An OIDC/SAML Client. It is simply an entity with a specific schema (`app` or `app_saml`). | OIDC Client, OAuth App |
+| **Provider Kind** | The marketplace/provider family identifier, such as `google`, `github`, `gitlab`, `entra`, or `custom`. | Template family / vendor preset |
+| **Protocol** | The runtime federation adapter used by a provider, such as `oidc`, `oauth2`, or `saml`. | Federation protocol |
+| **Catalog Ref** | Metadata linking an installed resource back to a catalog template and version. | Template origin |
 | **Org** | Organization. The top-level scope/context for filtering entities. | Tenant |
 
 ## Key Paradigms
@@ -30,7 +33,7 @@ The following terms define the structure and scope of the identity intelligence 
 | **Events** | Chronological stream of all discrete observations. Categorized by prefix: `entity.*`, `auth.*`, `request.*`, `log.*`, `signal.*`. | Logs / Audits |
 | **Category** | The top-level classification of an event. Stored as an indexed column, derived from the `event_type` prefix. Values: `entity`, `auth`, `session`, `token`, `request`, `log`, `signal`, `threat`, `system`. | — |
 | **Traces** | Correlated causal chains of events relying on `trace_id` and `span_id`. Provides end-to-end visibility from client SDK interactions to platform actions. | Activity / APM |
-| **Sessions** | Live authenticated state management. Bridges identities and historical events by providing a point of active security enforcement/revocation. | Sessions / Grants |
+| **Sessions** | Live authenticated state management. Bridges identities and historical events by providing a point of active security enforcement/revocation. Session metadata also carries auth provenance such as `auth_method`, `provider_id`, `provider_kind`, and `login_flow_id`. | Sessions / Grants |
 | **Cache** | A per-process SQLite database (`./data/zitadel-cache.db`) used as a durable buffer for analytics writes, settings cache, and rate limiter state. Disposable — can be deleted or run on tmpfs. Not a source of truth. | Local WAL / Sidecar cache |
 
 ### Event Categories

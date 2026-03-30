@@ -2,11 +2,11 @@
   <div class="space-y-6">
     <div class="flex items-center gap-3">
       <Button variant="ghost" size="icon" as-child>
-        <router-link to="/applications"><ArrowLeft class="size-4" /></router-link>
+        <router-link to="/projects"><ArrowLeft class="size-4" /></router-link>
       </Button>
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight">Create Application</h1>
-        <p class="text-sm text-muted-foreground">Fill the schema form, inspect the JSON payload, or copy the API call directly.</p>
+        <h1 class="text-2xl font-semibold tracking-tight">Create Project</h1>
+        <p class="text-sm text-muted-foreground">Define the project with schema fields, inspect the JSON, or copy the request cURL.</p>
       </div>
     </div>
 
@@ -15,7 +15,7 @@
       v-model="formData"
       :schema="schemaContext.schema"
       :curl-snippets="curlSnippets"
-      form-title="Application Fields"
+      form-title="Project Fields"
       @update:json-valid="(value) => jsonValid = value"
     />
 
@@ -25,10 +25,10 @@
 
     <div class="flex justify-end gap-3">
       <Button variant="outline" as-child>
-        <router-link to="/applications">Cancel</router-link>
+        <router-link to="/projects">Cancel</router-link>
       </Button>
       <Button :disabled="submitting || !jsonValid" @click="submit">
-        {{ submitting ? 'Creating…' : 'Create Application' }}
+        {{ submitting ? 'Creating…' : 'Create Project' }}
       </Button>
     </div>
 
@@ -41,7 +41,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { appApi } from '@/api/resources'
+import { projectApi } from '@/api/resources'
 import SchemaTabsEditor from '@/console/components/SchemaTabsEditor.vue'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import {
@@ -61,23 +61,18 @@ const { currentOrgId } = useOrgContext()
 const submitting = ref(false)
 const error = ref('')
 const jsonValid = ref(true)
-const formData = ref<Record<string, any>>({
-  app_type: 'web',
-  redirect_uris: [],
-  grant_types: ['authorization_code'],
-  response_types: ['code'],
-})
+const formData = ref<Record<string, any>>({})
 const schemaContext = ref<ResourceSchemaContext>({
   display: {},
   schema: null,
   schemaId: '',
-  schemaType: 'app',
+  schemaType: 'project',
   versions: [],
 })
 
-const payload = computed(() => buildResourceWriteBody('app', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
+const payload = computed(() => buildResourceWriteBody('project', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
 const curlSnippets = computed(() => buildCurlSnippets({
-  path: '/v1/apps',
+  path: '/v1/projects',
   body: payload.value,
   includeOrgHeader: true,
   orgId: currentOrgId.value,
@@ -85,17 +80,17 @@ const curlSnippets = computed(() => buildCurlSnippets({
 }))
 
 onMounted(async () => {
-  schemaContext.value = await loadResourceSchemaContext('app')
+  schemaContext.value = await loadResourceSchemaContext('project')
 })
 
 async function submit() {
   submitting.value = true
   error.value = ''
   try {
-    const created = await appApi.create(payload.value)
-    router.push(`/applications/${created.id}`)
+    const created = await projectApi.create(payload.value)
+    router.push(`/projects/${created.id}`)
   } catch (err: any) {
-    error.value = err?.message || 'Failed to create application'
+    error.value = err?.message || 'Failed to create project'
   } finally {
     submitting.value = false
   }

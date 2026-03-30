@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -80,15 +81,26 @@ func searchDefs() []searchDef {
 		},
 		{
 			resourceType: "provider",
-			query: `SELECT id, name, protocol, template FROM providers
+			query: `SELECT id, name, protocol, COALESCE(metadata,'{}') FROM providers
 				WHERE name LIKE ?
 				ORDER BY name LIMIT ?`,
 			scan: func(rows *sql.Rows) (SearchResult, error) {
-				var id, name, protocol, tmpl string
-				if err := rows.Scan(&id, &name, &protocol, &tmpl); err != nil {
+				var id, name, protocol, metadataJSON string
+				if err := rows.Scan(&id, &name, &protocol, &metadataJSON); err != nil {
 					return SearchResult{}, err
 				}
-				return SearchResult{ResourceType: "provider", ID: id, Title: name, Subtitle: protocol + " · " + tmpl}, nil
+				kind := ""
+				var metadata map[string]any
+				if err := json.Unmarshal([]byte(metadataJSON), &metadata); err == nil {
+					if v, ok := metadata["kind"].(string); ok {
+						kind = v
+					}
+				}
+				subtitle := protocol
+				if kind != "" {
+					subtitle += " · " + kind
+				}
+				return SearchResult{ResourceType: "provider", ID: id, Title: name, Subtitle: subtitle}, nil
 			},
 		},
 	}

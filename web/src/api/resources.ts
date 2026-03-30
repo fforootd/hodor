@@ -274,18 +274,21 @@ export interface Org {
   id: string
   name: string
   state?: string
+  schema_id?: string
+  schema_type?: string
   metadata?: Record<string, unknown>
+  data?: Record<string, unknown>
   created_at?: string
   updated_at?: string
 }
 
 export const orgApi = {
-  list: (): Promise<Org[]> => unwrapItems<Org>(listOrgs()),
-  get: (id: string): Promise<Org> => api.get<Org>(`/v1/orgs/${encodeURIComponent(id)}`),
-  create: (data: { name: string; metadata?: Record<string, unknown> }): Promise<Org> =>
-    api.post<Org>('/v1/orgs', data),
-  update: (id: string, data: Partial<{ name: string; state: string; metadata: Record<string, unknown> }>): Promise<Org> =>
-    api.patch<Org>(`/v1/orgs/${encodeURIComponent(id)}`, data),
+  list: (): Promise<Org[]> => unwrapItems<Org>(listOrgs()).then(items => items.map(normalizeOrg)),
+  get: (id: string): Promise<Org> => api.get<Org>(`/v1/orgs/${encodeURIComponent(id)}`).then(normalizeOrg),
+  create: (data: { name?: string; schema_id?: string; metadata?: Record<string, unknown>; data?: Record<string, unknown> }): Promise<Org> =>
+    api.post<Org>('/v1/orgs', data).then(normalizeOrg),
+  update: (id: string, data: Partial<{ name: string; state: string; metadata: Record<string, unknown>; data: Record<string, unknown> }>): Promise<Org> =>
+    api.patch<Org>(`/v1/orgs/${encodeURIComponent(id)}`, data).then(normalizeOrg),
   delete: (id: string): Promise<void> =>
     api.delete(`/v1/orgs/${encodeURIComponent(id)}`),
 }
@@ -320,14 +323,20 @@ export interface App {
   id: string
   org_id: string
   name: string
+  description?: string
   app_type: string
   client_id: string
   client_secret?: string
   redirect_uris: string[]
+  post_logout_redirect_uris?: string[]
   grant_types: string[]
   response_types: string[]
+  logo_uri?: string
   state: string
+  schema_id?: string
+  schema_type?: string
   metadata?: Record<string, unknown>
+  data?: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -339,8 +348,8 @@ export const appApi = {
   },
   get: (id: string): Promise<App> =>
     api.get<App>(`/v1/apps/${encodeURIComponent(id)}`).then(normalizeApp),
-  create: (data: Partial<App> & { name: string }): Promise<App> =>
-    api.post<App>('/v1/apps', data),
+  create: (data: Partial<App> & { name?: string; data?: Record<string, unknown> }): Promise<App> =>
+    api.post<App>('/v1/apps', data).then(normalizeApp),
   update: (id: string, data: Partial<App>): Promise<App> =>
     api.patch<App>(`/v1/apps/${encodeURIComponent(id)}`, data).then(normalizeApp),
   delete: (id: string): Promise<void> =>
@@ -361,7 +370,23 @@ function normalizeApp(app: any): App {
   if (typeof app.metadata === 'string') {
     try { app.metadata = JSON.parse(app.metadata) } catch { app.metadata = {} }
   }
+  if (typeof app.data === 'string') {
+    try { app.data = JSON.parse(app.data) } catch { app.data = {} }
+  }
+  if (typeof app.post_logout_redirect_uris === 'string') {
+    try { app.post_logout_redirect_uris = JSON.parse(app.post_logout_redirect_uris) } catch { app.post_logout_redirect_uris = [] }
+  }
   return app as App
+}
+
+function normalizeOrg(org: any): Org {
+  if (typeof org.metadata === 'string') {
+    try { org.metadata = JSON.parse(org.metadata) } catch { org.metadata = {} }
+  }
+  if (typeof org.data === 'string') {
+    try { org.data = JSON.parse(org.data) } catch { org.data = {} }
+  }
+  return org as Org
 }
 
 // ------------------------------------------------------------------
@@ -499,7 +524,10 @@ export interface Group {
   name: string
   description: string
   state: string
+  schema_id?: string
+  schema_type?: string
   metadata?: Record<string, unknown>
+  data?: Record<string, unknown>
   member_count: number
   created_at: string
   updated_at: string
@@ -515,14 +543,14 @@ export interface Member {
 export const groupApi = {
   list: (orgId?: string): Promise<Group[]> => {
     const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
-    return api.get<{ items: Group[] }>(`/v1/groups${qs}`).then(r => r.items || [])
+    return api.get<{ items: Group[] }>(`/v1/groups${qs}`).then(r => (r.items || []).map(normalizeGroup))
   },
   get: (id: string): Promise<Group> =>
-    api.get<Group>(`/v1/groups/${encodeURIComponent(id)}`),
-  create: (data: { name: string; description?: string; metadata?: Record<string, unknown> }): Promise<Group> =>
-    api.post<Group>('/v1/groups', data),
-  update: (id: string, data: Partial<{ name: string; description: string; state: string; metadata: Record<string, unknown> }>): Promise<Group> =>
-    api.patch<Group>(`/v1/groups/${encodeURIComponent(id)}`, data),
+    api.get<Group>(`/v1/groups/${encodeURIComponent(id)}`).then(normalizeGroup),
+  create: (data: { name?: string; schema_id?: string; description?: string; metadata?: Record<string, unknown>; data?: Record<string, unknown> }): Promise<Group> =>
+    api.post<Group>('/v1/groups', data).then(normalizeGroup),
+  update: (id: string, data: Partial<{ name: string; description: string; state: string; metadata: Record<string, unknown>; data: Record<string, unknown> }>): Promise<Group> =>
+    api.patch<Group>(`/v1/groups/${encodeURIComponent(id)}`, data).then(normalizeGroup),
   delete: (id: string): Promise<void> =>
     api.delete(`/v1/groups/${encodeURIComponent(id)}`),
   listMembers: (id: string): Promise<Member[]> =>
@@ -542,7 +570,10 @@ export interface Project {
   name: string
   description: string
   state: string
+  schema_id?: string
+  schema_type?: string
   metadata?: Record<string, unknown>
+  data?: Record<string, unknown>
   member_count: number
   created_at: string
   updated_at: string
@@ -551,14 +582,14 @@ export interface Project {
 export const projectApi = {
   list: (orgId?: string): Promise<Project[]> => {
     const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
-    return api.get<{ items: Project[] }>(`/v1/projects${qs}`).then(r => r.items || [])
+    return api.get<{ items: Project[] }>(`/v1/projects${qs}`).then(r => (r.items || []).map(normalizeProject))
   },
   get: (id: string): Promise<Project> =>
-    api.get<Project>(`/v1/projects/${encodeURIComponent(id)}`),
-  create: (data: { name: string; description?: string; metadata?: Record<string, unknown> }): Promise<Project> =>
-    api.post<Project>('/v1/projects', data),
-  update: (id: string, data: Partial<{ name: string; description: string; state: string; metadata: Record<string, unknown> }>): Promise<Project> =>
-    api.patch<Project>(`/v1/projects/${encodeURIComponent(id)}`, data),
+    api.get<Project>(`/v1/projects/${encodeURIComponent(id)}`).then(normalizeProject),
+  create: (data: { name?: string; schema_id?: string; description?: string; metadata?: Record<string, unknown>; data?: Record<string, unknown> }): Promise<Project> =>
+    api.post<Project>('/v1/projects', data).then(normalizeProject),
+  update: (id: string, data: Partial<{ name: string; description: string; state: string; metadata: Record<string, unknown>; data: Record<string, unknown> }>): Promise<Project> =>
+    api.patch<Project>(`/v1/projects/${encodeURIComponent(id)}`, data).then(normalizeProject),
   delete: (id: string): Promise<void> =>
     api.delete(`/v1/projects/${encodeURIComponent(id)}`),
   listMembers: (id: string): Promise<Member[]> =>
@@ -567,6 +598,26 @@ export const projectApi = {
     api.post<Member>(`/v1/projects/${encodeURIComponent(id)}/members`, { user_id: userId, role }),
   removeMember: (id: string, userId: string): Promise<void> =>
     api.delete(`/v1/projects/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`),
+}
+
+function normalizeGroup(group: any): Group {
+  if (typeof group.metadata === 'string') {
+    try { group.metadata = JSON.parse(group.metadata) } catch { group.metadata = {} }
+  }
+  if (typeof group.data === 'string') {
+    try { group.data = JSON.parse(group.data) } catch { group.data = {} }
+  }
+  return group as Group
+}
+
+function normalizeProject(project: any): Project {
+  if (typeof project.metadata === 'string') {
+    try { project.metadata = JSON.parse(project.metadata) } catch { project.metadata = {} }
+  }
+  if (typeof project.data === 'string') {
+    try { project.data = JSON.parse(project.data) } catch { project.data = {} }
+  }
+  return project as Project
 }
 
 // ------------------------------------------------------------------
@@ -586,4 +637,3 @@ export const moduleApi = {
   disable: (name: string): Promise<void> =>
     api.post<void>(`/v1/modules/${encodeURIComponent(name)}/disable`, {}),
 }
-

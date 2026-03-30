@@ -34,10 +34,23 @@
         "passkey",
         "magic_link",
         "sso",
+        "registration",
         "pat",
         "client_secret"
       ],
       "description": "How the session was created"
+    },
+    "provider_id": {
+      "type": "string",
+      "description": "Identity provider used to create the session, when auth_method=sso"
+    },
+    "provider_kind": {
+      "type": "string",
+      "description": "Provider family such as google, github, gitlab, entra, or custom"
+    },
+    "login_flow_id": {
+      "type": "string",
+      "description": "Login flow that created this session, when applicable"
     },
     "mfa_verified": {
       "type": "boolean",

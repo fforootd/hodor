@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
+	providers "github.com/zitadel/zitadel/internal/provider"
 	"strings"
 	"sync"
 
@@ -33,15 +34,21 @@ type Index struct {
 
 // Template is a single catalog entry (metadata only, not the payload).
 type Template struct {
-	ID          string   `json:"id"`
-	Type        string   `json:"type"` // action | provider | authorization | schema
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags"`
-	Version     string   `json:"version"`
-	Author      string   `json:"author,omitempty"`
-	Path        string   `json:"path"`   // relative path to template JSON
-	Source      string   `json:"source"` // "embedded" | "remote" | "cached"
+	ID           string   `json:"id"`
+	Type         string   `json:"type"` // action | provider | authorization | schema
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Kind         string   `json:"kind,omitempty"`
+	Protocol     string   `json:"protocol,omitempty"`
+	Official     bool     `json:"official,omitempty"`
+	Tags         []string `json:"tags"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	LogoURL      string   `json:"logo_url,omitempty"`
+	DocsURL      string   `json:"docs_url,omitempty"`
+	Version      string   `json:"version"`
+	Author       string   `json:"author,omitempty"`
+	Path         string   `json:"path"`   // relative path to template JSON
+	Source       string   `json:"source"` // "embedded" | "remote" | "cached"
 }
 
 // TemplatePayload is the full template content including variables and installable payload.
@@ -214,22 +221,14 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 
 	switch payload.Type {
 	case "provider":
-		protocol, _ := resolved["protocol"].(string)
-		if protocol == "" {
-			protocol = "oidc"
+		repo := providers.NewRepository(s.db)
+		prov, convErr := providerFromResolvedPayload(resolved, tpl)
+		if convErr != nil {
+			return "", convErr
 		}
-		templateName, _ := resolved["template"].(string)
-		if templateName == "" {
-			templateName = templateID
-		}
-		configJSON, _ := json.Marshal(resolved["config"])
-		overridesJSON, _ := json.Marshal(resolved["claim_overrides"])
-		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, orgID, displayName, protocol, templateName,
-			string(configJSON), string(overridesJSON), schemaID, string(dataJSON),
-		)
+		prov.OrgID = orgID
+		prov.Target.SchemaID = schemaID
+		resourceID, err = repo.Create(ctx, resourceID, prov)
 	case "action":
 		hook, _ := resolved["hook"].(string)
 		actionType, _ := resolved["action_type"].(string)
@@ -504,6 +503,92 @@ func hasTag(tags []string, tag string) bool {
 		}
 	}
 	return false
+}
+
+func providerFromResolvedPayload(resolved map[string]any, tpl *Template) (providers.Provider, error) {
+	prov := providers.Provider{
+		DisplayName: fmt.Sprintf("%v", resolved["display_name"]),
+		Kind:        tpl.Kind,
+		Protocol:    firstNonEmptyString(fmt.Sprintf("%v", resolved["protocol"]), tpl.Protocol),
+		Enabled:     true,
+	}
+
+	if connection, ok := resolved["connection"].(map[string]any); ok {
+		prov.Connection = connection
+	} else {
+		prov.Connection = map[string]any{}
+		for _, key := range []string{"issuer", "authorization_url", "token_url", "userinfo_url", "client_id", "client_secret", "scopes"} {
+			if value, ok := resolved[key]; ok {
+				prov.Connection[key] = value
+			}
+		}
+	}
+
+	if mapping, ok := resolved["mapping"].(map[string]any); ok {
+		if claims, ok := mapping["claims"].(map[string]any); ok {
+			prov.Mapping.Claims = make(map[string]string, len(claims))
+			for key, value := range claims {
+				if str, ok := value.(string); ok {
+					prov.Mapping.Claims[key] = str
+				}
+			}
+		}
+	} else if legacyClaims, ok := resolved["claim_mappings"].(map[string]any); ok {
+		prov.Mapping.Claims = make(map[string]string, len(legacyClaims))
+		for key, value := range legacyClaims {
+			if str, ok := value.(string); ok {
+				prov.Mapping.Claims[key] = str
+			}
+		}
+	}
+
+	if target, ok := resolved["target"].(map[string]any); ok {
+		if schemaType, ok := target["schema_type"].(string); ok {
+			prov.Target.SchemaType = schemaType
+		}
+		if schemaID, ok := target["schema_id"].(string); ok {
+			prov.Target.SchemaID = schemaID
+		}
+	}
+	if linking, ok := resolved["linking"].(map[string]any); ok {
+		if mode, ok := linking["mode"].(string); ok {
+			prov.Linking.Mode = mode
+		}
+		if matchBy, ok := linking["match_by"].(string); ok {
+			prov.Linking.MatchBy = matchBy
+		}
+	}
+	if ui, ok := resolved["ui"].(map[string]any); ok {
+		prov.UI = ui
+	}
+	if session, ok := resolved["session"].(map[string]any); ok {
+		prov.Session = session
+	}
+	if enabled, ok := resolved["enabled"].(bool); ok {
+		prov.Enabled = enabled
+	}
+	if catalogMeta, ok := resolved["_catalog"].(map[string]any); ok {
+		prov.CatalogMeta = catalogMeta
+	}
+
+	prov.CatalogRef = providers.CatalogRef{
+		TemplateID:      tpl.ID,
+		TemplateVersion: tpl.Version,
+		Official:        tpl.Official,
+		Capabilities:    tpl.Capabilities,
+		LogoURL:         tpl.LogoURL,
+		DocsURL:         tpl.DocsURL,
+	}
+	return providers.Normalize(prov), nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
 }
 
 // computeHash returns a SHA-256 hex digest of the given data.

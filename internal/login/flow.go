@@ -116,11 +116,21 @@ type LoginFlowRef struct {
 	Version    string `json:"version"`     // semver constraint, e.g. ">=1"
 }
 
+type SSOProviderConfig struct {
+	Mode string   `json:"mode"`
+	IDs  []string `json:"ids"`
+}
+
+type SSOConfig struct {
+	Providers SSOProviderConfig `json:"providers"`
+}
+
 // LoginFlowConfig is the fully extracted config from a login flow schema.
 type LoginFlowConfig struct {
 	Ref         LoginFlowRef       `json:"ref"`
 	Login       LoginConfig        `json:"login"`
 	Branding    BrandingConfig     `json:"branding"`
+	SSO         SSOConfig          `json:"sso"`
 	Captcha     *CaptchaConfig     `json:"captcha,omitempty"`
 	Fingerprint *FingerprintConfig `json:"fingerprint,omitempty"`
 	RateLimit   *RateLimitConfig   `json:"rate_limit,omitempty"`
@@ -146,14 +156,17 @@ type SchemaFieldDef struct {
 
 // SchemaAuthConfig is the fully extracted auth/login/branding config from a schema.
 type SchemaAuthConfig struct {
-	Identifiers []string                    // field names that can be used as identifiers
-	Fields      map[string]AuthFieldConfig  // field name → auth config
-	AuthMethods map[string]*AuthMethodEntry // method name → config (from x-auth-methods)
-	SchemaID    string
-	SchemaType  string
-	Login       LoginConfig
-	Branding    BrandingConfig
-	SchemaProps []SchemaFieldDef // all visible schema fields (for registration)
+	Identifiers            []string                    // field names that can be used as identifiers
+	Fields                 map[string]AuthFieldConfig  // field name → auth config
+	AuthMethods            map[string]*AuthMethodEntry // method name → config (from x-auth-methods)
+	SchemaID               string
+	SchemaType             string
+	Login                  LoginConfig
+	Branding               BrandingConfig
+	SchemaProps            []SchemaFieldDef // all visible schema fields (for registration)
+	RegistrationSchemaType string
+	SSOProviderMode        string
+	SSOProviderIDs         []string
 	// Login flow specific (populated when a login flow schema is linked)
 	LoginFlowID string             `json:"-"` // ID of the linked login flow schema
 	Captcha     *CaptchaConfig     `json:"-"` // from login flow x-captcha
@@ -217,6 +230,7 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 		Login        json.RawMessage `json:"login"`
 		XBranding    json.RawMessage `json:"x-branding"`
 		Branding     json.RawMessage `json:"branding"`
+		SSO          json.RawMessage `json:"sso"`
 		XCaptcha     json.RawMessage `json:"x-captcha"`
 		Captcha      json.RawMessage `json:"captcha"`
 		XFingerprint json.RawMessage `json:"x-fingerprint"`
@@ -244,6 +258,9 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 	}
 	if source := firstNonEmptyRaw(raw.XBranding, raw.Branding); len(source) > 0 {
 		_ = json.Unmarshal(source, &cfg.Branding)
+	}
+	if len(raw.SSO) > 0 {
+		_ = json.Unmarshal(raw.SSO, &cfg.SSO)
 	}
 	if source := firstNonEmptyRaw(raw.XCaptcha, raw.Captcha); len(source) > 0 {
 		var cc CaptchaConfig
@@ -294,6 +311,9 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 
 	cfg.Login = mergeLoginDefaults(cfg.Login)
 	cfg.Branding = mergeBrandingDefaults(cfg.Branding)
+	if cfg.SSO.Providers.Mode == "" {
+		cfg.SSO.Providers.Mode = "all_enabled"
+	}
 	return cfg
 }
 
@@ -785,6 +805,7 @@ type Flow struct {
 	OIDCState     string            // OIDC state parameter
 	RegData       map[string]string // registration form data (accumulated)
 	LoginFlowID   string            // if set, login flow schema was used
+	AuthMethod    string
 
 	// Client signal accumulation (populated during flow, sent to session on complete)
 	CaptchaProvider      string  // "altcha", "hcaptcha", etc.

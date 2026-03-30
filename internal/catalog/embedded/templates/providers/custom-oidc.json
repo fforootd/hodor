@@ -40,17 +40,34 @@
   },
   "payload": {
     "display_name": "{{provider_name}}",
-    "type": "oidc",
-    "issuer": "{{issuer_url}}",
-    "client_id": "{{client_id}}",
-    "client_secret": "{{client_secret}}",
-    "scopes": "{{scopes}}",
-    "claim_mappings": {
-      "email": "{{email_claim}}",
-      "display_name": "{{name_claim}}",
-      "first_name": "claims.given_name",
-      "last_name": "claims.family_name",
-      "picture": "claims.picture"
-    }
+    "kind": "custom",
+    "protocol": "oidc",
+    "connection": {
+      "issuer": "{{issuer_url}}",
+      "client_id": "{{client_id}}",
+      "client_secret": "{{client_secret}}",
+      "scopes": "{{scopes}}"
+    },
+    "mapping": {
+      "claims": {
+        "email": "{{email_claim}}",
+        "display_name": "{{name_claim}}",
+        "first_name": "claims.given_name",
+        "last_name": "claims.family_name",
+        "picture": "claims.picture"
+      }
+    },
+    "target": {
+      "schema_type": "human_user"
+    },
+    "linking": {
+      "mode": "create_or_link",
+      "match_by": "verified_email"
+    },
+    "session": {},
+    "ui": {
+      "display_order": 50
+    },
+    "enabled": true
   }
 }

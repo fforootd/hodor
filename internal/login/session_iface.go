@@ -5,7 +5,7 @@ import "context"
 // SessionCreator abstracts session creation, breaking the import cycle
 // between login and api packages.
 type SessionCreator interface {
-	CreateSessionForLogin(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals) (*CreateSessionResponse, error)
+	CreateSessionForLogin(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals, provenance *SessionProvenance) (*CreateSessionResponse, error)
 	EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any)
 }
 
@@ -21,6 +21,14 @@ type ClientSignals struct {
 	FingerprintHash string  `json:"fingerprint_hash,omitempty"`
 	RequestID       string  `json:"request_id,omitempty"`
 	DocumentLoadMs  float64 `json:"document_load_ms,omitempty"`
+}
+
+type SessionProvenance struct {
+	AuthMethod   string         `json:"auth_method,omitempty"`
+	ProviderID   string         `json:"provider_id,omitempty"`
+	ProviderKind string         `json:"provider_kind,omitempty"`
+	LoginFlowID  string         `json:"login_flow_id,omitempty"`
+	AuthContext  map[string]any `json:"auth_context,omitempty"`
 }
 
 // CreateSessionResponse mirrors api.CreateSessionResponse to avoid import cycle.

@@ -72,6 +72,26 @@
         }
       }
     },
+    "sso": {
+      "type": "object",
+      "description": "SSO provider selection for this flow. Controls which providers appear; provider secrets and mappings still live on provider resources.",
+      "properties": {
+        "providers": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["all_enabled", "allowlist"],
+              "default": "all_enabled"
+            },
+            "ids": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
     "captcha": {
       "type": "object",
       "description": "Captcha configuration (x-captcha)",

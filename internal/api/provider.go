@@ -2,75 +2,14 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	providers "github.com/zitadel/zitadel/internal/provider"
 )
-
-// ProviderTemplate defines a preconfigured IDP preset.
-type ProviderTemplate struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	Protocol       string            `json:"protocol"`
-	DefaultConfig  map[string]any    `json:"default_config"`
-	DefaultScopes  string            `json:"default_scopes"`
-	ClaimOverrides map[string]string `json:"claim_overrides,omitempty"`
-	Description    string            `json:"description"`
-}
-
-var providerTemplates = []ProviderTemplate{
-	{
-		ID: "google", Name: "Google", Protocol: "oidc",
-		Description: "Google Workspace & consumer accounts",
-		DefaultConfig: map[string]any{
-			"issuer": "https://accounts.google.com",
-			"scopes": "openid email profile",
-		},
-	},
-	{
-		ID: "entraid", Name: "Microsoft Entra ID", Protocol: "oidc",
-		Description: "Microsoft Entra ID (Azure AD)",
-		DefaultConfig: map[string]any{
-			"issuer": "https://login.microsoftonline.com/{tenant_id}/v2.0",
-			"scopes": "openid email profile",
-		},
-		ClaimOverrides: map[string]string{
-			"email": "claims.preferred_username ?? claims.email",
-		},
-	},
-	{
-		ID: "gitlab", Name: "GitLab", Protocol: "oidc",
-		Description: "GitLab.com or self-hosted",
-		DefaultConfig: map[string]any{
-			"issuer": "https://gitlab.com",
-			"scopes": "openid email profile",
-		},
-	},
-	{
-		ID: "apple", Name: "Apple", Protocol: "oidc",
-		Description: "Sign in with Apple",
-		DefaultConfig: map[string]any{
-			"issuer": "https://appleid.apple.com",
-			"scopes": "openid email name",
-		},
-		ClaimOverrides: map[string]string{
-			"display_name": "claims.name.firstName + ' ' + claims.name.lastName",
-		},
-	},
-	{
-		ID: "custom", Name: "Custom OIDC", Protocol: "oidc",
-		Description: "Manual OIDC configuration",
-		DefaultConfig: map[string]any{
-			"issuer": "",
-			"scopes": "openid email profile",
-		},
-	},
-}
 
 // RegisterProviderRoutes mounts provider CRUD endpoints.
 func (a *API) RegisterProviderRoutes(mux *http.ServeMux) {
@@ -82,297 +21,127 @@ func (a *API) RegisterProviderRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/providers/{id}", a.requireAdmin(a.deleteProvider))
 }
 
-// --- Templates ---
-
 func (a *API) listProviderTemplates(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"templates": providerTemplates})
+	if a.catalog == nil {
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{"templates": []any{}})
+		return
+	}
+
+	templates := a.catalog.List("provider", "")
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
+		"templates":   templates,
+		"deprecated":  true,
+		"description": "Use /v1/catalog?type=provider for the primary marketplace surface.",
+	})
 }
 
-// --- Create ---
-
 func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name           string            `json:"name"`
-		Protocol       string            `json:"protocol"`
-		Template       string            `json:"template"`
-		Config         map[string]any    `json:"config"`
-		ClaimOverrides map[string]string `json:"claim_overrides"`
-		AutoRegister   *bool             `json:"auto_register"`
-		Enabled        *bool             `json:"enabled"`
-		DisplayOrder   int               `json:"display_order"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	req, err := decodeProviderBody(r)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if req.Protocol == "" {
-		req.Protocol = "oidc"
-	}
-	if req.Template == "" {
-		req.Template = "custom"
-	}
 
-	// Apply template defaults if a known template is selected.
-	if req.Config == nil {
-		req.Config = map[string]any{}
-	}
-	for _, t := range providerTemplates {
-		if t.ID == req.Template {
-			for k, v := range t.DefaultConfig {
-				if _, exists := req.Config[k]; !exists {
-					req.Config[k] = v
-				}
-			}
-			if req.ClaimOverrides == nil && len(t.ClaimOverrides) > 0 {
-				req.ClaimOverrides = t.ClaimOverrides
-			}
-			break
-		}
-	}
-
-	// Validate OIDC config.
-	if req.Protocol == "oidc" {
-		issuer, _ := req.Config["issuer"].(string)
-		clientID, _ := req.Config["client_id"].(string)
-		if issuer == "" || clientID == "" {
-			httputil.WriteError(w, http.StatusBadRequest, "OIDC providers require issuer and client_id in config")
-			return
-		}
-	}
-
-	providerID := id.New()
-
-	autoReg := true
-	if req.AutoRegister != nil {
-		autoReg = *req.AutoRegister
-	}
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-
-	configJSON, _ := json.Marshal(req.Config)
-	overrides := map[string]string{}
-	if req.ClaimOverrides != nil {
-		overrides = req.ClaimOverrides
-	}
-	overridesJSON, _ := json.Marshal(overrides)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	orgID := r.Header.Get("X-Org-Id")
-	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		providerID, orgID, req.Name, req.Protocol, req.Template,
-		string(configJSON), string(overridesJSON),
-		autoReg, enabled, req.DisplayOrder, now, now,
-	)
+	req.OrgID = r.Header.Get("X-Org-Id")
+	repo := providers.NewRepository(a.db.SQL())
+	providerID, err := repo.Create(r.Context(), id.New(), req)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "create provider failed: "+err.Error())
+		return
+	}
+
+	created, err := repo.Get(r.Context(), providerID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "load created provider failed")
 		return
 	}
 
 	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
 	if tx != nil {
 		emitEvent(r.Context(), tx, "provider.created", "", providerID, "provider", map[string]any{
-			"name": req.Name, "protocol": req.Protocol, "template": req.Template,
+			"display_name": created.DisplayName,
+			"kind":         created.Kind,
+			"protocol":     created.Protocol,
 		})
 		_ = tx.Commit()
 	}
 	a.bus.Signal()
 
-	httputil.WriteJSON(w, http.StatusCreated, map[string]any{
-		"id":       providerID,
-		"name":     req.Name,
-		"protocol": req.Protocol,
-		"template": req.Template,
-	})
+	httputil.WriteJSON(w, http.StatusCreated, created)
 }
 
-// --- List ---
-
 func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, protocol, template, config, claim_overrides,
-		        auto_register, enabled, display_order, created_at, updated_at
-		 FROM providers
-		 ORDER BY display_order, name`)
+	repo := providers.NewRepository(a.db.SQL())
+	items, err := repo.List(r.Context())
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	defer rows.Close()
 
-	var providers []map[string]any
-	for rows.Next() {
-		var pid, name, protocol, template, configStr, overridesStr, createdAt, updatedAt string
-		var autoReg, enabled bool
-		var displayOrder int
-		if err := rows.Scan(&pid, &name, &protocol, &template, &configStr, &overridesStr,
-			&autoReg, &enabled, &displayOrder, &createdAt, &updatedAt); err != nil {
-			continue
-		}
-
-		var config map[string]any
-		json.Unmarshal([]byte(configStr), &config)
-		if config != nil {
-			delete(config, "client_secret") // Strip from list responses.
-		}
-		var overrides map[string]any
-		json.Unmarshal([]byte(overridesStr), &overrides)
-
-		providers = append(providers, map[string]any{
-			"id":              pid,
-			"name":            name,
-			"protocol":        protocol,
-			"template":        template,
-			"config":          config,
-			"claim_overrides": overrides,
-			"auto_register":   autoReg,
-			"enabled":         enabled,
-			"display_order":   displayOrder,
-			"created_at":      createdAt,
-			"updated_at":      updatedAt,
-		})
+	providerList := make([]providers.Provider, 0, len(items))
+	for _, prov := range items {
+		providerList = append(providerList, providers.Redacted(prov))
 	}
-	if err := rows.Err(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
-		return
-	}
-	if providers == nil {
-		providers = []map[string]any{}
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"providers": providers, "count": len(providers)})
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"providers": providerList, "count": len(providerList)})
 }
 
-// --- Get ---
-
 func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
-	pid := r.PathValue("id")
+	repo := providers.NewRepository(a.db.SQL())
+	prov, err := repo.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "provider not found")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, prov)
+}
 
-	var name, protocol, template, configStr, overridesStr, createdAt, updatedAt string
-	var autoReg, enabled bool
-	var displayOrder int
-	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT name, protocol, template, config, claim_overrides,
-		        auto_register, enabled, display_order, created_at, updated_at
-		 FROM providers WHERE id = ?`, pid,
-	).Scan(&name, &protocol, &template, &configStr, &overridesStr,
-		&autoReg, &enabled, &displayOrder, &createdAt, &updatedAt)
+func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
+	repo := providers.NewRepository(a.db.SQL())
+	current, err := repo.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
-	var config map[string]any
-	json.Unmarshal([]byte(configStr), &config)
-	var overrides map[string]any
-	json.Unmarshal([]byte(overridesStr), &overrides)
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"id":              pid,
-		"name":            name,
-		"protocol":        protocol,
-		"template":        template,
-		"config":          config,
-		"claim_overrides": overrides,
-		"auto_register":   autoReg,
-		"enabled":         enabled,
-		"display_order":   displayOrder,
-		"created_at":      createdAt,
-		"updated_at":      updatedAt,
-	})
-}
-
-// --- Update ---
-
-func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
-	pid := r.PathValue("id")
-
-	var req map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	raw, err := decodeProviderRawBody(r)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	sets := []string{"updated_at = datetime('now')"}
-	if a.db.Dialect() == "postgres" {
-		sets = []string{"updated_at = NOW()"}
-	}
-	args := []any{}
-
-	if v, ok := req["name"].(string); ok {
-		sets = append(sets, "name = ?")
-		args = append(args, v)
-	}
-	if v, ok := req["enabled"].(bool); ok {
-		sets = append(sets, "enabled = ?")
-		args = append(args, v)
-	}
-	if v, ok := req["auto_register"].(bool); ok {
-		sets = append(sets, "auto_register = ?")
-		args = append(args, v)
-	}
-	if v, ok := req["display_order"].(float64); ok {
-		sets = append(sets, "display_order = ?")
-		args = append(args, int(v))
-	}
-	if v, ok := req["config"].(map[string]any); ok {
-		configJSON, _ := json.Marshal(v)
-		sets = append(sets, "config = ?")
-		args = append(args, string(configJSON))
-	}
-	if v, ok := req["claim_overrides"].(map[string]any); ok {
-		overridesJSON, _ := json.Marshal(v)
-		sets = append(sets, "claim_overrides = ?")
-		args = append(args, string(overridesJSON))
-	}
-
-	args = append(args, pid)
-	query := fmt.Sprintf("UPDATE providers SET %s WHERE id = ?", strings.Join(sets, ", "))
-
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	next, err := mergeProviderPatch(*current, raw)
 	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := repo.Save(r.Context(), next); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		httputil.WriteError(w, http.StatusNotFound, "provider not found")
+
+	updated, err := repo.Get(r.Context(), next.ID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "load updated provider failed")
 		return
 	}
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "updated"})
+	httputil.WriteJSON(w, http.StatusOK, updated)
 }
 
-// --- Delete ---
-
 func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
-	pid := r.PathValue("id")
-
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		`DELETE FROM providers WHERE id = ?`, pid)
+	repo := providers.NewRepository(a.db.SQL())
+	rows, err := repo.Delete(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
+	if rows == 0 {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
-	// linked_identities cascade via FK — no manual cleanup needed.
-
 	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
 	if tx != nil {
-		emitEvent(r.Context(), tx, "provider.deleted", "", pid, "provider", map[string]any{"provider_id": pid})
+		emitEvent(r.Context(), tx, "provider.deleted", "", r.PathValue("id"), "provider", map[string]any{"provider_id": r.PathValue("id")})
 		_ = tx.Commit()
 	}
 	a.bus.Signal()
@@ -380,8 +149,271 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
-// --- Helpers ---
+func decodeProviderBody(r *http.Request) (providers.Provider, error) {
+	raw, err := decodeProviderRawBody(r)
+	if err != nil {
+		return providers.Provider{}, err
+	}
+	return providerFromMap(raw)
+}
+
+func decodeProviderRawBody(r *http.Request) (map[string]any, error) {
+	var raw map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return nil, errors.New("invalid JSON body")
+	}
+	return raw, nil
+}
+
+//nolint:gocyclo // Backward-compatible decoder for multiple legacy provider payload shapes.
+func providerFromMap(raw map[string]any) (providers.Provider, error) {
+	prov := providers.Provider{
+		Connection: map[string]any{},
+		Mapping: providers.Mapping{
+			Claims: map[string]string{},
+		},
+		Session: map[string]any{},
+		UI:      map[string]any{},
+		Enabled: true,
+	}
+
+	if v, ok := raw["display_name"].(string); ok {
+		prov.DisplayName = strings.TrimSpace(v)
+	} else if v, ok := raw["name"].(string); ok {
+		prov.DisplayName = strings.TrimSpace(v)
+	}
+	if v, ok := raw["kind"].(string); ok {
+		prov.Kind = strings.TrimSpace(v)
+	} else if v, ok := raw["template"].(string); ok {
+		prov.Kind = strings.TrimSpace(v)
+	}
+	if v, ok := raw["protocol"].(string); ok {
+		prov.Protocol = strings.TrimSpace(v)
+	} else if v, ok := raw["type"].(string); ok {
+		prov.Protocol = strings.TrimSpace(v)
+	}
+	if v, ok := raw["connection"].(map[string]any); ok {
+		prov.Connection = v
+	} else if v, ok := raw["config"].(map[string]any); ok {
+		prov.Connection = v
+	}
+	if v, ok := raw["mapping"].(map[string]any); ok {
+		if claims, ok := stringMapFromAny(v["claims"]); ok {
+			prov.Mapping.Claims = claims
+		}
+	} else if v, ok := raw["claim_overrides"].(map[string]any); ok {
+		if claims, ok := stringMapFromAny(v); ok {
+			prov.Mapping.Claims = claims
+		}
+	}
+	if v, ok := raw["target"].(map[string]any); ok {
+		if schemaType, ok := v["schema_type"].(string); ok {
+			prov.Target.SchemaType = strings.TrimSpace(schemaType)
+		}
+		if schemaID, ok := v["schema_id"].(string); ok {
+			prov.Target.SchemaID = strings.TrimSpace(schemaID)
+		}
+	} else if v, ok := raw["schema_id"].(string); ok {
+		prov.Target.SchemaID = strings.TrimSpace(v)
+	}
+	if v, ok := raw["linking"].(map[string]any); ok {
+		if mode, ok := v["mode"].(string); ok {
+			prov.Linking.Mode = strings.TrimSpace(mode)
+		}
+		if matchBy, ok := v["match_by"].(string); ok {
+			prov.Linking.MatchBy = strings.TrimSpace(matchBy)
+		}
+	} else {
+		if v, ok := raw["auto_register"].(bool); ok && !v {
+			prov.Linking.Mode = providers.LinkModeLinkOnly
+		}
+	}
+	if v, ok := raw["session"].(map[string]any); ok {
+		prov.Session = v
+	}
+	if v, ok := raw["ui"].(map[string]any); ok {
+		prov.UI = v
+	}
+	if v, ok := raw["display_order"].(float64); ok {
+		prov.UI["display_order"] = int(v)
+	}
+	if v, ok := raw["enabled"].(bool); ok {
+		prov.Enabled = v
+	}
+	if v, ok := raw["catalog_ref"].(map[string]any); ok {
+		if templateID, ok := v["template_id"].(string); ok {
+			prov.CatalogRef.TemplateID = strings.TrimSpace(templateID)
+		}
+		if version, ok := v["template_version"].(string); ok {
+			prov.CatalogRef.TemplateVersion = strings.TrimSpace(version)
+		}
+		if official, ok := v["official"].(bool); ok {
+			prov.CatalogRef.Official = official
+		}
+		if capabilities, ok := providerStringSliceFromAny(v["capabilities"]); ok {
+			prov.CatalogRef.Capabilities = capabilities
+		}
+		if logoURL, ok := v["logo_url"].(string); ok {
+			prov.CatalogRef.LogoURL = strings.TrimSpace(logoURL)
+		}
+		if docsURL, ok := v["docs_url"].(string); ok {
+			prov.CatalogRef.DocsURL = strings.TrimSpace(docsURL)
+		}
+	}
+
+	if prov.DisplayName == "" {
+		return providers.Provider{}, errors.New("display_name is required")
+	}
+	prov = providers.Normalize(prov)
+	if err := validateProvider(prov); err != nil {
+		return providers.Provider{}, err
+	}
+	return prov, nil
+}
+
+//nolint:gocyclo // Backward-compatible patch merger for multiple legacy provider payload shapes.
+func mergeProviderPatch(current providers.Provider, raw map[string]any) (providers.Provider, error) {
+	next := current
+	if value, ok := raw["display_name"].(string); ok {
+		next.DisplayName = strings.TrimSpace(value)
+	} else if value, ok := raw["name"].(string); ok {
+		next.DisplayName = strings.TrimSpace(value)
+	}
+	if value, ok := raw["kind"].(string); ok {
+		next.Kind = strings.TrimSpace(value)
+	} else if value, ok := raw["template"].(string); ok {
+		next.Kind = strings.TrimSpace(value)
+	}
+	if value, ok := raw["protocol"].(string); ok {
+		next.Protocol = strings.TrimSpace(value)
+	} else if value, ok := raw["type"].(string); ok {
+		next.Protocol = strings.TrimSpace(value)
+	}
+	if value, ok := raw["connection"].(map[string]any); ok {
+		next.Connection = value
+	} else if value, ok := raw["config"].(map[string]any); ok {
+		next.Connection = value
+	}
+	if value, ok := raw["mapping"].(map[string]any); ok {
+		if claims, ok := stringMapFromAny(value["claims"]); ok {
+			next.Mapping.Claims = claims
+		}
+	} else if value, ok := raw["claim_overrides"].(map[string]any); ok {
+		if claims, ok := stringMapFromAny(value); ok {
+			next.Mapping.Claims = claims
+		}
+	}
+	if value, ok := raw["target"].(map[string]any); ok {
+		if schemaType, ok := value["schema_type"].(string); ok {
+			next.Target.SchemaType = strings.TrimSpace(schemaType)
+		}
+		if schemaID, ok := value["schema_id"].(string); ok {
+			next.Target.SchemaID = strings.TrimSpace(schemaID)
+		}
+	} else if value, ok := raw["schema_id"].(string); ok {
+		next.Target.SchemaID = strings.TrimSpace(value)
+	}
+	if value, ok := raw["linking"].(map[string]any); ok {
+		if mode, ok := value["mode"].(string); ok {
+			next.Linking.Mode = strings.TrimSpace(mode)
+		}
+		if matchBy, ok := value["match_by"].(string); ok {
+			next.Linking.MatchBy = strings.TrimSpace(matchBy)
+		}
+	} else if value, ok := raw["auto_register"].(bool); ok && !value {
+		next.Linking.Mode = providers.LinkModeLinkOnly
+	}
+	if value, ok := raw["session"].(map[string]any); ok {
+		next.Session = value
+	}
+	if value, ok := raw["ui"].(map[string]any); ok {
+		next.UI = value
+	}
+	if value, ok := raw["display_order"].(float64); ok {
+		if next.UI == nil {
+			next.UI = map[string]any{}
+		}
+		next.UI["display_order"] = int(value)
+	}
+	if value, ok := raw["enabled"].(bool); ok {
+		next.Enabled = value
+	}
+	if value, ok := raw["catalog_ref"].(map[string]any); ok {
+		if templateID, ok := value["template_id"].(string); ok {
+			next.CatalogRef.TemplateID = strings.TrimSpace(templateID)
+		}
+		if version, ok := value["template_version"].(string); ok {
+			next.CatalogRef.TemplateVersion = strings.TrimSpace(version)
+		}
+		if official, ok := value["official"].(bool); ok {
+			next.CatalogRef.Official = official
+		}
+		if capabilities, ok := providerStringSliceFromAny(value["capabilities"]); ok {
+			next.CatalogRef.Capabilities = capabilities
+		}
+		if logoURL, ok := value["logo_url"].(string); ok {
+			next.CatalogRef.LogoURL = strings.TrimSpace(logoURL)
+		}
+		if docsURL, ok := value["docs_url"].(string); ok {
+			next.CatalogRef.DocsURL = strings.TrimSpace(docsURL)
+		}
+	}
+	next = providers.Normalize(next)
+	if err := validateProvider(next); err != nil {
+		return providers.Provider{}, err
+	}
+	return next, nil
+}
+
+func validateProvider(prov providers.Provider) error {
+	if prov.Protocol == "oidc" {
+		issuer, _ := prov.Connection["issuer"].(string)
+		clientID, _ := prov.Connection["client_id"].(string)
+		if issuer == "" || clientID == "" {
+			return errors.New("OIDC providers require connection.issuer and connection.client_id")
+		}
+	}
+	if prov.Protocol == "oauth2" {
+		clientID, _ := prov.Connection["client_id"].(string)
+		if clientID == "" {
+			return errors.New("OAuth2 providers require connection.client_id")
+		}
+	}
+	return nil
+}
+
+func stringMapFromAny(value any) (map[string]string, bool) {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	out := make(map[string]string, len(raw))
+	for key, item := range raw {
+		str, ok := item.(string)
+		if !ok {
+			continue
+		}
+		out[key] = str
+	}
+	return out, true
+}
+
+func providerStringSliceFromAny(value any) ([]string, bool) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		str, ok := item.(string)
+		if !ok {
+			continue
+		}
+		out = append(out, str)
+	}
+	return out, true
+}
 
 func generateShortID() string {
-	return crypto.MustRandomHex(6)
+	return id.New()[:12]
 }

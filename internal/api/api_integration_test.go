@@ -133,6 +133,165 @@ func TestAdmin_CanCreateIdentity(t *testing.T) {
 	}
 }
 
+func TestAdmin_UserDetailIncludesSchemaContextAndCanonicalData(t *testing.T) {
+	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
+
+	createCode, created := srv.RequestWithHeaders("POST", "/v1/users", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"schema_id": "human_user_v1",
+		"data": map[string]any{
+			"email":        "schema-user@test.com",
+			"display_name": "Schema User",
+			"given_name":   "Schema",
+			"family_name":  "User",
+		},
+	})
+	if createCode != 200 && createCode != 201 {
+		t.Fatalf("create user: expected 200/201, got %d: %v", createCode, created)
+	}
+
+	userID, _ := created["id"].(string)
+	getCode, body := srv.GetWithBearer("/v1/users/"+userID, token)
+	if getCode != 200 {
+		t.Fatalf("get user: expected 200, got %d: %v", getCode, body)
+	}
+
+	if body["schema_id"] != "human_user_v1" {
+		t.Fatalf("schema_id = %v, want human_user_v1", body["schema_id"])
+	}
+	if body["schema_type"] != "human_user" {
+		t.Fatalf("schema_type = %v, want human_user", body["schema_type"])
+	}
+
+	data, _ := body["data"].(map[string]any)
+	if data["email"] != "schema-user@test.com" {
+		t.Fatalf("email = %v, want schema-user@test.com", data["email"])
+	}
+	if data["display_name"] != "Schema User" {
+		t.Fatalf("display_name = %v, want Schema User", data["display_name"])
+	}
+}
+
+func TestAdmin_AppCanonicalDataRoundTrip(t *testing.T) {
+	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
+
+	createCode, created := srv.RequestWithHeaders("POST", "/v1/apps", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"schema_id": "app_v1",
+		"data": map[string]any{
+			"client_name":               "Schema App",
+			"description":               "Back-office app",
+			"app_type":                  "web",
+			"redirect_uris":             []string{"https://example.com/callback"},
+			"post_logout_redirect_uris": []string{"https://example.com/logout"},
+			"grant_types":               []string{"authorization_code"},
+			"response_types":            []string{"code"},
+			"logo_uri":                  "https://example.com/logo.png",
+			"metadata":                  map[string]any{"tier": "pro"},
+		},
+	})
+	if createCode != 200 && createCode != 201 {
+		t.Fatalf("create app: expected 200/201, got %d: %v", createCode, created)
+	}
+
+	appID, _ := created["id"].(string)
+	getCode, body := srv.GetWithBearer("/v1/apps/"+appID, token)
+	if getCode != 200 {
+		t.Fatalf("get app: expected 200, got %d: %v", getCode, body)
+	}
+
+	if body["schema_type"] != "app" {
+		t.Fatalf("schema_type = %v, want app", body["schema_type"])
+	}
+	if body["description"] != "Back-office app" {
+		t.Fatalf("description = %v, want Back-office app", body["description"])
+	}
+	if body["logo_uri"] != "https://example.com/logo.png" {
+		t.Fatalf("logo_uri = %v, want logo uri", body["logo_uri"])
+	}
+
+	postLogout, _ := body["post_logout_redirect_uris"].([]any)
+	if len(postLogout) != 1 || postLogout[0] != "https://example.com/logout" {
+		t.Fatalf("post_logout_redirect_uris = %v", body["post_logout_redirect_uris"])
+	}
+
+	data, _ := body["data"].(map[string]any)
+	if data["client_name"] != "Schema App" {
+		t.Fatalf("client_name = %v, want Schema App", data["client_name"])
+	}
+}
+
+func TestAdmin_OrgGroupProjectCanonicalDataRoundTrip(t *testing.T) {
+	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
+
+	orgCode, orgCreated := srv.PostJSONWithBearer("/v1/orgs", map[string]any{
+		"schema_id": "org_v1",
+		"data": map[string]any{
+			"display_name": "Schema Org",
+			"metadata":     map[string]any{"region": "us"},
+		},
+	}, token)
+	if orgCode != 200 && orgCode != 201 {
+		t.Fatalf("create org: expected 200/201, got %d: %v", orgCode, orgCreated)
+	}
+	orgID, _ := orgCreated["id"].(string)
+
+	groupCode, groupCreated := srv.RequestWithHeaders("POST", "/v1/groups", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"data": map[string]any{
+			"name":        "Schema Group",
+			"description": "Writers",
+			"metadata":    map[string]any{"scope": "docs"},
+		},
+	})
+	if groupCode != 200 && groupCode != 201 {
+		t.Fatalf("create group: expected 200/201, got %d: %v", groupCode, groupCreated)
+	}
+	groupID, _ := groupCreated["id"].(string)
+
+	projectCode, projectCreated := srv.RequestWithHeaders("POST", "/v1/projects", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"data": map[string]any{
+			"name":        "Schema Project",
+			"description": "Prototype",
+			"metadata":    map[string]any{"phase": "beta"},
+		},
+	})
+	if projectCode != 200 && projectCode != 201 {
+		t.Fatalf("create project: expected 200/201, got %d: %v", projectCode, projectCreated)
+	}
+	projectID, _ := projectCreated["id"].(string)
+
+	if code, body := srv.GetWithBearer("/v1/orgs/"+orgID, token); code != 200 {
+		t.Fatalf("get org: expected 200, got %d: %v", code, body)
+	} else if data, _ := body["data"].(map[string]any); data["display_name"] != "Schema Org" {
+		t.Fatalf("org display_name = %v, want Schema Org", data["display_name"])
+	}
+
+	if code, body := srv.GetWithBearer("/v1/groups/"+groupID, token); code != 200 {
+		t.Fatalf("get group: expected 200, got %d: %v", code, body)
+	} else if data, _ := body["data"].(map[string]any); data["description"] != "Writers" {
+		t.Fatalf("group description = %v, want Writers", data["description"])
+	}
+
+	if code, body := srv.GetWithBearer("/v1/projects/"+projectID, token); code != 200 {
+		t.Fatalf("get project: expected 200, got %d: %v", code, body)
+	} else if data, _ := body["data"].(map[string]any); data["description"] != "Prototype" {
+		t.Fatalf("project description = %v, want Prototype", data["description"])
+	}
+}
+
 // ===================== Bulk Import Tests =====================
 
 func TestBulkImport_CreatesIdentities(t *testing.T) {

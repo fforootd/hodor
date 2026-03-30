@@ -9,7 +9,7 @@ import (
 // CreateSessionInternal adapts the login.SessionCreator interface.
 // This converts login.ClientSignals → api.ClientSignals to satisfy the interface
 // without creating an import cycle.
-func (a *API) CreateSessionForLogin(ctx context.Context, userID string, userAgent, ipAddress string, signals *login.ClientSignals) (*login.CreateSessionResponse, error) {
+func (a *API) CreateSessionForLogin(ctx context.Context, userID string, userAgent, ipAddress string, signals *login.ClientSignals, provenance *login.SessionProvenance) (*login.CreateSessionResponse, error) {
 	var apiSignals *ClientSignals
 	if signals != nil {
 		apiSignals = &ClientSignals{
@@ -23,7 +23,7 @@ func (a *API) CreateSessionForLogin(ctx context.Context, userID string, userAgen
 			RequestID:       signals.RequestID,
 		}
 	}
-	resp, err := a.CreateSessionInternal(ctx, userID, userAgent, ipAddress, apiSignals)
+	resp, err := a.CreateSessionInternal(ctx, userID, userAgent, ipAddress, apiSignals, provenance)
 	if err != nil {
 		return nil, err
 	}

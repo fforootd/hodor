@@ -30,6 +30,7 @@
 | [019](adr/019-server-driven-login-wc.md) | Server-Driven Login UI + Web Components | Accepted | 2026-03-28 |
 | [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Marketplace Modules | Accepted | 2026-03-29 |
 | [021](adr/021-multi-tenancy.md) | Multi-Tenancy via Instance Isolation | Accepted | 2026-03-30 |
+| [022](adr/022-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
 
 ## Architecture
 
@@ -91,4 +92,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 022
+- **Next ADR number**: 023

@@ -21,19 +21,36 @@
   },
   "payload": {
     "display_name": "GitLab",
-    "type": "oidc",
-    "issuer": "{{gitlab_url}}",
-    "client_id": "{{client_id}}",
-    "client_secret": "{{client_secret}}",
-    "scopes": ["openid", "profile", "email"],
-    "claim_mappings": {
-      "email": "claims.email",
-      "email_verified": "claims.email_verified",
-      "display_name": "claims.name",
-      "username": "claims.nickname",
-      "picture": "claims.picture",
-      "profile_url": "claims.profile",
-      "groups": "claims.groups"
-    }
+    "kind": "gitlab",
+    "protocol": "oidc",
+    "connection": {
+      "issuer": "{{gitlab_url}}",
+      "client_id": "{{client_id}}",
+      "client_secret": "{{client_secret}}",
+      "scopes": ["openid", "profile", "email"]
+    },
+    "mapping": {
+      "claims": {
+        "email": "claims.email",
+        "email_verified": "claims.email_verified",
+        "display_name": "claims.name",
+        "username": "claims.nickname",
+        "picture": "claims.picture",
+        "profile_url": "claims.profile",
+        "groups": "claims.groups"
+      }
+    },
+    "target": {
+      "schema_type": "human_user"
+    },
+    "linking": {
+      "mode": "create_or_link",
+      "match_by": "verified_email"
+    },
+    "session": {},
+    "ui": {
+      "display_order": 40
+    },
+    "enabled": true
   }
 }

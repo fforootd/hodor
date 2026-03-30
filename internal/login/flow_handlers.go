@@ -49,7 +49,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 		writeLoginError(w, status, apiErr)
 		return
 	}
-	ssoProviders := h.loadSSOProviders(r)
+	ssoProviders := h.loadSSOProviders(r, cfg)
 
 	flowID := id.NewFlow()
 	flow := &Flow{
@@ -61,6 +61,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 		OIDCState:       req.State,
 		VisitorID:       req.Fingerprint,
 		FingerprintHash: req.Fingerprint,
+		AuthMethod:      "password",
 	}
 	if trustedUserID, ok := h.resolveTrustedUserID(r, req.State); ok {
 		flow.TrustedUserID = trustedUserID
@@ -306,6 +307,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	}
 
 	flow.Verified = true
+	flow.AuthMethod = "password"
 	flow.Errors = nil
 
 	// Check if MFA is required.
@@ -349,7 +351,7 @@ func (h *Handler) flowSubmitSSO(w http.ResponseWriter, r *http.Request, flow *Fl
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"flow_id":      flow.ID,
 		"action":       "redirect",
-		"redirect_url": fmt.Sprintf("/v1/auth/sso/%s/start", providerID),
+		"redirect_url": fmt.Sprintf("/v1/auth/sso/%s/start?flow_id=%s", providerID, flow.ID),
 	})
 }
 
@@ -443,6 +445,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	flow.Identifier = identifier
 	flow.DisplayName = displayName
 	flow.Verified = true
+	flow.AuthMethod = "registration"
 	flow.Errors = nil
 
 	h.api.EmitAuthEvent(r.Context(), "auth.registration_completed", newID, map[string]any{
@@ -568,7 +571,11 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 		FingerprintHash: flow.FingerprintHash,
 		RequestID:       telemetry.RequestIDFromContext(r.Context()),
 	}
-	sessResp, err := h.api.CreateSessionForLogin(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals)
+	sessResp, err := h.api.CreateSessionForLogin(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals, &SessionProvenance{
+		AuthMethod:  flow.AuthMethod,
+		LoginFlowID: flow.ID,
+		AuthContext: map[string]any{"flow_id": flow.ID},
+	})
 	if err != nil {
 		flow.Errors = append(flow.Errors, FlowError{Code: "session_failed", Message: "Failed to create session. Please try again."})
 		h.flows.Put(flow)
@@ -587,7 +594,7 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 	h.api.EmitAuthEvent(r.Context(), "auth.login_completed", flow.IduserID, map[string]any{
 		"session_id": sessResp.Session.ID,
 		"flow_id":    flow.ID,
-		"method":     "flow",
+		"method":     flow.AuthMethod,
 	})
 
 	// Determine redirect URI: OIDC redirect_uri if present, otherwise /console.

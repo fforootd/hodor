@@ -21,6 +21,7 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/loginflow"
 	"github.com/zitadel/zitadel/internal/notify"
+	providers "github.com/zitadel/zitadel/internal/provider"
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/uniqueness"
@@ -104,7 +105,7 @@ func (h *Handler) handleBranding(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := h.getResolvedConfig(r, r.URL.Query().Get("flow"))
-	ssoProviders := h.loadSSOProviders(r)
+	ssoProviders := h.loadSSOProviders(r, cfg)
 
 	// Build auth_methods from schema config.
 	authMethods := make(map[string]any)
@@ -135,29 +136,45 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // loadSSOProviders reads enabled SSO providers from the dedicated providers table.
-func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
-	var ssoProviders []map[string]any
-	rows, err := h.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, protocol, COALESCE(template, '')
-		 FROM providers
-		 WHERE enabled = 1 OR enabled = true
-		 ORDER BY display_order ASC, name ASC`,
-	)
+func (h *Handler) loadSSOProviders(r *http.Request, cfg *SchemaAuthConfig) []map[string]any {
+	repo := providers.NewRepository(h.db.SQL())
+	list, err := repo.ListEnabled(r.Context())
 	if err != nil {
-		return ssoProviders
+		return []map[string]any{}
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var pid, pname, protocol, template string
-		if rows.Scan(&pid, &pname, &protocol, &template) == nil {
-			ssoProviders = append(ssoProviders, map[string]any{
-				"id": pid, "name": pname, "template": template, "protocol": protocol,
-			})
+
+	allowlist := map[string]struct{}{}
+	if cfg != nil && cfg.SSOProviderMode == "allowlist" {
+		for _, providerID := range cfg.SSOProviderIDs {
+			allowlist[providerID] = struct{}{}
 		}
 	}
-	_ = rows.Err()
-	if ssoProviders == nil {
-		ssoProviders = []map[string]any{}
+
+	targetSchemaType := "human_user"
+	if cfg != nil && cfg.RegistrationSchemaType != "" {
+		targetSchemaType = cfg.RegistrationSchemaType
+	}
+
+	ssoProviders := make([]map[string]any, 0, len(list))
+	for _, prov := range list {
+		if prov.Protocol != "oidc" && prov.Protocol != "oauth2" && prov.Protocol != "saml" {
+			continue
+		}
+		if len(allowlist) > 0 {
+			if _, ok := allowlist[prov.ID]; !ok {
+				continue
+			}
+		}
+		if prov.Target.SchemaType != "" && prov.Target.SchemaType != targetSchemaType && prov.Target.SchemaID == "" {
+			continue
+		}
+		ssoProviders = append(ssoProviders, map[string]any{
+			"id":       prov.ID,
+			"name":     prov.DisplayName,
+			"template": prov.CatalogRef.TemplateID,
+			"kind":     prov.Kind,
+			"protocol": prov.Protocol,
+		})
 	}
 	return ssoProviders
 }
@@ -184,6 +201,7 @@ func (h *Handler) getDefaultSchemaConfigStrict(ctx context.Context) (*SchemaAuth
 	cfg := ExtractAuthConfig(schemaRec.Schema)
 	cfg.SchemaID = schemaRec.ID
 	cfg.SchemaType = schemaRec.Type
+	cfg.RegistrationSchemaType = schemaRec.Type
 	return cfg, nil
 }
 
@@ -251,6 +269,11 @@ func (h *Handler) buildConfigFromFlowStrict(ctx context.Context, lf *loginflow.L
 	// Parse the login flow's config JSON to extract branding, captcha, etc.
 	flowCfg := ExtractLoginFlowConfig(string(lf.Config))
 	if flowCfg != nil {
+		if flowCfg.Ref.UserSchema != "" {
+			base.RegistrationSchemaType = flowCfg.Ref.UserSchema
+		}
+		base.SSOProviderMode = flowCfg.SSO.Providers.Mode
+		base.SSOProviderIDs = append([]string(nil), flowCfg.SSO.Providers.IDs...)
 		// Apply flow's login config (strategy, mfa, registration).
 		if flowCfg.Login.Strategy != "" {
 			base.Login = flowCfg.Login
@@ -302,6 +325,9 @@ func (h *Handler) buildConfigFromFlowStrict(ctx context.Context, lf *loginflow.L
 	}
 
 	base.LoginFlowID = lf.ID
+	if base.RegistrationSchemaType == "" {
+		base.RegistrationSchemaType = base.SchemaType
+	}
 	return base, nil
 }
 
@@ -530,7 +556,9 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 		`UPDATE users SET state = 'active' WHERE id = ? AND state = 'pending'`, userID)
 
 	// Create session.
-	sessResp, err := h.api.CreateSessionForLogin(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil)
+	sessResp, err := h.api.CreateSessionForLogin(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil, &SessionProvenance{
+		AuthMethod: "magic_link",
+	})
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return

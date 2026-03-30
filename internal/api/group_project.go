@@ -10,8 +10,8 @@ import (
 
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
-
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/schema"
 )
 
 // ──────────────────────────────────────────────────────────────────
@@ -19,10 +19,12 @@ import (
 // ──────────────────────────────────────────────────────────────────
 
 type GroupRequest struct {
+	SchemaID    string `json:"schema_id,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	State       string `json:"state,omitempty"`
 	Metadata    any    `json:"metadata,omitempty"`
+	Data        any    `json:"data,omitempty"`
 }
 
 type GroupResponse struct {
@@ -31,7 +33,10 @@ type GroupResponse struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	State       string `json:"state"`
+	SchemaID    string `json:"schema_id,omitempty"`
+	SchemaType  string `json:"schema_type,omitempty"`
 	Metadata    any    `json:"metadata,omitempty"`
+	Data        any    `json:"data,omitempty"`
 	MemberCount int    `json:"member_count"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
@@ -63,6 +68,19 @@ func (a *API) RegisterGroupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/groups/{id}/members", a.addMember("group"))
 	mux.HandleFunc("DELETE /v1/groups/{id}/members/{userId}", a.removeMember("group"))
 	logging.Printf("[api] registered /v1/groups (full CRUD + members)")
+}
+
+func (a *API) buildGroupResponse(ctx context.Context, row GroupResponse, metadataStr string) GroupResponse {
+	metadata := decodeObjectString(metadataStr)
+	if rec, err := a.resolveResourceSchema(ctx, "group", row.SchemaID); err == nil {
+		row.SchemaID = rec.ID
+		row.SchemaType = rec.Type
+	}
+	row.Data = groupCanonicalData(row.Name, row.Description, metadata)
+	if dataMap, ok := row.Data.(map[string]any); ok {
+		row.Metadata = dataMap["metadata"]
+	}
+	return row
 }
 
 func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
@@ -100,8 +118,7 @@ func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
 			&metaStr, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount); err != nil {
 			continue
 		}
-		_ = json.Unmarshal([]byte(metaStr), &g.Metadata)
-		groups = append(groups, g)
+		groups = append(groups, a.buildGroupResponse(r.Context(), g, metaStr))
 	}
 	if err := rows.Err(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
@@ -123,8 +140,33 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == "" {
+
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "group", req.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = groupCanonicalData(req.Name, req.Description, map[string]any{"metadata": req.Metadata})
+	}
+	name := stringFromAny(data["name"])
+	if name == "" {
+		name = strings.TrimSpace(req.Name)
+		data["name"] = name
+	}
+	if name == "" {
 		httputil.WriteError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	description := stringFromAny(data["description"])
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -135,12 +177,7 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		orgID = "1"
 	}
 
-	metadataJSON := "{}"
-	if req.Metadata != nil {
-		if b, err := json.Marshal(req.Metadata); err == nil {
-			metadataJSON = string(b)
-		}
-	}
+	metadataJSON := encodeObjectString(stripKeys(data, "name", "description"))
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -152,7 +189,7 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO groups (id, org_id, name, description, state, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
-		groupID, orgID, req.Name, req.Description, metadataJSON, now, now,
+		groupID, orgID, name, description, metadataJSON, now, now,
 	)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -162,7 +199,7 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emitEvent(r.Context(), tx, "group.created", groupID, groupID, "group", map[string]any{
-		"name": req.Name, "org_id": orgID,
+		"name": name, "org_id": orgID,
 	})
 
 	// FGA: write hierarchy + ownership tuples — async, best-effort.
@@ -185,9 +222,17 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusCreated, GroupResponse{
-		ID: groupID, OrgID: orgID, Name: req.Name,
-		Description: req.Description, State: "active",
-		CreatedAt: now, UpdatedAt: now,
+		ID:          groupID,
+		OrgID:       orgID,
+		Name:        name,
+		Description: description,
+		State:       "active",
+		SchemaID:    schemaRec.ID,
+		SchemaType:  schemaRec.Type,
+		Metadata:    data["metadata"],
+		Data:        data,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 }
 
@@ -211,9 +256,8 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	_ = json.Unmarshal([]byte(metaStr), &g.Metadata)
 
-	httputil.WriteJSON(w, http.StatusOK, g)
+	httputil.WriteJSON(w, http.StatusOK, a.buildGroupResponse(r.Context(), g, metaStr))
 }
 
 func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) {
@@ -229,14 +273,67 @@ func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := newPatch()
-	p.Set("name", req.Name)
-	p.Set("description", req.Description)
-	p.Set("state", req.State)
-	p.SetJSON("metadata", req.Metadata)
+	var current GroupResponse
+	var metadataStr string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, org_id, name, description, state, COALESCE(metadata,'{}'), created_at, updated_at,
+		        (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='group' AND m.resource_id = groups.id) as member_count
+		 FROM groups
+		 WHERE id = ?`,
+		groupID,
+	).Scan(&current.ID, &current.OrgID, &current.Name, &current.Description, &current.State, &metadataStr, &current.CreatedAt, &current.UpdatedAt, &current.MemberCount)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "group not found")
+		return
+	}
 
-	query, args := p.Build("groups", groupID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "group", "")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = groupCanonicalData(current.Name, current.Description, decodeObjectString(metadataStr))
+		if strings.TrimSpace(req.Name) != "" {
+			data["name"] = strings.TrimSpace(req.Name)
+		}
+		if strings.TrimSpace(req.Description) != "" {
+			data["description"] = strings.TrimSpace(req.Description)
+		}
+		if req.Metadata != nil {
+			data["metadata"] = req.Metadata
+		}
+	}
+	if stringFromAny(data["name"]) == "" {
+		data["name"] = current.Name
+	}
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	nextState := current.State
+	if strings.TrimSpace(req.State) != "" {
+		nextState = strings.TrimSpace(req.State)
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(),
+		`UPDATE groups
+		 SET name = ?, description = ?, state = ?, metadata = ?, updated_at = ?
+		 WHERE id = ?`,
+		stringFromAny(data["name"]),
+		stringFromAny(data["description"]),
+		nextState,
+		encodeObjectString(stripKeys(data, "name", "description")),
+		timeNow(),
+		groupID,
+	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
@@ -280,10 +377,12 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 // ──────────────────────────────────────────────────────────────────
 
 type ProjectRequest struct {
+	SchemaID    string `json:"schema_id,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	State       string `json:"state,omitempty"`
 	Metadata    any    `json:"metadata,omitempty"`
+	Data        any    `json:"data,omitempty"`
 }
 
 type ProjectResponse struct {
@@ -292,7 +391,10 @@ type ProjectResponse struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	State       string `json:"state"`
+	SchemaID    string `json:"schema_id,omitempty"`
+	SchemaType  string `json:"schema_type,omitempty"`
 	Metadata    any    `json:"metadata,omitempty"`
+	Data        any    `json:"data,omitempty"`
 	MemberCount int    `json:"member_count"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
@@ -312,6 +414,19 @@ func (a *API) RegisterProjectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/projects/{id}/members", a.addMember("project"))
 	mux.HandleFunc("DELETE /v1/projects/{id}/members/{userId}", a.removeMember("project"))
 	logging.Printf("[api] registered /v1/projects (full CRUD + members)")
+}
+
+func (a *API) buildProjectResponse(ctx context.Context, row ProjectResponse, metadataStr string) ProjectResponse {
+	metadata := decodeObjectString(metadataStr)
+	if rec, err := a.resolveResourceSchema(ctx, "project", row.SchemaID); err == nil {
+		row.SchemaID = rec.ID
+		row.SchemaType = rec.Type
+	}
+	row.Data = projectCanonicalData(row.Name, row.Description, metadata)
+	if dataMap, ok := row.Data.(map[string]any); ok {
+		row.Metadata = dataMap["metadata"]
+	}
+	return row
 }
 
 func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -349,8 +464,7 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 			&metaStr, &p.CreatedAt, &p.UpdatedAt, &p.MemberCount); err != nil {
 			continue
 		}
-		_ = json.Unmarshal([]byte(metaStr), &p.Metadata)
-		projects = append(projects, p)
+		projects = append(projects, a.buildProjectResponse(r.Context(), p, metaStr))
 	}
 	if err := rows.Err(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
@@ -372,8 +486,33 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == "" {
+
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "project", req.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = projectCanonicalData(req.Name, req.Description, map[string]any{"metadata": req.Metadata})
+	}
+	name := stringFromAny(data["name"])
+	if name == "" {
+		name = strings.TrimSpace(req.Name)
+		data["name"] = name
+	}
+	if name == "" {
 		httputil.WriteError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	description := stringFromAny(data["description"])
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -384,12 +523,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		orgID = "1"
 	}
 
-	metadataJSON := "{}"
-	if req.Metadata != nil {
-		if b, err := json.Marshal(req.Metadata); err == nil {
-			metadataJSON = string(b)
-		}
-	}
+	metadataJSON := encodeObjectString(stripKeys(data, "name", "description"))
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -401,7 +535,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO projects (id, org_id, name, description, state, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
-		projectID, orgID, req.Name, req.Description, metadataJSON, now, now,
+		projectID, orgID, name, description, metadataJSON, now, now,
 	)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -411,7 +545,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emitEvent(r.Context(), tx, "project.created", projectID, projectID, "project", map[string]any{
-		"name": req.Name, "org_id": orgID,
+		"name": name, "org_id": orgID,
 	})
 
 	// FGA: write hierarchy + ownership tuples — async, best-effort.
@@ -434,9 +568,16 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusCreated, ProjectResponse{
-		ID: projectID, OrgID: orgID, Name: req.Name,
-		Description: req.Description, State: "active",
-		CreatedAt: now, UpdatedAt: now,
+		ID:          projectID,
+		OrgID:       orgID,
+		Name:        name,
+		Description: description,
+		State:       "active",
+		SchemaID:    schemaRec.ID,
+		SchemaType:  schemaRec.Type,
+		Metadata:    data["metadata"],
+		Data:        data,
+		CreatedAt:   now, UpdatedAt: now,
 	})
 }
 
@@ -460,9 +601,8 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	_ = json.Unmarshal([]byte(metaStr), &p.Metadata)
 
-	httputil.WriteJSON(w, http.StatusOK, p)
+	httputil.WriteJSON(w, http.StatusOK, a.buildProjectResponse(r.Context(), p, metaStr))
 }
 
 func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
@@ -478,14 +618,67 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := newPatch()
-	p.Set("name", req.Name)
-	p.Set("description", req.Description)
-	p.Set("state", req.State)
-	p.SetJSON("metadata", req.Metadata)
+	var current ProjectResponse
+	var metadataStr string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, org_id, name, description, state, COALESCE(metadata,'{}'), created_at, updated_at,
+		        (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='project' AND m.resource_id = projects.id) as member_count
+		 FROM projects
+		 WHERE id = ?`,
+		projectID,
+	).Scan(&current.ID, &current.OrgID, &current.Name, &current.Description, &current.State, &metadataStr, &current.CreatedAt, &current.UpdatedAt, &current.MemberCount)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "project not found")
+		return
+	}
 
-	query, args := p.Build("projects", projectID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "project", "")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = projectCanonicalData(current.Name, current.Description, decodeObjectString(metadataStr))
+		if strings.TrimSpace(req.Name) != "" {
+			data["name"] = strings.TrimSpace(req.Name)
+		}
+		if strings.TrimSpace(req.Description) != "" {
+			data["description"] = strings.TrimSpace(req.Description)
+		}
+		if req.Metadata != nil {
+			data["metadata"] = req.Metadata
+		}
+	}
+	if stringFromAny(data["name"]) == "" {
+		data["name"] = current.Name
+	}
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	nextState := current.State
+	if strings.TrimSpace(req.State) != "" {
+		nextState = strings.TrimSpace(req.State)
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(),
+		`UPDATE projects
+		 SET name = ?, description = ?, state = ?, metadata = ?, updated_at = ?
+		 WHERE id = ?`,
+		stringFromAny(data["name"]),
+		stringFromAny(data["description"]),
+		nextState,
+		encodeObjectString(stripKeys(data, "name", "description")),
+		timeNow(),
+		projectID,
+	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return

@@ -224,7 +224,7 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 	currentSessionID := callerSessionID(r)
 
 	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, user_agent, ip_address, created_at, expires_at
+		`SELECT id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at
 		 FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
 		 ORDER BY created_at DESC`, userID,
 	)
@@ -237,15 +237,21 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 	var sessions []map[string]any
 	for rows.Next() {
 		var sid string
-		var userAgent, ipAddress, createdAt, expiresAt string
-		rows.Scan(&sid, &userAgent, &ipAddress, &createdAt, &expiresAt)
+		var userAgent, ipAddress, metadataJSON, createdAt, expiresAt string
+		rows.Scan(&sid, &userAgent, &ipAddress, &metadataJSON, &createdAt, &expiresAt)
+		var metadata map[string]any
+		_ = json.Unmarshal([]byte(metadataJSON), &metadata)
 		sessions = append(sessions, map[string]any{
-			"id":         sid,
-			"user_agent": userAgent,
-			"ip_address": ipAddress,
-			"created_at": createdAt,
-			"expires_at": expiresAt,
-			"current":    sid == currentSessionID,
+			"id":            sid,
+			"user_agent":    userAgent,
+			"ip_address":    ipAddress,
+			"created_at":    createdAt,
+			"expires_at":    expiresAt,
+			"current":       sid == currentSessionID,
+			"auth_method":   stringOr(metadata["auth_method"]),
+			"provider_id":   stringOr(metadata["provider_id"]),
+			"provider_kind": stringOr(metadata["provider_kind"]),
+			"login_flow_id": stringOr(metadata["login_flow_id"]),
 		})
 	}
 	if err := rows.Err(); err != nil {

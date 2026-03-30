@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/zitadel/zitadel/internal/catalog"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strconv"
@@ -32,11 +33,16 @@ type API struct {
 	bus     *eventbus.Bus
 	cookies *session.CookieConfig
 	spec    *OpenAPIRegistry
+	catalog *catalog.Service
 }
 
 // New creates a new API handler.
 func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API {
 	return &API{db: db, bus: bus, cookies: cookies, spec: &OpenAPIRegistry{}}
+}
+
+func (a *API) SetCatalogService(svc *catalog.Service) {
+	a.catalog = svc
 }
 
 // RegisterRoutes mounts all REST API routes on the given mux.
@@ -197,11 +203,11 @@ type OrgResponse struct {
 
 // --- Org handlers ---
 
-func (a *API) buildOrgResponse(row OrgResponse, metadataStr string) OrgResponse {
+func (a *API) buildOrgResponse(ctx context.Context, row OrgResponse, metadataStr string) OrgResponse {
 	metadata := decodeObjectString(metadataStr)
 	row.SchemaType = "org"
 	if row.SchemaID == "" {
-		if rec, err := a.resolveResourceSchema(context.Background(), "org", ""); err == nil {
+		if rec, err := a.resolveResourceSchema(ctx, "org", ""); err == nil {
 			row.SchemaID = rec.ID
 		}
 	}
@@ -236,7 +242,7 @@ func (a *API) listOrgs(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&row.ID, &row.Name, &row.State, &row.SchemaID, &metadataStr, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			continue
 		}
-		items = append(items, a.buildOrgResponse(row, metadataStr))
+		items = append(items, a.buildOrgResponse(r.Context(), row, metadataStr))
 	}
 	if err := rows.Err(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
@@ -272,7 +278,7 @@ func (a *API) getOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, a.buildOrgResponse(row, metadataStr))
+	httputil.WriteJSON(w, http.StatusOK, a.buildOrgResponse(r.Context(), row, metadataStr))
 }
 
 func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
@@ -499,44 +505,189 @@ func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
 // --- App types ---
 
 type AppRequest struct {
-	SchemaID                string   `json:"schema_id,omitempty"`
-	Name                    string   `json:"name"`
-	Description             string   `json:"description,omitempty"`
-	AppType                 string   `json:"app_type,omitempty"`
-	ClientID                string   `json:"client_id,omitempty"`
-	ClientSecret            string   `json:"client_secret,omitempty"`
-	RedirectURIs            []string `json:"redirect_uris,omitempty"`
-	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris,omitempty"`
-	GrantTypes              []string `json:"grant_types,omitempty"`
-	ResponseTypes           []string `json:"response_types,omitempty"`
-	LogoURI                 string   `json:"logo_uri,omitempty"`
-	State                   string   `json:"state,omitempty"`
-	Data                    any      `json:"data,omitempty"`
-	Metadata                any      `json:"metadata,omitempty"`
+	SchemaID               string   `json:"schema_id,omitempty"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description,omitempty"`
+	AppType                string   `json:"app_type,omitempty"`
+	ClientID               string   `json:"client_id,omitempty"`
+	ClientSecret           string   `json:"client_secret,omitempty"`
+	RedirectURIs           []string `json:"redirect_uris,omitempty"`
+	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
+	GrantTypes             []string `json:"grant_types,omitempty"`
+	ResponseTypes          []string `json:"response_types,omitempty"`
+	LogoURI                string   `json:"logo_uri,omitempty"`
+	State                  string   `json:"state,omitempty"`
+	Data                   any      `json:"data,omitempty"`
+	Metadata               any      `json:"metadata,omitempty"`
 }
 
 type AppResponse struct {
-	ID                      string   `json:"id"`
-	OrgID                   string   `json:"org_id"`
-	Name                    string   `json:"name"`
-	Description             string   `json:"description,omitempty"`
-	AppType                 string   `json:"app_type"`
-	ClientID                string   `json:"client_id"`
-	RedirectURIs            []string `json:"redirect_uris,omitempty"`
-	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris,omitempty"`
-	GrantTypes              []string `json:"grant_types,omitempty"`
-	ResponseTypes           []string `json:"response_types,omitempty"`
-	LogoURI                 string   `json:"logo_uri,omitempty"`
-	State                   string   `json:"state"`
-	SchemaID                string   `json:"schema_id,omitempty"`
-	SchemaType              string   `json:"schema_type,omitempty"`
-	Metadata                any      `json:"metadata,omitempty"`
-	Data                    any      `json:"data,omitempty"`
-	CreatedAt               string   `json:"created_at"`
-	UpdatedAt               string   `json:"updated_at"`
+	ID                     string   `json:"id"`
+	OrgID                  string   `json:"org_id"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description,omitempty"`
+	AppType                string   `json:"app_type"`
+	ClientID               string   `json:"client_id"`
+	RedirectURIs           []string `json:"redirect_uris,omitempty"`
+	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris,omitempty"`
+	GrantTypes             []string `json:"grant_types,omitempty"`
+	ResponseTypes          []string `json:"response_types,omitempty"`
+	LogoURI                string   `json:"logo_uri,omitempty"`
+	State                  string   `json:"state"`
+	SchemaID               string   `json:"schema_id,omitempty"`
+	SchemaType             string   `json:"schema_type,omitempty"`
+	Metadata               any      `json:"metadata,omitempty"`
+	Data                   any      `json:"data,omitempty"`
+	CreatedAt              string   `json:"created_at"`
+	UpdatedAt              string   `json:"updated_at"`
 }
 
 // --- App handlers ---
+
+func (a *API) buildAppResponse(ctx context.Context, row AppResponse, metadataStr string) AppResponse {
+	metadata := decodeObjectString(metadataStr)
+	if rec, err := a.resolveResourceSchema(ctx, "app", row.SchemaID); err == nil {
+		row.SchemaID = rec.ID
+		row.SchemaType = rec.Type
+	}
+
+	row.Data = appCanonicalData(
+		row.Name,
+		row.Description,
+		row.AppType,
+		row.RedirectURIs,
+		row.PostLogoutRedirectURIs,
+		row.GrantTypes,
+		row.ResponseTypes,
+		row.LogoURI,
+		metadata,
+	)
+	if dataMap, ok := row.Data.(map[string]any); ok {
+		if row.Description == "" {
+			row.Description = stringFromAny(dataMap["description"])
+		}
+		if len(row.PostLogoutRedirectURIs) == 0 {
+			row.PostLogoutRedirectURIs = stringSliceFromAny(dataMap["post_logout_redirect_uris"])
+		}
+		if row.LogoURI == "" {
+			row.LogoURI = stringFromAny(dataMap["logo_uri"])
+		}
+		row.Metadata = dataMap["metadata"]
+	}
+	return row
+}
+
+func (a *API) listApps(w http.ResponseWriter, r *http.Request) {
+	limit, cursor := parsePagination(r)
+	orgID := r.URL.Query().Get("org_id")
+
+	var where []string
+	var args []any
+	where = append(where, "id > ?")
+	args = append(args, cursor)
+	if orgID != "" {
+		where = append(where, "org_id = ?")
+		args = append(args, orgID)
+	}
+
+	query := `SELECT id, org_id, name, app_type, client_id,
+	                 COALESCE(redirect_uris,'[]'), COALESCE(grant_types,'[]'), COALESCE(response_types,'[]'),
+	                 state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
+	          FROM apps
+	          WHERE ` + strings.Join(where, " AND ") + `
+	          ORDER BY id ASC
+	          LIMIT ?`
+	args = append(args, limit+1)
+
+	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	defer rows.Close()
+
+	var items []AppResponse
+	for rows.Next() {
+		var row AppResponse
+		var redirectURIs, grantTypes, responseTypes, metadataStr string
+		if err := rows.Scan(
+			&row.ID,
+			&row.OrgID,
+			&row.Name,
+			&row.AppType,
+			&row.ClientID,
+			&redirectURIs,
+			&grantTypes,
+			&responseTypes,
+			&row.State,
+			&row.SchemaID,
+			&metadataStr,
+			&row.CreatedAt,
+			&row.UpdatedAt,
+		); err != nil {
+			continue
+		}
+		row.RedirectURIs = stringSliceFromAny(redirectURIs)
+		row.GrantTypes = stringSliceFromAny(grantTypes)
+		row.ResponseTypes = stringSliceFromAny(responseTypes)
+		items = append(items, a.buildAppResponse(r.Context(), row, metadataStr))
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	var nextCursor string
+	if len(items) > limit {
+		items = items[:limit]
+		nextCursor = items[len(items)-1].ID
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
+}
+
+func (a *API) getApp(w http.ResponseWriter, r *http.Request) {
+	appID, err := parseID(r, "id")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var row AppResponse
+	var redirectURIs, grantTypes, responseTypes, metadataStr string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, org_id, name, app_type, client_id,
+		        COALESCE(redirect_uris,'[]'), COALESCE(grant_types,'[]'), COALESCE(response_types,'[]'),
+		        state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
+		 FROM apps
+		 WHERE id = ?`,
+		appID,
+	).Scan(
+		&row.ID,
+		&row.OrgID,
+		&row.Name,
+		&row.AppType,
+		&row.ClientID,
+		&redirectURIs,
+		&grantTypes,
+		&responseTypes,
+		&row.State,
+		&row.SchemaID,
+		&metadataStr,
+		&row.CreatedAt,
+		&row.UpdatedAt,
+	)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "application not found")
+		return
+	}
+
+	row.RedirectURIs = stringSliceFromAny(redirectURIs)
+	row.GrantTypes = stringSliceFromAny(grantTypes)
+	row.ResponseTypes = stringSliceFromAny(responseTypes)
+
+	httputil.WriteJSON(w, http.StatusOK, a.buildAppResponse(r.Context(), row, metadataStr))
+}
 
 func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 	var req AppRequest
@@ -544,49 +695,92 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "name is required")
+
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "app", req.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = appCanonicalData(
+			req.Name,
+			req.Description,
+			req.AppType,
+			req.RedirectURIs,
+			req.PostLogoutRedirectURIs,
+			req.GrantTypes,
+			req.ResponseTypes,
+			req.LogoURI,
+			map[string]any{"metadata": req.Metadata},
+		)
+	}
+
+	name := stringFromAny(data["client_name"])
+	if name == "" {
+		name = strings.TrimSpace(req.Name)
+		data["client_name"] = name
+	}
+	if name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "client_name is required")
+		return
+	}
+
+	appType := normalizeAppType(stringFromAny(data["app_type"]))
+	if appType == "" {
+		appType = normalizeAppType(req.AppType)
+	}
+	if appType == "" {
+		appType = "web"
+		data["app_type"] = appType
+	}
+
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	appID := id.New()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	appType := req.AppType
-	if appType == "" {
-		appType = "oidc"
-	}
-
 	clientID := req.ClientID
 	if clientID == "" {
-		clientID = id.New() // auto-generate a client_id
+		clientID = id.New()
 	}
 
-	redirectURIs := "[]"
-	if len(req.RedirectURIs) > 0 {
-		if b, err := json.Marshal(req.RedirectURIs); err == nil {
-			redirectURIs = string(b)
-		}
+	redirectList := stringSliceFromAny(data["redirect_uris"])
+	grantList := stringSliceFromAny(data["grant_types"])
+	responseList := stringSliceFromAny(data["response_types"])
+	redirectBytes, err := json.Marshal(redirectList)
+	if err != nil {
+		redirectBytes = []byte("[]")
 	}
-	grantTypes := `["authorization_code"]`
-	if len(req.GrantTypes) > 0 {
-		if b, err := json.Marshal(req.GrantTypes); err == nil {
-			grantTypes = string(b)
-		}
+	grantBytes, err := json.Marshal(grantList)
+	if err != nil || len(grantList) == 0 {
+		grantBytes = []byte(`["authorization_code"]`)
+		grantList = []string{"authorization_code"}
 	}
-	responseTypes := `["code"]`
-	if len(req.ResponseTypes) > 0 {
-		if b, err := json.Marshal(req.ResponseTypes); err == nil {
-			responseTypes = string(b)
-		}
+	responseBytes, err := json.Marshal(responseList)
+	if err != nil || len(responseList) == 0 {
+		responseBytes = []byte(`["code"]`)
+		responseList = []string{"code"}
 	}
 
-	metadataJSON := "{}"
-	if req.Metadata != nil {
-		if b, err := json.Marshal(req.Metadata); err == nil {
-			metadataJSON = string(b)
-		}
-	}
+	description := stringFromAny(data["description"])
+	postLogoutRedirectURIs := stringSliceFromAny(data["post_logout_redirect_uris"])
+	logoURI := stringFromAny(data["logo_uri"])
+	metadataJSON := encodeObjectString(stripKeys(data,
+		"client_name",
+		"app_type",
+		"redirect_uris",
+		"grant_types",
+		"response_types",
+	))
 
 	orgID := r.Header.Get("X-Org-Id")
 
@@ -599,9 +793,9 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO apps (id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'app_v1', ?, ?, ?)`,
-		appID, orgID, req.Name, appType, clientID, req.ClientSecret,
-		redirectURIs, grantTypes, responseTypes, metadataJSON, now, now,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+		appID, orgID, name, appType, clientID, req.ClientSecret,
+		string(redirectBytes), string(grantBytes), string(responseBytes), schemaRec.ID, metadataJSON, now, now,
 	)
 	if err != nil {
 		logging.Printf("[createApp] DB insert failed: %v", err)
@@ -614,7 +808,7 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emitEvent(r.Context(), tx, "app.created", appID, appID, "app", map[string]any{
-		"name":      req.Name,
+		"name":      name,
 		"client_id": clientID,
 	})
 
@@ -637,14 +831,24 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusCreated, AppResponse{
-		ID:        appID,
-		OrgID:     orgID,
-		Name:      req.Name,
-		AppType:   appType,
-		ClientID:  clientID,
-		State:     "active",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                     appID,
+		OrgID:                  orgID,
+		Name:                   name,
+		Description:            description,
+		AppType:                appType,
+		ClientID:               clientID,
+		RedirectURIs:           redirectList,
+		PostLogoutRedirectURIs: postLogoutRedirectURIs,
+		GrantTypes:             grantList,
+		ResponseTypes:          responseList,
+		LogoURI:                logoURI,
+		State:                  "active",
+		SchemaID:               schemaRec.ID,
+		SchemaType:             schemaRec.Type,
+		Metadata:               data["metadata"],
+		Data:                   data,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	})
 }
 
@@ -661,16 +865,139 @@ func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := newPatch()
-	p.Set("name", req.Name)
-	p.Set("state", req.State)
-	p.SetJSON("redirect_uris", req.RedirectURIs)
-	p.SetJSON("grant_types", req.GrantTypes)
-	p.SetJSON("response_types", req.ResponseTypes)
-	p.SetJSON("metadata", req.Metadata)
+	var current AppResponse
+	var redirectURIs, grantTypes, responseTypes, metadataStr string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, org_id, name, app_type, client_id,
+		        COALESCE(redirect_uris,'[]'), COALESCE(grant_types,'[]'), COALESCE(response_types,'[]'),
+		        state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
+		 FROM apps
+		 WHERE id = ?`,
+		appID,
+	).Scan(
+		&current.ID,
+		&current.OrgID,
+		&current.Name,
+		&current.AppType,
+		&current.ClientID,
+		&redirectURIs,
+		&grantTypes,
+		&responseTypes,
+		&current.State,
+		&current.SchemaID,
+		&metadataStr,
+		&current.CreatedAt,
+		&current.UpdatedAt,
+	)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "application not found")
+		return
+	}
+	current.RedirectURIs = stringSliceFromAny(redirectURIs)
+	current.GrantTypes = stringSliceFromAny(grantTypes)
+	current.ResponseTypes = stringSliceFromAny(responseTypes)
+	current = a.buildAppResponse(r.Context(), current, metadataStr)
 
-	query, args := p.Build("apps", appID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "app", current.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = appCanonicalData(
+			current.Name,
+			current.Description,
+			current.AppType,
+			current.RedirectURIs,
+			current.PostLogoutRedirectURIs,
+			current.GrantTypes,
+			current.ResponseTypes,
+			current.LogoURI,
+			decodeObjectString(metadataStr),
+		)
+		if strings.TrimSpace(req.Name) != "" {
+			data["client_name"] = strings.TrimSpace(req.Name)
+		}
+		if strings.TrimSpace(req.Description) != "" {
+			data["description"] = strings.TrimSpace(req.Description)
+		}
+		if strings.TrimSpace(req.AppType) != "" {
+			data["app_type"] = normalizeAppType(req.AppType)
+		}
+		if len(req.RedirectURIs) > 0 {
+			data["redirect_uris"] = req.RedirectURIs
+		}
+		if len(req.PostLogoutRedirectURIs) > 0 {
+			data["post_logout_redirect_uris"] = req.PostLogoutRedirectURIs
+		}
+		if len(req.GrantTypes) > 0 {
+			data["grant_types"] = req.GrantTypes
+		}
+		if len(req.ResponseTypes) > 0 {
+			data["response_types"] = req.ResponseTypes
+		}
+		if strings.TrimSpace(req.LogoURI) != "" {
+			data["logo_uri"] = strings.TrimSpace(req.LogoURI)
+		}
+		if req.Metadata != nil {
+			data["metadata"] = req.Metadata
+		}
+	}
+	if stringFromAny(data["client_name"]) == "" {
+		data["client_name"] = current.Name
+	}
+	if stringFromAny(data["app_type"]) == "" {
+		data["app_type"] = current.AppType
+	}
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	nextState := current.State
+	if strings.TrimSpace(req.State) != "" {
+		nextState = strings.TrimSpace(req.State)
+	}
+
+	redirectJSON, err := json.Marshal(stringSliceFromAny(data["redirect_uris"]))
+	if err != nil {
+		redirectJSON = []byte("[]")
+	}
+	grantJSON, err := json.Marshal(stringSliceFromAny(data["grant_types"]))
+	if err != nil {
+		grantJSON = []byte(`["authorization_code"]`)
+	}
+	responseJSON, err := json.Marshal(stringSliceFromAny(data["response_types"]))
+	if err != nil {
+		responseJSON = []byte(`["code"]`)
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(),
+		`UPDATE apps
+		 SET name = ?, app_type = ?, redirect_uris = ?, grant_types = ?, response_types = ?, state = ?, metadata = ?, updated_at = ?
+		 WHERE id = ?`,
+		stringFromAny(data["client_name"]),
+		normalizeAppType(stringFromAny(data["app_type"])),
+		string(redirectJSON),
+		string(grantJSON),
+		string(responseJSON),
+		nextState,
+		encodeObjectString(stripKeys(data,
+			"client_name",
+			"app_type",
+			"redirect_uris",
+			"grant_types",
+			"response_types",
+		)),
+		timeNow(),
+		appID,
+	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
@@ -683,8 +1010,7 @@ func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
 
 	a.bus.Signal()
 
-	// Re-read and return.
-	a.getResource("apps")(w, r)
+	a.getApp(w, r)
 }
 
 func (a *API) deleteApp(w http.ResponseWriter, r *http.Request) {
@@ -768,19 +1094,54 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Identifier == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
+
+	schemaRec, err := schema.ResolveUserSchemaForWrite(r.Context(), a.db.SQL(), req.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
+
+	identifier := strings.TrimSpace(req.Identifier)
+	displayName := strings.TrimSpace(req.DisplayName)
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
+
+	var write *validatedUserWrite
+	if len(data) > 0 {
+		if identifier == "" {
+			identifier = identifierFromUserData(schemaRec.Schema, data, "")
+		}
+		if identifier == "" {
+			httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
+			return
+		}
+		if displayName == "" {
+			displayName = stringFromAny(data["display_name"])
+		}
+		if displayName == "" {
+			displayName = identifier
+		}
+		write, err = validatedUserWriteFromData(schemaRec, identifier, displayName, data)
+	} else {
+		if identifier == "" {
+			httputil.WriteError(w, http.StatusBadRequest, "identifier is required")
+			return
+		}
+		if displayName == "" {
+			displayName = identifier
+		}
+		write, err = a.prepareUserWrite(r.Context(), req.SchemaID, identifier, displayName, req.Metadata, req.Profile)
+	}
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
 		return
 	}
 
 	userID := id.New()
 	now := time.Now().UTC().Format(time.RFC3339)
-
-	write, err := a.prepareUserWrite(r.Context(), req.SchemaID, req.Identifier, req.DisplayName, req.Metadata, req.Profile)
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
-		return
-	}
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -798,7 +1159,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-		userID, orgID, req.Identifier, req.DisplayName, userType, write.Schema.ID, write.MetadataJSON, now, now,
+		userID, orgID, identifier, displayName, userType, write.Schema.ID, write.MetadataJSON, now, now,
 	)
 	if err != nil {
 		// Do not swallow the actual SQL error message!
@@ -812,7 +1173,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce uniqueness via unique_fields table (ADR-016).
-	if err := enforceUserUniqueness(r.Context(), tx, userID, orgID, req.Identifier, write); err != nil {
+	if err := enforceUserUniqueness(r.Context(), tx, userID, orgID, identifier, write); err != nil {
 		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
 				"error": "uniqueness_violation",
@@ -840,7 +1201,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 
 	// Emit event.
 	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
-		"identifier": req.Identifier,
+		"identifier": identifier,
 	})
 
 	if orgID != "" {
@@ -865,11 +1226,16 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 
 	resp := UserResponse{
 		ID:           userID,
-		OrgID:        "",
-		Identifier:   req.Identifier,
-		DisplayName:  req.DisplayName,
+		OrgID:        orgID,
+		Identifier:   identifier,
+		DisplayName:  displayName,
+		UserType:     userType,
 		State:        "active",
-		Profile:      req.Profile,
+		SchemaID:     write.Schema.ID,
+		SchemaType:   write.Schema.Type,
+		Profile:      stripKeys(write.Payload, "metadata"),
+		Metadata:     write.Payload["metadata"],
+		Data:         write.Payload,
 		Capabilities: req.Capabilities,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -975,39 +1341,103 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var currentIdentifier, currentDisplayName, currentSchemaID, currentMetadata string
+	var currentIdentifier, currentDisplayName, currentSchemaID, currentMetadata, currentOrgID string
 	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT identifier, COALESCE(display_name,''), COALESCE(schema_id,''), COALESCE(metadata,'{}')
+		`SELECT identifier, COALESCE(display_name,''), COALESCE(schema_id,''), COALESCE(metadata,'{}'), COALESCE(org_id,'')
 		 FROM users WHERE id = ?`,
 		userID,
-	).Scan(&currentIdentifier, &currentDisplayName, &currentSchemaID, &currentMetadata)
+	).Scan(&currentIdentifier, &currentDisplayName, &currentSchemaID, &currentMetadata, &currentOrgID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(currentMetadata), &metadata); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "invalid stored metadata")
-		return
-	}
-
-	nextDisplayName := currentDisplayName
-	if strings.TrimSpace(req.DisplayName) != "" {
-		nextDisplayName = strings.TrimSpace(req.DisplayName)
-	}
-
-	if _, err := a.prepareExistingUserWrite(r.Context(), currentSchemaID, currentIdentifier, nextDisplayName, metadata); err != nil {
+	currentMetadataMap := decodeObjectString(currentMetadata)
+	schemaRec, err := schema.ResolveUserSchemaForWrite(r.Context(), a.db.SQL(), currentSchemaID)
+	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
 		return
 	}
 
-	p := newPatch()
-	p.Set("state", req.State)
-	p.Set("display_name", nextDisplayName)
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
 
-	query, args := p.Build("users", userID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	nextIdentifier := strings.TrimSpace(req.Identifier)
+	nextDisplayName := strings.TrimSpace(req.DisplayName)
+
+	var write *validatedUserWrite
+	if len(data) > 0 {
+		if nextIdentifier == "" {
+			nextIdentifier = identifierFromUserData(schemaRec.Schema, data, currentIdentifier)
+		}
+		if nextIdentifier == "" {
+			nextIdentifier = currentIdentifier
+		}
+		if nextDisplayName == "" {
+			nextDisplayName = stringFromAny(data["display_name"])
+		}
+		if nextDisplayName == "" {
+			nextDisplayName = currentDisplayName
+		}
+		write, err = validatedUserWriteFromData(schemaRec, nextIdentifier, nextDisplayName, data)
+	} else {
+		mergedMetadata := cloneObjectMap(currentMetadataMap)
+		profile, err := schema.ObjectMap(req.Profile)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+			return
+		}
+		extraMetadata, err := schema.ObjectMap(req.Metadata)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+			return
+		}
+		for key, value := range extraMetadata {
+			mergedMetadata[key] = value
+		}
+		for key, value := range profile {
+			mergedMetadata[key] = value
+		}
+		if nextIdentifier == "" {
+			nextIdentifier = currentIdentifier
+		}
+		if nextDisplayName == "" {
+			nextDisplayName = currentDisplayName
+		}
+		existingWrite, prepErr := a.prepareExistingUserWrite(r.Context(), currentSchemaID, nextIdentifier, nextDisplayName, mergedMetadata)
+		if prepErr != nil {
+			httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(prepErr))
+			return
+		}
+		write = existingWrite
+	}
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
+
+	if nextDisplayName == "" {
+		nextDisplayName = currentDisplayName
+	}
+	if nextIdentifier == "" {
+		nextIdentifier = currentIdentifier
+	}
+
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(r.Context(),
+		`UPDATE users
+		 SET identifier = ?, state = COALESCE(NULLIF(?, ''), state), display_name = ?, metadata = ?, updated_at = ?
+		 WHERE id = ?`,
+		nextIdentifier, req.State, nextDisplayName, write.MetadataJSON, timeNow(), userID,
+	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
@@ -1015,6 +1445,23 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
+		return
+	}
+	if err := reindexUserUniqueness(r.Context(), tx, userID, currentOrgID, nextIdentifier, write); err != nil {
+		if v, ok := err.(*uniqueness.ViolationError); ok {
+			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
+				"error": "uniqueness_violation",
+				"field": v.Field,
+				"value": v.Value,
+				"scope": v.Scope,
+			})
+			return
+		}
+		httputil.WriteError(w, http.StatusConflict, "identity already exists")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
 
@@ -1817,11 +2264,11 @@ func (a *API) schemaIdentityCount(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) loadUser(r *http.Request, userID string) (UserResponse, error) {
 	var resp UserResponse
-	var displayName, metaStr sql.NullString
+	var displayName, metaStr, schemaID sql.NullString
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at
+		`SELECT id, org_id, identifier, display_name, user_type, state, COALESCE(schema_id,''), metadata, created_at, updated_at
 		 FROM users WHERE id = ?`, userID,
-	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.UserType, &resp.State,
+	).Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.UserType, &resp.State, &schemaID,
 		&metaStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		return resp, err
@@ -1829,10 +2276,28 @@ func (a *API) loadUser(r *http.Request, userID string) (UserResponse, error) {
 	if displayName.Valid {
 		resp.DisplayName = displayName.String
 	}
-	if metaStr.Valid {
-		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)
+	if schemaID.Valid {
+		resp.SchemaID = schemaID.String
 	}
 	resp.Capabilities = a.loadCapabilities(r, userID)
+
+	metadata := map[string]any{}
+	if metaStr.Valid {
+		_ = json.Unmarshal([]byte(metaStr.String), &metadata)
+	}
+	if resp.SchemaID != "" {
+		if schemaRec, err := schema.LoadSchemaRecord(r.Context(), a.db.SQL(), resp.SchemaID); err == nil {
+			resp.SchemaType = schemaRec.Type
+			resp.Data = schema.MaterializeUserData(schemaRec.Schema, resp.Identifier, resp.DisplayName, metadata)
+		}
+	}
+	if resp.Data == nil {
+		resp.Data = schema.MaterializeUserData("", resp.Identifier, resp.DisplayName, metadata)
+	}
+	if dataMap, ok := resp.Data.(map[string]any); ok {
+		resp.Profile = stripKeys(dataMap, "metadata")
+		resp.Metadata = dataMap["metadata"]
+	}
 
 	// Enrich: org memberships from the memberships table.
 	orgRows, err2 := a.db.SQL().QueryContext(r.Context(),

@@ -151,7 +151,12 @@ func stringSliceFromAny(value any) []string {
 	}
 }
 
-func appCanonicalData(name, description, appType string, redirectURIs, grantTypes, responseTypes []string, metadata map[string]any) map[string]any {
+func appCanonicalData(
+	name, description, appType string,
+	redirectURIs, postLogoutRedirectURIs, grantTypes, responseTypes []string,
+	logoURI string,
+	metadata map[string]any,
+) map[string]any {
 	data := cloneObjectMap(metadata)
 	if data == nil {
 		data = map[string]any{}
@@ -168,11 +173,17 @@ func appCanonicalData(name, description, appType string, redirectURIs, grantType
 	if len(redirectURIs) > 0 {
 		data["redirect_uris"] = redirectURIs
 	}
+	if len(postLogoutRedirectURIs) > 0 {
+		data["post_logout_redirect_uris"] = postLogoutRedirectURIs
+	}
 	if len(grantTypes) > 0 {
 		data["grant_types"] = grantTypes
 	}
 	if len(responseTypes) > 0 {
 		data["response_types"] = responseTypes
+	}
+	if logoURI != "" {
+		data["logo_uri"] = logoURI
 	}
 	return data
 }

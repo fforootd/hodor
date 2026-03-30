@@ -2,93 +2,111 @@
   "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
-  "description": "External identity provider (OIDC, SAML, social login).",
+  "description": "External identity provider (OIDC, OAuth2, SAML).",
   "x-table": "providers",
   "properties": {
     "display_name": {
       "type": "string",
-      "description": "Provider display name (shown on login)"
+      "description": "Provider display name shown in the login UI"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Marketplace/provider family identifier such as google, github, gitlab, entra, discord, linkedin, or custom"
     },
     "protocol": {
       "type": "string",
-      "enum": [
-        "oidc",
-        "saml",
-        "oauth2",
-        "ldap"
-      ],
-      "description": "Protocol type"
+      "enum": ["oidc", "oauth2", "saml", "ldap"],
+      "description": "Runtime adapter used to connect to the provider"
     },
-    "template": {
-      "type": "string",
-      "description": "Template ID (google, entraid, gitlab, apple, custom)"
-    },
-    "issuer": {
-      "type": "string",
-      "format": "uri",
-      "description": "Issuer URL (OIDC discovery)"
-    },
-    "client_id": {
-      "type": "string"
-    },
-    "client_secret": {
-      "type": "string",
-      "x-sensitive": true
-    },
-    "scopes": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": [
-        "openid",
-        "profile",
-        "email"
-      ]
-    },
-    "config": {
+    "connection": {
       "type": "object",
-      "description": "Protocol-specific configuration (issuer, client_id, scopes, etc.)"
+      "description": "Protocol-specific connection settings such as issuer, authorization_url, token_url, userinfo_url, client_id, client_secret, scopes, and tenant knobs"
     },
-    "claim_mapping": {
+    "mapping": {
       "type": "object",
-      "description": "Map external claims to Zitadel fields"
+      "description": "Inbound claim mapping from provider claims to Zitadel schema fields",
+      "properties": {
+        "claims": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     },
-    "claim_overrides": {
+    "target": {
       "type": "object",
-      "description": "Expression-based claim override mappings"
+      "description": "User schema target for first-login create/link behavior",
+      "properties": {
+        "schema_type": {
+          "type": "string"
+        },
+        "schema_id": {
+          "type": "string"
+        }
+      }
     },
-    "auto_register": {
-      "type": "boolean",
-      "default": false,
-      "description": "Auto-create user on first login"
+    "linking": {
+      "type": "object",
+      "description": "Controls whether the provider can create users, link existing users, or both",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["create_or_link", "link_only"]
+        },
+        "match_by": {
+          "type": "string",
+          "enum": ["verified_email", "identifier", "none"]
+        }
+      }
     },
-    "auto_link": {
-      "type": "string",
-      "enum": [
-        "email",
-        "username",
-        "none"
-      ],
-      "default": "email",
-      "description": "Auto-link to existing user by field"
+    "session": {
+      "type": "object",
+      "description": "Session-related provider defaults and future knobs"
     },
-    "logo_url": {
-      "type": "string",
-      "format": "uri"
+    "ui": {
+      "type": "object",
+      "description": "Login UI settings for this provider",
+      "properties": {
+        "display_order": {
+          "type": "integer",
+          "default": 0
+        }
+      }
     },
     "enabled": {
       "type": "boolean",
       "default": true
     },
-    "display_order": {
-      "type": "integer",
-      "default": 0,
-      "description": "Sort order for login page display"
+    "catalog_ref": {
+      "type": "object",
+      "description": "Marketplace origin metadata for installed providers",
+      "properties": {
+        "template_id": {
+          "type": "string"
+        },
+        "template_version": {
+          "type": "string"
+        },
+        "official": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "logo_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "docs_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
     }
   },
-  "required": [
-    "display_name",
-    "protocol"
-  ]
+  "required": ["display_name", "protocol"]
 }

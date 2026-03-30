@@ -97,6 +97,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Mount template catalog API (ADR-015).
 	catalogSvc := catalog.New(cfg.Catalog, db.SQL())
+	restAPI.SetCatalogService(catalogSvc)
 	api.RegisterCatalogRoutes(mux, catalogSvc, db.SQL())
 	logging.Printf("Catalog ready (%d embedded templates)", catalogSvc.EmbeddedCount())
 
