@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Zitadel — Cloudflare Containers Dockerfile
+#
+# Self-contained multi-stage build for Cloudflare Containers.
+# Target architecture: linux/amd64 (required by CF Containers).
+#
+# This file lives at the deploy/ level but MUST be built from the repo root:
+#   docker build -f deploy/cloudflare-containers/Dockerfile .
+#
+# Wrangler handles this automatically when image is set to this path.
+#
+# Why not use Dockerfile.goreleaser?
+#   - It's FROM scratch (no CA certs, no shell for SSH/debugging)
+#   - It expects goreleaser to pre-stage the binary, can't `docker build` standalone
+#
+# Alternative: use the GHCR image published by goreleaser. See wrangler.jsonc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: Build Vue frontend ──────────────────────────────────────────────
+FROM --platform=linux/amd64 node:22-slim AS web
+
+WORKDIR /build
+COPY package.json package-lock.json ./
+COPY web/package.json web/
+COPY packages/client-js/package.json packages/client-js/
+COPY e2e/package.json e2e/
+RUN npm ci --prefer-offline
+COPY web/ web/
+COPY packages/ packages/
+RUN npm run build -w web
+
+# ── Stage 2: Build Go binary ────────────────────────────────────────────────
+FROM --platform=linux/amd64 golang:1.26-bookworm AS go
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=web /build/web/dist internal/server/webdist/
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o /zitadel ./cmd/zitadel
+
+# ── Stage 3: Minimal runtime ────────────────────────────────────────────────
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=go /zitadel /usr/local/bin/zitadel
+COPY fixtures/prod-seed.yaml /etc/zitadel/seed.yaml
+RUN mkdir -p /data
+WORKDIR /data
+
+EXPOSE 8080
+ENTRYPOINT ["zitadel"]
+CMD ["start", "--auto-migrate"]

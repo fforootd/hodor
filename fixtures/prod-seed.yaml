@@ -1,0 +1,24 @@
+# Production seed — deterministic admin with env-var-driven credentials.
+#
+# Used by Cloudflare Workers for Containers (and any headless deployment)
+# where you can't read container stdout for the random bootstrap password.
+#
+# Set these environment variables before starting:
+#   ZITADEL_ADMIN_PASSWORD  — admin login password
+#   ZITADEL_ADMIN_EMAIL     — admin email (default: admin@zitadel.cloud)
+#   ZITADEL_ADMIN_PAT       — personal access token for API bootstrapping
+#
+# WARNING: Use strong values. Never commit real credentials to version control.
+
+users:
+  - identifier: admin
+    display_name: Admin
+    password: ${ZITADEL_ADMIN_PASSWORD}
+    on_conflict: update
+    capabilities: [admin, password]
+    pats:
+      - name: admin-api
+        token: ${ZITADEL_ADMIN_PAT}
+        scopes: [admin]
+    profile:
+      email: ${ZITADEL_ADMIN_EMAIL:-admin@zitadel.cloud}

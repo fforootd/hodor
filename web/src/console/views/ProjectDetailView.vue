@@ -20,7 +20,7 @@
             <Users class="size-3" />
             {{ members.length }} member{{ members.length !== 1 ? 's' : '' }}
           </Badge>
-          <Button variant="destructive" size="sm" @click="deleteProject">
+          <Button variant="destructive" size="sm" @click="showDeleteConfirm = true">
             <Trash2 class="size-3.5 mr-1" /> Delete
           </Button>
         </div>
@@ -127,6 +127,24 @@
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Delete Confirmation Dialog -->
+    <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Project</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete <strong>{{ project?.name }}</strong>? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showDeleteConfirm = false">Cancel</Button>
+          <Button variant="destructive" @click="deleteProject" :disabled="deleting">
+            {{ deleting ? 'Deleting…' : 'Delete' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -141,7 +159,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { RefreshCw, ArrowLeft, Users, User, UserPlus, Trash2, Settings } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -155,6 +175,8 @@ const showAddMember = ref(false)
 const newMemberUserId = ref('')
 const editName = ref('')
 const editDescription = ref('')
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
 
 async function fetchProject() {
   const id = route.params.id as string
@@ -207,12 +229,16 @@ async function saveSettings() {
 
 async function deleteProject() {
   const id = route.params.id as string
+  deleting.value = true
   try {
     await projectApi.delete(id)
     toast.success('Project deleted')
     router.push('/projects')
   } catch (err: any) {
     toast.error('Failed to delete project', { description: err.message })
+    showDeleteConfirm.value = false
+  } finally {
+    deleting.value = false
   }
 }
 

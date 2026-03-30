@@ -8,7 +8,7 @@
         </p>
       </div>
       <Button as-child>
-        <router-link to="/s/app/new">
+        <router-link to="/applications/new">
           <Plus class="mr-2 size-4" />
           New Application
         </router-link>
@@ -66,7 +66,7 @@
       </EmptyHeader>
       <EmptyContent>
         <Button as-child>
-          <router-link to="/s/app/new">
+          <router-link to="/applications/new">
             <Plus class="mr-2 size-4" />
             New Application
           </router-link>
@@ -125,8 +125,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, h, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { type Identity, metaSchemaApi } from '@/api/resources'
-import { api } from '@/api/client'
+import { appApi, type App } from '@/api/resources'
+import { useOrgContext } from '@/console/composables/useOrgContext'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
@@ -145,34 +145,28 @@ import {
 } from 'lucide-vue-next'
 import { createColumnHelper } from '@tanstack/vue-table'
 
-interface AppWithType extends Identity {
-  _schemaType?: string
-}
-
 const activeTab = ref('all')
-const allApps = ref<AppWithType[]>([])
+const allApps = ref<App[]>([])
 const selectedRows = ref({})
 const globalSearch = ref('')
 const loading = ref(true)
 const issuer = window.location.origin
 
-const appTypes = ['app'] // Future: add 'app_saml' when SAML is implemented
-
 // Computed
+const totalCount = computed(() => allApps.value.length)
+
 const typeCounts = computed(() => {
   const counts: Record<string, number> = {}
   for (const item of allApps.value) {
-    const t = item._schemaType || 'unknown'
+    const t = item.app_type || 'oidc'
     counts[t] = (counts[t] || 0) + 1
   }
   return counts
 })
 
-const totalCount = computed(() => allApps.value.length)
-
 const filteredApps = computed(() => {
   if (activeTab.value === 'all') return allApps.value
-  return allApps.value.filter(i => i._schemaType === activeTab.value)
+  return allApps.value.filter(a => a.app_type === activeTab.value)
 })
 
 // Search
@@ -183,7 +177,7 @@ function applySearchQuery(query: string, table: any) {
   globalSearch.value = query
   const filters: { id: string; value: string }[] = []
   if (query.trim()) {
-    filters.push({ id: 'identifier', value: query.trim() })
+    filters.push({ id: 'client_id', value: query.trim() })
   }
   if (activeTable) {
     activeTable.setColumnFilters(filters)
@@ -199,40 +193,27 @@ function getSortIcon(column: any) {
 
 function copy(text: string) { navigator.clipboard.writeText(text) }
 
-// Data loading
-onMounted(async () => {
-  let typePathMap: Record<string, string> = {}
+function formatUris(app: App): string {
+  const uris = app.redirect_uris || []
+  if (uris.length === 0) return '—'
+  if (uris.length === 1) return uris[0]
+  return `${uris[0]} +${uris.length - 1} more`
+}
+
+const { currentOrgId } = useOrgContext()
+
+async function loadApps() {
+  loading.value = true
   try {
-    const meta = await metaSchemaApi.get()
-    const catalog = meta['x-catalog'] || {}
-    for (const typeName of appTypes) {
-      const entry = catalog[typeName]
-      if (entry?.path) {
-        typePathMap[typeName] = entry.path
-      }
-    }
-  } catch { /* fallback */ }
-
-  const orgId = localStorage.getItem('zitadel_org')
-  const qs = orgId ? `?org_id=${orgId}` : ''
-
-  const results = await Promise.allSettled(
-    appTypes.map(async (typeName) => {
-      const path = typePathMap[typeName] || typeName
-      const data = await api.get<any>(`/v1/${path}${qs}`)
-      return (data.items || []).map((item: any) => ({ ...item, _schemaType: typeName }))
-    })
-  )
-
-  const merged: AppWithType[] = []
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      merged.push(...result.value)
-    }
+    allApps.value = await appApi.list(currentOrgId.value || undefined)
+  } catch { /* ignore */ } finally {
+    loading.value = false
   }
-  allApps.value = merged
-  loading.value = false
-})
+}
+
+onMounted(() => loadApps())
+
+watch(currentOrgId, () => loadApps())
 
 watch(activeTab, () => {
   if (activeTable) {
@@ -241,24 +222,7 @@ watch(activeTab, () => {
   }
 })
 
-function getField(item: Identity, field: string): string {
-  try {
-    const d = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {})
-    return d[field] || ''
-  } catch { return '' }
-}
-
-function formatUris(item: Identity): string {
-  try {
-    const d = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {})
-    const uris = d.redirect_uris || []
-    if (uris.length === 0) return '—'
-    if (uris.length === 1) return uris[0]
-    return `${uris[0]} +${uris.length - 1} more`
-  } catch { return '—' }
-}
-
-const columnHelper = createColumnHelper<AppWithType>()
+const columnHelper = createColumnHelper<App>()
 
 const columns = computed(() => [
   columnHelper.display({
@@ -277,30 +241,29 @@ const columns = computed(() => [
     enableSorting: false,
     enableHiding: false,
   }),
-  columnHelper.accessor('identifier', {
+  columnHelper.accessor('client_id', {
     header: ({ column }) => h(Button, {
       variant: 'ghost',
       class: '-ml-4',
       onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
     }, () => ['Client ID', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
     cell: info => h(RouterLink, {
-      to: `/users/${info.row.original.id}`,
+      to: `/applications/${info.row.original.id}`,
       class: 'font-mono text-sm text-primary hover:underline'
     }, () => info.getValue()),
   }),
-  columnHelper.accessor(row => getField(row, 'client_name') || getField(row, 'display_name') || row.display_name || '—', {
-    id: 'display_name',
+  columnHelper.accessor('name', {
     header: ({ column }) => h(Button, {
       variant: 'ghost',
       class: '-ml-4',
       onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
     }, () => ['Name', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
-    cell: info => h('span', { class: 'text-sm' }, info.getValue()),
+    cell: info => h('span', { class: 'text-sm' }, info.getValue() || '—'),
   }),
-  columnHelper.display({
+  columnHelper.accessor('app_type', {
     id: 'app_type',
     header: 'Type',
-    cell: ({ row }) => h(Badge, { variant: 'outline', class: 'text-xs uppercase' }, () => getField(row.original, 'app_type') || 'OIDC'),
+    cell: info => h(Badge, { variant: 'outline', class: 'text-xs uppercase' }, () => info.getValue() || 'OIDC'),
   }),
   columnHelper.display({
     id: 'redirect_uris',

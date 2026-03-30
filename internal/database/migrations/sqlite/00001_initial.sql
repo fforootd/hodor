@@ -441,16 +441,17 @@ CREATE TABLE IF NOT EXISTS groups (
 );
 CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
 
--- GROUP MEMBERS — join table for group membership
-CREATE TABLE IF NOT EXISTS group_members (
-    group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL DEFAULT 'member',
-    added_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (group_id, user_id)
+-- MEMBERSHIPS — unified join table for org, group, and project membership
+CREATE TABLE IF NOT EXISTS memberships (
+    resource_type TEXT NOT NULL,     -- 'org', 'group', 'project'
+    resource_id   TEXT NOT NULL,
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role          TEXT NOT NULL DEFAULT 'member',
+    added_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (resource_type, resource_id, user_id)
 );
-CREATE INDEX IF NOT EXISTS idx_gm_group ON group_members(group_id);
-CREATE INDEX IF NOT EXISTS idx_gm_user  ON group_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_user ON memberships(user_id, resource_type);
+CREATE INDEX IF NOT EXISTS idx_memberships_resource ON memberships(resource_type, resource_id);
 
 -- ============================================================================
 -- PROJECTS — org-scoped resource containers (ADR-020)
@@ -468,16 +469,7 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
 
--- PROJECT MEMBERS — join table for project membership
-CREATE TABLE IF NOT EXISTS project_members (
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL DEFAULT 'member',
-    added_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (project_id, user_id)
-);
-CREATE INDEX IF NOT EXISTS idx_pm_project ON project_members(project_id);
-CREATE INDEX IF NOT EXISTS idx_pm_user    ON project_members(user_id);
+-- (project_members removed — use memberships table with resource_type='project')
 
 -- ============================================================================
 -- SEED DATA
@@ -511,9 +503,8 @@ CREATE INDEX IF NOT EXISTS idx_saved_queries_name ON saved_queries(name);
 
 
 -- +goose Down
-DROP TABLE IF EXISTS project_members;
+DROP TABLE IF EXISTS memberships;
 DROP TABLE IF EXISTS projects;
-DROP TABLE IF EXISTS group_members;
 DROP TABLE IF EXISTS groups;
 DROP TABLE IF EXISTS saved_queries;
 DROP TABLE IF EXISTS retention_policies;

@@ -75,23 +75,23 @@
                   v-for="org in availableOrgs"
                   :key="org.id"
                   class="rounded-lg border p-3.5 flex items-start gap-3 cursor-pointer transition-colors hover:bg-muted/50"
-                  :class="selectedOrgs.includes(org.identifier || String(org.id))
+                  :class="selectedOrgs.includes(String(org.id))
                     ? 'border-primary bg-primary/5'
                     : ''"
-                  @click="$emit('toggle-org', org.identifier || String(org.id))"
+                  @click="$emit('toggle-org', String(org.id))"
                 >
                   <Checkbox
                     :id="'org-' + org.id"
-                    :checked="selectedOrgs.includes(org.identifier || String(org.id))"
-                    @update:checked="$emit('toggle-org', org.identifier || String(org.id))"
+                    :checked="selectedOrgs.includes(String(org.id))"
+                    @update:checked="$emit('toggle-org', String(org.id))"
                     class="mt-0.5"
                   />
                   <div class="min-w-0 flex-1">
                     <label
                       :for="'org-' + org.id"
                       class="text-sm font-medium leading-none cursor-pointer block"
-                    >{{ org.display_name || org.identifier }}</label>
-                    <p class="text-xs text-muted-foreground mt-1">{{ org.identifier || org.id }}</p>
+                    >{{ org.name || org.display_name || org.id }}</label>
+                    <p class="text-xs text-muted-foreground mt-1">{{ org.id }}</p>
                   </div>
                 </div>
 

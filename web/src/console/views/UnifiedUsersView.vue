@@ -134,6 +134,7 @@ import { ref, onMounted, computed, h, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { type Identity } from '@/api/resources'
 import { api } from '@/api/client'
+import { useOrgContext } from '@/console/composables/useOrgContext'
 import CreateUserWizard from '@/console/components/CreateUserWizard.vue'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
@@ -229,10 +230,11 @@ const userTypeMap: Record<string, string> = {
   ai: 'ai_agent',
 }
 
+const { currentOrgId } = useOrgContext()
+
 async function loadUsers() {
   loading.value = true
-  const orgId = localStorage.getItem('zitadel_org')
-  const qs = orgId ? `?org_id=${orgId}` : ''
+  const qs = currentOrgId.value ? `?org_id=${currentOrgId.value}` : ''
 
   try {
     const data = await api.get<any>(`/v1/users${qs}`)
@@ -264,6 +266,9 @@ watch(activeTab, () => {
     globalSearch.value = ''
   }
 })
+
+// Reload when org context changes
+watch(currentOrgId, () => loadUsers())
 
 function getField(item: Identity, field: string): string {
   try {

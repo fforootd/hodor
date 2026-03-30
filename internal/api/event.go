@@ -280,48 +280,10 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for rows.Next() {
-			var evt EventResponse
-			var payloadStr, metadataStr string
-			var requestID, sessionID, flowID, fingerprint *string
-			var clientID, tokenID, delegationType, sdkName, sdkVersion *string
-			if err := rows.Scan(
-				&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
-				&evt.AggregateID, &evt.AggregateType,
-				&payloadStr, &metadataStr, &evt.CreatedAt,
-				&requestID, &sessionID, &flowID, &fingerprint,
-				&clientID, &tokenID, &delegationType, &sdkName, &sdkVersion,
-			); err != nil {
+			evt, err := a.scanEventRow(rows)
+			if err != nil {
 				continue
 			}
-			if requestID != nil {
-				evt.RequestID = *requestID
-			}
-			if sessionID != nil {
-				evt.SessionID = *sessionID
-			}
-			if flowID != nil {
-				evt.FlowID = *flowID
-			}
-			if fingerprint != nil {
-				evt.Fingerprint = *fingerprint
-			}
-			if clientID != nil {
-				evt.ClientID = *clientID
-			}
-			if tokenID != nil {
-				evt.TokenID = *tokenID
-			}
-			if delegationType != nil {
-				evt.DelegationType = *delegationType
-			}
-			if sdkName != nil {
-				evt.SDKName = *sdkName
-			}
-			if sdkVersion != nil {
-				evt.SDKVersion = *sdkVersion
-			}
-			_ = json.Unmarshal([]byte(payloadStr), &evt.Payload)
-			_ = json.Unmarshal([]byte(metadataStr), &evt.Metadata)
 
 			// Apply type filter.
 			if len(typeList) > 0 {

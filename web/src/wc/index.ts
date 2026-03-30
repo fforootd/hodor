@@ -34,6 +34,11 @@ export { ZitadelOrgDetail } from './zitadel-org-detail-wc'
 export { ZitadelSessionList } from './zitadel-session-list-wc'
 export { ZitadelProviderList } from './zitadel-provider-list-wc'
 
+// Resource management: Apps, Groups, Projects
+export { ZitadelAppList } from './zitadel-app-list-wc'
+export { ZitadelGroupList } from './zitadel-group-list-wc'
+export { ZitadelProjectList } from './zitadel-project-list-wc'
+
 // Shared utilities (for advanced usage)
 export { createSharedStyleSheet, getSharedStyleSheet } from './base-styles'
 export { createWCApiClient, WCApiError } from './wc-api-client'

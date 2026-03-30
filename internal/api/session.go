@@ -6,12 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-
-	"github.com/zitadel/zitadel/internal/httputil"
-
 	"time"
 
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/logging"
 )
 
 // --- Session types ---
@@ -215,6 +214,13 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		"user_agent": userAgent,
 		"ip_address": ipAddress,
 	})
+
+	// FGA: write session tuples (subject + org) — best-effort (sessions expire naturally).
+	if svc := FGAService; svc != nil {
+		if err := svc.OnSessionCreated(ctx, sessionID, userID, "_global"); err != nil {
+			logging.Printf("[fga] warn: failed to write session tuples: %v", err)
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)

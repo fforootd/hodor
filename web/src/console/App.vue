@@ -256,7 +256,7 @@
                 <Users class="mr-2 size-4 shrink-0" />
                 <span>Create User</span>
               </CommandItem>
-              <CommandItem value="action-create-app" @select="navigateTo('/s/app/new')">
+              <CommandItem value="action-create-app" @select="navigateTo('/applications/new')">
                 <AppWindow class="mr-2 size-4 shrink-0" />
                 <span>Create Application</span>
               </CommandItem>
@@ -287,6 +287,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useOrgContext } from '@/console/composables/useOrgContext'
 import { useRoute, useRouter } from 'vue-router'
 import { searchApi, metaSchemaApi, orgApi, countsApi, type SearchResult } from '@/api/resources'
 import { Toaster } from '@/components/ui/sonner'
@@ -330,17 +331,13 @@ const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
 interface OrgEntry { id: string; display_name: string; name: string }
 const orgs = ref<OrgEntry[]>([])
 const showOrgDropdown = ref(false)
-const selectedOrgId = ref<string | null>(null)
+const { currentOrgId, setOrg } = useOrgContext()
+const selectedOrgId = currentOrgId
 const selectedOrg = computed(() => orgs.value.find(o => o.id === selectedOrgId.value) || null)
 
 function selectOrg(org: OrgEntry | null) {
-  selectedOrgId.value = org?.id ?? null
   showOrgDropdown.value = false
-  if (org) {
-    localStorage.setItem('zitadel_org', String(org.id))
-  } else {
-    localStorage.removeItem('zitadel_org')
-  }
+  setOrg(org?.id ?? null)
 }
 
 

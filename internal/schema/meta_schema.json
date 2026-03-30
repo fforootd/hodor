@@ -306,6 +306,7 @@
       "icon": "🌐",
       "sort_order": 13,
       "storage": "dedicated",
+      "nav": "hidden",
       "route": "/endpoints",
       "fga_type": "endpoint",
       "fga_scope": "instance"

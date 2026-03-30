@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/httputil"
@@ -226,60 +225,39 @@ func (a *API) updateLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	setClauses := []string{"updated_at = ?"}
-	args := []any{now}
-
-	name := req.Name
-	if name == "" {
-		name = req.DisplayName
-	}
-	if name != "" {
-		setClauses = append(setClauses, "name = ?")
-		args = append(args, name)
-	}
-	if req.Preset != "" {
-		setClauses = append(setClauses, "preset = ?")
-		args = append(args, req.Preset)
-	}
 	if req.State != "" {
 		if req.State != "draft" && req.State != "testing" && req.State != "active" && req.State != "archived" {
 			httputil.WriteError(w, http.StatusBadRequest, "invalid state")
 			return
 		}
-		setClauses = append(setClauses, "state = ?")
-		args = append(args, req.State)
 	}
+
+	// Name fallback: accept either name or display_name from frontend.
+	name := req.Name
+	if name == "" {
+		name = req.DisplayName
+	}
+
+	// Config fallback: accept either config or profile field.
+	config := req.Config
+	if config == nil {
+		config = req.Profile
+	}
+
+	p := newPatch()
+	p.Set("name", name)
+	p.Set("preset", req.Preset)
+	p.Set("state", req.State)
 	if req.Priority != 0 {
-		setClauses = append(setClauses, "priority = ?")
-		args = append(args, req.Priority)
+		p.SetInt("priority", req.Priority)
 	}
-	if req.Config != nil {
-		configJSON, _ := json.Marshal(req.Config)
-		setClauses = append(setClauses, "config = ?")
-		args = append(args, string(configJSON))
-	} else if req.Profile != nil {
-		profileJSON, _ := json.Marshal(req.Profile)
-		setClauses = append(setClauses, "config = ?")
-		args = append(args, string(profileJSON))
-	}
-	if req.Audience != nil {
-		audienceJSON, _ := json.Marshal(req.Audience)
-		setClauses = append(setClauses, "audience = ?")
-		args = append(args, string(audienceJSON))
-	}
-	if req.AuthMethods != nil {
-		authJSON, _ := json.Marshal(req.AuthMethods)
-		setClauses = append(setClauses, "auth_methods = ?")
-		args = append(args, string(authJSON))
-	}
-	// Handle is_default explicitly (since zero-value bool is meaningful).
-	setClauses = append(setClauses, "is_default = ?")
-	args = append(args, boolToInt(req.IsDefault))
+	p.SetJSON("config", config)
+	p.SetJSON("audience", req.Audience)
+	p.SetJSON("auth_methods", req.AuthMethods)
+	// is_default: always set (zero-value bool is meaningful).
+	p.SetInt("is_default", boolToInt(req.IsDefault))
 
-	args = append(args, flowID)
-
-	query := "UPDATE login_flows SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query, args := p.Build("login_flows", flowID)
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed: "+err.Error())

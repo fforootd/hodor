@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -59,9 +58,9 @@ func (a *API) RegisterGroupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/groups/{id}", a.getGroup)
 	mux.HandleFunc("PATCH /v1/groups/{id}", a.updateGroup)
 	mux.HandleFunc("DELETE /v1/groups/{id}", a.deleteGroup)
-	mux.HandleFunc("GET /v1/groups/{id}/members", a.listGroupMembers)
-	mux.HandleFunc("POST /v1/groups/{id}/members", a.addGroupMember)
-	mux.HandleFunc("DELETE /v1/groups/{id}/members/{userId}", a.removeGroupMember)
+	mux.HandleFunc("GET /v1/groups/{id}/members", a.listMembers("group"))
+	mux.HandleFunc("POST /v1/groups/{id}/members", a.addMember("group"))
+	mux.HandleFunc("DELETE /v1/groups/{id}/members/{userId}", a.removeMember("group"))
 	logging.Printf("[api] registered /v1/groups (full CRUD + members)")
 }
 
@@ -80,7 +79,7 @@ func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT g.id, g.org_id, g.name, g.description, g.state,
 		COALESCE(g.metadata,'{}'), g.created_at, g.updated_at,
-		(SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) as member_count
+		(SELECT COUNT(*) FROM memberships m WHERE m.resource_type='group' AND m.resource_id = g.id) as member_count
 		FROM groups g WHERE %s ORDER BY g.id ASC LIMIT ?`,
 		strings.Join(where, " AND "))
 	args = append(args, limit+1)
@@ -142,7 +141,14 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err := a.db.SQL().ExecContext(r.Context(),
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO groups (id, org_id, name, description, state, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
 		groupID, orgID, req.Name, req.Description, metadataJSON, now, now,
@@ -154,26 +160,26 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Emit event.
-	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
-	if tx != nil {
-		emitEvent(r.Context(), tx, "group.created", groupID, groupID, "group", map[string]any{
-			"name": req.Name, "org_id": orgID,
-		})
-		_ = tx.Commit()
-	}
-	a.bus.Signal()
+	emitEvent(r.Context(), tx, "group.created", groupID, groupID, "group", map[string]any{
+		"name": req.Name, "org_id": orgID,
+	})
 
-	// Wire FGA.
+	// FGA: write hierarchy + ownership tuples — must succeed before commit.
 	if svc := FGAService; svc != nil {
-		creatorID := r.Header.Get("X-Identity-Id")
-		if creatorID == "" {
-			creatorID = "admin"
-		}
+		creatorID := creatorFromRequest(r)
 		if err := svc.OnGroupCreated(r.Context(), groupID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] warn: failed to write group tuples: %v", err)
+			logging.Printf("[fga] failed to write group tuples: %v", err)
+			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
+			return
 		}
 	}
+
+	if err := tx.Commit(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
+		return
+	}
+
+	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusCreated, GroupResponse{
 		ID: groupID, OrgID: orgID, Name: req.Name,
@@ -194,7 +200,7 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT g.id, g.org_id, g.name, g.description, g.state,
 		 COALESCE(g.metadata,'{}'), g.created_at, g.updated_at,
-		 (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) as member_count
+		 (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='group' AND m.resource_id = g.id) as member_count
 		 FROM groups g WHERE g.id = ?`, groupID,
 	).Scan(&g.ID, &g.OrgID, &g.Name, &g.Description, &g.State,
 		&metaStr, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount)
@@ -220,30 +226,13 @@ func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	setClauses := []string{"updated_at = ?"}
-	args := []any{now}
+	p := newPatch()
+	p.Set("name", req.Name)
+	p.Set("description", req.Description)
+	p.Set("state", req.State)
+	p.SetJSON("metadata", req.Metadata)
 
-	if req.Name != "" {
-		setClauses = append(setClauses, "name = ?")
-		args = append(args, req.Name)
-	}
-	if req.Description != "" {
-		setClauses = append(setClauses, "description = ?")
-		args = append(args, req.Description)
-	}
-	if req.State != "" {
-		setClauses = append(setClauses, "state = ?")
-		args = append(args, req.State)
-	}
-	if req.Metadata != nil {
-		metaJSON, _ := json.Marshal(req.Metadata)
-		setClauses = append(setClauses, "metadata = ?")
-		args = append(args, string(metaJSON))
-	}
-	args = append(args, groupID)
-
-	query := "UPDATE groups SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query, args := p.Build("groups", groupID)
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -283,121 +272,6 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ── Group member management ──
-
-func (a *API) listGroupMembers(w http.ResponseWriter, r *http.Request) {
-	groupID, err := parseID(r, "id")
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT gm.user_id, COALESCE(u.display_name, u.identifier, ''), gm.role, gm.added_at
-		 FROM group_members gm
-		 LEFT JOIN users u ON u.id = gm.user_id
-		 WHERE gm.group_id = ?
-		 ORDER BY gm.added_at ASC`, groupID)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
-		return
-	}
-	defer rows.Close()
-
-	var members []MemberResponse
-	for rows.Next() {
-		var m MemberResponse
-		if err := rows.Scan(&m.UserID, &m.DisplayName, &m.Role, &m.AddedAt); err != nil {
-			continue
-		}
-		members = append(members, m)
-	}
-	if err := rows.Err(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
-		return
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: members})
-}
-
-func (a *API) addGroupMember(w http.ResponseWriter, r *http.Request) {
-	groupID, err := parseID(r, "id")
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-
-	var req MemberRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if req.UserID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "user_id is required")
-		return
-	}
-	if req.Role == "" {
-		req.Role = "member"
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT OR REPLACE INTO group_members (group_id, user_id, role, added_at) VALUES (?, ?, ?, ?)`,
-		groupID, req.UserID, req.Role, now)
-	if err != nil {
-		httputil.WriteError(w, http.StatusConflict, "failed to add member")
-		return
-	}
-
-	// Wire FGA.
-	if svc := FGAService; svc != nil {
-		if err := svc.AddGroupMember(r.Context(), req.UserID, groupID); err != nil {
-			logging.Printf("[fga] warn: failed to add group member tuple: %v", err)
-		}
-	}
-
-	a.bus.Signal()
-
-	httputil.WriteJSON(w, http.StatusCreated, MemberResponse{
-		UserID: req.UserID, Role: req.Role, AddedAt: now,
-	})
-}
-
-func (a *API) removeGroupMember(w http.ResponseWriter, r *http.Request) {
-	groupID, err := parseID(r, "id")
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	userID := r.PathValue("userId")
-	if userID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "userId is required")
-		return
-	}
-
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		`DELETE FROM group_members WHERE group_id = ? AND user_id = ?`, groupID, userID)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
-		return
-	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		httputil.WriteError(w, http.StatusNotFound, "member not found")
-		return
-	}
-
-	// Wire FGA.
-	if svc := FGAService; svc != nil {
-		if err := svc.RemoveGroupMember(r.Context(), userID, groupID); err != nil {
-			logging.Printf("[fga] warn: failed to remove group member tuple: %v", err)
-		}
-	}
-
-	a.bus.Signal()
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ──────────────────────────────────────────────────────────────────
 // Project types
 // ──────────────────────────────────────────────────────────────────
@@ -431,9 +305,9 @@ func (a *API) RegisterProjectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/projects/{id}", a.getProject)
 	mux.HandleFunc("PATCH /v1/projects/{id}", a.updateProject)
 	mux.HandleFunc("DELETE /v1/projects/{id}", a.deleteProject)
-	mux.HandleFunc("GET /v1/projects/{id}/members", a.listProjectMembers)
-	mux.HandleFunc("POST /v1/projects/{id}/members", a.addProjectMember)
-	mux.HandleFunc("DELETE /v1/projects/{id}/members/{userId}", a.removeProjectMember)
+	mux.HandleFunc("GET /v1/projects/{id}/members", a.listMembers("project"))
+	mux.HandleFunc("POST /v1/projects/{id}/members", a.addMember("project"))
+	mux.HandleFunc("DELETE /v1/projects/{id}/members/{userId}", a.removeMember("project"))
 	logging.Printf("[api] registered /v1/projects (full CRUD + members)")
 }
 
@@ -452,7 +326,7 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT p.id, p.org_id, p.name, p.description, p.state,
 		COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
-		(SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) as member_count
+		(SELECT COUNT(*) FROM memberships m WHERE m.resource_type='project' AND m.resource_id = p.id) as member_count
 		FROM projects p WHERE %s ORDER BY p.id ASC LIMIT ?`,
 		strings.Join(where, " AND "))
 	args = append(args, limit+1)
@@ -514,7 +388,14 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err := a.db.SQL().ExecContext(r.Context(),
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO projects (id, org_id, name, description, state, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
 		projectID, orgID, req.Name, req.Description, metadataJSON, now, now,
@@ -526,26 +407,26 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Emit event.
-	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
-	if tx != nil {
-		emitEvent(r.Context(), tx, "project.created", projectID, projectID, "project", map[string]any{
-			"name": req.Name, "org_id": orgID,
-		})
-		_ = tx.Commit()
-	}
-	a.bus.Signal()
+	emitEvent(r.Context(), tx, "project.created", projectID, projectID, "project", map[string]any{
+		"name": req.Name, "org_id": orgID,
+	})
 
-	// Wire FGA.
+	// FGA: write hierarchy + ownership tuples — must succeed before commit.
 	if svc := FGAService; svc != nil {
-		creatorID := r.Header.Get("X-Identity-Id")
-		if creatorID == "" {
-			creatorID = "admin"
-		}
+		creatorID := creatorFromRequest(r)
 		if err := svc.OnProjectCreated(r.Context(), projectID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] warn: failed to write project tuples: %v", err)
+			logging.Printf("[fga] failed to write project tuples: %v", err)
+			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
+			return
 		}
 	}
+
+	if err := tx.Commit(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
+		return
+	}
+
+	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusCreated, ProjectResponse{
 		ID: projectID, OrgID: orgID, Name: req.Name,
@@ -566,7 +447,7 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT p.id, p.org_id, p.name, p.description, p.state,
 		 COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
-		 (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) as member_count
+		 (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='project' AND m.resource_id = p.id) as member_count
 		 FROM projects p WHERE p.id = ?`, projectID,
 	).Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.State,
 		&metaStr, &p.CreatedAt, &p.UpdatedAt, &p.MemberCount)
@@ -592,30 +473,13 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	setClauses := []string{"updated_at = ?"}
-	args := []any{now}
+	p := newPatch()
+	p.Set("name", req.Name)
+	p.Set("description", req.Description)
+	p.Set("state", req.State)
+	p.SetJSON("metadata", req.Metadata)
 
-	if req.Name != "" {
-		setClauses = append(setClauses, "name = ?")
-		args = append(args, req.Name)
-	}
-	if req.Description != "" {
-		setClauses = append(setClauses, "description = ?")
-		args = append(args, req.Description)
-	}
-	if req.State != "" {
-		setClauses = append(setClauses, "state = ?")
-		args = append(args, req.State)
-	}
-	if req.Metadata != nil {
-		metaJSON, _ := json.Marshal(req.Metadata)
-		setClauses = append(setClauses, "metadata = ?")
-		args = append(args, string(metaJSON))
-	}
-	args = append(args, projectID)
-
-	query := "UPDATE projects SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query, args := p.Build("projects", projectID)
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -647,121 +511,6 @@ func (a *API) deleteProject(w http.ResponseWriter, r *http.Request) {
 	if rowsAffected == 0 {
 		httputil.WriteError(w, http.StatusNotFound, "project not found")
 		return
-	}
-
-	a.bus.Signal()
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// ── Project member management ──
-
-func (a *API) listProjectMembers(w http.ResponseWriter, r *http.Request) {
-	projectID, err := parseID(r, "id")
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT pm.user_id, COALESCE(u.display_name, u.identifier, ''), pm.role, pm.added_at
-		 FROM project_members pm
-		 LEFT JOIN users u ON u.id = pm.user_id
-		 WHERE pm.project_id = ?
-		 ORDER BY pm.added_at ASC`, projectID)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
-		return
-	}
-	defer rows.Close()
-
-	var members []MemberResponse
-	for rows.Next() {
-		var m MemberResponse
-		if err := rows.Scan(&m.UserID, &m.DisplayName, &m.Role, &m.AddedAt); err != nil {
-			continue
-		}
-		members = append(members, m)
-	}
-	if err := rows.Err(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
-		return
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: members})
-}
-
-func (a *API) addProjectMember(w http.ResponseWriter, r *http.Request) {
-	projectID, err := parseID(r, "id")
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-
-	var req MemberRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if req.UserID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "user_id is required")
-		return
-	}
-	if req.Role == "" {
-		req.Role = "member"
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT OR REPLACE INTO project_members (project_id, user_id, role, added_at) VALUES (?, ?, ?, ?)`,
-		projectID, req.UserID, req.Role, now)
-	if err != nil {
-		httputil.WriteError(w, http.StatusConflict, "failed to add member")
-		return
-	}
-
-	// Wire FGA.
-	if svc := FGAService; svc != nil {
-		if err := svc.AddProjectMember(r.Context(), req.UserID, projectID); err != nil {
-			logging.Printf("[fga] warn: failed to add project member tuple: %v", err)
-		}
-	}
-
-	a.bus.Signal()
-
-	httputil.WriteJSON(w, http.StatusCreated, MemberResponse{
-		UserID: req.UserID, Role: req.Role, AddedAt: now,
-	})
-}
-
-func (a *API) removeProjectMember(w http.ResponseWriter, r *http.Request) {
-	projectID, err := parseID(r, "id")
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	userID := r.PathValue("userId")
-	if userID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "userId is required")
-		return
-	}
-
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`, projectID, userID)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
-		return
-	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		httputil.WriteError(w, http.StatusNotFound, "member not found")
-		return
-	}
-
-	// Wire FGA.
-	if svc := FGAService; svc != nil {
-		if err := svc.RemoveProjectMember(r.Context(), userID, projectID); err != nil {
-			logging.Printf("[fga] warn: failed to remove project member tuple: %v", err)
-		}
 	}
 
 	a.bus.Signal()
@@ -838,14 +587,3 @@ func (a *API) disableModule(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ──
-
-func parsePagination(r *http.Request) (limit int, cursor string) {
-	limit = 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
-	cursor = r.URL.Query().Get("cursor")
-	return
-}

@@ -131,8 +131,6 @@
             <dl class="grid grid-cols-[80px_1fr] gap-y-2 gap-x-4 text-sm">
               <dt class="font-medium text-muted-foreground">ID</dt>
               <dd class="font-mono text-xs break-all">{{ identity.id }}</dd>
-              <dt class="font-medium text-muted-foreground">Org ID</dt>
-              <dd>{{ identity.org_id }}</dd>
               <dt class="font-medium text-muted-foreground">Schema</dt>
               <dd>{{ (identity as any).schema_name || '—' }}</dd>
               <dt class="font-medium text-muted-foreground">Created</dt>
@@ -143,6 +141,54 @@
           </CardContent>
         </Card>
       </div>
+
+      <!-- Organizations membership -->
+      <Card>
+        <CardHeader class="pb-3 flex flex-row items-center justify-between">
+          <CardTitle class="text-sm">Organizations</CardTitle>
+          <DropdownMenu v-if="availableOrgs.length">
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="h-7 text-xs">
+                <Plus class="size-3 mr-1" /> Add
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                v-for="org in availableOrgs" :key="org.id"
+                @click="addToOrg(org.id)"
+              >
+                {{ org.name }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </CardHeader>
+        <CardContent>
+          <div v-if="userOrgs.length" class="space-y-2">
+            <div
+              v-for="om in userOrgs" :key="om.org_id"
+              class="flex items-center justify-between p-2.5 rounded-lg border bg-muted/30"
+            >
+              <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center size-8 rounded-md bg-primary/10 text-primary font-bold text-xs">
+                  {{ (om.org_name || om.org_id)[0]?.toUpperCase() }}
+                </div>
+                <div>
+                  <p class="text-sm font-medium">{{ om.org_name || om.org_id }}</p>
+                  <p class="text-xs text-muted-foreground">{{ om.role }}</p>
+                </div>
+              </div>
+              <Button
+                variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive"
+                @click="removeFromOrg(om.org_id)"
+                :disabled="removingOrg === om.org_id"
+              >
+                <X class="size-3.5" />
+              </Button>
+            </div>
+          </div>
+          <p v-else class="text-sm text-muted-foreground">Not a member of any organization</p>
+        </CardContent>
+      </Card>
     </template>
 
     <!-- ═══ JSON VIEW ═══ -->
@@ -294,7 +340,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { userApi, magicLinkApi, schemaApi, metaSchemaApi, type Identity } from '@/api/resources'
+import { userApi, magicLinkApi, schemaApi, metaSchemaApi, orgApi, orgMembersApi, type Identity, type Org } from '@/api/resources'
 import JsonEditor from '@/console/components/JsonEditor.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -307,7 +353,10 @@ import { Separator } from '@/components/ui/separator'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Mail, Pencil, Trash2, X, Activity, FileJson, Key, ExternalLink } from 'lucide-vue-next'
+import { ArrowLeft, Mail, Pencil, Trash2, X, Activity, FileJson, Key, ExternalLink, Plus } from 'lucide-vue-next'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 
 const route = useRoute()
 const router = useRouter()
@@ -326,6 +375,47 @@ const editJsonError = ref('')
 const editJsonParsed = ref<any>({})
 const displayMeta = ref<any>({})
 const entitySchema = ref<any>(null)
+
+// Org membership state
+interface OrgMembership { org_id: string; org_name: string; role: string; added_at: string }
+const userOrgs = ref<OrgMembership[]>([])
+const allOrgs = ref<Org[]>([])
+const removingOrg = ref('')
+
+const availableOrgs = computed(() => {
+  const memberOrgIds = new Set(userOrgs.value.map(o => o.org_id))
+  return allOrgs.value.filter(o => !memberOrgIds.has(o.id))
+})
+
+function loadOrgMemberships() {
+  if (!identity.value) return
+  userOrgs.value = (identity.value as any).orgs || []
+}
+
+async function addToOrg(orgId: string) {
+  if (!identity.value) return
+  try {
+    await orgMembersApi.add(orgId, identity.value.id)
+    identity.value = await userApi.get(identity.value.id)
+    loadOrgMemberships()
+    message.value = 'Added to organization'; messageType.value = 'success'
+  } catch (e: any) {
+    message.value = e?.message || 'Failed to add to org'; messageType.value = 'error'
+  }
+}
+
+async function removeFromOrg(orgId: string) {
+  if (!identity.value) return
+  removingOrg.value = orgId
+  try {
+    await orgMembersApi.remove(orgId, identity.value.id)
+    identity.value = await userApi.get(identity.value.id)
+    loadOrgMemberships()
+    message.value = 'Removed from organization'; messageType.value = 'success'
+  } catch (e: any) {
+    message.value = e?.message || 'Failed to remove from org'; messageType.value = 'error'
+  } finally { removingOrg.value = '' }
+}
 
 const schemaType = computed(() => (route.params as any).schemaType || (identity.value as any)?.schema_name || '')
 const isInteractiveIdentity = computed(() => {
@@ -447,6 +537,8 @@ async function deleteIdentity() {
 onMounted(async () => {
   try {
     identity.value = await userApi.get(route.params.id as string)
+    loadOrgMemberships()
+    orgApi.list().then(orgs => { allOrgs.value = orgs }).catch(() => {})
     const schemaName = (identity.value as any)?.schema_name
     if (schemaName) {
       const allSchemas = await schemaApi.list()

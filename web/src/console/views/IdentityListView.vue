@@ -137,11 +137,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, h } from 'vue'
+import { ref, onMounted, computed, h, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink } from 'vue-router'
 import { type Identity, metaSchemaApi } from '@/api/resources'
 import { api } from '@/api/client'
+import { useOrgContext } from '@/console/composables/useOrgContext'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
@@ -254,29 +255,15 @@ function applySearchQuery(query: string, table: any) {
   }
 }
 
-onMounted(async () => {
-  let apiPath = props.schemaType
+const { currentOrgId } = useOrgContext()
+let _apiPath = ''
 
+async function loadData() {
+  if (!_apiPath) return
   try {
-    const metaData = await metaSchemaApi.get()
-
-    const catalog = metaData['x-catalog'] || {}
-    const entry = catalog[props.schemaType]
-    if (entry) {
-      schemaDisplay.value = { alias: entry.alias, singular: entry.singular, path: entry.path, icon: entry.icon }
-      apiPath = entry.path || props.schemaType
-    }
-  } catch { /* ignore */ }
-
-
-  try {
-    let url = `/v1/${apiPath}`
-    const orgId = localStorage.getItem('zitadel_org')
-    if (orgId && apiPath !== 'orgs' && props.schemaType !== 'org') url += `?org_id=${orgId}`
-
+    let url = `/v1/${_apiPath}`
+    if (currentOrgId.value && _apiPath !== 'orgs' && props.schemaType !== 'org') url += `?org_id=${currentOrgId.value}`
     const data = await api.get<any>(url)
-
-    // Normalize: orgs use `name` whereas the DataTable expects `identifier`/`display_name`.
     const items = data.items || []
     if (props.schemaType === 'org') {
       identities.value = items.map((o: any) => ({
@@ -288,7 +275,24 @@ onMounted(async () => {
       identities.value = items
     }
   } catch { /* ignore */ }
+}
+
+onMounted(async () => {
+  let apiPath = props.schemaType
+  try {
+    const metaData = await metaSchemaApi.get()
+    const catalog = metaData['x-catalog'] || {}
+    const entry = catalog[props.schemaType]
+    if (entry) {
+      schemaDisplay.value = { alias: entry.alias, singular: entry.singular, path: entry.path, icon: entry.icon }
+      apiPath = entry.path || props.schemaType
+    }
+  } catch { /* ignore */ }
+  _apiPath = apiPath
+  await loadData()
 })
+
+watch(currentOrgId, () => loadData())
 
 function getField(item: Identity, field: string): string {
   try {
@@ -339,7 +343,7 @@ const columns = computed(() => {
         onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
       }, () => ['Identifier', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
       cell: info => h(RouterLink, {
-        to: `/users/${info.row.original.id}`,
+        to: isApp ? `/applications/${info.row.original.id}` : `/users/${info.row.original.id}`,
         class: isApp ? 'font-mono text-sm text-primary hover:underline' : 'font-medium hover:underline'
       }, () => info.getValue()),
     }),

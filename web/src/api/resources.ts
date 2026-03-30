@@ -290,11 +290,78 @@ export const orgApi = {
     api.delete(`/v1/orgs/${encodeURIComponent(id)}`),
 }
 
+export interface OrgMember {
+  user_id: string
+  display_name?: string
+  role: string
+  added_at: string
+}
+
+export const orgMembersApi = {
+  list: (orgId: string): Promise<OrgMember[]> =>
+    api.get<{ items: OrgMember[] }>(`/v1/orgs/${encodeURIComponent(orgId)}/members`).then(r => r.items ?? []),
+  add: (orgId: string, userId: string, role = 'member'): Promise<OrgMember> =>
+    api.post<OrgMember>(`/v1/orgs/${encodeURIComponent(orgId)}/members`, { user_id: userId, role }),
+  remove: (orgId: string, userId: string): Promise<void> =>
+    api.delete(`/v1/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`),
+}
+
 // ------------------------------------------------------------------
 // Counts API
 // ------------------------------------------------------------------
 export const countsApi = {
   get: (): Promise<CountsResponse> => unwrap<CountsResponse>(entityCounts()),
+}
+
+// ------------------------------------------------------------------
+// App API (OIDC Clients — dedicated `apps` table)
+// ------------------------------------------------------------------
+export interface App {
+  id: string
+  org_id: string
+  name: string
+  app_type: string
+  client_id: string
+  client_secret?: string
+  redirect_uris: string[]
+  grant_types: string[]
+  response_types: string[]
+  state: string
+  metadata?: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export const appApi = {
+  list: (orgId?: string): Promise<App[]> => {
+    const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
+    return api.get<{ items: App[] }>(`/v1/apps${qs}`).then(r => (r.items || []).map(normalizeApp))
+  },
+  get: (id: string): Promise<App> =>
+    api.get<App>(`/v1/apps/${encodeURIComponent(id)}`).then(normalizeApp),
+  create: (data: Partial<App> & { name: string }): Promise<App> =>
+    api.post<App>('/v1/apps', data),
+  update: (id: string, data: Partial<App>): Promise<App> =>
+    api.patch<App>(`/v1/apps/${encodeURIComponent(id)}`, data).then(normalizeApp),
+  delete: (id: string): Promise<void> =>
+    api.delete(`/v1/apps/${encodeURIComponent(id)}`),
+}
+
+// Normalize JSON-encoded array fields that come back as strings from the generic list handler.
+function normalizeApp(app: any): App {
+  if (typeof app.redirect_uris === 'string') {
+    try { app.redirect_uris = JSON.parse(app.redirect_uris) } catch { app.redirect_uris = [] }
+  }
+  if (typeof app.grant_types === 'string') {
+    try { app.grant_types = JSON.parse(app.grant_types) } catch { app.grant_types = [] }
+  }
+  if (typeof app.response_types === 'string') {
+    try { app.response_types = JSON.parse(app.response_types) } catch { app.response_types = [] }
+  }
+  if (typeof app.metadata === 'string') {
+    try { app.metadata = JSON.parse(app.metadata) } catch { app.metadata = {} }
+  }
+  return app as App
 }
 
 // ------------------------------------------------------------------

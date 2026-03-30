@@ -12,6 +12,8 @@ const router = createRouter({
     // Unified aggregate views
     { path: '/users', name: 'users', component: () => import('./views/UnifiedUsersView.vue') },
     { path: '/applications', name: 'applications', component: () => import('./views/UnifiedAppsView.vue') },
+    { path: '/applications/new', name: 'application-create', component: () => import('./views/AppCreateView.vue') },
+    { path: '/applications/:id', name: 'application-detail', component: () => import('./views/AppDetailView.vue') },
     // Dynamic schema-type identity list: /s/human_user, /s/app, /s/ai_agent, etc. (backward compat)
     { path: '/s/:schemaType', name: 'schema-identities', component: () => import('./views/IdentityListView.vue'), props: true },
     // Shared identity detail/create

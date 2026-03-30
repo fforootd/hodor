@@ -353,7 +353,7 @@ const primaryIdentifier = computed(() => {
 const selectedOrgNames = computed(() => {
   if (selectedOrgs.value.length === 0) return 'No organization'
   return selectedOrgs.value
-    .map(id => availableOrgs.value.find(o => o.identifier === id || String(o.id) === id)?.display_name || id)
+    .map(orgId => availableOrgs.value.find(o => String(o.id) === orgId)?.name || orgId)
     .join(', ')
 })
 
@@ -447,21 +447,32 @@ async function nextStep() {
       }
     }
 
-    const metadata: Record<string, any> = {}
-    if (selectedOrgs.value.length > 0) {
-      metadata.orgs = selectedOrgs.value
-    }
-
     const payload = {
       schema_id: currentSchema.value?.id || props.schemaType,
       identifier: primaryIdentifier.value.trim(),
       display_name: profileData.display_name?.trim() || primaryIdentifier.value.trim(),
       profile: profileDict,
       capabilities: caps,
-      metadata,
     }
 
     const created = await apiPost<any>('/v1/users', payload)
+
+    // Create org memberships via the memberships API (canonical source of truth)
+    if (created.id && selectedOrgs.value.length > 0) {
+      for (const orgId of selectedOrgs.value) {
+        // Resolve actual org ID from identifier
+        const org = availableOrgs.value.find(
+          (o: any) => o.identifier === orgId || String(o.id) === orgId
+        )
+        const resolvedOrgId = org?.id || orgId
+        await apiPost(`/v1/orgs/${encodeURIComponent(resolvedOrgId)}/members`, {
+          user_id: created.id,
+          role: 'member',
+        }).catch((err: any) => {
+          console.error(`Failed to add user to org ${resolvedOrgId}:`, err)
+        })
+      }
+    }
 
     // Set password if chosen
     if (authMethod.value === 'password' && created.id) {

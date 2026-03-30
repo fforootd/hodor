@@ -210,6 +210,12 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID str
 			return nil
 		default: // "skip"
 			logging.Printf("[seed] identity %q already exists, skipping", ident.Identifier)
+			// Ensure org membership exists even on skip.
+			if orgID != "" {
+				tx.ExecContext(ctx,
+					`INSERT OR IGNORE INTO memberships (resource_type, resource_id, user_id, role, added_at) VALUES ('org', ?, ?, 'member', datetime('now'))`,
+					orgID, existingID)
+			}
 			// Still process linked accounts for this existing identity.
 			for _, la := range ident.LinkedAccounts {
 				seedLinkedAccount(ctx, tx, existingID, la)
@@ -263,6 +269,13 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID str
 
 	// Seed PATs.
 	seedPATs(ctx, tx, newID, ident.PATs)
+
+	// Insert org membership (only when a default org exists).
+	if orgID != "" {
+		tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO memberships (resource_type, resource_id, user_id, role, added_at) VALUES ('org', ?, ?, 'member', datetime('now'))`,
+			orgID, newID)
+	}
 
 	logging.Printf("[seed] created identity %q (id: %s)", ident.Identifier, newID)
 

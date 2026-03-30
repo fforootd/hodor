@@ -47,7 +47,7 @@
 
       <!-- ═══ FORM MODE ═══ -->
       <template v-if="mode === 'form'">
-        <Card>
+        <Card key="main-card">
           <CardHeader class="pb-3">
             <CardTitle class="text-sm">{{ isInteractiveIdentity ? 'Account' : 'Identity' }}</CardTitle>
           </CardHeader>
@@ -60,14 +60,14 @@
               <Label for="create-name">Display Name</Label>
               <Input id="create-name" v-model="form.display_name" placeholder="Display name" />
             </div>
-            <div class="space-y-2" v-if="hasPassword">
+            <div class="space-y-2" v-show="hasPassword">
               <Label for="create-pw">Password</Label>
               <Input id="create-pw" v-model="form.password" type="password" placeholder="Set initial password" />
             </div>
           </CardContent>
         </Card>
 
-        <Card v-if="schemaFields.length">
+        <Card v-if="schemaFields.length" key="properties-card">
           <CardHeader class="pb-3">
             <CardTitle class="text-sm">Properties</CardTitle>
           </CardHeader>
@@ -77,7 +77,7 @@
               <Select v-if="field.type === 'boolean'" v-model="profileData[field.name]">
                 <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">—</SelectItem>
+                  <SelectItem value="__unset__">—</SelectItem>
                   <SelectItem value="true">true</SelectItem>
                   <SelectItem value="false">false</SelectItem>
                 </SelectContent>
@@ -85,7 +85,7 @@
               <Select v-else-if="field.enum" v-model="profileData[field.name]">
                 <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">—</SelectItem>
+                  <SelectItem value="__unset__">—</SelectItem>
                   <SelectItem v-for="opt in field.enum" :key="opt" :value="opt">{{ opt }}</SelectItem>
                 </SelectContent>
               </Select>
@@ -101,7 +101,7 @@
           </CardContent>
         </Card>
 
-        <Card v-if="isInteractiveIdentity">
+        <Card v-if="isInteractiveIdentity" key="capabilities-card">
           <CardHeader class="pb-3">
             <CardTitle class="text-sm">Capabilities</CardTitle>
           </CardHeader>
@@ -115,7 +115,7 @@
           </CardContent>
         </Card>
 
-        <Card v-if="isInteractiveIdentity && hasLogin" class="bg-muted/30">
+        <Card v-if="isInteractiveIdentity && hasLogin" class="bg-muted/30" key="invite-card">
           <CardContent class="py-4">
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" v-model="sendInvite" class="accent-primary" />
@@ -290,7 +290,7 @@ async function submit() {
       const profile: Record<string, any> = {}
       if (form.display_name) profile.display_name = form.display_name
       for (const [k, v] of Object.entries(profileData)) {
-        if (v !== '') {
+        if (v !== '' && v !== '__unset__') {
           const fieldDef = schemaFields.value.find(f => f.name === k)
           if (fieldDef?.type === 'boolean') profile[k] = v === 'true'
           else if (fieldDef?.type === 'integer') profile[k] = parseInt(v) || 0

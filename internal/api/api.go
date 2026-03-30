@@ -140,12 +140,14 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/orgs/{id}", a.getResource("orgs"))
 	mux.HandleFunc("PATCH /v1/orgs/{id}", a.updateOrg)
 	mux.HandleFunc("DELETE /v1/orgs/{id}", a.deleteOrg)
-	logging.Printf("[api] registered /v1/orgs (full CRUD)")
+	mux.HandleFunc("GET /v1/orgs/{id}/members", a.listMembers("org"))
+	mux.HandleFunc("POST /v1/orgs/{id}/members", a.addMember("org"))
+	mux.HandleFunc("DELETE /v1/orgs/{id}/members/{userId}", a.removeMember("org"))
+	logging.Printf("[api] registered /v1/orgs (full CRUD + members)")
 
-	// Generic CRUD routes for other dedicated resource tables.
+	// Generic read-only routes for other dedicated resource tables.
 	resourceTables := map[string]string{
 		"action": "actions",
-		"app":    "apps",
 	}
 
 	for typeName, tableName := range resourceTables {
@@ -161,6 +163,14 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 
 		logging.Printf("[api] registered /v1/%s (table=%s)", entry.Path, tbl)
 	}
+
+	// Dedicated App CRUD routes (OIDC clients live in the `apps` table).
+	mux.HandleFunc("GET /v1/apps", a.listResource("apps"))
+	mux.HandleFunc("POST /v1/apps", a.createApp)
+	mux.HandleFunc("GET /v1/apps/{id}", a.getResource("apps"))
+	mux.HandleFunc("PATCH /v1/apps/{id}", a.updateApp)
+	mux.HandleFunc("DELETE /v1/apps/{id}", a.deleteApp)
+	logging.Printf("[api] registered /v1/apps (full CRUD)")
 }
 
 // --- Org types ---
@@ -203,7 +213,14 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err := a.db.SQL().ExecContext(r.Context(),
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO orgs (id, name, state, metadata, created_at, updated_at)
 		 VALUES (?, ?, 'active', ?, ?, ?)`,
 		orgID, req.Name, metadataJSON, now, now,
@@ -218,27 +235,26 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Emit event.
-	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
-	if tx != nil {
-		emitEvent(r.Context(), tx, "org.created", orgID, orgID, "org", map[string]any{
-			"name": req.Name,
-		})
-		_ = tx.Commit()
+	emitEvent(r.Context(), tx, "org.created", orgID, orgID, "org", map[string]any{
+		"name": req.Name,
+	})
+
+	// FGA: write ownership tuples — must succeed before commit.
+	if svc := FGAService; svc != nil {
+		creatorID := creatorFromRequest(r)
+		if err := svc.OnOrgCreated(r.Context(), orgID, creatorID); err != nil {
+			logging.Printf("[fga] failed to write org tuples: %v", err)
+			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
+		return
 	}
 
 	a.bus.Signal()
-
-	// Wire FGA: write ownership tuples for the new org.
-	if svc := FGAService; svc != nil {
-		creatorID := r.Header.Get("X-Identity-Id")
-		if creatorID == "" {
-			creatorID = "admin"
-		}
-		if err := svc.OnOrgCreated(r.Context(), orgID, creatorID); err != nil {
-			logging.Printf("[fga] warn: failed to write org tuples: %v", err)
-		}
-	}
 
 	httputil.WriteJSON(w, http.StatusCreated, OrgResponse{
 		ID:        orgID,
@@ -262,27 +278,12 @@ func (a *API) updateOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	p := newPatch()
+	p.Set("name", req.Name)
+	p.Set("state", req.State)
+	p.SetJSON("metadata", req.Metadata)
 
-	setClauses := []string{"updated_at = ?"}
-	args := []any{now}
-
-	if req.Name != "" {
-		setClauses = append(setClauses, "name = ?")
-		args = append(args, req.Name)
-	}
-	if req.State != "" {
-		setClauses = append(setClauses, "state = ?")
-		args = append(args, req.State)
-	}
-	if req.Metadata != nil {
-		metaJSON, _ := json.Marshal(req.Metadata)
-		setClauses = append(setClauses, "metadata = ?")
-		args = append(args, string(metaJSON))
-	}
-	args = append(args, orgID)
-
-	query := "UPDATE orgs SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query, args := p.Build("orgs", orgID)
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -318,7 +319,14 @@ func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM orgs WHERE id = ?`, orgID)
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM orgs WHERE id = ?`, orgID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -329,14 +337,222 @@ func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.bus.Signal()
-
-	// Wire FGA: clean up tuples.
+	// FGA: clean up tuples (best-effort — orphan tuples on deleted resources are harmless).
 	if svc := FGAService; svc != nil {
 		if err := svc.OnResourceDeleted(r.Context(), orgID); err != nil {
-			logging.Printf("[fga] warn: failed to delete org tuples: %v", err)
+			logging.Printf("[fga] warn: failed to delete org tuples (will be cleaned by reconciler): %v", err)
 		}
 	}
+
+	if err := tx.Commit(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
+		return
+	}
+
+	a.bus.Signal()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Org member management ──
+
+// --- App types ---
+
+type AppRequest struct {
+	Name          string   `json:"name"`
+	AppType       string   `json:"app_type,omitempty"`
+	ClientID      string   `json:"client_id,omitempty"`
+	ClientSecret  string   `json:"client_secret,omitempty"`
+	RedirectURIs  []string `json:"redirect_uris,omitempty"`
+	GrantTypes    []string `json:"grant_types,omitempty"`
+	ResponseTypes []string `json:"response_types,omitempty"`
+	State         string   `json:"state,omitempty"`
+	Metadata      any      `json:"metadata,omitempty"`
+}
+
+type AppResponse struct {
+	ID            string   `json:"id"`
+	OrgID         string   `json:"org_id"`
+	Name          string   `json:"name"`
+	AppType       string   `json:"app_type"`
+	ClientID      string   `json:"client_id"`
+	RedirectURIs  []string `json:"redirect_uris,omitempty"`
+	GrantTypes    []string `json:"grant_types,omitempty"`
+	ResponseTypes []string `json:"response_types,omitempty"`
+	State         string   `json:"state"`
+	Metadata      any      `json:"metadata,omitempty"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
+}
+
+// --- App handlers ---
+
+func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
+	var req AppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	appID := id.New()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	appType := req.AppType
+	if appType == "" {
+		appType = "oidc"
+	}
+
+	clientID := req.ClientID
+	if clientID == "" {
+		clientID = id.New() // auto-generate a client_id
+	}
+
+	redirectURIs := "[]"
+	if len(req.RedirectURIs) > 0 {
+		if b, err := json.Marshal(req.RedirectURIs); err == nil {
+			redirectURIs = string(b)
+		}
+	}
+	grantTypes := `["authorization_code"]`
+	if len(req.GrantTypes) > 0 {
+		if b, err := json.Marshal(req.GrantTypes); err == nil {
+			grantTypes = string(b)
+		}
+	}
+	responseTypes := `["code"]`
+	if len(req.ResponseTypes) > 0 {
+		if b, err := json.Marshal(req.ResponseTypes); err == nil {
+			responseTypes = string(b)
+		}
+	}
+
+	metadataJSON := "{}"
+	if req.Metadata != nil {
+		if b, err := json.Marshal(req.Metadata); err == nil {
+			metadataJSON = string(b)
+		}
+	}
+
+	orgID := r.Header.Get("X-Org-Id")
+
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
+		`INSERT INTO apps (id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'app_v1', ?, ?, ?)`,
+		appID, orgID, req.Name, appType, clientID, req.ClientSecret,
+		redirectURIs, grantTypes, responseTypes, metadataJSON, now, now,
+	)
+	if err != nil {
+		logging.Printf("[createApp] DB insert failed: %v", err)
+		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
+			"error":   "database error",
+			"code":    409,
+			"details": err.Error(),
+		})
+		return
+	}
+
+	emitEvent(r.Context(), tx, "app.created", appID, appID, "app", map[string]any{
+		"name":      req.Name,
+		"client_id": clientID,
+	})
+
+	// FGA: write org + ownership tuples — must succeed before commit.
+	if svc := FGAService; svc != nil {
+		creatorID := creatorFromRequest(r)
+		if err := svc.OnAppCreated(r.Context(), appID, creatorID, orgID); err != nil {
+			logging.Printf("[fga] failed to write app tuples: %v", err)
+			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
+		return
+	}
+
+	a.bus.Signal()
+
+	httputil.WriteJSON(w, http.StatusCreated, AppResponse{
+		ID:        appID,
+		OrgID:     orgID,
+		Name:      req.Name,
+		AppType:   appType,
+		ClientID:  clientID,
+		State:     "active",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+}
+
+func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
+	appID, err := parseID(r, "id")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req AppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	p := newPatch()
+	p.Set("name", req.Name)
+	p.Set("state", req.State)
+	p.SetJSON("redirect_uris", req.RedirectURIs)
+	p.SetJSON("grant_types", req.GrantTypes)
+	p.SetJSON("response_types", req.ResponseTypes)
+	p.SetJSON("metadata", req.Metadata)
+
+	query, args := p.Build("apps", appID)
+	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		httputil.WriteError(w, http.StatusNotFound, "application not found")
+		return
+	}
+
+	a.bus.Signal()
+
+	// Re-read and return.
+	a.getResource("apps")(w, r)
+}
+
+func (a *API) deleteApp(w http.ResponseWriter, r *http.Request) {
+	appID, err := parseID(r, "id")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM apps WHERE id = ?`, appID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		httputil.WriteError(w, http.StatusNotFound, "application not found")
+		return
+	}
+
+	a.bus.Signal()
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -354,18 +570,26 @@ type UserRequest struct {
 }
 
 type UserResponse struct {
-	ID           string   `json:"id"`
-	OrgID        string   `json:"org_id"`
-	Identifier   string   `json:"identifier"`
-	DisplayName  string   `json:"display_name,omitempty"`
-	UserType     string   `json:"user_type"`
-	State        string   `json:"state"`
-	Profile      any      `json:"profile,omitempty"`
-	Metadata     any      `json:"metadata,omitempty"`
-	Data         any      `json:"data,omitempty"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	CreatedAt    string   `json:"created_at"`
-	UpdatedAt    string   `json:"updated_at"`
+	ID           string             `json:"id"`
+	OrgID        string             `json:"org_id"`
+	Identifier   string             `json:"identifier"`
+	DisplayName  string             `json:"display_name,omitempty"`
+	UserType     string             `json:"user_type"`
+	State        string             `json:"state"`
+	Profile      any                `json:"profile,omitempty"`
+	Metadata     any                `json:"metadata,omitempty"`
+	Data         any                `json:"data,omitempty"`
+	Capabilities []string           `json:"capabilities,omitempty"`
+	Orgs         []OrgMembershipDTO `json:"orgs,omitempty"`
+	CreatedAt    string             `json:"created_at"`
+	UpdatedAt    string             `json:"updated_at"`
+}
+
+type OrgMembershipDTO struct {
+	OrgID   string `json:"org_id"`
+	OrgName string `json:"org_name"`
+	Role    string `json:"role"`
+	AddedAt string `json:"added_at"`
 }
 
 type ListResponse struct {
@@ -463,10 +687,32 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 
 	// Capabilities handled by FGA — no-op for user_capabilities table.
 
+	// Insert org membership (structural — same transaction as user creation).
+	// Only insert if orgID is set (wizard creates users without X-Org-Id header).
+	if orgID != "" {
+		if _, err := tx.ExecContext(r.Context(),
+			`INSERT OR IGNORE INTO memberships (resource_type, resource_id, user_id, role, added_at) VALUES ('org', ?, ?, 'member', ?)`,
+			orgID, userID, now); err != nil {
+			logging.Printf("[createUser] membership insert failed: %v", err)
+		}
+	}
+
 	// Emit event.
 	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
 		"identifier": req.Identifier,
 	})
+
+	// FGA: write org membership tuple — must succeed before commit.
+	// Only write if orgID is set; users created without an org context
+	// (e.g. via the wizard) get their memberships added post-creation.
+	if svc := FGAService; svc != nil && orgID != "" {
+		creatorID := creatorFromRequest(r)
+		if err := svc.OnResourceCreated(r.Context(), userID, creatorID, orgID); err != nil {
+			logging.Printf("[fga] failed to write user tuples: %v", err)
+			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
+			return
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
@@ -474,18 +720,6 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.bus.Signal()
-
-	// Wire FGA: write ownership + org tuples for the new entity.
-	if svc := FGAService; svc != nil {
-		creatorID := r.Header.Get("X-Identity-Id")
-		if creatorID == "" {
-			creatorID = "admin" // fallback for bootstrap
-		}
-		orgID := r.Header.Get("X-Org-Id")
-		if err := svc.OnResourceCreated(r.Context(), userID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] warn: failed to write entity tuples: %v", err)
-		}
-	}
 
 	resp := UserResponse{
 		ID:           userID,
@@ -549,7 +783,7 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if orgIDFilter != "" {
-		where = append(where, `i.org_id = ?`)
+		where = append(where, `i.id IN (SELECT user_id FROM memberships WHERE resource_type='org' AND resource_id=?)`)
 		args = append(args, orgIDFilter)
 	}
 	where = append(where, `i.id > ?`)
@@ -599,31 +833,12 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	p := newPatch()
+	p.Set("state", req.State)
+	p.Set("display_name", req.DisplayName)
 
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-	defer tx.Rollback()
-
-	setClauses := []string{"updated_at = ?"}
-	args := []any{now}
-
-	if req.State != "" {
-		setClauses = append(setClauses, "state = ?")
-		args = append(args, req.State)
-	}
-	// Profile updates are handled via the JSON merge below.
-	if req.DisplayName != "" {
-		setClauses = append(setClauses, "display_name = ?")
-		args = append(args, req.DisplayName)
-	}
-	args = append(args, userID)
-
-	query := "UPDATE users SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
-	result, err := tx.ExecContext(r.Context(), query, args...)
+	query, args := p.Build("users", userID)
+	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
@@ -634,16 +849,9 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), tx, "identity.updated", userID, userID, "identity", map[string]any{
+	a.EmitAuthEvent(r.Context(), "identity.updated", userID, map[string]any{
 		"state": req.State,
 	})
-
-	if err := tx.Commit(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
-		return
-	}
-
-	a.bus.Signal()
 
 	resp, _ := a.loadUser(r, userID)
 	httputil.WriteJSON(w, http.StatusOK, resp)
@@ -682,19 +890,19 @@ func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
 
 	emitEvent(r.Context(), tx, "identity.deleted", userID, userID, "identity", nil)
 
+	// FGA: clean up all tuples (best-effort — orphan tuples on deleted users are harmless).
+	if svc := FGAService; svc != nil {
+		if err := svc.OnResourceDeleted(r.Context(), userID); err != nil {
+			logging.Printf("[fga] warn: failed to delete user tuples (will be cleaned by reconciler): %v", err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
 
 	a.bus.Signal()
-
-	// Wire FGA: clean up all tuples for deleted entity.
-	if svc := FGAService; svc != nil {
-		if err := svc.OnResourceDeleted(r.Context(), userID); err != nil {
-			logging.Printf("[fga] warn: failed to delete entity tuples: %v", err)
-		}
-	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1458,6 +1666,26 @@ func (a *API) loadUser(r *http.Request, userID string) (UserResponse, error) {
 		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)
 	}
 	resp.Capabilities = a.loadCapabilities(r, userID)
+
+	// Enrich: org memberships from the memberships table.
+	orgRows, err2 := a.db.SQL().QueryContext(r.Context(),
+		`SELECT m.resource_id, COALESCE(o.name,''), m.role, m.added_at
+		 FROM memberships m
+		 LEFT JOIN orgs o ON o.id = m.resource_id
+		 WHERE m.user_id = ? AND m.resource_type = 'org'
+		 ORDER BY m.added_at ASC`, userID)
+	if err2 == nil {
+		defer orgRows.Close()
+		for orgRows.Next() {
+			var om OrgMembershipDTO
+			if err := orgRows.Scan(&om.OrgID, &om.OrgName, &om.Role, &om.AddedAt); err != nil {
+				continue
+			}
+			resp.Orgs = append(resp.Orgs, om)
+		}
+		_ = orgRows.Err() // non-fatal enrichment; ignore iteration errors
+	}
+
 	return resp, nil
 }
 
@@ -1647,253 +1875,15 @@ func (a *API) getResource(table string) http.HandlerFunc {
 	}
 }
 
-// --- Universal Search ---
-
-type SearchResult struct {
-	ResourceType string `json:"resource_type"` // user, org, schema, event, session, provider
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Subtitle     string `json:"subtitle,omitempty"`
-}
-
-func (a *API) search(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if q == "" {
-		httputil.WriteJSON(w, http.StatusOK, map[string]any{"results": []any{}, "query": ""})
-		return
-	}
-
-	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 50 {
-			limit = n
-		}
-	}
-
-	pattern := "%" + q + "%"
-	results := make([]SearchResult, 0, limit*5)
-
-	results = append(results, a.searchEntities(r, pattern, limit)...)
-	results = append(results, a.searchOrgs(r, pattern, limit)...)
-	results = append(results, a.searchSchemas(r, pattern, limit)...)
-	results = append(results, a.searchEvents(r, pattern, limit)...)
-	results = append(results, a.searchProviders(r, pattern, limit)...)
-
-	// Deduplicate entities (may appear from both direct + index search)
-	seen := map[string]bool{}
-	var deduped []SearchResult
-	for _, res := range results {
-		key := res.ResourceType + ":" + res.ID
-		if !seen[key] {
-			seen[key] = true
-			deduped = append(deduped, res)
-		}
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"results": deduped,
-		"query":   q,
-		"count":   len(deduped),
-	})
-}
-
-func (a *API) searchEntities(r *http.Request, pattern string, limit int) []SearchResult {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, identifier, display_name, state FROM users
-		 WHERE identifier LIKE ? OR display_name LIKE ?
-		 ORDER BY id DESC LIMIT ?`,
-		pattern, pattern, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var results []SearchResult
-	for rows.Next() {
-		var id string
-		var ident, displayName, state string
-		var dn sql.NullString
-		if err := rows.Scan(&id, &ident, &dn, &state); err != nil {
-			continue
-		}
-		if dn.Valid {
-			displayName = dn.String
-		}
-		results = append(results, SearchResult{
-			ResourceType: "user",
-			ID:           id,
-			Title:        ident,
-			Subtitle:     displayName + " · " + state,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return results
-}
-
-func (a *API) searchOrgs(r *http.Request, pattern string, limit int) []SearchResult {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name FROM orgs WHERE name LIKE ? ORDER BY name LIMIT ?`,
-		pattern, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var results []SearchResult
-	for rows.Next() {
-		var orgID, name string
-		if err := rows.Scan(&orgID, &name); err != nil {
-			continue
-		}
-		results = append(results, SearchResult{
-			ResourceType: "org",
-			ID:           orgID,
-			Title:        name,
-			Subtitle:     orgID,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return results
-}
-
-func (a *API) searchSchemas(r *http.Request, pattern string, limit int) []SearchResult {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, type FROM schemas WHERE id LIKE ? OR type LIKE ? LIMIT ?`,
-		pattern, pattern, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var results []SearchResult
-	for rows.Next() {
-		var schemaID, schemaType string
-		if err := rows.Scan(&schemaID, &schemaType); err != nil {
-			continue
-		}
-		results = append(results, SearchResult{
-			ResourceType: "schema",
-			ID:           schemaID,
-			Title:        schemaType,
-			Subtitle:     schemaID,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return results
-}
-
-func (a *API) searchEvents(r *http.Request, pattern string, limit int) []SearchResult {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, event_type, created_at FROM events WHERE event_type LIKE ? ORDER BY id DESC LIMIT ?`,
-		pattern, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var results []SearchResult
-	for rows.Next() {
-		var evtID string
-		var evtType, createdAt string
-		if err := rows.Scan(&evtID, &evtType, &createdAt); err != nil {
-			continue
-		}
-		results = append(results, SearchResult{
-			ResourceType: "event",
-			ID:           evtID,
-			Title:        evtType,
-			Subtitle:     createdAt,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return results
-}
-
-func (a *API) searchProviders(r *http.Request, pattern string, limit int) []SearchResult {
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, name, protocol, template FROM providers
-		 WHERE name LIKE ?
-		 ORDER BY name LIMIT ?`,
-		pattern, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var results []SearchResult
-	for rows.Next() {
-		var provID, name, protocol, tmpl string
-		if err := rows.Scan(&provID, &name, &protocol, &tmpl); err != nil {
-			continue
-		}
-		results = append(results, SearchResult{
-			ResourceType: "provider",
-			ID:           provID,
-			Title:        name,
-			Subtitle:     protocol + " · " + tmpl,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil
-	}
-	return results
-}
-
-func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggregateID string, aggregateType string, payload map[string]any) {
-	eventID := id.New()
-	payloadJSON := "{}"
-	if len(payload) > 0 {
-		b, _ := json.Marshal(payload)
-		payloadJSON = string(b)
-	}
-	requestID := telemetry.RequestIDFromContext(ctx)
-	sessionID := telemetry.SessionIDFromContext(ctx)
-	flowID := telemetry.FlowIDFromContext(ctx)
-	fingerprint := telemetry.FingerprintFromContext(ctx)
-	clientID := telemetry.ClientIDFromContext(ctx)
-	tokenID := telemetry.TokenIDFromContext(ctx)
-	delegationType := telemetry.DelegationTypeFromContext(ctx)
-	sdkName := telemetry.SDKNameFromContext(ctx)
-	sdkVersion := telemetry.SDKVersionFromContext(ctx)
-
-	tx.ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
-}
-
-func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
-	eventID := id.New()
-	payloadJSON := "{}"
-	if len(payload) > 0 {
-		b, _ := json.Marshal(payload)
-		payloadJSON = string(b)
-	}
-	requestID := telemetry.RequestIDFromContext(ctx)
-	sessionID := telemetry.SessionIDFromContext(ctx)
-	flowID := telemetry.FlowIDFromContext(ctx)
-	fingerprint := telemetry.FingerprintFromContext(ctx)
-	clientID := telemetry.ClientIDFromContext(ctx)
-	tokenID := telemetry.TokenIDFromContext(ctx)
-	delegationType := telemetry.DelegationTypeFromContext(ctx)
-	sdkName := telemetry.SDKNameFromContext(ctx)
-	sdkVersion := telemetry.SDKVersionFromContext(ctx)
-
-	a.db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', ?, 'auth', ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), actorID, actorID, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
-	a.bus.Signal()
-}
-
-// emitEventSimple is a package-level helper for event emission outside transactions.
-func emitEventSimple(ctx context.Context, db interface {
+// execer abstracts *sql.Tx and *sql.DB for event insertion.
+type execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, eventType string, actorID string, aggregateID, aggregateType string, payload map[string]any) {
-	eventIDVal := id.New()
+}
+
+// emitEventTo is the single implementation for audit event emission.
+// All other emit* functions delegate here.
+func emitEventTo(ctx context.Context, db execer, eventType, actorID, aggregateID, aggregateType string, payload map[string]any) {
+	eventID := id.New()
 	payloadJSON := "{}"
 	if len(payload) > 0 {
 		b, _ := json.Marshal(payload)
@@ -1912,7 +1902,18 @@ func emitEventSimple(ctx context.Context, db interface {
 	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
 		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
 		 VALUES (?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventIDVal, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
+		eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
+}
+
+// emitEvent emits an audit event within a transaction.
+func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggregateID, aggregateType string, payload map[string]any) {
+	emitEventTo(ctx, tx, eventType, actorID, aggregateID, aggregateType, payload)
+}
+
+// EmitAuthEvent emits an auth-category event outside a transaction and signals the bus.
+func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
+	emitEventTo(ctx, a.db.SQL(), eventType, actorID, actorID, "auth", payload)
+	a.bus.Signal()
 }
 
 // eventCategory derives the event category from the event_type prefix.
@@ -1994,28 +1995,12 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 
 // UpdateUserInternal is an exported helper for the UI to update an identity.
 func (a *API) UpdateUserInternal(r *http.Request, userID string, req UserRequest) (UserResponse, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
-	if err != nil {
-		return UserResponse{}, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
+	p := newPatch()
+	p.Set("state", req.State)
+	p.SetJSON("metadata", req.Profile)
 
-	setClauses := []string{"updated_at = ?"}
-	args := []any{now}
-	if req.State != "" {
-		setClauses = append(setClauses, "state = ?")
-		args = append(args, req.State)
-	}
-	if req.Profile != nil {
-		metadataJSON, _ := json.Marshal(req.Profile)
-		setClauses = append(setClauses, "metadata = ?")
-		args = append(args, string(metadataJSON))
-	}
-	args = append(args, userID)
-
-	query := "UPDATE users SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
-	result, err := tx.ExecContext(r.Context(), query, args...)
+	query, args := p.Build("users", userID)
+	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		return UserResponse{}, fmt.Errorf("update: %w", err)
 	}
@@ -2024,11 +2009,7 @@ func (a *API) UpdateUserInternal(r *http.Request, userID string, req UserRequest
 		return UserResponse{}, fmt.Errorf("identity %s", userID)
 	}
 
-	emitEvent(r.Context(), tx, "identity.updated", userID, userID, "identity", nil)
-	if err := tx.Commit(); err != nil {
-		return UserResponse{}, fmt.Errorf("commit: %w", err)
-	}
-	a.bus.Signal()
+	a.EmitAuthEvent(r.Context(), "identity.updated", userID, nil)
 
 	return a.loadUser(r, userID)
 }

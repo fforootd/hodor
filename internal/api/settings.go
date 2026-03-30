@@ -118,7 +118,7 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit event.
-	emitEventSimple(r.Context(), a.db.SQL(), "settings.updated",
+	emitEventTo(r.Context(), a.db.SQL(), "settings.updated",
 		r.Header.Get("X-Identity-Id"), "", "settings",
 		map[string]any{
 			"type":     settingsType,
@@ -152,7 +152,7 @@ func (a *API) deleteSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEventSimple(r.Context(), a.db.SQL(), "settings.deleted",
+	emitEventTo(r.Context(), a.db.SQL(), "settings.deleted",
 		r.Header.Get("X-Identity-Id"), "", "settings",
 		map[string]any{
 			"type":     settingsType,

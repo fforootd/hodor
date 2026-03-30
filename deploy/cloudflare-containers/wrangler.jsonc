@@ -1,0 +1,65 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zitadel",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-27",
+
+  // ── Observability ────────────────────────────────────────────────────────
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+
+  // ── Container Definition ─────────────────────────────────────────────────
+  //
+  // Image options:
+  //   "./Dockerfile"  — build locally (requires Docker)
+  //   "ghcr.io/zitadel/zitadel:<TAG>" — use goreleaser GHCR image
+  //
+  // Instance types:
+  //   lite       → 1/16 vCPU,  256 MiB RAM,  2 GB disk
+  //   basic      → 1/4  vCPU,  1   GiB RAM,  4 GB disk
+  //   standard-1 → 1/2  vCPU,  4   GiB RAM,  8 GB disk  ← production
+  //
+  "containers": [
+    {
+      "class_name": "ZitadelContainer",
+      "image": "../../Dockerfile.cloudflare",
+      "max_instances": 3,
+      "instance_type": "standard-1"
+    }
+  ],
+  // ── D1 Database Binding ──────────────────────────────────────────────────
+  // Create with:  npx wrangler d1 create zitadel-db
+  // Then paste the database_id below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zitadel-db",
+      "database_id": "4f00073b-41d1-4084-86b1-de304d8d0a8c"
+    }
+  ],
+  // ── Durable Object Binding ───────────────────────────────────────────────
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ZITADEL",
+        "class_name": "ZitadelContainer"
+      }
+    ]
+  },
+  // ── Migrations ───────────────────────────────────────────────────────────
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "ZitadelContainer"
+      ]
+    }
+  ]
+}
