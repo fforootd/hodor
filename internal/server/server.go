@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -51,10 +52,16 @@ type Server struct {
 	fga       *fga.Service
 	analytics *analytics.Engine
 	tlsMgr    *ztls.Manager
+	ready     atomic.Bool
 }
 
 // New creates a new Server with all routes registered.
 func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
+	srv := &Server{
+		cfg: cfg,
+		db:  db,
+		bus: bus,
+	}
 	mux := http.NewServeMux()
 
 	// Health check — always first.
@@ -69,6 +76,14 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Readiness check.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !srv.ready.Load() {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		if err := db.SQL().PingContext(r.Context()); err != nil {
+			http.Error(w, "database unhealthy", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready"))
 	})
@@ -322,16 +337,14 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		logging.Printf("WARN: TLS manager init failed: %v", err)
 	}
 
-	return &Server{
-		cfg:       cfg,
-		db:        db,
-		bus:       bus,
-		http:      httpSrv,
-		api:       restAPI,
-		fga:       fgaSvc,
-		analytics: analyticsEngine,
-		tlsMgr:    tlsMgr,
-	}
+	srv.http = httpSrv
+	srv.api = restAPI
+	srv.fga = fgaSvc
+	srv.analytics = analyticsEngine
+	srv.tlsMgr = tlsMgr
+	srv.ready.Store(true)
+
+	return srv
 }
 
 // Handler returns the HTTP handler for testing purposes.

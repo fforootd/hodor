@@ -135,9 +135,9 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	logging.Printf("[api] registered /v1/users (all user types)")
 
 	// Dedicated Org CRUD routes.
-	mux.HandleFunc("GET /v1/orgs", a.listResource("orgs"))
+	mux.HandleFunc("GET /v1/orgs", a.listOrgs)
 	mux.HandleFunc("POST /v1/orgs", a.createOrg)
-	mux.HandleFunc("GET /v1/orgs/{id}", a.getResource("orgs"))
+	mux.HandleFunc("GET /v1/orgs/{id}", a.getOrg)
 	mux.HandleFunc("PATCH /v1/orgs/{id}", a.updateOrg)
 	mux.HandleFunc("DELETE /v1/orgs/{id}", a.deleteOrg)
 	mux.HandleFunc("GET /v1/orgs/{id}/members", a.listMembers("org"))
@@ -165,9 +165,9 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 	}
 
 	// Dedicated App CRUD routes (OIDC clients live in the `apps` table).
-	mux.HandleFunc("GET /v1/apps", a.listResource("apps"))
+	mux.HandleFunc("GET /v1/apps", a.listApps)
 	mux.HandleFunc("POST /v1/apps", a.createApp)
-	mux.HandleFunc("GET /v1/apps/{id}", a.getResource("apps"))
+	mux.HandleFunc("GET /v1/apps/{id}", a.getApp)
 	mux.HandleFunc("PATCH /v1/apps/{id}", a.updateApp)
 	mux.HandleFunc("DELETE /v1/apps/{id}", a.deleteApp)
 	logging.Printf("[api] registered /v1/apps (full CRUD)")
@@ -176,21 +176,104 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 // --- Org types ---
 
 type OrgRequest struct {
+	SchemaID string `json:"schema_id,omitempty"`
 	Name     string `json:"name"`
 	State    string `json:"state,omitempty"`
+	Data     any    `json:"data,omitempty"`
 	Metadata any    `json:"metadata,omitempty"`
 }
 
 type OrgResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	State     string `json:"state"`
-	Metadata  any    `json:"metadata,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	SchemaID   string `json:"schema_id,omitempty"`
+	SchemaType string `json:"schema_type,omitempty"`
+	Metadata   any    `json:"metadata,omitempty"`
+	Data       any    `json:"data,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 // --- Org handlers ---
+
+func (a *API) buildOrgResponse(row OrgResponse, metadataStr string) OrgResponse {
+	metadata := decodeObjectString(metadataStr)
+	row.SchemaType = "org"
+	if row.SchemaID == "" {
+		if rec, err := a.resolveResourceSchema(context.Background(), "org", ""); err == nil {
+			row.SchemaID = rec.ID
+		}
+	}
+	row.Data = orgCanonicalData(row.Name, metadata)
+	if dataMap, ok := row.Data.(map[string]any); ok {
+		row.Metadata = dataMap["metadata"]
+	}
+	return row
+}
+
+func (a *API) listOrgs(w http.ResponseWriter, r *http.Request) {
+	limit, cursor := parsePagination(r)
+
+	rows, err := a.db.SQL().QueryContext(r.Context(),
+		`SELECT id, name, state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
+		 FROM orgs
+		 WHERE id > ?
+		 ORDER BY id ASC
+		 LIMIT ?`,
+		cursor, limit+1,
+	)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	defer rows.Close()
+
+	var items []OrgResponse
+	for rows.Next() {
+		var row OrgResponse
+		var metadataStr string
+		if err := rows.Scan(&row.ID, &row.Name, &row.State, &row.SchemaID, &metadataStr, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			continue
+		}
+		items = append(items, a.buildOrgResponse(row, metadataStr))
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	var nextCursor string
+	if len(items) > limit {
+		items = items[:limit]
+		nextCursor = items[len(items)-1].ID
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
+}
+
+func (a *API) getOrg(w http.ResponseWriter, r *http.Request) {
+	orgID, err := parseID(r, "id")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var row OrgResponse
+	var metadataStr string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT id, name, state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
+		 FROM orgs
+		 WHERE id = ?`,
+		orgID,
+	).Scan(&row.ID, &row.Name, &row.State, &row.SchemaID, &metadataStr, &row.CreatedAt, &row.UpdatedAt)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, a.buildOrgResponse(row, metadataStr))
+}
 
 func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 	var req OrgRequest
@@ -198,20 +281,39 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "name is required")
+
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "org", req.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		data = orgCanonicalData(req.Name, map[string]any{"metadata": req.Metadata})
+	}
+	name := stringFromAny(data["display_name"])
+	if name == "" {
+		name = strings.TrimSpace(req.Name)
+	}
+	if name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, "display_name is required")
+		return
+	}
+	data["display_name"] = name
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	orgID := id.New()
 	now := time.Now().UTC().Format(time.RFC3339)
-
-	metadataJSON := "{}"
-	if req.Metadata != nil {
-		if b, err := json.Marshal(req.Metadata); err == nil {
-			metadataJSON = string(b)
-		}
-	}
+	storedMetadata := stripKeys(data, "display_name")
+	metadataJSON := encodeObjectString(storedMetadata)
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -221,9 +323,9 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO orgs (id, name, state, metadata, created_at, updated_at)
-		 VALUES (?, ?, 'active', ?, ?, ?)`,
-		orgID, req.Name, metadataJSON, now, now,
+		`INSERT INTO orgs (id, name, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, 'active', ?, ?, ?, ?)`,
+		orgID, name, schemaRec.ID, metadataJSON, now, now,
 	)
 	if err != nil {
 		logging.Printf("[createOrg] DB insert failed: %v", err)
@@ -236,7 +338,7 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emitEvent(r.Context(), tx, "org.created", orgID, orgID, "org", map[string]any{
-		"name": req.Name,
+		"name": name,
 	})
 
 	creatorID := creatorFromRequest(r)
@@ -258,11 +360,15 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 	a.bus.Signal()
 
 	httputil.WriteJSON(w, http.StatusCreated, OrgResponse{
-		ID:        orgID,
-		Name:      req.Name,
-		State:     "active",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         orgID,
+		Name:       name,
+		State:      "active",
+		SchemaID:   schemaRec.ID,
+		SchemaType: schemaRec.Type,
+		Metadata:   data["metadata"],
+		Data:       data,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	})
 }
 
@@ -279,13 +385,60 @@ func (a *API) updateOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := newPatch()
-	p.Set("name", req.Name)
-	p.Set("state", req.State)
-	p.SetJSON("metadata", req.Metadata)
+	var currentName, currentState, currentSchemaID, currentMetadata string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT name, state, COALESCE(schema_id,''), COALESCE(metadata,'{}')
+		 FROM orgs
+		 WHERE id = ?`,
+		orgID,
+	).Scan(&currentName, &currentState, &currentSchemaID, &currentMetadata)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "organization not found")
+		return
+	}
 
-	query, args := p.Build("orgs", orgID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "org", currentSchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	data, err := objectMapOrEmpty(req.Data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(data) == 0 {
+		existing := orgCanonicalData(currentName, decodeObjectString(currentMetadata))
+		data = existing
+		if strings.TrimSpace(req.Name) != "" {
+			data["display_name"] = strings.TrimSpace(req.Name)
+		}
+		if req.Metadata != nil {
+			data["metadata"] = req.Metadata
+		}
+	}
+	name := stringFromAny(data["display_name"])
+	if name == "" {
+		name = currentName
+		data["display_name"] = name
+	}
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	nextState := currentState
+	if strings.TrimSpace(req.State) != "" {
+		nextState = strings.TrimSpace(req.State)
+	}
+
+	result, err := a.db.SQL().ExecContext(r.Context(),
+		`UPDATE orgs
+		 SET name = ?, state = ?, metadata = ?, updated_at = ?
+		 WHERE id = ?`,
+		name, nextState, encodeObjectString(stripKeys(data, "display_name")), timeNow(), orgID,
+	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
@@ -297,20 +450,7 @@ func (a *API) updateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.bus.Signal()
-
-	// Re-read and return updated org.
-	var resp OrgResponse
-	var metaStr string
-	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, name, state, COALESCE(metadata,'{}'), created_at, updated_at FROM orgs WHERE id = ?`, orgID,
-	).Scan(&resp.ID, &resp.Name, &resp.State, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "read-back failed")
-		return
-	}
-	json.Unmarshal([]byte(metaStr), &resp.Metadata)
-
-	httputil.WriteJSON(w, http.StatusOK, resp)
+	a.getOrg(w, r)
 }
 
 func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
@@ -359,30 +499,41 @@ func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
 // --- App types ---
 
 type AppRequest struct {
-	Name          string   `json:"name"`
-	AppType       string   `json:"app_type,omitempty"`
-	ClientID      string   `json:"client_id,omitempty"`
-	ClientSecret  string   `json:"client_secret,omitempty"`
-	RedirectURIs  []string `json:"redirect_uris,omitempty"`
-	GrantTypes    []string `json:"grant_types,omitempty"`
-	ResponseTypes []string `json:"response_types,omitempty"`
-	State         string   `json:"state,omitempty"`
-	Metadata      any      `json:"metadata,omitempty"`
+	SchemaID                string   `json:"schema_id,omitempty"`
+	Name                    string   `json:"name"`
+	Description             string   `json:"description,omitempty"`
+	AppType                 string   `json:"app_type,omitempty"`
+	ClientID                string   `json:"client_id,omitempty"`
+	ClientSecret            string   `json:"client_secret,omitempty"`
+	RedirectURIs            []string `json:"redirect_uris,omitempty"`
+	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris,omitempty"`
+	GrantTypes              []string `json:"grant_types,omitempty"`
+	ResponseTypes           []string `json:"response_types,omitempty"`
+	LogoURI                 string   `json:"logo_uri,omitempty"`
+	State                   string   `json:"state,omitempty"`
+	Data                    any      `json:"data,omitempty"`
+	Metadata                any      `json:"metadata,omitempty"`
 }
 
 type AppResponse struct {
-	ID            string   `json:"id"`
-	OrgID         string   `json:"org_id"`
-	Name          string   `json:"name"`
-	AppType       string   `json:"app_type"`
-	ClientID      string   `json:"client_id"`
-	RedirectURIs  []string `json:"redirect_uris,omitempty"`
-	GrantTypes    []string `json:"grant_types,omitempty"`
-	ResponseTypes []string `json:"response_types,omitempty"`
-	State         string   `json:"state"`
-	Metadata      any      `json:"metadata,omitempty"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
+	ID                      string   `json:"id"`
+	OrgID                   string   `json:"org_id"`
+	Name                    string   `json:"name"`
+	Description             string   `json:"description,omitempty"`
+	AppType                 string   `json:"app_type"`
+	ClientID                string   `json:"client_id"`
+	RedirectURIs            []string `json:"redirect_uris,omitempty"`
+	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris,omitempty"`
+	GrantTypes              []string `json:"grant_types,omitempty"`
+	ResponseTypes           []string `json:"response_types,omitempty"`
+	LogoURI                 string   `json:"logo_uri,omitempty"`
+	State                   string   `json:"state"`
+	SchemaID                string   `json:"schema_id,omitempty"`
+	SchemaType              string   `json:"schema_type,omitempty"`
+	Metadata                any      `json:"metadata,omitempty"`
+	Data                    any      `json:"data,omitempty"`
+	CreatedAt               string   `json:"created_at"`
+	UpdatedAt               string   `json:"updated_at"`
 }
 
 // --- App handlers ---
@@ -565,6 +716,7 @@ type UserRequest struct {
 	SchemaID     string   `json:"schema_id,omitempty"`
 	Identifier   string   `json:"identifier"`
 	DisplayName  string   `json:"display_name,omitempty"`
+	Data         any      `json:"data,omitempty"`
 	Profile      any      `json:"profile,omitempty"`
 	Metadata     any      `json:"metadata,omitempty"`
 	State        string   `json:"state,omitempty"`
@@ -578,6 +730,8 @@ type UserResponse struct {
 	DisplayName  string             `json:"display_name,omitempty"`
 	UserType     string             `json:"user_type"`
 	State        string             `json:"state"`
+	SchemaID     string             `json:"schema_id,omitempty"`
+	SchemaType   string             `json:"schema_type,omitempty"`
 	Profile      any                `json:"profile,omitempty"`
 	Metadata     any                `json:"metadata,omitempty"`
 	Data         any                `json:"data,omitempty"`

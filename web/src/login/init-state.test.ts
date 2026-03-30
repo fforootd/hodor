@@ -26,7 +26,7 @@ describe('login init state helpers', () => {
   it('treats unknown errors as retryable transport failures', () => {
     expect(toLoginErrorDetail(new Error('boom'))).toEqual({
       code: 'service_unavailable',
-      message: 'Login is temporarily unavailable. Try again in a moment.',
+      message: 'Zitadel is temporarily unavailable. Try again in a moment.',
       retryable: true,
       kind: 'transport',
     })

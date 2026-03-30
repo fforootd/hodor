@@ -1,5 +1,16 @@
 <template>
+  <AppBootstrapScreen
+    v-if="initState !== 'ready' || !flowStep"
+    app-name="login"
+    :state="initState"
+    :error="initError"
+    :retry-delay-ms="retryDelayMs"
+    configuration-hint="Check the login flow and schema bootstrap data, then retry."
+    @retry="retryInitialize"
+  />
+
   <LoginShell
+    v-else
     :branding="branding"
     :layout-override="props.layoutOverride"
     :dark-mode-override="props.darkModeOverride"
@@ -7,7 +18,6 @@
     :primary-color-override="props.primaryColorOverride"
   >
     <LoginNodeRenderer
-      v-if="initState === 'ready' && flowStep"
       :flow-step="flowStep"
       :submit-error="submitError"
       :loading="loading"
@@ -23,48 +33,6 @@
       @captcha-reset="resetCaptchaState"
       @captcha-error="setCaptchaError"
     />
-
-    <div
-      v-else-if="initState === 'initializing'"
-      class="flex flex-col items-center gap-3 py-8 text-center"
-    >
-      <Spinner class="size-6" />
-      <div class="space-y-1">
-        <p class="text-sm font-medium">Initializing login</p>
-        <p class="text-xs text-muted-foreground">Loading your sign-in flow…</p>
-      </div>
-    </div>
-
-    <div
-      v-else-if="initState === 'waiting_for_server'"
-      class="flex flex-col items-center gap-3 py-8 text-center"
-    >
-      <Spinner class="size-6" />
-      <div class="space-y-1">
-        <p class="text-sm font-medium">Starting Zitadel</p>
-        <p class="text-xs text-muted-foreground">
-          {{ initError?.message || 'Zitadel is still starting. Try again in a moment.' }}
-        </p>
-        <p v-if="retryDelayMs" class="text-xs text-muted-foreground/80">Retrying soon…</p>
-      </div>
-    </div>
-
-    <div
-      v-else-if="initState === 'fatal'"
-      class="flex flex-col items-center gap-4 py-8 text-center"
-    >
-      <AlertCircle class="size-8 text-destructive" />
-      <div class="space-y-1">
-        <p class="text-sm font-medium">Login is unavailable</p>
-        <p class="text-xs text-muted-foreground">
-          {{ initError?.message || 'Login is temporarily unavailable.' }}
-        </p>
-        <p v-if="initError?.kind === 'configuration'" class="text-xs text-muted-foreground/80">
-          Check the login flow and schema bootstrap data, then retry.
-        </p>
-      </div>
-      <Button type="button" class="w-full" @click="retryInitialize">Retry</Button>
-    </div>
   </LoginShell>
 </template>
 
@@ -98,15 +66,11 @@
   } from '@/lib/telemetry'
   import { collectFingerprint, submitFingerprint } from '@/lib/fingerprint'
   import {
-    nextLoginInitRetryDelay,
-    shouldRetryLoginInit,
-    toLoginErrorDetail,
+    createReadyzWaiter,
+    useAppBootstrap,
     type LoginErrorDetail,
-    type LoginInitState,
-  } from './init-state'
-  import { Button } from '@/components/ui/button'
-  import { Spinner } from '@/components/ui/spinner'
-  import { AlertCircle } from 'lucide-vue-next'
+  } from '@/bootstrap/app-bootstrap'
+  import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
   import LoginShell from './components/LoginShell.vue'
   import LoginNodeRenderer from './components/LoginNodeRenderer.vue'
 
@@ -144,11 +108,28 @@
   const formData = reactive<Record<string, string>>({})
   const confirmPasswords = reactive<Record<string, string>>({})
   const pendingAction = ref('')
-  const initState = ref<LoginInitState>('initializing')
-  const initError = ref<LoginErrorDetail | null>(null)
-  const retryDelayMs = ref(0)
   const captchaSolving = ref(false)
   const fingerprintCollected = ref(false)
+
+  const {
+    state: initState,
+    error: initError,
+    retryDelayMs,
+    run: runInitialize,
+    retry: retryInitialize,
+    dispose: disposeBootstrap,
+  } = useAppBootstrap(
+    async () => {
+      resetFormState()
+      const step = await flowApi.create(props.apiBaseUrl || '', props.redirectUri, props.state)
+      applyInitializedFlow(step)
+    },
+    {
+      waitForReady: createReadyzWaiter(props.apiBaseUrl || ''),
+      onFatal: (detail) => emit('login-error', detail),
+    },
+  )
+
   let disposed = false
 
   const captchaSolved = computed(() => flowStep.value?.captcha_verified === true)
@@ -224,9 +205,6 @@
   function applyInitializedFlow(step: FlowStep) {
     flowStep.value = step
     branding.value = step.branding
-    initState.value = 'ready'
-    initError.value = null
-    retryDelayMs.value = 0
     setFlowId(step.flow_id)
 
     for (const node of step.nodes) {
@@ -238,69 +216,14 @@
     maybeCollectFingerprint(step)
   }
 
-  function sleep(ms: number) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms))
-  }
-
-  async function waitForReadiness(delayMs: number) {
-    const startedAt = Date.now()
-    while (!disposed && Date.now() - startedAt < delayMs) {
-      const ready = await flowApi.ready(props.apiBaseUrl || '').catch(() => false)
-      if (ready) return
-      await sleep(Math.min(250, delayMs))
-    }
-  }
-
-  async function initializeFlow() {
-    resetFormState()
-    let attempt = 0
-
-    while (!disposed) {
-      initState.value = attempt === 0 ? 'initializing' : 'waiting_for_server'
-      retryDelayMs.value = 0
-
-      try {
-        const step = await flowApi.create(props.apiBaseUrl || '', props.redirectUri, props.state)
-        applyInitializedFlow(step)
-        return
-      } catch (err) {
-        const detail = toLoginErrorDetail(err)
-        initError.value = detail
-
-        if (!shouldRetryLoginInit(detail, attempt)) {
-          initState.value = 'fatal'
-          emit('login-error', detail)
-          return
-        }
-
-        const delay = nextLoginInitRetryDelay(attempt)
-        if (delay == null) {
-          initState.value = 'fatal'
-          emit('login-error', detail)
-          return
-        }
-
-        initState.value = 'waiting_for_server'
-        retryDelayMs.value = delay
-        await waitForReadiness(delay)
-        attempt += 1
-      }
-    }
-  }
-
-  async function retryInitialize() {
-    initError.value = null
-    initState.value = 'initializing'
-    await initializeFlow()
-  }
-
   onMounted(async () => {
     initTelemetry({ baseUrl: props.apiBaseUrl || '', enabled: true })
-    await initializeFlow()
+    await runInitialize()
   })
 
   onUnmounted(() => {
     disposed = true
+    disposeBootstrap()
     syncFavicon('')
     shutdownTelemetry()
   })

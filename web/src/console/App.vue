@@ -1,6 +1,15 @@
 <template>
   <Toaster position="top-right" :expand="true" rich-colors />
-  <SidebarProvider>
+  <AppBootstrapScreen
+    v-if="bootstrapState !== 'ready'"
+    app-name="console"
+    :state="bootstrapState"
+    :error="bootstrapError"
+    :retry-delay-ms="bootstrapRetryDelayMs"
+    @retry="retryBootstrap"
+  />
+
+  <SidebarProvider v-else>
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
@@ -287,9 +296,15 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import {
+  createReadyzWaiter,
+  useAppBootstrap,
+} from '@/bootstrap/app-bootstrap'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import { useRoute, useRouter } from 'vue-router'
-import { searchApi, metaSchemaApi, orgApi, countsApi, type SearchResult } from '@/api/resources'
+import { api } from '@/api/client'
+import { searchApi, type SearchResult } from '@/api/resources'
+import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
 import { Toaster } from '@/components/ui/sonner'
 
 // shadcn components
@@ -433,6 +448,29 @@ interface NavGroupDef {
 const navItems = ref<NavItem[]>([])
 const navGroupDefs = ref<Record<string, NavGroupDef>>({})
 const entityCounts = ref<Record<string, number>>({})
+const {
+  state: bootstrapState,
+  error: bootstrapError,
+  retryDelayMs: bootstrapRetryDelayMs,
+  run: runBootstrap,
+  retry: retryBootstrap,
+  dispose: disposeBootstrap,
+} = useAppBootstrap(
+  async () => {
+    const [meta, counts, orgList] = await Promise.all([
+      api.get<any>('/v1/schemas/$meta'),
+      api.get<Record<string, number>>('/v1/counts'),
+      api.get<{ items?: Array<Record<string, any>> }>('/v1/orgs'),
+    ])
+
+    hydrateNav(meta)
+    applyCounts(counts)
+    applyOrgs(orgList.items || [])
+  },
+  {
+    waitForReady: createReadyzWaiter(),
+  },
+)
 
 const ungroupedItems = computed(() =>
   navItems.value.filter(i => !i.navGroup).sort((a, b) => a.sortOrder - b.sortOrder)
@@ -505,74 +543,72 @@ function getIcon(type: string) {
   return iconMap[type] || Database
 }
 
+function hydrateNav(meta: Record<string, any>) {
+  const catalog = meta['x-catalog'] || {}
+  const groups = meta['x-groups'] || {}
+
+  navGroupDefs.value = groups
+
+  const items: NavItem[] = []
+  for (const [typeName, entry] of Object.entries(catalog) as [string, any][]) {
+    if (entry.nav === 'hidden') continue
+
+    let itemRoute: string
+    if (entry.route) {
+      itemRoute = entry.route
+    } else if (entry.storage === 'entities') {
+      itemRoute = `/s/${typeName}`
+    } else {
+      itemRoute = `/${entry.path}`
+    }
+
+    items.push({
+      type: typeName,
+      label: entry.alias || typeName,
+      sortOrder: entry.sort_order ?? 99,
+      storage: entry.storage || 'entities',
+      route: itemRoute,
+      countable: !!entry.countable,
+      navGroup: entry.nav_group,
+      aggregates: entry.aggregates,
+    })
+  }
+
+  navItems.value = items.sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+function applyCounts(counts: Record<string, number>) {
+  entityCounts.value = counts
+
+  for (const item of navItems.value) {
+    if (!item.countable) continue
+
+    if (item.aggregates && item.aggregates.length > 0) {
+      item.count = item.aggregates.reduce((sum, type) => sum + (entityCounts.value[type] || 0), 0)
+    } else {
+      item.count = entityCounts.value[item.type] || 0
+    }
+  }
+}
+
+function applyOrgs(items: Array<Record<string, any>>) {
+  orgs.value = items.map((org) => ({
+    id: String(org.id || ''),
+    display_name: org.name || org.display_name || org.identifier || '',
+    name: org.name || '',
+  }))
+
+  if (selectedOrgId.value && !orgs.value.find((org) => org.id === selectedOrgId.value)) {
+    selectOrg(null)
+  }
+}
+
 onMounted(async () => {
-  // Fetch meta schema for nav
-  try {
-    const meta = await metaSchemaApi.get()
-    const catalog = meta['x-catalog'] || {}
-    const groups = meta['x-groups'] || {}
+  await runBootstrap()
+})
 
-    navGroupDefs.value = groups
-
-    const items: NavItem[] = []
-    for (const [typeName, entry] of Object.entries(catalog) as [string, any][]) {
-      if (entry.nav === 'hidden') continue
-
-      let itemRoute: string
-      if (entry.route) {
-        itemRoute = entry.route
-      } else if (entry.storage === 'entities') {
-        itemRoute = `/s/${typeName}`
-      } else {
-        itemRoute = `/${entry.path}`
-      }
-
-      items.push({
-        type: typeName,
-        label: entry.alias || typeName,
-        sortOrder: entry.sort_order ?? 99,
-        storage: entry.storage || 'entities',
-        route: itemRoute,
-        countable: !!entry.countable,
-        navGroup: entry.nav_group,
-        aggregates: entry.aggregates,
-      })
-    }
-
-    navItems.value = items.sort((a, b) => a.sortOrder - b.sortOrder)
-  } catch { /* ignore */ }
-
-  // Fetch counts for badges
-  try {
-    entityCounts.value = await countsApi.get()
-
-    // Apply counts to nav items
-    for (const item of navItems.value) {
-      if (!item.countable) continue
-
-      if (item.aggregates && item.aggregates.length > 0) {
-        // Virtual aggregate: sum counts of child types
-        item.count = item.aggregates.reduce((sum, t) => sum + (entityCounts.value[t] || 0), 0)
-      } else {
-        item.count = entityCounts.value[item.type] || 0
-      }
-    }
-  } catch { /* ignore */ }
-
-  // Fetch orgs
-  try {
-    const items = await orgApi.list()
-    orgs.value = items.map((o: any) => ({
-      id: o.id,
-      display_name: o.name || o.display_name || o.identifier || '',
-      name: o.name || '',
-    }))
-    if (selectedOrgId.value && !orgs.value.find(o => o.id === selectedOrgId.value)) {
-      selectOrg(null)
-    }
-  } catch { /* ignore */ }
-
-
+onUnmounted(() => {
+  disposeBootstrap()
 })
 
 const pageTitle = computed(() => {
