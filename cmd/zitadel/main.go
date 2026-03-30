@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -76,6 +77,11 @@ func startCmd() *cobra.Command {
 				cfg.Database.Bootstrap = "auto"
 			}
 
+			storageResolution, err := cfg.ResolveLocalStorage(configPath)
+			if err != nil {
+				return fmt.Errorf("resolve local storage: %w", err)
+			}
+
 			// Initialize logging — streams, sinks, redaction.
 			// DB is nil here; analytics drainer activates after DB open.
 			logging.Init(logging.Config{
@@ -106,6 +112,8 @@ func startCmd() *cobra.Command {
 					IPMode: cfg.Observability.Redaction.IPMode,
 				},
 			})
+
+			logLegacyStorageWarning(storageResolution)
 
 			// Open database with pool config.
 			poolLifetime, _ := time.ParseDuration(cfg.Database.ConnMaxLifetime)
@@ -189,6 +197,9 @@ func startCmd() *cobra.Command {
 			cli.PrintLogo()
 			logging.Printf("Zitadel %s starting on :%d", version, cfg.Server.Port)
 			logging.Printf("Database: %s", cfg.Database.URL)
+			if cfg.Observability.Sinks.Analytics.Enabled {
+				logging.Printf("Local cache: %s (disposable analytics buffer)", cfg.Observability.CachePath)
+			}
 			logging.Printf("Migration mode: %s | Bootstrap mode: %s", migrateMode, bootstrapMode)
 
 			srv := server.New(cfg, db, bus)
@@ -226,11 +237,18 @@ For Postgres, an advisory lock ensures safe concurrent execution.`,
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			storageResolution, err := cfg.ResolveLocalStorage(configPath)
+			if err != nil {
+				return fmt.Errorf("resolve local storage: %w", err)
+			}
+
 			// Minimal logging for migration command.
 			logging.Init(logging.Config{
 				Level:  cfg.Observability.LogLevel,
 				Format: cfg.Observability.LogFormat,
 			})
+
+			logLegacyStorageWarning(storageResolution)
 
 			db, err := database.Open(cfg.Database.URL)
 			if err != nil {
@@ -283,6 +301,10 @@ func migrateStatusCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			if _, err := cfg.ResolveLocalStorage(configPath); err != nil {
+				return fmt.Errorf("resolve local storage: %w", err)
+			}
+
 			db, err := database.Open(cfg.Database.URL)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
@@ -315,6 +337,24 @@ func migrateStatusCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to zitadel.toml config file")
 
 	return cmd
+}
+
+func logLegacyStorageWarning(resolution *config.LocalStorageResolution) {
+	if resolution == nil || !resolution.LegacyDatabaseUsed {
+		return
+	}
+
+	parts := []string{
+		fmt.Sprintf("using legacy flat-root database at %s", resolution.LegacyDatabasePath),
+		fmt.Sprintf("new default database path is %s", resolution.DefaultDatabasePath),
+	}
+	if resolution.LegacyCacheUsed {
+		parts = append(parts, fmt.Sprintf("legacy cache retained at %s", resolution.LegacyCachePath))
+	} else {
+		parts = append(parts, fmt.Sprintf("new default cache path is %s", resolution.DefaultCachePath))
+	}
+
+	logging.Printf("[WARN] local storage: %s", strings.Join(parts, "; "))
 }
 
 func versionCmd() *cobra.Command {

@@ -70,12 +70,12 @@ tx.Commit() // both or neither
 
 ## Tier 2: OLAP (Durable Analytics)
 
-High-volume telemetry (`request.*`, `log.*`) flows through the structured logging system into a **local SQLite cache** (`zitadel-cache.db`), then batch-drains to the analytics backend:
+High-volume telemetry (`request.*`, `log.*`) flows through the structured logging system into a **local SQLite cache** (`./data/zitadel-cache.db`), then batch-drains to the analytics backend:
 
 ```
 Logger.InfoContext(ctx, "request.api", attrs...)
   → FanOutHandler
-    → cacheSink → zitadel-cache.db (local SQLite, WAL mode)
+    → cacheSink → ./data/zitadel-cache.db (local SQLite, WAL mode)
       → Drainer (background goroutine, every 5s)
         → Batch INSERT into events table (analytics backend)
 ```
@@ -110,7 +110,7 @@ mode = "off"  # domain events go through emitEvent(), not the logger
 
 The SQLite cache is a **ring buffer** — oldest entries are trimmed when max capacity is reached:
 
-- **Default path**: `zitadel-cache.db` (relative to working directory)
+- **Default path**: `./data/zitadel-cache.db` (under the working directory)
 - **Max rows**: 50,000 (configurable via `cache_max`)
 - **WAL mode**: Concurrent reads during writes
 - **tmpfs compatible**: For multi-machine deployments, use tmpfs for in-memory speed

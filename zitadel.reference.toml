@@ -113,7 +113,7 @@ cross_origin_opener = "same-origin"
 # Cloudflare D1 (edge, via HTTP proxy): "d1://d1.local"
 #   D1 requires deploying on Cloudflare Workers + Containers with the
 #   outboundByHost proxy pattern. See deploy/cloudflare-containers/README.md.
-url = "sqlite://./zitadel.db"
+url = "sqlite://./data/zitadel.db"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Schema Migration — controls behavior of 'zitadel start'

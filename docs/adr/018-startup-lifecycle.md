@@ -7,7 +7,7 @@
 
 ## Context
 
-Zitadel's single `serve` command did everything: load config → open DB → run migrations → bootstrap admin → start server. This works for dev but breaks in production:
+Zitadel's single startup flow did everything: load config → open DB → run migrations → bootstrap admin → start server. This works for dev but breaks in production:
 
 - **K8s rolling deploy**: Multiple pods race to run DDL simultaneously
 - **Managed Postgres**: App user may lack DDL privileges
@@ -28,7 +28,7 @@ zitadel migrate status # Print schema version info
 
 ```toml
 [database]
-url = "sqlite://./zitadel.db"
+url = "sqlite://./data/zitadel.db"
 migrate = "auto"       # "auto" | "check" | "skip"
 bootstrap = "auto"     # "auto" | "skip"
 ```
@@ -66,7 +66,7 @@ This is optional — a single user with full privileges works fine.
 
 ```bash
 zitadel start
-# → SQLite at ./zitadel.db, auto-migrated, admin bootstrapped
+# → SQLite at ./data/zitadel.db, auto-migrated, admin bootstrapped
 ```
 
 ### Dev (Postgres)

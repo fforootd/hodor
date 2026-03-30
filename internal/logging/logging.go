@@ -70,7 +70,7 @@ const (
 type Config struct {
 	Level     string
 	Format    string // "text" | "json"
-	CachePath string // local SQLite cache file (default: "zitadel-cache.db")
+	CachePath string // local SQLite cache file (default: "./data/zitadel-cache.db")
 	CacheMax  int    // ring buffer max rows (default: 50000)
 	Streams   StreamRouting
 	Sinks     SinksConfig
@@ -159,7 +159,7 @@ func Init(cfg Config) {
 	if cfg.Sinks.Analytics.Enabled {
 		cachePath := cfg.CachePath
 		if cachePath == "" {
-			cachePath = "zitadel-cache.db"
+			cachePath = "./data/zitadel-cache.db"
 		}
 		cacheMax := cfg.CacheMax
 		if cacheMax == 0 {

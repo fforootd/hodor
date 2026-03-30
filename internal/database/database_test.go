@@ -41,6 +41,26 @@ func TestOpenDefault(t *testing.T) {
 	if db.Dialect() != "sqlite" {
 		t.Errorf("dialect = %q, want sqlite", db.Dialect())
 	}
+
+	path := filepath.Join(dir, "data", "zitadel.db")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Errorf("default database file %s not created", path)
+	}
+}
+
+func TestOpenSQLiteCreatesParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "data", "test.db")
+
+	db, err := Open("sqlite://" + path)
+	if err != nil {
+		t.Fatalf("Open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Fatalf("database file not created at %s", path)
+	}
 }
 
 func TestOpenUnsupported(t *testing.T) {
