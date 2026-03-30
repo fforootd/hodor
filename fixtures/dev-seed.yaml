@@ -47,3 +47,13 @@ users:
     profile:
       email: alice@example.com
       display_name: Alice Wonder
+
+  - identifier: _platform
+    display_name: Platform Service
+    type: service_user
+    on_conflict: skip
+    capabilities: [admin]
+    pats:
+      - name: platform-api-token
+        token: zitadel-platform-token-do-not-use-in-production
+        scopes: [admin]

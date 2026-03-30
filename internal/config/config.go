@@ -17,6 +17,7 @@ import (
 // This covers infrastructure-level settings only (~30 total).
 type Config struct {
 	Server        ServerConfig        `toml:"server"`
+	TLS           TLSConfig           `toml:"tls"`
 	Database      DatabaseConfig      `toml:"database"`
 	Observability ObservabilityConfig `toml:"observability"`
 	Workers       WorkersConfig       `toml:"workers"`
@@ -89,6 +90,65 @@ type SecurityHeadersConfig struct {
 	ReferrerPolicy      string `toml:"referrer_policy"`        // default: "strict-origin-when-cross-origin"
 	PermissionsPolicy   string `toml:"permissions_policy"`     // default: restrict camera, mic, etc.
 	CrossOriginOpener   string `toml:"cross_origin_opener"`    // default: "same-origin"
+}
+
+// TLSConfig controls automatic TLS certificate provisioning via CertMagic.
+type TLSConfig struct {
+	// Mode controls how TLS is handled:
+	//   "auto"     — CertMagic provisions certs via Let's Encrypt (default when external_domain is public)
+	//   "manual"   — use tls_cert/tls_key from ServerConfig
+	//   "external" — TLS terminated upstream (reverse proxy, load balancer)
+	//   "off"      — plain HTTP only (default in dev)
+	Mode      string `toml:"mode"`
+	Email     string `toml:"email"`      // ACME account email (for auto mode)
+	CADir     string `toml:"ca_dir"`     // Custom ACME CA directory URL (optional, default: Let's Encrypt production)
+	HTTPPort  int    `toml:"http_port"`  // Port for HTTP redirect + ACME challenges (default: 80)
+	HTTPSPort int    `toml:"https_port"` // Port for HTTPS (default: 443)
+}
+
+// ResolveMode determines the effective TLS mode from config + server state.
+// Zero-config: when external_domain is set and public, default to "auto".
+// Dev mode or localhost: default to "off".
+func (t *TLSConfig) ResolveMode(serverCfg *ServerConfig, isDev bool) string {
+	// Explicit mode always wins.
+	switch t.Mode {
+	case "auto", "manual", "external", "off":
+		return t.Mode
+	}
+
+	// Manual certs provided → manual mode.
+	if serverCfg.TLSCert != "" && serverCfg.TLSKey != "" {
+		return "manual"
+	}
+
+	// Dev mode → off.
+	if isDev {
+		return "off"
+	}
+
+	// Public domain set → auto.
+	d := serverCfg.ExternalDomain
+	if d != "" && d != "localhost" && d != "127.0.0.1" && d != "0.0.0.0" {
+		return "auto"
+	}
+
+	return "off"
+}
+
+// ResolveHTTPPort returns the effective HTTP port.
+func (t *TLSConfig) ResolveHTTPPort() int {
+	if t.HTTPPort > 0 {
+		return t.HTTPPort
+	}
+	return 80
+}
+
+// ResolveHTTPSPort returns the effective HTTPS port.
+func (t *TLSConfig) ResolveHTTPSPort() int {
+	if t.HTTPSPort > 0 {
+		return t.HTTPSPort
+	}
+	return 443
 }
 
 // DatabaseConfig controls the primary database connection and startup lifecycle.
@@ -299,6 +359,11 @@ func Defaults() *Config {
 			Backend:    "memory",
 			GCInterval: 60,
 		},
+		TLS: TLSConfig{
+			// Mode defaults to "" — resolved dynamically by ResolveMode().
+			HTTPPort:  80,
+			HTTPSPort: 443,
+		},
 	}
 }
 
@@ -321,6 +386,7 @@ func Load(path string) (*Config, error) {
 
 func applyEnv(cfg *Config) {
 	applyServerEnv(cfg)
+	applyTLSEnv(cfg)
 	applyDatabaseEnv(cfg)
 	applyObservabilityEnv(cfg)
 	applyDevEnv(cfg)
@@ -353,6 +419,28 @@ func applyServerEnv(cfg *Config) {
 	}
 	if v := os.Getenv("ZITADEL_REAL_IP_HEADER"); v != "" {
 		cfg.Server.RealIPHeader = v
+	}
+}
+
+func applyTLSEnv(cfg *Config) {
+	if v := os.Getenv("ZITADEL_TLS_MODE"); v != "" {
+		cfg.TLS.Mode = v
+	}
+	if v := os.Getenv("ZITADEL_TLS_EMAIL"); v != "" {
+		cfg.TLS.Email = v
+	}
+	if v := os.Getenv("ZITADEL_TLS_CA_DIR"); v != "" {
+		cfg.TLS.CADir = v
+	}
+	if v := os.Getenv("ZITADEL_TLS_HTTP_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.TLS.HTTPPort = port
+		}
+	}
+	if v := os.Getenv("ZITADEL_TLS_HTTPS_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.TLS.HTTPSPort = port
+		}
 	}
 }
 

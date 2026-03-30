@@ -53,8 +53,9 @@
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto (Let's Encrypt)</SelectItem>
-                  <SelectItem value="custom">Custom Certificate</SelectItem>
-                  <SelectItem value="none">None (HTTP only)</SelectItem>
+                  <SelectItem value="manual">Manual Certificate</SelectItem>
+                  <SelectItem value="external">External (proxy terminates TLS)</SelectItem>
+                  <SelectItem value="off">Off (HTTP only)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -107,7 +108,15 @@
                 <div class="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                   <span class="capitalize">{{ ep.component }}</span>
                   <span>·</span>
-                  <span>TLS: {{ ep.tls_mode }}</span>
+                  <span :class="tlsStatusClass(ep.tls_status)">{{ tlsStatusLabel(ep.tls_status) }}</span>
+                  <template v-if="ep.cert_expires">
+                    <span>·</span>
+                    <span>Expires: {{ new Date(ep.cert_expires).toLocaleDateString() }}</span>
+                  </template>
+                  <template v-if="ep.tls_error">
+                    <span>·</span>
+                    <span class="text-destructive">{{ ep.tls_error }}</span>
+                  </template>
                   <template v-if="ep.dns_method">
                     <span>·</span>
                     <span>DNS: {{ ep.dns_method.toUpperCase() }}</span>
@@ -183,6 +192,9 @@ interface Endpoint {
   component: string
   enabled: boolean
   tls_mode: string
+  tls_status: string
+  tls_error: string
+  cert_expires: string
   dns_verified: boolean
   dns_method: string
   dns_token: string
@@ -223,6 +235,30 @@ function componentIcon(c: string) {
     account: User,
   }
   return icons[c] || Link
+}
+
+function tlsStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    active: '🔒 Active',
+    provisioning: '⏳ Provisioning',
+    pending: '⚠️ Pending',
+    error: '❌ Error',
+    external: '🔓 External',
+    off: '➖ HTTP',
+  }
+  return labels[status] || status
+}
+
+function tlsStatusClass(status: string): string {
+  const classes: Record<string, string> = {
+    active: 'text-emerald-600',
+    provisioning: 'text-yellow-600',
+    pending: 'text-orange-500',
+    error: 'text-destructive',
+    external: 'text-blue-500',
+    off: 'text-muted-foreground',
+  }
+  return classes[status] || ''
 }
 
 async function fetchEndpoints() {

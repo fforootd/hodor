@@ -26,18 +26,21 @@ type EndpointRequest struct {
 }
 
 type EndpointResponse struct {
-	ID          string `json:"id"`
-	InstanceID  string `json:"instance_id"`
-	Domain      string `json:"domain"`
-	Path        string `json:"path"`
-	Component   string `json:"component"`
-	Enabled     bool   `json:"enabled"`
-	TLSMode     string `json:"tls_mode"`
-	DNSVerified bool   `json:"dns_verified"`
-	DNSMethod   string `json:"dns_method,omitempty"`
-	DNSToken    string `json:"dns_token,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID           string `json:"id"`
+	InstanceID   string `json:"instance_id"`
+	Domain       string `json:"domain"`
+	Path         string `json:"path"`
+	Component    string `json:"component"`
+	Enabled      bool   `json:"enabled"`
+	TLSMode      string `json:"tls_mode"`
+	TLSStatus    string `json:"tls_status"`
+	TLSError     string `json:"tls_error,omitempty"`
+	CertExpires  string `json:"cert_expires,omitempty"`
+	DNSVerified  bool   `json:"dns_verified"`
+	DNSMethod    string `json:"dns_method,omitempty"`
+	DNSToken     string `json:"dns_token,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 var validComponents = map[string]bool{
@@ -71,6 +74,7 @@ func (a *API) listEndpoints(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT id, instance_id, domain, path, component, enabled, tls_mode,
+		        tls_status, COALESCE(tls_error,''), COALESCE(cert_expires,''),
 		        dns_verified, COALESCE(dns_method,''), COALESCE(dns_token,''),
 		        created_at, updated_at
 		 FROM endpoints WHERE instance_id = ?
@@ -86,6 +90,7 @@ func (a *API) listEndpoints(w http.ResponseWriter, r *http.Request) {
 		var ep EndpointResponse
 		if err := rows.Scan(&ep.ID, &ep.InstanceID, &ep.Domain, &ep.Path,
 			&ep.Component, &ep.Enabled, &ep.TLSMode,
+			&ep.TLSStatus, &ep.TLSError, &ep.CertExpires,
 			&ep.DNSVerified, &ep.DNSMethod, &ep.DNSToken,
 			&ep.CreatedAt, &ep.UpdatedAt); err != nil {
 			continue
@@ -121,6 +126,15 @@ func (a *API) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		req.TLSMode = "auto"
 	}
 
+	// Derive initial TLS status from mode.
+	tlsStatus := "pending"
+	switch req.TLSMode {
+	case "external":
+		tlsStatus = "external"
+	case "off":
+		tlsStatus = "off"
+	}
+
 	iid := instance.FromContext(r.Context())
 	epID := id.New()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -134,9 +148,9 @@ func (a *API) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO endpoints (id, instance_id, domain, path, component, enabled, tls_mode, dns_token, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		epID, iid, req.Domain, req.Path, req.Component, enabled, req.TLSMode, dnsToken, now, now,
+		`INSERT INTO endpoints (id, instance_id, domain, path, component, enabled, tls_mode, tls_status, dns_token, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		epID, iid, req.Domain, req.Path, req.Component, enabled, req.TLSMode, tlsStatus, dnsToken, now, now,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -157,6 +171,7 @@ func (a *API) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Component:  req.Component,
 		Enabled:    enabled,
 		TLSMode:    req.TLSMode,
+		TLSStatus:  tlsStatus,
 		DNSToken:   dnsToken,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -170,11 +185,13 @@ func (a *API) getEndpoint(w http.ResponseWriter, r *http.Request) {
 	var ep EndpointResponse
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT id, instance_id, domain, path, component, enabled, tls_mode,
+		        tls_status, COALESCE(tls_error,''), COALESCE(cert_expires,''),
 		        dns_verified, COALESCE(dns_method,''), COALESCE(dns_token,''),
 		        created_at, updated_at
 		 FROM endpoints WHERE id = ? AND instance_id = ?`, epID, iid,
 	).Scan(&ep.ID, &ep.InstanceID, &ep.Domain, &ep.Path,
 		&ep.Component, &ep.Enabled, &ep.TLSMode,
+		&ep.TLSStatus, &ep.TLSError, &ep.CertExpires,
 		&ep.DNSVerified, &ep.DNSMethod, &ep.DNSToken,
 		&ep.CreatedAt, &ep.UpdatedAt)
 	if err != nil {

@@ -84,14 +84,35 @@ func (s *Service) ListObjects(ctx context.Context, user, relation, objectType st
 //   - user:{adminID} → owner → instance:inst_root
 //   - org:_global → parent → instance:inst_root
 //   - user:{adminID} → owner → org:_global
+//
+// It also grants ownership to the _platform service user if it exists,
+// enabling cross-instance endpoint management via root-gets-* bypass.
 func (s *Service) OnBootstrap(ctx context.Context, adminID string) error {
 	logging.Printf("[fga] bootstrapping tuples: admin=%s", adminID)
-	return s.WriteTuples(ctx,
+	err := s.WriteTuples(ctx,
 		[3]string{"user:" + adminID, "owner", "instance:inst_root"},
 		// Global org — grants access when org_id is unknown/nullable.
 		[3]string{"instance:inst_root", "parent", "org:_global"},
 		[3]string{"user:" + adminID, "owner", "org:_global"},
 	)
+	if err != nil {
+		return err
+	}
+
+	// Grant _platform service user owner of inst_root (if seeded).
+	var platformID string
+	if qErr := s.db.QueryRowContext(ctx,
+		`SELECT id FROM users WHERE identifier = '_platform' LIMIT 1`,
+	).Scan(&platformID); qErr == nil && platformID != "" {
+		logging.Printf("[fga] granting _platform user (%s) owner of inst_root", platformID)
+		if wErr := s.WriteTuples(ctx,
+			[3]string{"user:" + platformID, "owner", "instance:inst_root"},
+		); wErr != nil {
+			logging.Printf("WARN: failed to grant _platform ownership: %v", wErr)
+		}
+	}
+
+	return nil
 }
 
 // OnInstanceCreated writes tuples when a new sub-instance is created:

@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	cryptotls "crypto/tls"
 	"embed"
 	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
@@ -24,13 +25,14 @@ import (
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/fga"
+	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/ratelimit"
-	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/ui"
+	"github.com/zitadel/zitadel/internal/ztls"
 )
 
 //go:embed all:webdist
@@ -45,6 +47,7 @@ type Server struct {
 	api       *api.API
 	fga       *fga.Service
 	analytics *analytics.Engine
+	tlsMgr    *ztls.Manager
 }
 
 // New creates a new Server with all routes registered.
@@ -277,6 +280,13 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		IdleTimeout: 60 * time.Second,
 	}
 
+	// Initialize TLS manager.
+	isDev := cfg.Dev.MockOIDC || cfg.Dev.SeedFile != ""
+	tlsMgr, err := ztls.NewManager(cfg.TLS, &cfg.Server, db.SQL(), isDev)
+	if err != nil {
+		logging.Printf("WARN: TLS manager init failed: %v", err)
+	}
+
 	return &Server{
 		cfg:       cfg,
 		db:        db,
@@ -285,6 +295,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		api:       restAPI,
 		fga:       fgaSvc,
 		analytics: analyticsEngine,
+		tlsMgr:    tlsMgr,
 	}
 }
 
@@ -310,11 +321,44 @@ func (s *Server) ListenAndServe() error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	errCh := make(chan error, 1)
+
+	tlsMode := "off"
+	if s.tlsMgr != nil {
+		tlsMode = s.tlsMgr.Mode()
+	}
+
 	go func() {
-		logging.Printf("listening on %s", s.http.Addr)
-		if s.cfg.Server.TLSCert != "" && s.cfg.Server.TLSKey != "" {
+		switch tlsMode {
+		case "auto":
+			// Auto-TLS via CertMagic.
+			httpsPort := s.cfg.TLS.ResolveHTTPSPort()
+			httpPort := s.cfg.TLS.ResolveHTTPPort()
+
+			// Start HTTP listener for ACME challenges + redirect.
+			go func() {
+				httpAddr := fmt.Sprintf(":%d", httpPort)
+				logging.Printf("[tls] HTTP listener on %s (ACME challenges + HTTPS redirect)", httpAddr)
+				if err := http.ListenAndServe(httpAddr, s.tlsMgr.HTTPChallengeHandler(httpsPort)); err != nil {
+					logging.Printf("WARN: HTTP listener error: %v", err)
+				}
+			}()
+
+			// Start HTTPS listener.
+			httpsAddr := fmt.Sprintf(":%d", httpsPort)
+			logging.Printf("listening on %s (auto-TLS)", httpsAddr)
+			ln, err := cryptotls.Listen("tcp", httpsAddr, s.tlsMgr.TLSConfig())
+			if err != nil {
+				errCh <- fmt.Errorf("tls listen: %w", err)
+				return
+			}
+			errCh <- s.http.Serve(ln)
+
+		case "manual":
+			logging.Printf("listening on %s (manual TLS)", s.http.Addr)
 			errCh <- s.http.ListenAndServeTLS(s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
-		} else {
+
+		default: // "external", "off"
+			logging.Printf("listening on %s", s.http.Addr)
 			errCh <- s.http.ListenAndServe()
 		}
 	}()
