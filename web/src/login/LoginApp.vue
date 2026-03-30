@@ -36,13 +36,20 @@
           </Alert>
         </template>
 
-        <!-- Loading -->
-        <div v-if="!flowStep" class="flex justify-center py-8">
-          <Spinner class="size-6" />
+
+
+
+        <!-- Identity Header (shown after identifier step) -->
+        <div v-if="flowStep?.identity" class="flex flex-col items-center gap-1 mb-4">
+          <Avatar class="size-10">
+            <AvatarFallback>{{ flowStep.identity.avatar_initial }}</AvatarFallback>
+          </Avatar>
+          <span class="text-sm font-medium">{{ flowStep.identity.display_name }}</span>
         </div>
 
         <!-- Node Renderer -->
-        <form v-else @submit.prevent="onSubmit" class="space-y-4">
+        <Transition name="fade" mode="out-in">
+        <form v-if="flowStep" :key="flowStep.step" @submit.prevent="onSubmit" class="space-y-4">
           <template v-for="(node, i) in flowStep.nodes" :key="i">
             <!-- Heading -->
             <h1 v-if="node.type === 'heading'" class="text-xl font-semibold text-center">{{ node.text }}</h1>
@@ -272,6 +279,12 @@
             </div>
           </template>
         </form>
+        </Transition>
+
+        <!-- Loading state when no flow yet -->
+        <div v-if="!flowStep" class="flex justify-center py-8">
+          <Spinner class="size-6" />
+        </div>
       </CardContent>
     </Card>
 
@@ -630,3 +643,18 @@ async function maybeCollectFingerprint(step: FlowStep) {
   }
 }
 </script>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+</style>

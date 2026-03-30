@@ -4,16 +4,6 @@
   "type": "object",
   "x-table": "orgs",
 
-  "x-branding": {
-    "heading": "Welcome",
-    "colors": { "primary": "#6366f1" }
-  },
-  "x-login": {
-    "preset": "identifier_first",
-    "mfa_required": false,
-    "registration_allowed": true
-  },
-
   "properties": {
     "display_name": {
       "type": "string",
@@ -30,15 +20,6 @@
         "logo_dark_url": { "type": "string", "format": "uri" },
         "font_family":   { "type": "string" },
         "favicon_url":   { "type": "string", "format": "uri" }
-      }
-    },
-    "login_policy": {
-      "type": "object",
-      "properties": {
-        "mfa_required":         { "type": "boolean" },
-        "passwordless_enabled": { "type": "boolean" },
-        "registration_allowed": { "type": "boolean" },
-        "external_idp_only":    { "type": "boolean" }
       }
     },
     "notification_channels": {

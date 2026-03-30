@@ -12,15 +12,7 @@
     "sso":        { "enabled": true,  "interactive": true,  "position": 3 },
     "pat":        { "enabled": false, "interactive": false }
   },
-  "x-login": {
-    "preset": "identifier_first",
-    "mfa_required": false,
-    "registration_allowed": true
-  },
-  "x-branding": {
-    "heading": "Welcome back",
-    "colors": { "primary": "#6366f1" }
-  },
+
 
   "properties": {
     "display_name": {

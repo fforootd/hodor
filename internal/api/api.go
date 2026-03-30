@@ -239,14 +239,15 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name,
 	})
 
-	// FGA: write ownership tuples — must succeed before commit.
+	creatorID := creatorFromRequest(r)
 	if svc := FGAService; svc != nil {
-		creatorID := creatorFromRequest(r)
-		if err := svc.OnOrgCreated(r.Context(), orgID, creatorID); err != nil {
-			logging.Printf("[fga] failed to write org tuples: %v", err)
-			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
-			return
-		}
+		fgaAsync("org created", func() { //nolint:contextcheck
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := svc.OnOrgCreated(ctx, orgID, creatorID); err != nil {
+				logging.Printf("[fga] org created: %v", err)
+			}
+		})
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -466,14 +467,15 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 		"client_id": clientID,
 	})
 
-	// FGA: write org + ownership tuples — must succeed before commit.
+	creatorID := creatorFromRequest(r)
 	if svc := FGAService; svc != nil {
-		creatorID := creatorFromRequest(r)
-		if err := svc.OnAppCreated(r.Context(), appID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] failed to write app tuples: %v", err)
-			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
-			return
-		}
+		fgaAsync("app created", func() { //nolint:contextcheck
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := svc.OnAppCreated(ctx, appID, creatorID, orgID); err != nil {
+				logging.Printf("[fga] app created: %v", err)
+			}
+		})
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -702,15 +704,16 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 		"identifier": req.Identifier,
 	})
 
-	// FGA: write org membership tuple — must succeed before commit.
-	// Only write if orgID is set; users created without an org context
-	// (e.g. via the wizard) get their memberships added post-creation.
-	if svc := FGAService; svc != nil && orgID != "" {
+	if orgID != "" {
 		creatorID := creatorFromRequest(r)
-		if err := svc.OnResourceCreated(r.Context(), userID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] failed to write user tuples: %v", err)
-			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
-			return
+		if svc := FGAService; svc != nil {
+			fgaAsync("user created", func() { //nolint:contextcheck
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := svc.OnResourceCreated(ctx, userID, creatorID, orgID); err != nil {
+					logging.Printf("[fga] user created: %v", err)
+				}
+			})
 		}
 	}
 

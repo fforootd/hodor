@@ -17,23 +17,20 @@
   },
   "payload": {
     "display_name": "SSO Enterprise Login",
-    "login_policy": {
-      "preset": "sso_only",
-      "passwordless_enabled": false,
-      "mfa_required": false,
-      "registration_allowed": false,
-      "external_idp_only": true,
-      "force_mfa_local_only": true
-    },
+    "preset": "sso_only",
     "auth_methods": {
       "passkey":    { "enabled": false, "interactive": true, "position": 0 },
       "password":   { "enabled": false, "interactive": true, "position": 1 },
       "magic_link": { "enabled": false, "interactive": true, "position": 2 },
       "sso":        { "enabled": true,  "interactive": true, "position": 0 }
     },
-    "branding": {
-      "heading": "Sign in to {{company_name}}",
-      "colors": { "primary": "{{primary_color}}" }
+    "config": {
+      "branding": {
+        "heading": "Sign in to {{company_name}}",
+        "colors": { "primary": "{{primary_color}}" },
+        "layout": "centered",
+        "hide_registration": true
+      }
     },
     "actions": []
   }

@@ -259,6 +259,8 @@
       "icon": "⚡",
       "sort_order": 10,
       "storage": "dedicated",
+      "installable": true,
+      "marketplace_category": "automation",
       "fga_type": "action",
       "fga_scope": "org"
     },
@@ -274,6 +276,8 @@
       "sort_order": 11,
       "storage": "dedicated",
       "countable": true,
+      "installable": true,
+      "marketplace_category": "login",
       "engines": {
         "login": {
           "model": "schema-driven"
@@ -293,6 +297,8 @@
       "icon": "🔗",
       "sort_order": 12,
       "storage": "dedicated",
+      "installable": true,
+      "marketplace_category": "identity",
       "route": "/providers",
       "fga_type": "provider",
       "fga_scope": "instance"
@@ -512,20 +518,7 @@
       "fga_type": "settings",
       "fga_scope": "instance"
     },
-    "login_policy": {
-      "$ref": "schemas/login_policy.json",
-      "version": "1.0",
-      "group": "nav",
-      "alias": "Login Policy",
-      "singular": "Login Policy",
-      "path": "settings/login-policy",
-      "icon": "🚪",
-      "sort_order": 3,
-      "storage": "settings",
-      "nav": "hidden",
-      "fga_type": "settings",
-      "fga_scope": "instance"
-    },
+
     "lockout_policy": {
       "$ref": "schemas/lockout_policy.json",
       "version": "1.0",
@@ -606,7 +599,7 @@
     },
     "x-login": {
       "type": "object",
-      "description": "Interactive login flow configuration (default, overridable via settings).",
+      "description": "DEPRECATED on user schemas — use login flow config instead. Interactive login flow configuration (default, overridable via settings). Retained for backward compatibility; if present, used as fallback when no login flow is resolved.",
       "properties": {
         "preset": {
           "type": "string",
@@ -631,7 +624,7 @@
     },
     "x-branding": {
       "type": "object",
-      "description": "Visual customization for the login UI (default, overridable via settings).",
+      "description": "DEPRECATED on user schemas — use login flow branding instead. Visual customization for the login UI. Retained for backward compatibility; if present, used as fallback when no login flow is resolved.",
       "properties": {
         "heading": {
           "type": "string"

@@ -3,6 +3,7 @@
 package login
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/loginflow"
 	"github.com/zitadel/zitadel/internal/notify"
 	"github.com/zitadel/zitadel/internal/session"
 )
@@ -31,10 +33,11 @@ type Handler struct {
 	flows     *FlowStore
 	cookies   *session.CookieConfig
 	captcha   *captcha.AltchaVerifier
+	resolver  *loginflow.Resolver
 }
 
 // New creates a new login API handler.
-func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, cookies *session.CookieConfig) *Handler {
+func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, cookies *session.CookieConfig, resolver *loginflow.Resolver) *Handler {
 	// Generate a random HMAC key for Altcha PoW challenges.
 	// In production, this should come from config/secrets.
 	hmacKey, _ := captcha.GenerateHMACKey()
@@ -48,6 +51,7 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, coo
 		flows:     NewFlowStore(),
 		cookies:   cookies,
 		captcha:   captcha.NewAltchaVerifier(hmacKey, "SHA-256", 100000),
+		resolver:  resolver,
 	}
 }
 
@@ -76,7 +80,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 // --- Branding (schema-driven) ---
 
 func (h *Handler) handleBranding(w http.ResponseWriter, r *http.Request) {
-	cfg := h.getDefaultSchemaConfig(r)
+	cfg := h.getResolvedConfig(r, r.URL.Query().Get("flow"))
 	b := cfg.Branding
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"org_id":                "",
@@ -96,7 +100,7 @@ func (h *Handler) handleBranding(w http.ResponseWriter, r *http.Request) {
 // --- Auth Settings (schema-driven) ---
 
 func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
-	cfg := h.getDefaultSchemaConfig(r)
+	cfg := h.getResolvedConfig(r, r.URL.Query().Get("flow"))
 	ssoProviders := h.loadSSOProviders(r)
 
 	// Build auth_methods from schema config.
@@ -160,15 +164,13 @@ func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
 }
 
 // getDefaultSchemaConfig loads the default identity schema and extracts auth config.
-// Resolution order: is_default=true for the type, fallback to oldest schema.
+// This is the fallback when no login flow is resolved.
 func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
 	var schemaJSON string
-	// Try is_default first.
 	err := h.db.SQL().QueryRowContext(r.Context(),
 		`SELECT schema FROM schemas WHERE is_default = true ORDER BY created_at ASC LIMIT 1`,
 	).Scan(&schemaJSON)
 	if err != nil || schemaJSON == "" {
-		// Fallback to oldest schema (pre-migration compatibility).
 		err = h.db.SQL().QueryRowContext(r.Context(),
 			`SELECT schema FROM schemas ORDER BY created_at ASC LIMIT 1`,
 		).Scan(&schemaJSON)
@@ -177,6 +179,120 @@ func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
 		}
 	}
 	return ExtractAuthConfig(schemaJSON)
+}
+
+// getResolvedConfig resolves the best login flow for the request context,
+// then merges the flow's config with the user schema's auth methods.
+// Falls back to getDefaultSchemaConfig if no login flow matches.
+func (h *Handler) getResolvedConfig(r *http.Request, flowIDOverride string) *SchemaAuthConfig {
+	ctx := r.Context()
+
+	// Preview path: if a specific flow ID is provided, load it directly.
+	if flowIDOverride != "" {
+		return h.loadFlowConfig(ctx, flowIDOverride, r)
+	}
+
+	// Build user context from request hints.
+	orgID := httputil.ResolveOrgID(r, "")
+	uc := loginflow.UserContext{
+		OrgID: orgID,
+	}
+
+	// Resolve the best login flow.
+	lf, err := h.resolver.Resolve(ctx, uc)
+	if err != nil {
+		logging.Printf("[login] flow resolution failed (org=%s): %v, falling back to schema config", orgID, err)
+		return h.getDefaultSchemaConfig(r)
+	}
+
+	logging.Printf("[login] resolved flow %s (%s) for org=%s", lf.ID, lf.Name, orgID)
+	return h.buildConfigFromFlow(ctx, lf, r)
+}
+
+// loadFlowConfig loads a specific login flow by ID for preview.
+func (h *Handler) loadFlowConfig(ctx context.Context, flowID string, r *http.Request) *SchemaAuthConfig {
+	var configJSON, authMethodsJSON string
+	var preset string
+	err := h.db.SQL().QueryRowContext(ctx,
+		`SELECT COALESCE(preset,'identifier_first'), COALESCE(config,'{}'), COALESCE(auth_methods,'{}')
+		 FROM login_flows WHERE id = ?`, flowID,
+	).Scan(&preset, &configJSON, &authMethodsJSON)
+	if err != nil {
+		logging.Printf("[login] preview flow %s not found: %v, falling back", flowID, err)
+		return h.getDefaultSchemaConfig(r)
+	}
+
+	lf := &loginflow.LoginFlow{
+		ID:          flowID,
+		Preset:      preset,
+		Config:      json.RawMessage(configJSON),
+		AuthMethods: json.RawMessage(authMethodsJSON),
+	}
+	return h.buildConfigFromFlow(ctx, lf, r)
+}
+
+// buildConfigFromFlow constructs a SchemaAuthConfig from a resolved login flow.
+// It starts with the flow's config (branding, captcha, etc.) and merges
+// the user schema's auth methods as narrower overrides.
+func (h *Handler) buildConfigFromFlow(ctx context.Context, lf *loginflow.LoginFlow, r *http.Request) *SchemaAuthConfig {
+	// Start with the user schema config as the base for field definitions.
+	base := h.getDefaultSchemaConfig(r)
+
+	// Parse the login flow's config JSON to extract branding, captcha, etc.
+	flowCfg := ExtractLoginFlowConfig(string(lf.Config))
+	if flowCfg != nil {
+		// Apply flow's login config (preset, mfa, registration).
+		if flowCfg.Login.Preset != "" {
+			base.Login = flowCfg.Login
+		}
+		// Apply flow's branding (heading, colors, layout, etc.).
+		if flowCfg.Branding.Heading != "" || flowCfg.Branding.Layout != "" {
+			base.Branding = mergeBrandingDefaults(flowCfg.Branding)
+		}
+		// Apply captcha config from flow.
+		if flowCfg.Captcha != nil {
+			base.Captcha = flowCfg.Captcha
+		}
+		// Apply fingerprint config from flow.
+		if flowCfg.Fingerprint != nil {
+			base.Fingerprint = flowCfg.Fingerprint
+		}
+		// Apply rate limit from flow.
+		if flowCfg.RateLimit != nil {
+			base.RateLimit = flowCfg.RateLimit
+		}
+	}
+
+	// Apply auth methods from the login flow as the base,
+	// then let the user schema narrow them.
+	var flowAuthMethods map[string]*AuthMethodEntry
+	if len(lf.AuthMethods) > 0 && string(lf.AuthMethods) != "{}" {
+		if json.Unmarshal(lf.AuthMethods, &flowAuthMethods) == nil && len(flowAuthMethods) > 0 {
+			// Login flow is the base. User schema can only narrow (disable methods).
+			merged := make(map[string]*AuthMethodEntry)
+			for method, flowEntry := range flowAuthMethods {
+				if schemaEntry, ok := base.AuthMethods[method]; ok {
+					// Schema can disable a method the flow enabled, but not enable one the flow disabled.
+					if flowEntry.Enabled && !schemaEntry.Enabled {
+						merged[method] = schemaEntry // schema narrowed
+					} else {
+						merged[method] = flowEntry
+					}
+				} else {
+					merged[method] = flowEntry
+				}
+			}
+			base.AuthMethods = merged
+		}
+	}
+
+	// Apply flow preset.
+	if lf.Preset != "" {
+		base.Login.Preset = lf.Preset
+	}
+
+	base.LoginFlowID = lf.ID
+	return base
 }
 
 // Legacy login routes (handleLoginStart, handleLoginPassword, handleLoginComplete)

@@ -13,6 +13,7 @@ package login
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -629,14 +630,16 @@ func mergeBrandingOver(base, overlay BrandingConfig) BrandingConfig {
 type StepType string
 
 const (
-	StepIdentifier StepType = "identifier"
-	StepAuthSelect StepType = "auth_select"
-	StepPassword   StepType = "password"
-	StepPasskey    StepType = "passkey"
-	StepMagicLink  StepType = "magic_link_sent"
-	StepMFA        StepType = "mfa"
-	StepRegister   StepType = "register"
-	StepComplete   StepType = "complete"
+	StepIdentifier     StepType = "identifier"
+	StepAuthSelect     StepType = "auth_select"
+	StepPassword       StepType = "password"
+	StepPasskey        StepType = "passkey"
+	StepMagicLink      StepType = "magic_link_sent"
+	StepMFA            StepType = "mfa"
+	StepRegister       StepType = "register"
+	StepForgotPassword StepType = "forgot_password"
+	StepResetPassword  StepType = "reset_password"
+	StepComplete       StepType = "complete"
 )
 
 // UINode represents a single renderable element in the login UI.
@@ -777,6 +780,10 @@ func BuildNodes(flow *Flow) []UINode {
 		nodes = buildMagicLinkSentNodes(flow, texts)
 	case StepRegister:
 		nodes = buildRegisterNodes(flow, cfg, texts)
+	case StepForgotPassword:
+		nodes = buildForgotPasswordNodes(flow, texts)
+	case StepResetPassword:
+		nodes = buildResetPasswordNodes(flow, texts)
 	case StepComplete:
 		return []UINode{
 			{Type: "heading", Text: "Welcome!"},
@@ -943,73 +950,86 @@ func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 		{Type: "description", Text: textOr(texts, "auth_select_description", "Choose how to sign in")},
 	}
 
-	// Password input (if enabled).
-	if m := cfg.AuthMethods["password"]; m != nil && m.Enabled {
-		nodes = append(nodes,
-			UINode{Type: "input", Name: "password", InputType: "password",
-				Label:       textOr(texts, "password_label", "Password"),
-				Placeholder: "••••••••", Autocomplete: "current-password", Required: true},
-		)
-		// Password hint (forgot password) — auto-generated when any field has x-recover.
-		hasRecovery := false
-		for _, fc := range cfg.Fields {
-			if fc.Recovery != "" {
-				hasRecovery = true
-				break
-			}
-		}
-		if hasRecovery {
-			nodes = append(nodes, UINode{
-				Type:   "password_hint",
-				Label:  textOr(texts, "forgot_password", "Forgot your password?"),
-				Action: "forgot_password",
-			})
-		}
-		nodes = append(nodes,
-			UINode{Type: "submit", Label: textOr(texts, "signin_button", "Sign in with password"), Action: "password"},
-		)
+	// Sort auth methods by Position for deterministic rendering order.
+	type methodEntry struct {
+		name  string
+		entry *AuthMethodEntry
 	}
+	var sortedMethods []methodEntry
+	for name, m := range cfg.AuthMethods {
+		if m != nil && m.Enabled {
+			sortedMethods = append(sortedMethods, methodEntry{name, m})
+		}
+	}
+	sort.Slice(sortedMethods, func(i, j int) bool {
+		return sortedMethods[i].entry.Position < sortedMethods[j].entry.Position
+	})
 
-	// Divider before alternative methods.
+	// Render each method in sorted order.
+	hasPrimary := false
 	hasAlternatives := false
 
-	// Magic link.
-	if m := cfg.AuthMethods["magic_link"]; m != nil && m.Enabled {
-		if !hasAlternatives {
-			nodes = append(nodes, UINode{Type: "divider"})
-			hasAlternatives = true
-		}
-		nodes = append(nodes, UINode{
-			Type: "button", Label: textOr(texts, "magic_link_button", "✉ Send me a sign-in link"), Action: "magic_link",
-		})
-	}
+	for _, me := range sortedMethods {
+		switch me.name {
+		case "password":
+			hasPrimary = true
+			nodes = append(nodes,
+				UINode{Type: "input", Name: "password", InputType: "password",
+					Label:       textOr(texts, "password_label", "Password"),
+					Placeholder: "••••••••", Autocomplete: "current-password", Required: true},
+			)
+			// Password hint (forgot password).
+			hasRecovery := false
+			for _, fc := range cfg.Fields {
+				if fc.Recovery != "" {
+					hasRecovery = true
+					break
+				}
+			}
+			if hasRecovery {
+				nodes = append(nodes, UINode{
+					Type:   "password_hint",
+					Label:  textOr(texts, "forgot_password", "Forgot your password?"),
+					Action: "forgot_password",
+				})
+			}
+			nodes = append(nodes,
+				UINode{Type: "submit", Label: textOr(texts, "signin_button", "Sign in with password"), Action: "password"},
+			)
 
-	// Passkey.
-	if m := cfg.AuthMethods["passkey"]; m != nil && m.Enabled {
-		if !hasAlternatives {
-			nodes = append(nodes, UINode{Type: "divider"})
-			hasAlternatives = true
-		}
-		nodes = append(nodes, UINode{
-			Type: "button", Label: "🔑 Use a passkey", Action: "passkey",
-		})
-	}
-
-	// SSO providers.
-	if m := cfg.AuthMethods["sso"]; m != nil && m.Enabled {
-		for _, p := range flow.SSOProviders {
-			if !hasAlternatives {
+		case "magic_link":
+			if hasPrimary && !hasAlternatives {
 				nodes = append(nodes, UINode{Type: "divider"})
 				hasAlternatives = true
 			}
 			nodes = append(nodes, UINode{
-				Type:         "sso_button",
-				ProviderID:   fmt.Sprintf("%v", p["id"]),
-				ProviderName: fmt.Sprintf("%v", p["name"]),
-				Template:     fmt.Sprintf("%v", p["template"]),
-				Label:        fmt.Sprintf("Continue with %v", p["name"]),
-				Action:       "sso",
+				Type: "button", Label: textOr(texts, "magic_link_button", "✉ Send me a sign-in link"), Action: "magic_link",
 			})
+
+		case "passkey":
+			if hasPrimary && !hasAlternatives {
+				nodes = append(nodes, UINode{Type: "divider"})
+				hasAlternatives = true
+			}
+			nodes = append(nodes, UINode{
+				Type: "button", Label: "🔑 Use a passkey", Action: "passkey",
+			})
+
+		case "sso":
+			for _, p := range flow.SSOProviders {
+				if hasPrimary && !hasAlternatives {
+					nodes = append(nodes, UINode{Type: "divider"})
+					hasAlternatives = true
+				}
+				nodes = append(nodes, UINode{
+					Type:         "sso_button",
+					ProviderID:   fmt.Sprintf("%v", p["id"]),
+					ProviderName: fmt.Sprintf("%v", p["name"]),
+					Template:     fmt.Sprintf("%v", p["template"]),
+					Label:        fmt.Sprintf("Continue with %v", p["name"]),
+					Action:       "sso",
+				})
+			}
 		}
 	}
 
@@ -1034,6 +1054,31 @@ func buildMagicLinkSentNodes(flow *Flow, texts map[string]string) []UINode {
 		{Type: "info", Text: "Click the link in your email to sign in. The link expires in 15 minutes."},
 		{Type: "button", Label: textOr(texts, "resend_button", "Resend link"), Action: "resend_magic_link"},
 		{Type: "link", Label: textOr(texts, "back_link", "← Back to sign in"), Action: "back"},
+	}
+}
+
+func buildForgotPasswordNodes(flow *Flow, texts map[string]string) []UINode {
+	return []UINode{
+		{Type: "icon", Text: "🔒"},
+		{Type: "heading", Text: textOr(texts, "forgot_heading", "Reset your password")},
+		{Type: "description", Text: textOr(texts, "forgot_description", "We'll send a password reset link to your email.")},
+		{Type: "info", Text: fmt.Sprintf("A reset link will be sent to %s", flow.Identifier)},
+		{Type: "submit", Label: textOr(texts, "send_reset_button", "Send reset link"), Action: "send_reset"},
+		{Type: "link", Label: textOr(texts, "back_link", "← Back to sign in"), Action: "back"},
+	}
+}
+
+func buildResetPasswordNodes(flow *Flow, texts map[string]string) []UINode {
+	return []UINode{
+		{Type: "icon", Text: "🔒"},
+		{Type: "heading", Text: textOr(texts, "reset_heading", "Set a new password")},
+		{Type: "input", Name: "new_password", InputType: "password",
+			Label:       textOr(texts, "new_password_label", "New password"),
+			Placeholder: "••••••••", Required: true, Autocomplete: "new-password"},
+		{Type: "input", Name: "confirm_password", InputType: "password",
+			Label:       textOr(texts, "confirm_password_label", "Confirm password"),
+			Placeholder: "••••••••", Required: true, Autocomplete: "new-password"},
+		{Type: "submit", Label: textOr(texts, "reset_button", "Reset password"), Action: "reset_password"},
 	}
 }
 

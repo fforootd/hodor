@@ -2,7 +2,8 @@
 
 **Status**: Accepted  
 **Date**: 2026-03-26  
-**Amended by**: [ADR-003](003-auth-methods-meta-schema.md) (Unified Auth Methods)
+**Amended by**: [ADR-003](003-auth-methods-meta-schema.md) (Unified Auth Methods)  
+**Amended**: 2026-03-30 — `x-login` and `x-branding` moved from user schemas to login flows
 
 ## Decision
 
@@ -25,10 +26,11 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
 
 ### Schema-level annotations
 
-| Annotation | Purpose |
-|---|---|
-| **`x-login`** | Login flow configuration: preset, auth methods, MFA rules |
-| **`x-branding`** | Visual customization: heading, colors, texts, CSS |
+| Annotation | Purpose | Where |
+|---|---|---|
+| **`x-auth-methods`** | Auth methods available for this user type (narrower override) | User schema |
+| ~~`x-login`~~ | ~~Login flow configuration~~ | **Moved to login flow** (see Amendment below) |
+| ~~`x-branding`~~ | ~~Visual customization~~ | **Moved to login flow** (see Amendment below) |
 
 ### Full example
 
@@ -40,15 +42,6 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
     "passkey":    {"enabled": false, "interactive": true,  "position": 0},
     "magic_link": {"enabled": true,  "interactive": true,  "position": 2},
     "sso":        {"enabled": true,  "interactive": true,  "position": 3}
-  },
-  "x-login": {
-    "preset": "identifier_first",
-    "mfa_required": false,
-    "registration_allowed": true
-  },
-  "x-branding": {
-    "heading": "Welcome to Acme",
-    "colors": {"primary": "#ff6600"}
   },
   "properties": {
     "email": {
@@ -66,11 +59,13 @@ Identity schemas are standard JSON Schema documents extended with `x-*` annotati
 }
 ```
 
+> **Note:** `x-login` and `x-branding` are no longer on user schemas. They live on the **login flow** entity (`login_flows` table). See Amendment below.
+
 ## Rationale
 
-1. **Single source of truth.** The schema defines what an identity looks like (data), how it authenticates (x-auth), what the login UI shows (x-login, x-branding), how claims map from SSO (x-claim-mapping), and what gets redacted (x-sensitive). No config drift between separate tables.
+1. **Single source of truth.** The user schema defines what an identity looks like (data), how it authenticates per-field (x-auth), and which auth methods are available as narrower overrides (x-auth-methods). The login flow defines the UX: branding, preset, captcha, registration config.
 
-2. **Per-schema login flows.** Different schemas can have different login behaviors. "Employees" authenticate via SSO-only. "Customers" use identifier-first + password + magic link. The schema IS the policy.
+2. **Per-flow login experiences.** Different login flows can target different audiences. "Enterprise" flow uses SSO-only. "Consumer" flow uses identifier-first + password + magic link. Audience targeting (org, schema, app, user) determines which flow is served.
 
 3. **Dynamic via API.** Schemas are created and updated via `POST/PATCH /v1/schemas` — no config files, no restarts. Changes take effect immediately.
 
@@ -197,3 +192,41 @@ This enables gradual rollout:
 | **Custom DSL (à la Janssen Agama)** | Steep learning curve; no IDE support; Java dependency |
 | **File-based config (à la Ory Kratos)** | Requires restart to apply changes; no dynamic multi-schema |
 | **Hard-coded presets only** | Insufficient flexibility for power users |
+
+## Amendment: Login Flow Separation (2026-03-30)
+
+### What changed
+
+`x-login` and `x-branding` have been **removed from user schemas** and moved to the **login flow** entity (`login_flows` table). The user schema no longer defines UX/presentation concerns.
+
+### New responsibility boundaries
+
+| Concern | Where | Annotation/Field |
+|---|---|---|
+| Field definitions, types, validation | User schema | `properties` |
+| Per-field auth behavior (identifier, verify, recover, MFA) | User schema | `x-identifier`, `x-verify`, `x-recover`, `x-mfa` |
+| Auth method narrowing per user type | User schema | `x-auth-methods` |
+| Claim mapping from SSO | User schema | `x-claim` |
+| PII redaction, visibility | User schema | `x-sensitive`, `x-hidden` |
+| Login preset, MFA, registration | **Login flow** | `preset`, `x-login` in flow config |
+| Branding (heading, colors, layout, CSS) | **Login flow** | `branding` in flow config |
+| Captcha, fingerprint, rate limiting | **Login flow** | `captcha`, `fingerprint`, `rate_limit` |
+| Registration field selection | **Login flow** | `registration.fields`, `registration.user_schema` |
+| Audience targeting | **Login flow** | `audience` (org_ids, schema_ids, user_ids, app_ids) |
+
+### Auth methods cascade
+
+Login flow provides the **base** available auth methods. User schema provides **narrower overrides** — it can restrict but not widen.
+
+```
+Login flow auth_methods (broad defaults)
+  ↓ narrowed by
+User schema x-auth-methods (per-type restrictions)
+```
+
+Example: The login flow enables `password + magic_link + sso`. A `service_account` schema can disable `password` and `magic_link`, leaving only API-based auth. But it cannot enable a method the flow hasn't enabled.
+
+### Why
+
+The original ADR assumed a 1:1 mapping between user schema and login experience. In practice, customers need multiple login experiences for the same user schema (e.g., "Quick signup" vs. "Full signup" for `human_user`). The login flow entity decouples UX from data shape, enabling audience-targeted, A/B-testable login experiences.
+

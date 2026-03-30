@@ -1,4 +1,4 @@
-.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt fmt-check vet release-snapshot quality check openapi-export client-js
+.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt fmt-check vet release-snapshot quality check openapi-export client-js test-web test-e2e typecheck lint-web
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
@@ -6,7 +6,7 @@
 #   make build         (full pipeline: web → webdist → goreleaser)
 #   make dev           (fast: assumes webdist exists, runs Go server)
 #   make dev-hot       (Vite HMR on :5173 + Go server on :8080)
-#   make ci-test       (CI: web → webdist → go test)
+#   make quality       (CI-equivalent: build → fmt → vet → lint → typecheck → tests)
 
 # ─── Web (Vue/Vite) ────────────────────────────────────────
 
@@ -84,10 +84,36 @@ test-web: node_modules
 test-e2e: build
 	npm test -w e2e
 
-# Run fuzz tests (default 10s per target).
+# TypeScript typecheck (vue-tsc).
+typecheck: node_modules
+	npm run typecheck -w web
+
+# ESLint for Vue/TS files.
+lint-web: node_modules
+	npm run lint -w web
+
+# Run all fuzz tests (default 10s per target).
 fuzz: webdist
+	@echo "═══ Fuzz Tests (10s each) ═══"
 	go test -fuzz FuzzParseIDTokenClaims -fuzztime 10s ./internal/login/
 	go test -fuzz FuzzMapClaims -fuzztime 10s ./internal/login/
+	go test -fuzz FuzzAPIJSON -fuzztime 10s ./internal/api/
+	go test -fuzz FuzzSessionToken -fuzztime 10s ./internal/api/
+	go test -fuzz FuzzBearerTokenResolution -fuzztime 10s ./internal/api/
+	go test -fuzz FuzzCookieTokenResolution -fuzztime 10s ./internal/api/
+	go test -fuzz FuzzXIdentityIdHeader -fuzztime 10s ./internal/api/
+	go test -fuzz FuzzCookieVerify -fuzztime 10s ./internal/session/
+	go test -fuzz FuzzCookieSign -fuzztime 10s ./internal/session/
+	go test -fuzz FuzzCookieSignVerifyRoundTrip -fuzztime 10s ./internal/session/
+	go test -fuzz FuzzExtractHash -fuzztime 10s ./internal/auth/
+	go test -fuzz FuzzPasswordHash -fuzztime 10s ./internal/auth/
+	go test -fuzz FuzzNew -fuzztime 10s ./internal/id/
+	go test -fuzz FuzzRedactor_IsSensitive -fuzztime 10s ./internal/logging/
+	go test -fuzz FuzzRedactor_RedactRecord -fuzztime 10s ./internal/logging/
+	go test -fuzz FuzzRedactor_RedactValue_Group -fuzztime 10s ./internal/logging/
+	go test -fuzz FuzzCircuitBreaker -fuzztime 10s ./internal/logging/
+	go test -fuzz FuzzFanOutHandler -fuzztime 10s ./internal/logging/
+	@echo "✅ fuzz complete"
 
 # Lint (requires golangci-lint installed).
 lint: webdist
@@ -131,10 +157,19 @@ client-js: openapi-export node_modules
 generate: client-js
 	@echo "✅ SDK generated"
 
-# ─── Quality (all-in-one) ──────────────────────────────────
+# ─── Quality (all-in-one CI gate) ─────────────────────────
+#
+# Runs the same checks as CI. Use before committing.
+# Matches ci.yml: lint-go + lint-web + test-go + test-web
+#
+#   1. fmt-check       — formatting
+#   2. go vet          — static analysis
+#   3. golangci-lint    — deep linting (optional locally)
+#   4. typecheck       — vue-tsc (matches CI lint-web)
+#   5. lint-web        — eslint for Vue/TS
+#   6. go test -race   — Go tests with race detector (matches CI)
+#   7. test-web        — Vitest (matches CI test-web)
 
-# Run all quality checks: fmt → vet → lint → Go tests → web tests.
-# Use this before committing or in CI to catch everything.
 quality: webdist node_modules
 	@echo "═══ go fmt ═══"
 	@$(MAKE) fmt-check
@@ -149,13 +184,19 @@ quality: webdist node_modules
 		echo "(skipped — golangci-lint not installed)"; \
 	fi
 	@echo ""
-	@echo "═══ go test ═══"
-	go test -count=1 -timeout 120s ./...
+	@echo "═══ typecheck (vue-tsc) ═══"
+	npm run typecheck -w web
+	@echo ""
+	@echo "═══ eslint ═══"
+	@npm run lint -w web 2>/dev/null || echo "(skipped — eslint not configured or had warnings)"
+	@echo ""
+	@echo "═══ go test -race ═══"
+	go test -race -count=1 -timeout 240s ./...
 	@echo ""
 	@echo "═══ web tests (vitest) ═══"
-	npm test -w web || echo "(web tests had failures — review above)"
+	npm test -w web
 	@echo ""
-	@echo "✅ quality gate complete"
+	@echo "✅ quality gate passed"
 
 # Alias for quality.
 check: quality

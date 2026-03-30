@@ -69,9 +69,10 @@ func commitTx(w http.ResponseWriter, tx *sql.Tx) bool {
 
 // ── FGA helpers ─────────────────────────────────────────────────────────────
 
-// fgaSync runs an FGA operation if the service is available.
+// fgaSync runs an FGA operation synchronously if the service is available.
 // On failure it logs the error, writes a 500 response, and returns false.
-// On success (or if FGA is disabled) it returns true.
+// Use this only for operations where FGA consistency is required before responding
+// (e.g. membership removals). For creates, prefer fgaAsync.
 func fgaSync(w http.ResponseWriter, label string, fn func(context.Context, *fga.Service) error, ctx context.Context) bool {
 	svc := FGAService
 	if svc == nil {
@@ -83,6 +84,24 @@ func fgaSync(w http.ResponseWriter, label string, fn func(context.Context, *fga.
 		return false
 	}
 	return true
+}
+
+// fgaAsync runs fn in a background goroutine with a 2-second timeout.
+// Used for FGA writes that are best-effort — the DB is the source of truth.
+// Callers should capture svc := FGAService and guard nil themselves.
+func fgaAsync(label string, fn func()) {
+	go func() {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			fn()
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			logging.Printf("[fga] async %s timed out after 2s (non-blocking)", label)
+		}
+	}()
 }
 
 // ── Pagination helpers ──────────────────────────────────────────────────────

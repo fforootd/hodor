@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -164,14 +165,16 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name, "org_id": orgID,
 	})
 
-	// FGA: write hierarchy + ownership tuples — must succeed before commit.
+	// FGA: write hierarchy + ownership tuples — async, best-effort.
 	if svc := FGAService; svc != nil {
 		creatorID := creatorFromRequest(r)
-		if err := svc.OnGroupCreated(r.Context(), groupID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] failed to write group tuples: %v", err)
-			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
-			return
-		}
+		fgaAsync("group created", func() { //nolint:contextcheck
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := svc.OnGroupCreated(ctx, groupID, creatorID, orgID); err != nil {
+				logging.Printf("[fga] group created: %v", err)
+			}
+		})
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -411,14 +414,16 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name, "org_id": orgID,
 	})
 
-	// FGA: write hierarchy + ownership tuples — must succeed before commit.
+	// FGA: write hierarchy + ownership tuples — async, best-effort.
 	if svc := FGAService; svc != nil {
 		creatorID := creatorFromRequest(r)
-		if err := svc.OnProjectCreated(r.Context(), projectID, creatorID, orgID); err != nil {
-			logging.Printf("[fga] failed to write project tuples: %v", err)
-			httputil.WriteError(w, http.StatusInternalServerError, "authorization sync failed")
-			return
-		}
+		fgaAsync("project created", func() { //nolint:contextcheck
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := svc.OnProjectCreated(ctx, projectID, creatorID, orgID); err != nil {
+				logging.Printf("[fga] project created: %v", err)
+			}
+		})
 	}
 
 	if err := tx.Commit(); err != nil {

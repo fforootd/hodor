@@ -206,6 +206,12 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 	}
 
 	// Dispatch insert to the correct dedicated table based on template type.
+	// Use org from context if available, otherwise default to '1'.
+	orgID := "1"
+	if ctxOrg, ok := ctx.Value("org_id").(string); ok && ctxOrg != "" {
+		orgID = ctxOrg
+	}
+
 	switch payload.Type {
 	case "provider":
 		protocol, _ := resolved["protocol"].(string)
@@ -220,8 +226,8 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		overridesJSON, _ := json.Marshal(resolved["claim_overrides"])
 		_, err = s.db.ExecContext(ctx,
 			`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, displayName, protocol, templateName,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, orgID, displayName, protocol, templateName,
 			string(configJSON), string(overridesJSON), schemaID, string(dataJSON),
 		)
 	case "action":
@@ -231,24 +237,36 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		configJSON, _ := json.Marshal(resolved["config"])
 		_, err = s.db.ExecContext(ctx,
 			`INSERT INTO actions (id, org_id, name, hook, action_type, trigger_expr, config, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, displayName, hook, actionType, triggerExpr,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, orgID, displayName, hook, actionType, triggerExpr,
 			string(configJSON), schemaID, string(dataJSON),
 		)
 	case "login_flow":
-		stepsJSON, _ := json.Marshal(resolved["steps"])
+		// Extract top-level fields that map to dedicated columns.
+		preset, _ := resolved["preset"].(string)
+		if preset == "" {
+			preset = "identifier_first"
+		}
+		authMethodsJSON, _ := json.Marshal(resolved["auth_methods"])
 		configJSON, _ := json.Marshal(resolved["config"])
+		audienceJSON, _ := json.Marshal(resolved["audience"])
+		if string(audienceJSON) == "null" {
+			audienceJSON = []byte("{}")
+		}
+
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO login_flows (id, org_id, name, steps, config, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, '1', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, displayName, string(stepsJSON), string(configJSON), schemaID, string(dataJSON),
+			`INSERT INTO login_flows (id, org_id, name, preset, auth_methods, config, enabled, state, priority, audience, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, 1, 'active', 10, ?, ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, orgID, displayName, preset,
+			string(authMethodsJSON), string(configJSON), string(audienceJSON),
+			schemaID, string(dataJSON),
 		)
 	default:
-		// Schema or unknown type — insert as user (fallback for schema templates etc.).
+		// Schema or unknown type — insert as user.
 		_, err = s.db.ExecContext(ctx,
 			`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, '1', ?, ?, 'human', 'active', ?, ?, datetime('now'), datetime('now'))`,
-			resourceID, templateID, displayName, schemaID, string(dataJSON),
+			 VALUES (?, ?, ?, ?, 'human', 'active', ?, ?, datetime('now'), datetime('now'))`,
+			resourceID, orgID, templateID, displayName, schemaID, string(dataJSON),
 		)
 	}
 	if err != nil {

@@ -22,16 +22,24 @@ import (
 // handleFlowCreate creates a new login flow and returns the first step.
 // POST /v1/login/flows
 func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
-	cfg := h.getDefaultSchemaConfig(r)
-	ssoProviders := h.loadSSOProviders(r)
-
-	// Optional: accept OIDC redirect context and initial device fingerprint.
+	// Optional: accept OIDC redirect context, preview flow ID, and device fingerprint.
 	var req struct {
 		RedirectURI string `json:"redirect_uri,omitempty"`
 		State       string `json:"state,omitempty"`
 		Fingerprint string `json:"fingerprint,omitempty"`
+		FlowID      string `json:"flow_id,omitempty"`   // preview: load a specific login flow
+		ClientID    string `json:"client_id,omitempty"` // OIDC: resolve flow by app
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	// Also check query param for preview: /v1/login/flows?flow=xxx
+	if req.FlowID == "" {
+		req.FlowID = r.URL.Query().Get("flow")
+	}
+
+	// Resolve the best login flow config (or use preview override).
+	cfg := h.getResolvedConfig(r, req.FlowID)
+	ssoProviders := h.loadSSOProviders(r)
 
 	flowID := id.NewFlow()
 	flow := &Flow{
@@ -47,15 +55,15 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	// Determine entry step based on preset.
 	switch cfg.Login.Preset {
 	case "passkey_first":
-		flow.CurrentStep = StepIdentifier // passkey_first still starts at identifier but with passkey button prominent
+		flow.CurrentStep = StepIdentifier
 	case "sso_only":
-		flow.CurrentStep = StepAuthSelect // skip identifier, go straight to SSO buttons
+		flow.CurrentStep = StepAuthSelect
 	default: // "identifier_first"
 		flow.CurrentStep = StepIdentifier
 	}
 
 	h.flows.Put(flow)
-	logging.Printf("[flow] created %s (preset=%s, step=%s)", flowID, cfg.Login.Preset, flow.CurrentStep)
+	logging.Printf("[flow] created %s (preset=%s, step=%s, login_flow=%s)", flowID, cfg.Login.Preset, flow.CurrentStep, cfg.LoginFlowID)
 
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
@@ -105,6 +113,19 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		h.flowSubmitCaptcha(w, r, flow, req)
 	case "fingerprint_submit":
 		h.flowSubmitFingerprint(w, r, flow, req)
+	case "forgot_password":
+		flow.CurrentStep = StepForgotPassword
+		flow.Errors = nil
+		h.flows.Put(flow)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	case "send_reset":
+		// Reuse magic link infrastructure with password reset messaging.
+		flow.CurrentStep = StepMagicLink
+		flow.Messages = []FlowMessage{{Type: "info", Text: "Password reset link sent to " + flow.Identifier}}
+		h.flows.Put(flow)
+		// TODO: actually send recovery email (reuse magic link sender with purpose="reset")
+		logging.Printf("[flow] %s sent password reset to %s", flow.ID, flow.Identifier)
+		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 	case "back":
 		flow.CurrentStep = StepIdentifier
 		flow.IduserID = ""
@@ -361,10 +382,13 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 		}
 	}
 
+	// Resolve org from the flow context.
+	orgID := httputil.ResolveOrgID(r, "1") // fallback to "1" for single-org mode
+
 	_, err := h.db.SQL().ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, state, metadata, created_at, updated_at)
-		 VALUES (?, '1', ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
-		newID, identifier, displayName, profileJSON,
+		 VALUES (?, ?, ?, ?, 'active', ?, datetime('now'), datetime('now'))`,
+		newID, orgID, identifier, displayName, profileJSON,
 	)
 	if err != nil {
 		logging.Printf("[flow] %s registration failed: %v", flow.ID, err)

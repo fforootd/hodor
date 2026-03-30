@@ -29,6 +29,7 @@ import (
 	"github.com/zitadel/zitadel/internal/fga"
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/login"
+	"github.com/zitadel/zitadel/internal/loginflow"
 	"github.com/zitadel/zitadel/internal/mgmt"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/ratelimit"
@@ -90,8 +91,14 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	analyticsEngine.RegisterRoutes(mux)
 
 	// Mount login flow API (serves <zitadel-login> web component).
-	passwords := auth.NewPasswords(db)
-	loginAPI := login.New(db, passwords, restAPI, cookieCfg)
+	// Use fast argon2id params in dev mode to avoid 30s+ login latency.
+	var passwords *auth.Passwords
+	if cfg.Dev.MockOIDC || cfg.Dev.SeedFile != "" {
+		passwords = auth.NewPasswordsDev(db)
+	} else {
+		passwords = auth.NewPasswords(db)
+	}
+	loginAPI := login.New(db, passwords, restAPI, cookieCfg, loginflow.NewResolver(db))
 	loginAPI.Register(mux)
 
 	// Serve web assets (JS/CSS) from go:embed.
@@ -221,9 +228,17 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// 2. Security headers.
 	isSecure := cfg.Server.TLSCert != "" || (cfg.Server.ExternalDomain != "" && cfg.Server.ExternalDomain != "localhost")
 
-	// Initialise embedded OpenFGA (shares our SQLite/Postgres DB).
+	// Initialise embedded OpenFGA on its OWN dedicated DB connection.
+	// Root cause of slowness: SQLite has a single write lock. When FGA's
+	// Write() competed with app transactions on the shared pool, it deadlocked
+	// and returned Internal Server Error (4000) after the SQLite busy timeout.
+	// A separate connection lets both write concurrently via WAL mode.
 	ctx := context.Background()
-	fgaSvc, err := fga.New(ctx, db.SQL(), db.Dialect())
+	fgaDB, err := database.Open(cfg.Database.URL)
+	if err != nil {
+		logging.Fatalf("fga: open dedicated db connection: %v", err)
+	}
+	fgaSvc, err := fga.New(ctx, fgaDB.SQL(), fgaDB.Dialect())
 	if err != nil {
 		logging.Fatalf("fga init: %v", err)
 	}

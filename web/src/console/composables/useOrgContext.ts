@@ -7,16 +7,21 @@
 import { ref, readonly } from 'vue'
 
 // Module-level singleton so re-imports share the same ref.
-const _orgId = ref<string | null>(localStorage.getItem('zitadel_org'))
+function getStoredOrg(): string | null {
+  try { return localStorage.getItem('zitadel_org') } catch { return null }
+}
+const _orgId = ref<string | null>(getStoredOrg())
 
 export function useOrgContext() {
   function setOrg(id: string | null) {
     _orgId.value = id
-    if (id) {
-      localStorage.setItem('zitadel_org', id)
-    } else {
-      localStorage.removeItem('zitadel_org')
-    }
+    try {
+      if (id) {
+        localStorage.setItem('zitadel_org', id)
+      } else {
+        localStorage.removeItem('zitadel_org')
+      }
+    } catch { /* test env */ }
   }
 
   return {

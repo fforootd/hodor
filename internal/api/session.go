@@ -215,15 +215,20 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		"ip_address": ipAddress,
 	})
 
-	// FGA: write session tuples (subject + org) — best-effort (sessions expire naturally).
-	if svc := FGAService; svc != nil {
-		if err := svc.OnSessionCreated(ctx, sessionID, userID, "_global"); err != nil {
-			logging.Printf("[fga] warn: failed to write session tuples: %v", err)
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
+	}
+
+	// FGA: write session tuples — truly best-effort, async with timeout.
+	// Sessions expire naturally so missing tuples are harmless.
+	if svc := FGAService; svc != nil {
+		go func() { //nolint:gosec,contextcheck // intentional — FGA write must outlive request
+			fgaCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := svc.OnSessionCreated(fgaCtx, sessionID, userID, "_global"); err != nil {
+				logging.Printf("[fga] warn: session tuple write failed (non-blocking): %v", err)
+			}
+		}()
 	}
 
 	a.bus.Signal()

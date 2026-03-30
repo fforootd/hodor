@@ -66,18 +66,22 @@ func setupTestDB(t *testing.T) *sql.DB {
 		updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 	)`)
 	db.Exec(`CREATE TABLE login_flows (
-		id         TEXT PRIMARY KEY,
-		org_id     TEXT NOT NULL DEFAULT '1',
-		name       TEXT NOT NULL DEFAULT '',
-		preset     TEXT DEFAULT 'identifier_first',
-		steps      TEXT NOT NULL DEFAULT '[]',
-		config     TEXT NOT NULL DEFAULT '{}',
-		is_default BOOLEAN DEFAULT 0,
-		enabled    BOOLEAN DEFAULT 1,
-		schema_id  TEXT DEFAULT '',
-		metadata   TEXT DEFAULT '{}',
-		created_at TEXT NOT NULL DEFAULT (datetime('now')),
-		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		id          TEXT PRIMARY KEY,
+		org_id      TEXT NOT NULL DEFAULT '1',
+		name        TEXT NOT NULL DEFAULT '',
+		preset      TEXT DEFAULT 'identifier_first',
+		steps       TEXT NOT NULL DEFAULT '[]',
+		config      TEXT NOT NULL DEFAULT '{}',
+		auth_methods TEXT NOT NULL DEFAULT '{}',
+		is_default  BOOLEAN DEFAULT 0,
+		enabled     BOOLEAN DEFAULT 1,
+		state       TEXT NOT NULL DEFAULT 'active',
+		priority    INTEGER DEFAULT 0,
+		audience    TEXT NOT NULL DEFAULT '{}',
+		schema_id   TEXT DEFAULT '',
+		metadata    TEXT DEFAULT '{}',
+		created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 	)`)
 	db.Exec(`CREATE TABLE providers (
 		id              TEXT PRIMARY KEY,
@@ -333,14 +337,14 @@ func TestService_Get_LoginFlow(t *testing.T) {
 	}
 
 	// Verify login flow has expected nested structure.
-	if _, ok := payload.Payload["login_policy"]; !ok {
-		t.Error("missing login_policy in payload")
+	if _, ok := payload.Payload["preset"]; !ok {
+		t.Error("missing preset in payload")
 	}
 	if _, ok := payload.Payload["auth_methods"]; !ok {
 		t.Error("missing auth_methods in payload")
 	}
-	if _, ok := payload.Payload["branding"]; !ok {
-		t.Error("missing branding in payload")
+	if _, ok := payload.Payload["config"]; !ok {
+		t.Error("missing config in payload")
 	}
 	if _, ok := payload.Payload["actions"]; !ok {
 		t.Error("missing actions in payload")
@@ -434,8 +438,9 @@ func TestService_Install_LoginFlow(t *testing.T) {
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
 
-	// Verify variable substitution in nested structures.
-	branding, _ := data["branding"].(map[string]any)
+	// Verify variable substitution in nested config.branding.
+	configBlock, _ := data["config"].(map[string]any)
+	branding, _ := configBlock["branding"].(map[string]any)
 	if branding["heading"] != "Welcome to Acme" {
 		t.Errorf("branding.heading = %q", branding["heading"])
 	}
@@ -445,9 +450,11 @@ func TestService_Install_LoginFlow(t *testing.T) {
 		t.Errorf("branding.colors.primary = %q", colors["primary"])
 	}
 
-	loginPolicy, _ := data["login_policy"].(map[string]any)
-	if loginPolicy["registration_allowed"] != false {
-		t.Errorf("registration_allowed = %v, want false", loginPolicy["registration_allowed"])
+	// Verify preset was written to the preset column.
+	var preset string
+	db.QueryRow(`SELECT preset FROM login_flows WHERE id = ?`, userID).Scan(&preset)
+	if preset != "passkey_first" {
+		t.Errorf("preset column = %q, want passkey_first", preset)
 	}
 }
 
@@ -468,14 +475,17 @@ func TestService_Install_SSOEnterprise(t *testing.T) {
 	var data map[string]any
 	json.Unmarshal([]byte(dataJSON), &data)
 
-	branding, _ := data["branding"].(map[string]any)
+	configBlock, _ := data["config"].(map[string]any)
+	branding, _ := configBlock["branding"].(map[string]any)
 	if branding["heading"] != "Sign in to ACME Corp" {
 		t.Errorf("heading = %q, want 'Sign in to ACME Corp'", branding["heading"])
 	}
 
-	loginPolicy, _ := data["login_policy"].(map[string]any)
-	if loginPolicy["external_idp_only"] != true {
-		t.Error("sso-enterprise should have external_idp_only=true")
+	// Verify preset column.
+	var preset string
+	db.QueryRow(`SELECT preset FROM login_flows WHERE id = ?`, userID).Scan(&preset)
+	if preset != "sso_only" {
+		t.Errorf("preset = %q, want sso_only", preset)
 	}
 }
 
@@ -593,8 +603,15 @@ func TestCatalogState_ForkedLoginFlow(t *testing.T) {
 		t.Errorf("unmodified state = %q, want linked", state)
 	}
 
-	// Modify branding → forked.
-	branding, _ := data["branding"].(map[string]any)
+	// Modify config.branding → forked.
+	configBlock, _ := data["config"].(map[string]any)
+	if configBlock == nil {
+		configBlock = map[string]any{}
+	}
+	branding, _ := configBlock["branding"].(map[string]any)
+	if branding == nil {
+		branding = map[string]any{}
+	}
 	branding["heading"] = "Custom Heading"
 
 	if state := CatalogState(data); state != "forked" {

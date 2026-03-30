@@ -203,7 +203,7 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 	}
 
 	// Set password (outside tx — uses its own transaction).
-	pw := auth.NewPasswords(db)
+	pw := auth.NewPasswordsDev(db)
 	if err := pw.SetPassword(ctx, userID, password); err != nil {
 		return fmt.Errorf("set admin password: %w", err)
 	}

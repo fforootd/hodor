@@ -22,11 +22,30 @@ type Passwords struct {
 	db      *database.DB
 }
 
-// NewPasswords creates a new Passwords instance with argon2id as the default hasher.
+// NewPasswords creates a new Passwords instance with production argon2id params.
 func NewPasswords(db *database.DB) *Passwords {
 	swapper := passwap.NewSwapper(
 		argon2.NewArgon2id(argon2.RecommendedIDParams, nil),
 		// Add legacy verifiers here when migrating from other algorithms.
+	)
+	return &Passwords{
+		swapper: swapper,
+		db:      db,
+	}
+}
+
+// NewPasswordsDev creates a Passwords instance with fast argon2id params for development.
+// Uses minimal memory (4 MB) and single iteration to keep login under 100ms.
+func NewPasswordsDev(db *database.DB) *Passwords {
+	devParams := argon2.Params{
+		Time:    1,
+		Memory:  4 * 1024, // 4 MB (vs 64 MB production)
+		Threads: 1,
+		KeyLen:  32,
+		SaltLen: 16,
+	}
+	swapper := passwap.NewSwapper(
+		argon2.NewArgon2id(devParams, nil),
 	)
 	return &Passwords{
 		swapper: swapper,

@@ -171,26 +171,125 @@
         }
       }
     },
+    "registration": {
+      "type": "object",
+      "description": "Registration form configuration — controls which user schema fields appear on the sign-up form.",
+      "properties": {
+        "user_schema": {
+          "type": "string",
+          "description": "User schema type to create from (e.g. 'human_user'). If absent, uses the default user schema."
+        },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Whitelist of user schema property names to show on registration. Empty = show all non-hidden fields."
+        },
+        "field_order": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Rendering order of fields. If absent, uses schema property order."
+        }
+      }
+    },
     "branding": {
       "type": "object",
-      "description": "Layout and branding overrides for this flow",
+      "description": "Layout and branding configuration for the login UI.",
       "properties": {
+        "heading": {
+          "type": "string",
+          "description": "Login page heading text"
+        },
+        "description": {
+          "type": "string",
+          "description": "Login page description/subtitle text"
+        },
+        "logo_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Logo URL for the login page"
+        },
         "layout": {
           "type": "string",
           "enum": ["centered", "split", "muted", "card_image", "minimal"],
-          "description": "Override the default layout"
+          "default": "centered",
+          "description": "Login page layout style"
         },
         "dark_mode": {
           "type": "string",
-          "enum": ["light", "dark", "auto"]
+          "enum": ["light", "dark", "auto"],
+          "default": "light"
         },
         "cover_image": {
           "type": "string",
+          "format": "uri",
           "description": "URL for split/card_image layouts"
+        },
+        "colors": {
+          "type": "object",
+          "description": "Brand colors",
+          "properties": {
+            "primary": { "type": "string" },
+            "primary_foreground": { "type": "string" },
+            "background": { "type": "string" },
+            "surface": { "type": "string" },
+            "text": { "type": "string" },
+            "muted": { "type": "string" },
+            "error": { "type": "string" }
+          },
+          "additionalProperties": { "type": "string" }
+        },
+        "font_family": {
+          "type": "string",
+          "description": "CSS font-family value"
+        },
+        "font_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Google Fonts or custom font URL"
+        },
+        "custom_css": {
+          "type": "string",
+          "description": "Custom CSS injected into the login shadow DOM"
+        },
+        "terms_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "privacy_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "social_position": {
+          "type": "string",
+          "enum": ["top", "bottom"],
+          "default": "bottom",
+          "description": "Position of SSO/social buttons relative to the form"
+        },
+        "consent": {
+          "type": "array",
+          "description": "Consent checkboxes for registration",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string", "description": "Supports markdown links" },
+              "required": { "type": "boolean", "default": false }
+            },
+            "required": ["id", "label"]
+          }
         },
         "hide_registration": {
           "type": "boolean",
           "default": false
+        },
+        "hide_zitadel_branding": {
+          "type": "boolean",
+          "default": false
+        },
+        "border_radius": {
+          "type": "string",
+          "enum": ["sm", "md", "lg", "xl", "full"],
+          "default": "md"
         }
       }
     },

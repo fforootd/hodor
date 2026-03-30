@@ -253,7 +253,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID str
 
 	// Hash password and store as entity_credential.
 	if ident.Password != "" {
-		pw := auth.NewPasswords(nil)
+		pw := auth.NewPasswordsDev(nil)
 		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			credID := id.New()
@@ -291,7 +291,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID str
 func updateExistingIdentity(ctx context.Context, tx *sql.Tx, userID string, ident SeedIdentity) error {
 	// Update password if provided.
 	if ident.Password != "" {
-		pw := auth.NewPasswords(nil)
+		pw := auth.NewPasswordsDev(nil)
 		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			// Delete existing + re-insert.
