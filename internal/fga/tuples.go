@@ -81,19 +81,31 @@ func (s *Service) ListObjects(ctx context.Context, user, relation, objectType st
 // ──────────────────────────────────────────────────────────────────
 
 // OnBootstrap writes the initial FGA tuples for the admin user:
-//   - user:{adminID} → owner → instance:default
-//   - org:_global → parent → instance:default   (fallback for nullable org_id)
+//   - user:{adminID} → owner → instance:inst_root
+//   - org:_global → parent → instance:inst_root
 //   - user:{adminID} → owner → org:_global
-//
-// Real org tuples are written via OnOrgCreated() when users create orgs.
 func (s *Service) OnBootstrap(ctx context.Context, adminID string) error {
 	logging.Printf("[fga] bootstrapping tuples: admin=%s", adminID)
 	return s.WriteTuples(ctx,
-		[3]string{"user:" + adminID, "owner", "instance:default"},
+		[3]string{"user:" + adminID, "owner", "instance:inst_root"},
 		// Global org — grants access when org_id is unknown/nullable.
-		[3]string{"instance:default", "parent", "org:_global"},
+		[3]string{"instance:inst_root", "parent", "org:_global"},
 		[3]string{"user:" + adminID, "owner", "org:_global"},
 	)
+}
+
+// OnInstanceCreated writes tuples when a new sub-instance is created:
+//   - instance:inst_root → parent → instance:{instanceID}
+//   - user:{creatorID} → owner → instance:{instanceID}
+func (s *Service) OnInstanceCreated(ctx context.Context, instanceID, creatorID string) error {
+	logging.Printf("[fga] instance created: id=%s creator=%s", instanceID, creatorID)
+	tuples := [][3]string{
+		{"instance:inst_root", "parent", "instance:" + instanceID},
+	}
+	if creatorID != "" {
+		tuples = append(tuples, [3]string{"user:" + creatorID, "owner", "instance:" + instanceID})
+	}
+	return s.WriteTuples(ctx, tuples...)
 }
 
 // OnResourceCreated writes tuples when a new resource (identity) is created:
@@ -159,9 +171,12 @@ func (s *Service) OnGroupCreated(ctx context.Context, groupID, creatorID, orgID 
 }
 
 // OnOrgCreated writes tuples when a new org is created.
-func (s *Service) OnOrgCreated(ctx context.Context, orgID, creatorID string) error {
+func (s *Service) OnOrgCreated(ctx context.Context, orgID, creatorID, instanceID string) error {
+	if instanceID == "" {
+		instanceID = "inst_root"
+	}
 	return s.WriteTuples(ctx,
-		[3]string{"instance:default", "parent", "org:" + orgID},
+		[3]string{"instance:" + instanceID, "parent", "org:" + orgID},
 		[3]string{"user:" + creatorID, "owner", "org:" + orgID},
 	)
 }

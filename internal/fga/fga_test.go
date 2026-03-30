@@ -82,7 +82,7 @@ func TestCheck_OrgHierarchy(t *testing.T) {
 	}
 
 	// Explicitly create org (no default org at bootstrap).
-	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCheck_GroupMembership(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestCheck_ProjectPermissions(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestOnResourceCreatedAndDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestEnableModule_RBAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	err = svc.OnOrgCreated(ctx, "org1", "admin")
+	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}

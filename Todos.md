@@ -1,5 +1,6 @@
 # Hodor Todos
 
+- Secrets encryption in secrets storage with list of masterkeys
 - Groups as Marketplace addon for FGA?
 - Should we also store the flows? In the events... also we want to instrument them meaning the client provides trace context and so on
 - Timestamps should be local time not UTC in the UI

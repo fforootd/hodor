@@ -33,6 +33,14 @@
                   </router-link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton as-child :data-active="$route.name === 'instances'">
+                  <router-link to="/instances">
+                    <Server class="size-4" />
+                    <span>All Instances</span>
+                  </router-link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -166,6 +174,46 @@
         </Breadcrumb>
 
         <div class="ml-auto flex items-center gap-2">
+          <!-- Instance Switcher -->
+          <Popover v-model:open="showInstanceDropdown">
+            <PopoverTrigger as-child>
+              <Button variant="outline" size="sm" class="gap-1.5 text-xs">
+                <Server class="size-3.5" />
+                {{ selectedInstanceLabel }}
+                <ChevronsUpDown class="size-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent class="w-56 p-0" align="end">
+              <Command>
+                <CommandInput placeholder="Search instances..." />
+                <CommandList>
+                  <CommandEmpty>No instance found.</CommandEmpty>
+                  <CommandGroup heading="Instances">
+                    <CommandItem value="root-instance" @select="selectInstance(null)">
+                      <Shield class="mr-2 size-4" />
+                      Zitadel (Root)
+                    </CommandItem>
+                    <CommandItem
+                      v-for="inst in instanceList"
+                      :key="inst.id"
+                      :value="inst.name"
+                      @select="selectInstance(inst)"
+                    >
+                      <Server class="mr-2 size-4" />
+                      {{ inst.name }}
+                    </CommandItem>
+                  </CommandGroup>
+                  <CommandGroup>
+                    <CommandItem value="add-instance" @select="navigateTo('/instances')">
+                      <Plus class="mr-2 size-4" />
+                      Add Instance
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
           <!-- Org Switcher -->
           <Popover v-model:open="showOrgDropdown">
             <PopoverTrigger as-child>
@@ -286,7 +334,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { searchApi, metaSchemaApi, orgApi, countsApi, type SearchResult } from '@/api/resources'
+import { searchApi, metaSchemaApi, orgApi, countsApi, instanceApi, switchInstance, currentInstance, type SearchResult, type Instance } from '@/api/resources'
 import { Toaster } from '@/components/ui/sonner'
 
 // shadcn components
@@ -316,7 +364,7 @@ import {
   Shield, LayoutDashboard, Users, KeyRound, Globe, FileJson, Workflow, Lock,
   Clock, BarChart3, Search, ChevronsUpDown, Building2, User, LogOut, Database, Zap,
   Bot, AppWindow, Activity, Calendar, ShieldCheck, Package, ChevronRight, Settings,
-  UsersRound, FolderKanban,
+  UsersRound, FolderKanban, Server, Plus, Link,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -339,6 +387,23 @@ function selectOrg(org: OrgEntry | null) {
   } else {
     localStorage.removeItem('zitadel_org')
   }
+}
+
+// ─── Instance Switcher ───
+const instanceList = ref<Instance[]>([])
+const showInstanceDropdown = ref(false)
+
+const selectedInstanceLabel = computed(() => {
+  if (!currentInstance.value) return 'Zitadel (Root)'
+  const inst = instanceList.value.find(i => i.id === currentInstance.value)
+  return inst?.name || currentInstance.value
+})
+
+function selectInstance(inst: Instance | null) {
+  switchInstance(inst?.id ?? null)
+  showInstanceDropdown.value = false
+  // Force router refresh
+  router.push('/')
 }
 
 // ─── Command Palette ───
@@ -497,6 +562,7 @@ const iconMap: Record<string, any> = {
   authz_overview: ShieldCheck, authz_permissions: ShieldCheck, authz_relationships: Workflow,
   authz_model: Workflow, authz_modules: Package,
   marketplace: Package,
+  endpoint: Link,
 }
 
 function getIcon(type: string) {
@@ -569,6 +635,12 @@ onMounted(async () => {
       selectOrg(null)
     }
   } catch { /* ignore */ }
+
+  // Fetch instances for switcher
+  try {
+    const items = await instanceApi.list()
+    instanceList.value = items.filter(i => !i.is_root)
+  } catch { /* ignore */ }
 })
 
 const pageTitle = computed(() => {
@@ -581,6 +653,7 @@ const pageTitle = computed(() => {
   }
   const titles: Record<string, string> = {
     dashboard: 'Dashboard',
+    instances: 'All Instances',
     'user-detail': 'User Detail',
     'identity-create': 'New User',
     orgs: 'Organizations',

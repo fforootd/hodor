@@ -297,6 +297,19 @@
       "fga_type": "provider",
       "fga_scope": "instance"
     },
+    "endpoint": {
+      "group": "nav",
+      "nav_group": "configure",
+      "alias": "Endpoints",
+      "singular": "Endpoint",
+      "path": "endpoints",
+      "icon": "🌐",
+      "sort_order": 13,
+      "storage": "dedicated",
+      "route": "/endpoints",
+      "fga_type": "endpoint",
+      "fga_scope": "instance"
+    },
     "schema": {
       "group": "nav",
       "nav_group": "system",

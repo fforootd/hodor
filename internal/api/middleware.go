@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
@@ -147,7 +148,7 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 		// Use FGA to check admin access when available.
 		if svc := FGAService; svc != nil {
-			allowed, err := svc.Check(r.Context(), "user:"+callerID, "admin", "instance:default")
+			allowed, err := svc.Check(r.Context(), "user:"+callerID, "admin", "instance:"+instance.FromContext(r.Context()))
 			if err != nil || !allowed {
 				writeError(w, http.StatusForbidden, "admin access required")
 				return

@@ -29,6 +29,7 @@
 | [018](adr/018-startup-lifecycle.md) | Startup Lifecycle & Schema Migration | Proposed | 2026-03-28 |
 | [019](adr/019-server-driven-login-wc.md) | Server-Driven Login UI + Web Components | Accepted | 2026-03-28 |
 | [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Marketplace Modules | Accepted | 2026-03-29 |
+| [021](adr/021-multi-tenancy.md) | Multi-Tenancy via Instance Isolation | Accepted | 2026-03-30 |
 
 ## Architecture
 
@@ -80,6 +81,8 @@ graph TD
     A012 --> A019
     A005 --> A020[020 AuthZ Model]
     A006 --> A020
+    A020 --> A021[021 Multi-Tenancy]
+    A005 --> A021
 ```
 
 ## Conventions
@@ -88,4 +91,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 021
+- **Next ADR number**: 022

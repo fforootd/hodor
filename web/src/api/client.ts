@@ -80,6 +80,11 @@ function generateHex(length: number): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+/** Get the active instance ID from localStorage (written by switchInstance in resources.ts). */
+function getActiveInstance(): string | null {
+  return localStorage.getItem('zitadel_instance')
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   // Generate a unique span_id for this request.
   const spanId = generateHex(16)
@@ -88,12 +93,16 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   // Include device fingerprint if available (non-blocking — uses cached value).
   const fingerprint = getDeviceFingerprint()
 
+  // Instance scoping: inject X-Zitadel-Instance header when a non-root instance is selected.
+  const instanceId = getActiveInstance()
+
   const resp = await fetch(`${BASE_URL}${path}`, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
       'Traceparent': traceparent,
       ...(fingerprint ? { 'X-Fingerprint': fingerprint } : {}),
+      ...(instanceId ? { 'X-Zitadel-Instance': instanceId } : {}),
       ...opts.headers,
     },
     credentials: credentialsMode(),

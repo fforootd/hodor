@@ -10,6 +10,7 @@ import (
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/instance"
 )
 
 // ProviderTemplate defines a preconfigured IDP preset.
@@ -164,10 +165,11 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	iid := instance.FromContext(r.Context())
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
-		 VALUES (?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		providerID, req.Name, req.Protocol, req.Template,
+		`INSERT INTO providers (id, instance_id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, created_at, updated_at)
+		 VALUES (?, ?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		providerID, iid, req.Name, req.Protocol, req.Template,
 		string(configJSON), string(overridesJSON),
 		autoReg, enabled, req.DisplayOrder, now, now,
 	)
@@ -192,11 +194,12 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 // --- List ---
 
 func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
+	iid := instance.FromContext(r.Context())
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT id, name, protocol, template, config, claim_overrides,
 		        auto_register, enabled, display_order, created_at, updated_at
-		 FROM providers
-		 ORDER BY display_order, name`)
+		 FROM providers WHERE instance_id = ?
+		 ORDER BY display_order, name`, iid)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -254,10 +257,11 @@ func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
 	var name, protocol, template, configStr, overridesStr, createdAt, updatedAt string
 	var autoReg, enabled bool
 	var displayOrder int
+	iid := instance.FromContext(r.Context())
 	err := a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT name, protocol, template, config, claim_overrides,
 		        auto_register, enabled, display_order, created_at, updated_at
-		 FROM providers WHERE id = ?`, pid,
+		 FROM providers WHERE id = ? AND instance_id = ?`, pid, iid,
 	).Scan(&name, &protocol, &template, &configStr, &overridesStr,
 		&autoReg, &enabled, &displayOrder, &createdAt, &updatedAt)
 	if err != nil {
@@ -329,8 +333,9 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 		args = append(args, string(overridesJSON))
 	}
 
-	args = append(args, pid)
-	query := fmt.Sprintf("UPDATE providers SET %s WHERE id = ?", strings.Join(sets, ", "))
+	iid := instance.FromContext(r.Context())
+	args = append(args, pid, iid)
+	query := fmt.Sprintf("UPDATE providers SET %s WHERE id = ? AND instance_id = ?", strings.Join(sets, ", "))
 
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
@@ -351,8 +356,9 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 	pid := r.PathValue("id")
 
+	iid := instance.FromContext(r.Context())
 	result, err := a.db.SQL().ExecContext(r.Context(),
-		`DELETE FROM providers WHERE id = ?`, pid)
+		`DELETE FROM providers WHERE id = ? AND instance_id = ?`, pid, iid)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

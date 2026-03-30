@@ -9,6 +9,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/loginflow"
 )
@@ -126,10 +127,11 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 		orgID = "1"
 	}
 
+	iid := instance.FromContext(r.Context())
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO login_flows (id, org_id, name, preset, config, is_default, enabled, state, priority, audience, auth_methods, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-		flowID, orgID, name, preset, configJSON,
+		`INSERT INTO login_flows (id, instance_id, org_id, name, preset, config, is_default, enabled, state, priority, audience, auth_methods, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+		flowID, iid, orgID, name, preset, configJSON,
 		boolToInt(req.IsDefault), state, req.Priority,
 		audienceJSON, authMethodsJSON, now, now,
 	)
@@ -176,14 +178,17 @@ func (a *API) getLoginFlow(w http.ResponseWriter, r *http.Request) {
 func (a *API) listLoginFlows(w http.ResponseWriter, r *http.Request) {
 	stateFilter := r.URL.Query().Get("state")
 
+	iid := instance.FromContext(r.Context())
+	var args []any
+
 	query := `SELECT id, COALESCE(org_id,''), name, preset, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 	                  COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 	                  COALESCE(metadata,'{}'), created_at, updated_at
-	           FROM login_flows`
-	var args []any
+	           FROM login_flows WHERE instance_id = ?`
+	args = append(args, iid)
 
 	if stateFilter != "" {
-		query += ` WHERE state = ?`
+		query += ` AND state = ?`
 		args = append(args, stateFilter)
 	}
 	query += ` ORDER BY COALESCE(is_default,0) DESC, priority DESC, created_at DESC`
@@ -275,9 +280,10 @@ func (a *API) updateLoginFlow(w http.ResponseWriter, r *http.Request) {
 	setClauses = append(setClauses, "is_default = ?")
 	args = append(args, boolToInt(req.IsDefault))
 
-	args = append(args, flowID)
+	iid := instance.FromContext(r.Context())
+	args = append(args, flowID, iid)
 
-	query := "UPDATE login_flows SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query := "UPDATE login_flows SET " + strings.Join(setClauses, ", ") + " WHERE id = ? AND instance_id = ?"
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed: "+err.Error())
@@ -312,7 +318,8 @@ func (a *API) deleteLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM login_flows WHERE id = ?`, flowID)
+	iid := instance.FromContext(r.Context())
+	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM login_flows WHERE id = ? AND instance_id = ?`, flowID, iid)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

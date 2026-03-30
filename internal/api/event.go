@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/instance"
 	"strconv"
 	"strings"
 
@@ -60,12 +61,13 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 		cursor = c
 	}
 
+	iid := instance.FromContext(r.Context())
 	query := `SELECT id, event_type, org_id, actor_id, actor_type,
 	                 aggregate_id, aggregate_type, payload, metadata, created_at,
 	                 request_id, session_id, flow_id, fingerprint,
 	                 client_id, token_id, delegation_type, sdk_name, sdk_version
-	          FROM events WHERE id > ?`
-	args := []any{cursor}
+	          FROM events WHERE instance_id = ? AND id > ?`
+	args := []any{iid, cursor}
 
 	if orgID := r.URL.Query().Get("org_id"); orgID != "" {
 		query += ` AND org_id = ?`
@@ -191,8 +193,9 @@ func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 	switch queryName {
 	case "event_counts":
 		orgID := r.URL.Query().Get("org_id")
-		query = `SELECT event_type, COUNT(*) as cnt FROM events WHERE org_id = ? GROUP BY event_type`
-		args = []any{orgID}
+		iid := instance.FromContext(r.Context())
+		query = `SELECT event_type, COUNT(*) as cnt FROM events WHERE instance_id = ? AND org_id = ? GROUP BY event_type`
+		args = []any{iid, orgID}
 	default:
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown aggregate query: %s", queryName))
 		return
@@ -265,12 +268,13 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 			return // Client disconnected.
 		}
 
+		iid := instance.FromContext(r.Context())
 		rows, err := a.db.SQL().QueryContext(r.Context(),
 			`SELECT id, event_type, org_id, actor_id, actor_type,
 			        aggregate_id, aggregate_type, payload, metadata, created_at,
 			        request_id, session_id, flow_id, fingerprint,
 			        client_id, token_id, delegation_type, sdk_name, sdk_version
-			 FROM events WHERE id > ? ORDER BY id ASC LIMIT 100`, cursor)
+			 FROM events WHERE instance_id = ? AND id > ? ORDER BY id ASC LIMIT 100`, iid, cursor)
 		if err != nil {
 			return
 		}

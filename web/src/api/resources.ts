@@ -520,3 +520,63 @@ export const moduleApi = {
   disable: (name: string): Promise<void> =>
     api.post<void>(`/v1/modules/${encodeURIComponent(name)}/disable`, {}),
 }
+
+// ------------------------------------------------------------------
+// Instance API (ADR-021: multi-tenancy)
+// ------------------------------------------------------------------
+import { ref, computed } from 'vue'
+
+export interface Instance {
+  id: string
+  name: string
+  domain: string
+  is_root: boolean
+  state: string
+  created_at: string
+  updated_at: string
+}
+
+export interface InstanceDetail {
+  instance: Instance
+  user_count: number
+  org_count: number
+}
+
+/** Reactive state — the currently selected instance (null = root). */
+export const currentInstance = ref<string | null>(null)
+
+/** Returns the API path prefix for the current instance context. */
+export const instanceApiPrefix = computed(() => {
+  if (currentInstance.value) {
+    return `/v1/instances/${currentInstance.value}`
+  }
+  return '/v1'
+})
+
+export function switchInstance(instanceId: string | null) {
+  currentInstance.value = instanceId
+  if (instanceId) {
+    localStorage.setItem('zitadel_instance', instanceId)
+  } else {
+    localStorage.removeItem('zitadel_instance')
+  }
+}
+
+// Restore instance from localStorage on load.
+const savedInstance = localStorage.getItem('zitadel_instance')
+if (savedInstance) {
+  currentInstance.value = savedInstance
+}
+
+export const instanceApi = {
+  list: (): Promise<Instance[]> =>
+    api.get<{ items: Instance[] }>('/v1/instances').then(r => r.items || []),
+  get: (id: string): Promise<InstanceDetail> =>
+    api.get<InstanceDetail>(`/v1/instances/${encodeURIComponent(id)}`),
+  create: (data: { name: string; domain?: string }): Promise<Instance> =>
+    api.post<Instance>('/v1/instances', data),
+  update: (id: string, data: Partial<{ name: string; domain: string; state: string }>): Promise<void> =>
+    api.patch<void>(`/v1/instances/${encodeURIComponent(id)}`, data),
+  delete: (id: string): Promise<void> =>
+    api.delete(`/v1/instances/${encodeURIComponent(id)}`),
+}

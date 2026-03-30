@@ -25,6 +25,13 @@ No YAML files. No Docker Compose. No database setup. One command, working in 60 
 - Bootstrap creates default org, admin user, and default schema
 - Development TLS auto-provisions if needed
 
+**Root instance gets `*`:**
+The root instance (`inst_root`) is the operator's own instance. Its owners bypass FGA checks entirely — they have implicit wildcard access to all resources across all instances. This means:
+- No per-type FGA tuples needed for the operator's admin
+- New resource types (endpoints, schemas, etc.) work immediately without model changes
+- Customer instances still enforce strict FGA-based authorization
+- This mirrors the `root` user convention in Unix — secure by default, powerful when needed
+
 **Startup lifecycle** (see [ADR-018](../adr/018-startup-lifecycle.md)):
 
 | `database.migrate` | Behavior |

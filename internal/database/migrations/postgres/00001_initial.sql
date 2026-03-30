@@ -1,6 +1,6 @@
 -- +goose Up
--- Zitadel baseline schema — PostgreSQL (ADR-022: dedicated resource tables, consolidated)
--- 22 tables total. See docs/adr/022-dedicated-resource-tables.md
+-- Zitadel baseline schema — PostgreSQL (ADR-021/022: multi-tenant, dedicated resource tables)
+-- All tenant-scoped tables carry an instance_id column for row-level isolation.
 
 -- ============================================================================
 -- INSTANCES
@@ -8,11 +8,14 @@
 CREATE TABLE IF NOT EXISTS instances (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
+    domain     TEXT DEFAULT '',
+    is_root    BOOLEAN DEFAULT false,
     state      TEXT NOT NULL DEFAULT 'active',
     settings   JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_instances_domain ON instances(domain) WHERE domain != '';
 
 -- ============================================================================
 -- ORGS
@@ -33,17 +36,19 @@ CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
 -- SCHEMAS — registry for validation, UI generation, engine bindings
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS schemas (
-    id         TEXT PRIMARY KEY,
-    type       TEXT NOT NULL,
-    org_id     TEXT NOT NULL DEFAULT '1',
-    schema     JSONB NOT NULL,
-    version    INTEGER DEFAULT 1,
-    is_default BOOLEAN DEFAULT FALSE,
-    visibility TEXT NOT NULL DEFAULT 'private',
-    message    TEXT DEFAULT '',
-    created_by TEXT DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id          TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL DEFAULT 'inst_root',
+    type        TEXT NOT NULL,
+    org_id      TEXT NOT NULL DEFAULT '1',
+    schema      JSONB NOT NULL,
+    version     INTEGER DEFAULT 1,
+    is_default  BOOLEAN DEFAULT FALSE,
+    visibility  TEXT NOT NULL DEFAULT 'private',
+    message     TEXT DEFAULT '',
+    created_by  TEXT DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_schema_instance ON schemas(instance_id);
 CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id);
 CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default);
 CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
@@ -53,6 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
+    instance_id   TEXT NOT NULL DEFAULT 'inst_root',
     org_id        TEXT NOT NULL DEFAULT '1',
     identifier    TEXT NOT NULL,
     display_name  TEXT DEFAULT '',
@@ -62,8 +68,9 @@ CREATE TABLE IF NOT EXISTS users (
     metadata      JSONB DEFAULT '{}',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(org_id, identifier)
+    UNIQUE(instance_id, org_id, identifier)
 );
+CREATE INDEX IF NOT EXISTS idx_users_instance ON users(instance_id);
 CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
 CREATE INDEX IF NOT EXISTS idx_users_type ON users(user_type);
 CREATE INDEX IF NOT EXISTS idx_users_state ON users(state);
@@ -85,6 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_creds_user ON credentials(user_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS providers (
     id              TEXT PRIMARY KEY,
+    instance_id     TEXT NOT NULL DEFAULT 'inst_root',
     org_id          TEXT NOT NULL DEFAULT '1',
     name            TEXT NOT NULL,
     protocol        TEXT NOT NULL DEFAULT 'oidc',
@@ -98,8 +106,9 @@ CREATE TABLE IF NOT EXISTS providers (
     metadata        JSONB DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(org_id, name)
+    UNIQUE(instance_id, org_id, name)
 );
+CREATE INDEX IF NOT EXISTS idx_providers_instance ON providers(instance_id);
 CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 
 -- ============================================================================
@@ -107,6 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS apps (
     id             TEXT PRIMARY KEY,
+    instance_id    TEXT NOT NULL DEFAULT 'inst_root',
     org_id         TEXT NOT NULL DEFAULT '1',
     name           TEXT NOT NULL,
     app_type       TEXT NOT NULL DEFAULT 'oidc',
@@ -121,6 +131,7 @@ CREATE TABLE IF NOT EXISTS apps (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_apps_instance ON apps(instance_id);
 CREATE INDEX IF NOT EXISTS idx_apps_org ON apps(org_id);
 
 -- ============================================================================
@@ -128,6 +139,7 @@ CREATE INDEX IF NOT EXISTS idx_apps_org ON apps(org_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS actions (
     id          TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL DEFAULT '1',
     name        TEXT NOT NULL,
     hook        TEXT NOT NULL DEFAULT 'on_event',
@@ -149,6 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS login_flows (
     id           TEXT PRIMARY KEY,
+    instance_id  TEXT NOT NULL DEFAULT 'inst_root',
     org_id       TEXT,
     name         TEXT NOT NULL,
     preset       TEXT DEFAULT 'identifier_first',
@@ -190,6 +203,7 @@ CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_identities(provider_id,
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sessions (
     id             TEXT PRIMARY KEY,
+    instance_id    TEXT NOT NULL DEFAULT 'inst_root',
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     org_id         TEXT NOT NULL DEFAULT '1',
     token_hash     TEXT NOT NULL DEFAULT '',
@@ -287,6 +301,7 @@ CREATE TABLE IF NOT EXISTS fingerprints (
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
     id             TEXT PRIMARY KEY,
+    instance_id    TEXT NOT NULL DEFAULT 'inst_root',
     event_type     TEXT NOT NULL,
     category       TEXT NOT NULL DEFAULT '',
     org_id         TEXT NOT NULL DEFAULT '0',
@@ -319,8 +334,8 @@ CREATE INDEX IF NOT EXISTS idx_events_flow ON events(flow_id) WHERE flow_id IS N
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS domains (
     domain      TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL,
-    instance_id TEXT DEFAULT '0',
     verified    BOOLEAN NOT NULL DEFAULT FALSE,
     is_primary  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -347,13 +362,14 @@ CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS settings (
     id         TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     type       TEXT NOT NULL,
     scope      TEXT NOT NULL DEFAULT 'instance',
     scope_id   TEXT NOT NULL DEFAULT '',
     data       JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(type, scope, scope_id)
+    UNIQUE(instance_id, type, scope, scope_id)
 );
 CREATE INDEX IF NOT EXISTS idx_settings_type ON settings(type, scope);
 
@@ -414,6 +430,7 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS groups (
     id          TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL DEFAULT '1',
     name        TEXT NOT NULL,
     description TEXT DEFAULT '',
@@ -421,7 +438,7 @@ CREATE TABLE IF NOT EXISTS groups (
     metadata    JSONB DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(org_id, name)
+    UNIQUE(instance_id, org_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
 
@@ -441,6 +458,7 @@ CREATE INDEX IF NOT EXISTS idx_gm_user  ON group_members(user_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS projects (
     id          TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL DEFAULT '1',
     name        TEXT NOT NULL,
     description TEXT DEFAULT '',
@@ -448,7 +466,7 @@ CREATE TABLE IF NOT EXISTS projects (
     metadata    JSONB DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(org_id, name)
+    UNIQUE(instance_id, org_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
 
@@ -483,8 +501,8 @@ VALUES
     ('rp_default',            '*',                  '14d', '365d', 0)
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO instances (id, name, created_at, updated_at)
-VALUES ('inst_default', 'default', NOW(), NOW())
+INSERT INTO instances (id, name, is_root, created_at, updated_at)
+VALUES ('inst_root', 'Zitadel', true, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- +goose Down
