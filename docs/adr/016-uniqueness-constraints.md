@@ -57,11 +57,9 @@ Per-field annotation declaring uniqueness scope:
 
 **Default**: When `x-unique` is not specified, no uniqueness is enforced. The `x-identifier` annotation alone does not imply uniqueness.
 
-### 2. Cross-Type Uniqueness
+### 2. Current Scope: User-Backed Uniqueness
 
-Uniqueness is **not scoped by schema type**. A unique value is unique across the entire system (instance scope) or entire org (org scope), regardless of entity type.
-
-Rationale: An email address identifies a person, not a schema type. If `alice@example.com` exists as a `human_user`, it must not also exist as a `service_user`. This matches how the `id` column works — IDs are globally unique, not per-type.
+The current implementation enforces uniqueness through the `users` table and `unique_fields.user_id`. Instance- and org-scoped values are therefore cross-user-type for identities that live in `users`, but this mechanism does not yet generalize to non-user resources such as apps or providers.
 
 ### 3. Normalization
 
@@ -81,12 +79,12 @@ CREATE TABLE IF NOT EXISTS unique_fields (
     field_name       TEXT NOT NULL,             -- e.g., 'email', 'username'
     normalized_value TEXT NOT NULL,             -- lowercase, trimmed
 
-    entity_id        TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
     UNIQUE(scope_id, field_name, normalized_value)
 );
 
-CREATE INDEX idx_unique_fields_entity ON unique_fields(entity_id);
+CREATE INDEX idx_unique_fields_user   ON unique_fields(user_id);
 CREATE INDEX idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);
 ```
 
@@ -201,7 +199,7 @@ If duplicates exist, the schema save is **rejected** with a detailed report:
       "field": "email",
       "scope": "instance",
       "duplicates": [
-        { "value": "alice@example.com", "entity_ids": ["019a...", "019b..."], "orgs": ["org-1", "org-2"] }
+        { "value": "alice@example.com", "user_ids": ["019a...", "019b..."], "orgs": ["org-1", "org-2"] }
       ]
     }
   ]

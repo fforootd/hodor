@@ -198,6 +198,35 @@ func TestExtractLoginFlowConfig_RuntimeConfigShape(t *testing.T) {
 	}
 }
 
+func TestExtractLoginFlowConfig_RuntimeStepAliases(t *testing.T) {
+	schema := `{
+		"captcha": {
+			"provider": "altcha",
+			"mode": "always",
+			"steps": ["identifier", "password"]
+		},
+		"fingerprint": {
+			"enabled": true,
+			"steps": ["identifier"]
+		}
+	}`
+
+	cfg := ExtractLoginFlowConfig(schema)
+
+	if cfg.Captcha == nil {
+		t.Fatal("Captcha is nil")
+	}
+	if len(cfg.Captcha.On) != 1 || cfg.Captcha.On[0] != "login" {
+		t.Fatalf("Captcha.On = %#v, want []string{\"login\"}", cfg.Captcha.On)
+	}
+	if cfg.Fingerprint == nil {
+		t.Fatal("Fingerprint is nil")
+	}
+	if len(cfg.Fingerprint.On) != 1 || cfg.Fingerprint.On[0] != "login" {
+		t.Fatalf("Fingerprint.On = %#v, want []string{\"login\"}", cfg.Fingerprint.On)
+	}
+}
+
 func TestExtractLoginFlowConfig_InvalidJSON(t *testing.T) {
 	cfg := ExtractLoginFlowConfig("not valid json")
 
@@ -264,7 +293,7 @@ func TestResolveFlowConfig_NilFlow(t *testing.T) {
 }
 
 func TestCaptchaActiveForStep(t *testing.T) {
-	cc := &CaptchaConfig{On: []string{"login", "register"}}
+	cc := &CaptchaConfig{Provider: "altcha", On: []string{"login", "register"}}
 
 	tests := []struct {
 		step     StepType
@@ -286,6 +315,68 @@ func TestCaptchaActiveForStep(t *testing.T) {
 	// Nil config.
 	if captchaActiveForStep(nil, StepIdentifier) {
 		t.Error("nil config should return false")
+	}
+}
+
+func TestCaptchaActiveForStep_ModeAlways(t *testing.T) {
+	cc := &CaptchaConfig{Provider: "altcha", Mode: "always"}
+
+	if !captchaActiveForStep(cc, StepIdentifier) {
+		t.Error("always mode should show captcha on login steps")
+	}
+	if !captchaActiveForStep(cc, StepRegister) {
+		t.Error("always mode should show captcha on register steps")
+	}
+	if !captchaActiveForStep(cc, StepForgotPassword) {
+		t.Error("always mode should show captcha on forgot-password steps")
+	}
+}
+
+func TestFlowCaptchaVerificationScope(t *testing.T) {
+	flow := &Flow{
+		CurrentStep:          StepIdentifier,
+		CaptchaVerified:      true,
+		CaptchaVerifiedScope: "login",
+		CaptchaProvider:      "altcha",
+		SchemaConfig:         &SchemaAuthConfig{Captcha: &CaptchaConfig{Provider: "altcha", Mode: "always"}},
+	}
+
+	if !flow.captchaVerifiedForCurrentStep() {
+		t.Fatal("captcha should be valid for identifier step when login scope is verified")
+	}
+
+	flow.transitionToStep(StepPassword)
+	if !flow.captchaVerifiedForCurrentStep() {
+		t.Fatal("captcha should carry across login scope steps")
+	}
+
+	flow.transitionToStep(StepRegister)
+	if flow.CaptchaVerified {
+		t.Fatal("captcha should reset when transitioning to a different logical scope")
+	}
+	if flow.CaptchaVerifiedScope != "" {
+		t.Fatalf("CaptchaVerifiedScope = %q, want empty", flow.CaptchaVerifiedScope)
+	}
+}
+
+func TestToFlowStepIncludesCaptchaFlags(t *testing.T) {
+	flow := &Flow{
+		ID:                   "flow_123",
+		CurrentStep:          StepIdentifier,
+		CaptchaVerified:      true,
+		CaptchaVerifiedScope: "login",
+		SchemaConfig: &SchemaAuthConfig{
+			Branding: defaultBrandingConfig(),
+			Captcha:  &CaptchaConfig{Provider: "altcha", Mode: "always"},
+		},
+	}
+
+	step := flow.ToFlowStep()
+	if !step.CaptchaRequired {
+		t.Fatal("CaptchaRequired = false, want true")
+	}
+	if !step.CaptchaVerified {
+		t.Fatal("CaptchaVerified = false, want true")
 	}
 }
 

@@ -12,18 +12,6 @@ const testSchema = `{
     "magic_link": {"enabled": true, "interactive": true, "position": 2},
     "sso": {"enabled": true, "interactive": true, "position": 3}
   },
-  "x-login": {
-    "strategy": "identifier_first",
-    "mfa_required": false,
-    "registration_allowed": true
-  },
-  "x-branding": {
-    "heading": "Welcome to Acme",
-    "description": "Sign in to your workspace",
-    "org_name": "Acme Corp",
-    "colors": {"primary": "#ff6600"},
-    "texts": {"continue_button": "Next"}
-  },
   "properties": {
     "email": {
       "type": "string",
@@ -40,6 +28,21 @@ const testSchema = `{
     "display_name": {
       "type": "string"
     }
+  }
+}`
+
+const testFlowSchema = `{
+  "login": {
+    "strategy": "identifier_first",
+    "mfa_required": false,
+    "registration_allowed": true
+  },
+  "branding": {
+    "heading": "Welcome to Acme",
+    "description": "Sign in to your workspace",
+    "org_name": "Acme Corp",
+    "colors": {"primary": "#ff6600"},
+    "texts": {"continue_button": "Next"}
   }
 }`
 
@@ -109,14 +112,14 @@ func TestExtractAuthConfig_LoginConfig(t *testing.T) {
 func TestExtractAuthConfig_Branding(t *testing.T) {
 	cfg := ExtractAuthConfig(testSchema)
 
-	if cfg.Branding.Heading != "Welcome to Acme" {
-		t.Errorf("heading = %q, want %q", cfg.Branding.Heading, "Welcome to Acme")
+	if cfg.Branding.Heading != "Welcome back" {
+		t.Errorf("heading = %q, want %q", cfg.Branding.Heading, "Welcome back")
 	}
-	if cfg.Branding.OrgName != "Acme Corp" {
-		t.Errorf("org_name = %q, want %q", cfg.Branding.OrgName, "Acme Corp")
+	if cfg.Branding.OrgName != "Zitadel" {
+		t.Errorf("org_name = %q, want %q", cfg.Branding.OrgName, "Zitadel")
 	}
-	if cfg.Branding.Colors["primary"] != "#ff6600" {
-		t.Errorf("primary color = %q, want %q", cfg.Branding.Colors["primary"], "#ff6600")
+	if cfg.Branding.Colors["primary"] != "#6366f1" {
+		t.Errorf("primary color = %q, want %q", cfg.Branding.Colors["primary"], "#6366f1")
 	}
 	// Default colors should be merged in.
 	if cfg.Branding.Colors["background"] != "#f0f2ff" {
@@ -125,8 +128,8 @@ func TestExtractAuthConfig_Branding(t *testing.T) {
 	if cfg.Branding.FontFamily != "Inter, system-ui, sans-serif" {
 		t.Errorf("font_family should use default, got %q", cfg.Branding.FontFamily)
 	}
-	if cfg.Branding.Texts["continue_button"] != "Next" {
-		t.Errorf("continue_button text = %q, want %q", cfg.Branding.Texts["continue_button"], "Next")
+	if cfg.Branding.Texts["continue_button"] != "" {
+		t.Errorf("continue_button text = %q, want empty default", cfg.Branding.Texts["continue_button"])
 	}
 }
 
@@ -153,7 +156,7 @@ func TestExtractAuthConfig_InvalidJSON(t *testing.T) {
 }
 
 func TestBuildNodes_Identifier(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,
@@ -185,7 +188,7 @@ func TestBuildNodes_Identifier(t *testing.T) {
 }
 
 func TestBuildNodes_AuthSelect(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,
@@ -219,7 +222,7 @@ func TestBuildNodes_AuthSelect(t *testing.T) {
 }
 
 func TestBuildNodes_AuthSelectAnonymousDoesNotExposeDerivedIdentity(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,
@@ -241,7 +244,7 @@ func TestBuildNodes_AuthSelectAnonymousDoesNotExposeDerivedIdentity(t *testing.T
 }
 
 func TestBuildNodes_Complete(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,
@@ -276,7 +279,7 @@ func TestFlowStore(t *testing.T) {
 }
 
 func TestToFlowStep(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,
@@ -304,7 +307,7 @@ func TestToFlowStep(t *testing.T) {
 }
 
 func TestToFlowStep_OmitsIdentityForAnonymousFlows(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,
@@ -321,7 +324,7 @@ func TestToFlowStep_OmitsIdentityForAnonymousFlows(t *testing.T) {
 }
 
 func TestBuildNodes_Register(t *testing.T) {
-	cfg := ExtractAuthConfig(testSchema)
+	cfg := ResolveFlowConfig(ExtractAuthConfig(testSchema), ExtractLoginFlowConfig(testFlowSchema))
 	flow := &Flow{
 		ID:           "f_test",
 		SchemaConfig: cfg,

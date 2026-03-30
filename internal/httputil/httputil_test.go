@@ -19,6 +19,9 @@ func TestWriteJSON_StatusAndContentType(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", cc)
+	}
 }
 
 func TestWriteJSON_Body(t *testing.T) {
@@ -78,6 +81,20 @@ func TestWriteError_Format(t *testing.T) {
 	if result["code"] != float64(403) {
 		t.Errorf("code = %v, want 403", result["code"])
 	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", cc)
+	}
+}
+
+func TestWriteJSON_RespectsExistingCacheControl(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Cache-Control", "public, max-age=60")
+
+	WriteJSON(rec, http.StatusOK, map[string]any{"ok": true})
+
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=60" {
+		t.Errorf("Cache-Control = %q, want public, max-age=60", cc)
+	}
 }
 
 func TestWriteError_EscapesSpecialChars(t *testing.T) {
@@ -114,6 +131,8 @@ func TestIsPublicRoute(t *testing.T) {
 		{"GET", "/v1/schemas/human_user_v1", true},
 		{"GET", "/v1/branding", true},
 		{"GET", "/v1/auth/settings", true},
+		{"GET", "/v1/login/flows/flow_123", true},
+		{"GET", "/v1/login/flows/flow_123/captcha/challenge", true},
 		{"GET", "/v1/providers/templates", true},
 		{"GET", "/healthz", true},
 		{"GET", "/readyz", true},

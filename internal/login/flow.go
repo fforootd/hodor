@@ -1,9 +1,8 @@
 // Package login Flow Engine — schema-driven login flow state machine.
 //
-// Reads per-field annotations (x-identifier, x-verify, x-recover, x-mfa),
-// x-auth-methods, x-login (schema-level), and x-branding
-// annotations from entity schemas to determine step ordering
-// and generate UI node trees.
+// Reads per-field annotations (x-identifier, x-verify, x-recover, x-mfa)
+// plus x-auth-methods from user schemas, and reads login UX annotations
+// from login flow configs to determine step ordering and generate UI node trees.
 //
 // ADR-019: Server-Driven Login UI + Web Components
 // The FlowStep + UINode contract is the SOLE interface between the
@@ -36,9 +35,9 @@ type AuthMethodEntry struct {
 	MaxTokens   int  `json:"max_tokens,omitempty"` // for PAT/API key limits
 }
 
-// LoginConfig represents the x-login schema-level annotation.
+// LoginConfig represents flow-owned login configuration.
 type LoginConfig struct {
-	Strategy              string `json:"strategy"` // "identifier_first", "passkey_first", "sso_only", "custom"
+	Strategy            string `json:"strategy"` // "identifier_first", "passkey_first", "sso_only", "custom"
 	MFARequired         bool   `json:"mfa_required"`
 	RegistrationAllowed bool   `json:"registration_allowed"`
 }
@@ -50,7 +49,7 @@ type ConsentItem struct {
 	Required bool   `json:"required"` // must be checked to proceed
 }
 
-// BrandingConfig represents the x-branding schema-level annotation.
+// BrandingConfig represents flow-owned branding configuration.
 type BrandingConfig struct {
 	Heading     string            `json:"heading"`
 	Description string            `json:"description"`
@@ -87,6 +86,7 @@ type CaptchaConfig struct {
 	Provider  string   `json:"provider"`             // "altcha" | "hcaptcha" | "recaptcha" | "turnstile"
 	Mode      string   `json:"mode"`                 // "invisible" | "checkbox" | "floating"
 	On        []string `json:"on"`                   // ["register", "forgot_password", "login"]
+	Steps     []string `json:"steps,omitempty"`      // legacy alias from console/runtime config
 	Algorithm string   `json:"algorithm,omitempty"`  // "SHA-256" | "SHA-384" | "SHA-512" (Altcha PoW hash)
 	MaxNumber int      `json:"max_number,omitempty"` // PoW difficulty range (default: 100000)
 	SiteKey   string   `json:"site_key,omitempty"`   // for third-party providers
@@ -100,6 +100,7 @@ type FingerprintConfig struct {
 	Provider string   `json:"provider"`     // "thumbmarkjs" (extensible)
 	Persist  bool     `json:"persist"`      // persist visitor ID across sessions
 	On       []string `json:"on,omitempty"` // ["login", "register"] — when to collect
+	Steps    []string `json:"steps,omitempty"`
 }
 
 // RateLimitConfig represents x-rate-limit on the login flow schema.
@@ -148,6 +149,8 @@ type SchemaAuthConfig struct {
 	Identifiers []string                    // field names that can be used as identifiers
 	Fields      map[string]AuthFieldConfig  // field name → auth config
 	AuthMethods map[string]*AuthMethodEntry // method name → config (from x-auth-methods)
+	SchemaID    string
+	SchemaType  string
 	Login       LoginConfig
 	Branding    BrandingConfig
 	SchemaProps []SchemaFieldDef // all visible schema fields (for registration)
@@ -160,14 +163,12 @@ type SchemaAuthConfig struct {
 
 // ─── Annotation Extraction ──────────────────────────────────
 
-// ExtractAuthConfig parses per-field auth annotations, x-auth-methods, x-login, and x-branding from a JSON schema string.
+// ExtractAuthConfig parses per-field auth annotations and x-auth-methods from a user schema string.
 func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 	var raw struct {
 		Properties   map[string]map[string]any `json:"properties"`
 		Required     []string                  `json:"required"`
 		XAuthMethods json.RawMessage           `json:"x-auth-methods"`
-		XLogin       json.RawMessage           `json:"x-login"`
-		XBranding    json.RawMessage           `json:"x-branding"`
 	}
 	if err := json.Unmarshal([]byte(schemaJSON), &raw); err != nil {
 		return defaultConfig()
@@ -199,17 +200,7 @@ func ExtractAuthConfig(schemaJSON string) *SchemaAuthConfig {
 		}
 	}
 
-	// Extract schema-level x-login.
-	if len(raw.XLogin) > 0 {
-		_ = json.Unmarshal(raw.XLogin, &config.Login)
-	}
-
-	// Extract schema-level x-branding.
-	if len(raw.XBranding) > 0 {
-		_ = json.Unmarshal(raw.XBranding, &config.Branding)
-	}
-
-	// Apply defaults for missing fields.
+	// User schemas no longer own login/branding; keep runtime defaults here.
 	config.Login = mergeLoginDefaults(config.Login)
 	config.Branding = mergeBrandingDefaults(config.Branding)
 
@@ -257,6 +248,11 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 	if source := firstNonEmptyRaw(raw.XCaptcha, raw.Captcha); len(source) > 0 {
 		var cc CaptchaConfig
 		if json.Unmarshal(source, &cc) == nil {
+			if len(cc.On) == 0 && len(cc.Steps) > 0 {
+				cc.On = normalizeFlowStepTargets(cc.Steps)
+			} else {
+				cc.On = normalizeFlowStepTargets(cc.On)
+			}
 			if cc.Algorithm == "" {
 				cc.Algorithm = "SHA-256"
 			}
@@ -269,6 +265,11 @@ func ExtractLoginFlowConfig(flowSchemaJSON string) *LoginFlowConfig {
 	if source := firstNonEmptyRaw(raw.XFingerprint, raw.Fingerprint); len(source) > 0 {
 		var fp FingerprintConfig
 		if json.Unmarshal(source, &fp) == nil {
+			if len(fp.On) == 0 && len(fp.Steps) > 0 {
+				fp.On = normalizeFlowStepTargets(fp.Steps)
+			} else {
+				fp.On = normalizeFlowStepTargets(fp.On)
+			}
 			if fp.Provider == "" {
 				fp.Provider = "thumbmarkjs"
 			}
@@ -305,6 +306,47 @@ func firstNonEmptyRaw(values ...json.RawMessage) json.RawMessage {
 	return nil
 }
 
+func normalizeFlowStepTargets(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := value
+		switch value {
+		case "identifier", "password", "auth_select", "login":
+			normalized = "login"
+		case "register":
+			normalized = "register"
+		case "forgot_password":
+			normalized = "forgot_password"
+		}
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func captchaScopeForStep(step StepType) string {
+	switch step {
+	case StepIdentifier, StepAuthSelect, StepPassword:
+		return "login"
+	case StepRegister:
+		return "register"
+	case StepForgotPassword:
+		return "forgot_password"
+	default:
+		return ""
+	}
+}
+
 // ResolveFlowConfig merges a user schema's field-level auth config with a
 // login flow schema's UX config. The login flow's Login, Branding, Captcha,
 // Fingerprint, and RateLimit override whatever was on the user schema.
@@ -328,17 +370,21 @@ func ResolveFlowConfig(userConfig *SchemaAuthConfig, flowConfig *LoginFlowConfig
 
 // captchaActiveForStep returns true if the captcha should be shown on the given step.
 func captchaActiveForStep(cc *CaptchaConfig, step StepType) bool {
-	if cc == nil {
+	if cc == nil || cc.Provider == "" || cc.Provider == "none" {
 		return false
 	}
-	var stepName string
-	switch step {
-	case StepIdentifier, StepAuthSelect, StepPassword:
-		stepName = "login"
-	case StepRegister:
-		stepName = "register"
-	default:
+	if cc.Mode == "never" {
 		return false
+	}
+	stepName := captchaScopeForStep(step)
+	if stepName == "" {
+		return false
+	}
+	if cc.Mode == "always" {
+		return true
+	}
+	if len(cc.On) == 0 {
+		return true
 	}
 	for _, s := range cc.On {
 		if s == stepName {
@@ -472,7 +518,7 @@ func defaultAuthMethods() map[string]*AuthMethodEntry {
 
 func defaultLoginConfig() LoginConfig {
 	return LoginConfig{
-		Strategy:              "identifier_first",
+		Strategy:            "identifier_first",
 		MFARequired:         false,
 		RegistrationAllowed: true,
 	}
@@ -696,14 +742,16 @@ type FlowMessage struct {
 
 // FlowStep is the current step response sent to the UI.
 type FlowStep struct {
-	FlowID   string         `json:"flow_id"`
-	Step     StepType       `json:"step"`
-	Nodes    []UINode       `json:"nodes"`
-	Branding BrandingConfig `json:"branding"`
-	Identity *FlowIdentity  `json:"identity,omitempty"`
-	Errors   []FlowError    `json:"errors,omitempty"`
-	Messages []FlowMessage  `json:"messages,omitempty"`
-	CSS      string         `json:"css,omitempty"`
+	FlowID          string         `json:"flow_id"`
+	Step            StepType       `json:"step"`
+	Nodes           []UINode       `json:"nodes"`
+	Branding        BrandingConfig `json:"branding"`
+	Identity        *FlowIdentity  `json:"identity,omitempty"`
+	Errors          []FlowError    `json:"errors,omitempty"`
+	Messages        []FlowMessage  `json:"messages,omitempty"`
+	CSS             string         `json:"css,omitempty"`
+	CaptchaRequired bool           `json:"captcha_required,omitempty"`
+	CaptchaVerified bool           `json:"captcha_verified,omitempty"`
 }
 
 // FlowIdentity is the resolved identity info shown during auth steps.
@@ -739,13 +787,14 @@ type Flow struct {
 	LoginFlowID   string            // if set, login flow schema was used
 
 	// Client signal accumulation (populated during flow, sent to session on complete)
-	CaptchaProvider string  // "altcha", "hcaptcha", etc.
-	CaptchaVerified bool    // was captcha successfully verified?
-	CaptchaScore    float64 // score from score-based providers
-	PoWCompleted    bool    // was PoW challenge solved?
-	PoWDurationMs   float64 // how long the PoW solve took (client-reported)
-	VisitorID       string  // ThumbmarkJS persistent fingerprint
-	FingerprintHash string  // composite component hash
+	CaptchaProvider      string  // "altcha", "hcaptcha", etc.
+	CaptchaVerified      bool    // was captcha successfully verified?
+	CaptchaVerifiedScope string  // logical scope the captcha was solved for
+	CaptchaScore         float64 // score from score-based providers
+	PoWCompleted         bool    // was PoW challenge solved?
+	PoWDurationMs        float64 // how long the PoW solve took (client-reported)
+	VisitorID            string  // ThumbmarkJS persistent fingerprint
+	FingerprintHash      string  // composite component hash
 }
 
 // FlowStore is an in-memory store for active login flows.
@@ -1251,16 +1300,45 @@ func (f *Flow) authSelectHeading() string {
 	return f.Identifier
 }
 
+func (f *Flow) currentCaptchaScope() string {
+	return captchaScopeForStep(f.CurrentStep)
+}
+
+func (f *Flow) captchaVerifiedForCurrentStep() bool {
+	scope := f.currentCaptchaScope()
+	return scope != "" && f.CaptchaVerified && f.CaptchaVerifiedScope == scope
+}
+
+func (f *Flow) clearCaptchaState() {
+	f.CaptchaProvider = ""
+	f.CaptchaVerified = false
+	f.CaptchaVerifiedScope = ""
+	f.CaptchaScore = 0
+	f.PoWCompleted = false
+	f.PoWDurationMs = 0
+}
+
+func (f *Flow) transitionToStep(step StepType) {
+	currentScope := f.currentCaptchaScope()
+	nextScope := captchaScopeForStep(step)
+	if currentScope != "" && nextScope != currentScope {
+		f.clearCaptchaState()
+	}
+	f.CurrentStep = step
+}
+
 // ToFlowStep converts flow state to the response sent to the UI.
 func (f *Flow) ToFlowStep() *FlowStep {
 	step := &FlowStep{
-		FlowID:   f.ID,
-		Step:     f.CurrentStep,
-		Nodes:    BuildNodes(f),
-		Branding: f.SchemaConfig.Branding,
-		Errors:   f.Errors,
-		Messages: f.Messages,
-		CSS:      f.SchemaConfig.Branding.CustomCSS,
+		FlowID:          f.ID,
+		Step:            f.CurrentStep,
+		Nodes:           BuildNodes(f),
+		Branding:        f.SchemaConfig.Branding,
+		Errors:          f.Errors,
+		Messages:        f.Messages,
+		CSS:             f.SchemaConfig.Branding.CustomCSS,
+		CaptchaRequired: captchaActiveForStep(f.SchemaConfig.Captcha, f.CurrentStep),
+		CaptchaVerified: f.captchaVerifiedForCurrentStep(),
 	}
 	if f.revealsKnownUserIdentity() && f.DisplayName != "" {
 		initial := string([]rune(f.DisplayName)[0])

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -261,7 +262,14 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 	}
 
 	seeded := 0
-	for typeName, entry := range catalog {
+	typeNames := make([]string, 0, len(catalog))
+	for typeName := range catalog {
+		typeNames = append(typeNames, typeName)
+	}
+	sort.Strings(typeNames)
+
+	for _, typeName := range typeNames {
+		entry := catalog[typeName]
 		if entry.Ref == "" {
 			continue // System views (sessions, events, jobs, schema) have no $ref.
 		}

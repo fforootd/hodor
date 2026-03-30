@@ -21,7 +21,9 @@ import (
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // oidcConfig holds parsed OIDC provider configuration.
@@ -276,12 +278,15 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 		return "", fmt.Errorf("no linked account found and auto_register is disabled")
 	}
 
-	// Map claims to profile using schema + provider overrides.
-	schemaJSON := h.loadDefaultSchemaJSON(ctx)
+	// Map claims to profile using the default human-user schema + provider overrides.
+	schemaRec, err := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL())
+	if err != nil {
+		return "", fmt.Errorf("resolve default human user schema: %w", err)
+	}
 	var overrides map[string]string
 	_ = json.Unmarshal([]byte(overridesJSON), &overrides)
 
-	profile, _ := MapClaims(schemaJSON, overrides, claims)
+	profile, _ := MapClaims(schemaRec.Schema, overrides, claims)
 
 	displayName := ""
 	if dn, ok := profile["display_name"].(string); ok {
@@ -298,22 +303,38 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 
 	// Create identity.
 	newID := id.New()
+	payload := schema.MaterializeUserData(schemaRec.Schema, identifier, displayName, profile)
+	if err := schema.ValidateData(schemaRec.Schema, payload); err != nil {
+		return "", fmt.Errorf("validate identity against %s: %w", schemaRec.ID, err)
+	}
 
 	profileJSON, _ := json.Marshal(profile)
 
-	_, err = h.db.SQL().ExecContext(ctx,
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, profile, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'active', 'human_user_v1', ?, '{}', datetime('now'), datetime('now'))`,
-		newID, identifier, displayName, string(profileJSON),
+	tx, err := h.db.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin identity create: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, 1, ?, ?, 'active', ?, ?, datetime('now'), datetime('now'))`,
+		newID, identifier, displayName, schemaRec.ID, string(profileJSON),
 	)
 	if err != nil {
 		return "", fmt.Errorf("create identity: %w", err)
+	}
+	if err := uniqueness.EnforceFromIdentifier(ctx, tx, newID, "1", identifier); err != nil {
+		return "", err
+	}
+	if err := uniqueness.Enforce(ctx, tx, newID, "1", uniqueness.ExtractConstraints(schemaRec.Schema), payload); err != nil {
+		return "", err
 	}
 
 	// Create linked account.
 	linkID := id.New()
 	claimsJSON, _ := json.Marshal(claims)
-	_, err = h.db.SQL().ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
 		 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
 		linkID, newID, providerID, externalSub, externalEmail, string(claimsJSON),
@@ -321,19 +342,11 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, providerID, ex
 	if err != nil {
 		return "", fmt.Errorf("create linked account: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit identity create: %w", err)
+	}
 
 	return newID, nil
-}
-
-func (h *Handler) loadDefaultSchemaJSON(ctx context.Context) string {
-	var schemaJSON string
-	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT schema FROM schemas WHERE id = 'human_user_v1'`,
-	).Scan(&schemaJSON)
-	if err != nil {
-		return "{}"
-	}
-	return schemaJSON
 }
 
 // --- OIDC Helpers ---

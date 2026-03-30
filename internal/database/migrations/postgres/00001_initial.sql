@@ -159,6 +159,27 @@ CREATE INDEX IF NOT EXISTS idx_lf_org ON login_flows(org_id);
 CREATE INDEX IF NOT EXISTS idx_lf_state ON login_flows(state, enabled);
 
 -- ============================================================================
+-- LOGIN FLOW ASSETS — uploaded branding media (logo, dark logo, cover image, favicon)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS login_flow_assets (
+    id            TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL DEFAULT '1',
+    login_flow_id TEXT NOT NULL REFERENCES login_flows(id) ON DELETE CASCADE,
+    slot          TEXT NOT NULL,
+    filename      TEXT NOT NULL DEFAULT '',
+    content_type  TEXT NOT NULL,
+    size_bytes    BIGINT NOT NULL DEFAULT 0,
+    sha256        TEXT NOT NULL,
+    etag          TEXT NOT NULL,
+    data          BYTEA NOT NULL,
+    metadata      JSONB DEFAULT '{}',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(login_flow_id, slot)
+);
+CREATE INDEX IF NOT EXISTS idx_login_flow_assets_flow ON login_flow_assets(login_flow_id);
+
+-- ============================================================================
 -- LINKED IDENTITIES — external identity provider links (user ↔ provider)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS linked_identities (

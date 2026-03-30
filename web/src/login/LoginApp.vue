@@ -15,9 +15,13 @@
       :confirm-passwords="confirmPasswords"
       :captcha-solving="captchaSolving"
       :captcha-solved="captchaSolved"
+      :captcha-required="flowStep.captcha_required === true"
       @submit="onSubmit"
       @action="handleRendererAction"
       @solve-captcha="solveCaptcha"
+      @captcha-token="submitCaptchaToken"
+      @captcha-reset="resetCaptchaState"
+      @captcha-error="setCaptchaError"
     />
 
     <div
@@ -144,14 +148,42 @@
   const initError = ref<LoginErrorDetail | null>(null)
   const retryDelayMs = ref(0)
   const captchaSolving = ref(false)
-  const captchaSolved = ref(false)
   const fingerprintCollected = ref(false)
   let disposed = false
+
+  const captchaSolved = computed(() => flowStep.value?.captcha_verified === true)
+
+  const protectedCaptchaActions = new Set([
+    'identifier',
+    'password',
+    'magic_link',
+    'sso',
+    'register_submit',
+    'send_reset',
+  ])
 
   const effectiveDarkMode = computed(() => {
     if (props.darkModeOverride) return props.darkModeOverride
     return branding.value?.dark_mode || 'light'
   })
+
+  function syncFavicon(href: string) {
+    if (typeof document === 'undefined') return
+    let link = document.querySelector(
+      "link[data-zitadel-login-favicon='true']",
+    ) as HTMLLinkElement | null
+    if (!href) {
+      link?.remove()
+      return
+    }
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      link.setAttribute('data-zitadel-login-favicon', 'true')
+      document.head.appendChild(link)
+    }
+    link.href = href
+  }
 
   watch(
     effectiveDarkMode,
@@ -169,6 +201,14 @@
     { immediate: true },
   )
 
+  watch(
+    () => branding.value?.favicon || '',
+    (favicon) => {
+      syncFavicon(favicon)
+    },
+    { immediate: true },
+  )
+
   function resetFormState() {
     flowStep.value = null
     submitError.value = ''
@@ -178,6 +218,7 @@
     Object.keys(confirmPasswords).forEach((key) => {
       delete confirmPasswords[key]
     })
+    captchaSolving.value = false
   }
 
   function applyInitializedFlow(step: FlowStep) {
@@ -260,11 +301,16 @@
 
   onUnmounted(() => {
     disposed = true
+    syncFavicon('')
     shutdownTelemetry()
   })
 
   function handleRendererAction(action: string, extra?: Record<string, string>) {
     if (!action) return
+    if (requiresCaptchaVerification(action)) {
+      submitError.value = 'Complete captcha verification to continue.'
+      return
+    }
     if (action === 'identifier' || action === 'password' || action === 'register_submit') {
       pendingAction.value = action
       return
@@ -274,13 +320,54 @@
 
   async function onSubmit() {
     const action = pendingAction.value || 'identifier'
+    if (requiresCaptchaVerification(action)) {
+      submitError.value = 'Complete captcha verification to continue.'
+      return
+    }
     await submitAction(action)
+  }
+
+  function requiresCaptchaVerification(action: string): boolean {
+    return (
+      !!action &&
+      protectedCaptchaActions.has(action) &&
+      flowStep.value?.captcha_required === true &&
+      flowStep.value?.captcha_verified !== true
+    )
+  }
+
+  function normalizeAltchaDigest(algorithm: string): AlgorithmIdentifier {
+    switch (algorithm.toUpperCase()) {
+      case 'SHA-384':
+        return 'SHA-384'
+      case 'SHA-512':
+        return 'SHA-512'
+      default:
+        return 'SHA-256'
+    }
+  }
+
+  function resetCaptchaState() {
+    captchaSolving.value = false
+    if (
+      submitError.value === 'Complete captcha verification to continue.' ||
+      submitError.value === 'Captcha verification failed'
+    ) {
+      submitError.value = ''
+    }
+  }
+
+  function setCaptchaError(message: string) {
+    captchaSolving.value = false
+    submitError.value = message
   }
 
   async function submitAction(action: string, extra?: Record<string, string>) {
     if (!flowStep.value) return
     loading.value = true
-    submitError.value = ''
+    if (action !== 'captcha_submit') {
+      submitError.value = ''
+    }
 
     const span = traceFormSubmit(action, flowStep.value.flow_id)
     const previousStep = flowStep.value.step
@@ -330,11 +417,11 @@
       }
 
       maybeCollectFingerprint(step)
-      captchaSolved.value = false
       captchaSolving.value = false
     } catch (err) {
       const detail = toLoginErrorDetail(err)
       submitError.value = detail.message
+      captchaSolving.value = false
       emit('login-error', detail)
     } finally {
       loading.value = false
@@ -346,23 +433,25 @@
   async function solveCaptcha() {
     if (!flowStep.value || captchaSolving.value || captchaSolved.value) return
     captchaSolving.value = true
+    submitError.value = ''
 
     try {
-      const baseUrl = props.apiBaseUrl || ''
-      const challengeResp = await fetch(`${baseUrl}/v1/captcha/challenge`, {
-        credentials: 'include',
-      })
-      const challenge = await challengeResp.json()
+      const challenge = await flowApi.captchaChallenge(
+        props.apiBaseUrl || '',
+        flowStep.value.flow_id,
+      )
+      const digestAlgorithm = normalizeAltchaDigest(String(challenge.algorithm || 'SHA-256'))
 
       const startTime = performance.now()
       let solution = -1
-      for (let i = 0; i <= challenge.maxnumber; i++) {
-        const input = challenge.salt + String(i)
-        const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
+      const maxNumber = Number(challenge.maxnumber ?? 0)
+      for (let i = 0; i <= maxNumber; i++) {
+        const input = String(challenge.salt || '') + String(i)
+        const hashBuf = await crypto.subtle.digest(digestAlgorithm, new TextEncoder().encode(input))
         const hashHex = Array.from(new Uint8Array(hashBuf))
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('')
-        if (hashHex === challenge.challenge) {
+        if (hashHex === String(challenge.challenge || '')) {
           solution = i
           break
         }
@@ -376,21 +465,28 @@
       }
 
       const payload = JSON.stringify({
-        algorithm: challenge.algorithm,
-        challenge: challenge.challenge,
+        algorithm: String(challenge.algorithm || ''),
+        challenge: String(challenge.challenge || ''),
         number: solution,
-        salt: challenge.salt,
-        signature: challenge.signature,
+        salt: String(challenge.salt || ''),
+        signature: String(challenge.signature || ''),
         took,
       })
 
       await submitAction('captcha_submit', { altcha_payload: payload })
-      captchaSolved.value = true
     } catch {
       submitError.value = 'Captcha verification failed'
+      captchaSolving.value = false
     } finally {
       captchaSolving.value = false
     }
+  }
+
+  async function submitCaptchaToken(token: string) {
+    if (!flowStep.value || !token || captchaSolving.value) return
+    captchaSolving.value = true
+    submitError.value = ''
+    await submitAction('captcha_submit', { captcha_token: token })
   }
 
   async function maybeCollectFingerprint(step: FlowStep) {

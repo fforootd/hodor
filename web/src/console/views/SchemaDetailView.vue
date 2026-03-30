@@ -347,22 +347,15 @@ onMounted(async () => {
 function syncSidebarFromJson(json: string) {
   try {
     const parsed = JSON.parse(json)
-    const login = parsed?.['x-login'] || {}
-    const branding = parsed?.['x-branding'] || {}
-    const methods = parsed?.['x-auth-methods'] || login.auth_methods || {}
+    const methods = parsed?.['x-auth-methods'] || {}
 
-    loginStrategy.value = login.strategy || 'identifier_first'
     authPassword.value = methods.password?.enabled ?? true
     authMagicLink.value = methods.magic_link?.enabled ?? true
     authPasskey.value = methods.passkey?.enabled ?? false
     authSSO.value = methods.sso?.enabled ?? true
-    mfaRequired.value = login.mfa_required ?? false
-    registrationAllowed.value = login.registration_allowed ?? true
     authPAT.value = methods.pat?.enabled ?? false
     authAPIKey.value = methods.api_key?.enabled ?? false
     authClientCert.value = methods.client_cert?.enabled ?? false
-    brandHeading.value = branding.heading || 'Welcome back'
-    brandPrimary.value = branding.colors?.primary || '#6366f1'
   } catch {}
 }
 
@@ -379,17 +372,6 @@ function onQuickSettingChange() {
     am.pat = { ...(am.pat || {}), enabled: authPAT.value, interactive: false }
     am.api_key = { ...(am.api_key || {}), enabled: authAPIKey.value, interactive: false }
     am.client_cert = { ...(am.client_cert || {}), enabled: authClientCert.value, interactive: false }
-
-    if (!parsed['x-login']) parsed['x-login'] = {}
-    parsed['x-login'].strategy = loginStrategy.value
-    parsed['x-login'].mfa_required = mfaRequired.value
-    parsed['x-login'].registration_allowed = registrationAllowed.value
-    delete parsed['x-login'].auth_methods
-
-    if (!parsed['x-branding']) parsed['x-branding'] = {}
-    parsed['x-branding'].heading = brandHeading.value
-    if (!parsed['x-branding'].colors) parsed['x-branding'].colors = {}
-    parsed['x-branding'].colors.primary = brandPrimary.value
 
     editorContent.value = JSON.stringify(parsed, null, 2)
     jsonError.value = ''

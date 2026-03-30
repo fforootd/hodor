@@ -104,7 +104,10 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Serve web assets (JS/CSS) from go:embed.
 	webFS, err := fs.Sub(webAssets, "webdist")
 	if err == nil {
-		mux.Handle("GET /assets/", http.FileServer(http.FS(webFS)))
+		mux.Handle("GET /assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			http.FileServer(http.FS(webFS)).ServeHTTP(w, r)
+		}))
 	}
 
 	// Vue login page — server-rendered shell enhanced by Vue.

@@ -620,10 +620,13 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := id.New()
-
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// TODO: validate data against schema if req.SchemaID is set
+	write, err := a.prepareUserWrite(r.Context(), req.SchemaID, req.Identifier, req.DisplayName, req.Metadata, req.Profile)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -632,34 +635,16 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	metadataJSON := "{}"
-	if req.Metadata != nil {
-		if b, err := json.Marshal(req.Metadata); err == nil {
-			metadataJSON = string(b)
-		}
-	}
-	// If profile data was provided, merge it into metadata.
-	if req.Profile != nil && metadataJSON == "{}" {
-		if b, err := json.Marshal(req.Profile); err == nil {
-			metadataJSON = string(b)
-		}
-	}
-
 	userType := "human"
-	if req.SchemaID != "" {
-		// Derive type from schema if available.
-		var schemaType string
-		a.db.SQL().QueryRow(`SELECT type FROM schemas WHERE id = ?`, req.SchemaID).Scan(&schemaType)
-		if schemaType == "service_user" || schemaType == "ai_agent" {
-			userType = schemaType
-		}
+	if write.Schema.Type == "service_user" || write.Schema.Type == "ai_agent" {
+		userType = write.Schema.Type
 	}
 
 	orgID := r.Header.Get("X-Org-Id")
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-		userID, orgID, req.Identifier, req.DisplayName, userType, req.SchemaID, metadataJSON, now, now,
+		userID, orgID, req.Identifier, req.DisplayName, userType, write.Schema.ID, write.MetadataJSON, now, now,
 	)
 	if err != nil {
 		// Do not swallow the actual SQL error message!
@@ -673,7 +658,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce uniqueness via unique_fields table (ADR-016).
-	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, userID, orgID, req.Identifier); err != nil {
+	if err := enforceUserUniqueness(r.Context(), tx, userID, orgID, req.Identifier, write); err != nil {
 		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
 				"error": "uniqueness_violation",
@@ -836,9 +821,36 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var currentIdentifier, currentDisplayName, currentSchemaID, currentMetadata string
+	err = a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT identifier, COALESCE(display_name,''), COALESCE(schema_id,''), COALESCE(metadata,'{}')
+		 FROM users WHERE id = ?`,
+		userID,
+	).Scan(&currentIdentifier, &currentDisplayName, &currentSchemaID, &currentMetadata)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "identity not found")
+		return
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(currentMetadata), &metadata); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "invalid stored metadata")
+		return
+	}
+
+	nextDisplayName := currentDisplayName
+	if strings.TrimSpace(req.DisplayName) != "" {
+		nextDisplayName = strings.TrimSpace(req.DisplayName)
+	}
+
+	if _, err := a.prepareExistingUserWrite(r.Context(), currentSchemaID, currentIdentifier, nextDisplayName, metadata); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
+
 	p := newPatch()
 	p.Set("state", req.State)
-	p.Set("display_name", req.DisplayName)
+	p.Set("display_name", nextDisplayName)
 
 	query, args := p.Build("users", userID)
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
@@ -978,9 +990,8 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate x-auth-methods keys.
-	if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
-		httputil.WriteError(w, http.StatusBadRequest, validationErr)
+	if err := schema.ValidateSchemaDocument(schemaJSON); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1122,9 +1133,8 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate x-auth-methods keys.
-	if validationErr := validateSchemaAnnotations(schemaJSON); validationErr != "" {
-		httputil.WriteError(w, http.StatusBadRequest, validationErr)
+	if err := schema.ValidateSchemaDocument(schemaJSON); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1960,10 +1970,9 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 	userID := id.New()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	metadataJSON := "{}"
-	if req.Profile != nil {
-		b, _ := json.Marshal(req.Profile)
-		metadataJSON = string(b)
+	write, err := a.prepareUserWrite(r.Context(), req.SchemaID, req.Identifier, req.DisplayName, req.Metadata, req.Profile)
+	if err != nil {
+		return UserResponse{}, err
 	}
 
 	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
@@ -1973,11 +1982,19 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
-		 VALUES (?, '_global', ?, ?, 'human', 'active', ?, ?, ?)`,
-		userID, req.Identifier, req.DisplayName, metadataJSON, now, now)
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, '_global', ?, ?, ?, 'active', ?, ?, ?, ?)`,
+		userID, req.Identifier, req.DisplayName, func() string {
+			if write.Schema.Type == "service_user" || write.Schema.Type == "ai_agent" {
+				return write.Schema.Type
+			}
+			return "human"
+		}(), write.Schema.ID, write.MetadataJSON, now, now)
 	if err != nil {
 		return UserResponse{}, fmt.Errorf("insert: %w", err)
+	}
+	if err := enforceUserUniqueness(r.Context(), tx, userID, "_global", req.Identifier, write); err != nil {
+		return UserResponse{}, err
 	}
 
 	emitEvent(r.Context(), tx, "identity.created", userID, userID, "identity", map[string]any{
@@ -1998,18 +2015,61 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 
 // UpdateUserInternal is an exported helper for the UI to update an identity.
 func (a *API) UpdateUserInternal(r *http.Request, userID string, req UserRequest) (UserResponse, error) {
-	p := newPatch()
-	p.Set("state", req.State)
-	p.SetJSON("metadata", req.Profile)
+	var currentIdentifier, currentDisplayName, currentSchemaID, currentMetadata, orgID string
+	err := a.db.SQL().QueryRowContext(r.Context(),
+		`SELECT identifier, COALESCE(display_name,''), COALESCE(schema_id,''), COALESCE(metadata,'{}'), COALESCE(org_id,'')
+		 FROM users WHERE id = ?`,
+		userID,
+	).Scan(&currentIdentifier, &currentDisplayName, &currentSchemaID, &currentMetadata, &orgID)
+	if err != nil {
+		return UserResponse{}, fmt.Errorf("identity %s", userID)
+	}
 
-	query, args := p.Build("users", userID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	metadata, err := schema.ObjectMap(json.RawMessage(currentMetadata))
+	if err != nil {
+		return UserResponse{}, err
+	}
+	profile, err := schema.ObjectMap(req.Profile)
+	if err != nil {
+		return UserResponse{}, err
+	}
+	for k, v := range profile {
+		metadata[k] = v
+	}
+
+	nextDisplayName := currentDisplayName
+	if strings.TrimSpace(req.DisplayName) != "" {
+		nextDisplayName = strings.TrimSpace(req.DisplayName)
+	}
+
+	write, err := a.prepareExistingUserWrite(r.Context(), currentSchemaID, currentIdentifier, nextDisplayName, metadata)
+	if err != nil {
+		return UserResponse{}, err
+	}
+
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		return UserResponse{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
+		`UPDATE users
+		 SET state = COALESCE(NULLIF(?, ''), state),
+		     display_name = ?,
+		     metadata = ?,
+		     updated_at = ?
+		 WHERE id = ?`,
+		req.State, nextDisplayName, write.MetadataJSON, time.Now().UTC().Format(time.RFC3339), userID,
+	)
 	if err != nil {
 		return UserResponse{}, fmt.Errorf("update: %w", err)
 	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return UserResponse{}, fmt.Errorf("identity %s", userID)
+	if err := reindexUserUniqueness(r.Context(), tx, userID, orgID, currentIdentifier, write); err != nil {
+		return UserResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UserResponse{}, fmt.Errorf("commit: %w", err)
 	}
 
 	a.EmitAuthEvent(r.Context(), "identity.updated", userID, nil)

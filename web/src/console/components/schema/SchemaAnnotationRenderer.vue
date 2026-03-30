@@ -17,41 +17,13 @@
         </AccordionContent>
       </AccordionItem>
 
-      <!-- Login flow: only if x-login exists -->
-      <AccordionItem v-if="has('x-login')" value="login" class="border-b">
-        <AccordionTrigger class="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
-          Login Flow
-        </AccordionTrigger>
-        <AccordionContent class="px-4 pb-3">
-          <XLoginPanel
-            :config="annotation('x-login')"
-            :auth-methods="annotation('x-auth-methods')"
-            @change="$emit('change')"
-          />
-        </AccordionContent>
-      </AccordionItem>
-
-      <!-- Non-interactive auth methods: only if x-auth-methods exists AND no x-login -->
-      <AccordionItem v-if="has('x-auth-methods') && !has('x-login')" value="auth-methods" class="border-b">
+      <AccordionItem v-if="has('x-auth-methods')" value="auth-methods" class="border-b">
         <AccordionTrigger class="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
           Auth Methods
         </AccordionTrigger>
         <AccordionContent class="px-4 pb-3">
           <XAuthMethodsPanel
             :config="annotation('x-auth-methods')"
-            @change="$emit('change')"
-          />
-        </AccordionContent>
-      </AccordionItem>
-
-      <!-- Branding: only if x-branding exists -->
-      <AccordionItem v-if="has('x-branding')" value="branding" class="border-b">
-        <AccordionTrigger class="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
-          Branding
-        </AccordionTrigger>
-        <AccordionContent class="px-4 pb-3">
-          <XBrandingPanel
-            :config="annotation('x-branding')"
             @change="$emit('change')"
           />
         </AccordionContent>
@@ -101,9 +73,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import XVersionPanel from './XVersionPanel.vue'
-import XLoginPanel from './XLoginPanel.vue'
 import XAuthMethodsPanel from './XAuthMethodsPanel.vue'
-import XBrandingPanel from './XBrandingPanel.vue'
 import XClaimMappingPanel from './XClaimMappingPanel.vue'
 import XFieldsPanel from './XFieldsPanel.vue'
 
@@ -136,8 +106,7 @@ const hasClaimMappings = computed(() => {
 // Open version + fields by default, plus any annotation sections that exist
 const defaultPanels = computed(() => {
   const panels = ['version', 'fields']
-  if (has('x-login')) panels.push('login')
-  if (has('x-branding')) panels.push('branding')
+  if (has('x-auth-methods')) panels.push('auth-methods')
   return panels
 })
 </script>

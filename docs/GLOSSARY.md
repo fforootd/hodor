@@ -8,7 +8,7 @@ This document defines the core vocabulary and terminology mappings for the Zitad
 | **Schema** | A versioned JSON Schema that defines the shape, behavior, and display of an entity type. | Fixed database columns |
 | **Type** | The machine identifier for a schema (e.g., `human_user`, `app`). Immutable. | Hardcoded class/model |
 | **Alias** | The human-readable name for a type (e.g., "Users"). Defined via `x-display`. | - |
-| **Group** | A navigation section that categorizes schema types (e.g., "identities", "applications"). Replaces the concept of "Projects". A Group containing apps, users, and grants IS a project. | Project |
+| **Group** | A first-class collaborative resource plus a navigation/category concept depending on context. In the current prototype, Groups and Projects both exist as distinct resources. | Group / Team |
 | **Path** | An API route alias (e.g., "users" → `/v1/users`). Defined via `x-display`. | - |
 | **App** | An OIDC/SAML Client. It is simply an entity with a specific schema (`app` or `app_saml`). | OIDC Client, OAuth App |
 | **Org** | Organization. The top-level scope/context for filtering entities. | Tenant |

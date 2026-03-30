@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
 	"os"
@@ -20,6 +21,8 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/schema"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // SeedFile represents the top-level structure of a seed YAML file.
@@ -233,9 +236,13 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID str
 	if state == "" {
 		state = "active"
 	}
-	schemaID := ident.SchemaID
-	if schemaID == "" {
-		schemaID = "human_user_v1"
+	schemaRec, err := resolveSeedUserSchema(ctx, tx, ident.SchemaID)
+	if err != nil {
+		return err
+	}
+	payload := schema.MaterializeUserData(schemaRec.Schema, ident.Identifier, ident.DisplayName, ident.Profile)
+	if err := schema.ValidateData(schemaRec.Schema, payload); err != nil {
+		return err
 	}
 	profileJSON := "{}"
 	if ident.Profile != nil {
@@ -244,10 +251,21 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID str
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		newID, orgID, ident.Identifier, ident.DisplayName, state, schemaID, profileJSON)
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		newID, orgID, ident.Identifier, ident.DisplayName, func() string {
+			if schemaRec.Type == "service_user" || schemaRec.Type == "ai_agent" {
+				return schemaRec.Type
+			}
+			return "human"
+		}(), state, schemaRec.ID, profileJSON)
 	if err != nil {
+		return err
+	}
+	if err := uniqueness.EnforceFromIdentifier(ctx, tx, newID, orgID, ident.Identifier); err != nil {
+		return err
+	}
+	if err := uniqueness.Enforce(ctx, tx, newID, orgID, uniqueness.ExtractConstraints(schemaRec.Schema), payload); err != nil {
 		return err
 	}
 
@@ -317,6 +335,50 @@ func updateExistingIdentity(ctx context.Context, tx *sql.Tx, userID string, iden
 	}
 
 	return nil
+}
+
+func resolveSeedUserSchema(ctx context.Context, tx *sql.Tx, schemaID string) (*schema.SchemaRecord, error) {
+	if strings.TrimSpace(schemaID) != "" {
+		var rec schema.SchemaRecord
+		err := tx.QueryRowContext(ctx,
+			`SELECT id, type, schema FROM schemas WHERE id = ?`,
+			schemaID,
+		).Scan(&rec.ID, &rec.Type, &rec.Schema)
+		if err != nil {
+			return nil, err
+		}
+		if !schema.IsUserSchemaType(rec.Type) {
+			return nil, fmt.Errorf("schema %q is type %q, not a user schema", rec.ID, rec.Type)
+		}
+		return &rec, nil
+	}
+
+	var rec schema.SchemaRecord
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, type, schema
+		 FROM schemas
+		 WHERE type = 'human_user' AND is_default = true
+		 ORDER BY created_at ASC
+		 LIMIT 1`,
+	).Scan(&rec.ID, &rec.Type, &rec.Schema)
+	if err == nil {
+		return &rec, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, type, schema
+		 FROM schemas
+		 WHERE type = 'human_user'
+		 ORDER BY version DESC, created_at ASC
+		 LIMIT 1`,
+	).Scan(&rec.ID, &rec.Type, &rec.Schema)
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 // seedCapabilities is a no-op — capabilities are now handled by FGA.

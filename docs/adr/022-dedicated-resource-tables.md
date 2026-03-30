@@ -97,7 +97,7 @@ CREATE TABLE users (
 ```
 
 - `identifier` — the primary login name. That's the only identity field as a typed column.
-- Email, phone, employee_id — all in `metadata`, enforced via `unique_fields` when schema declares `x-unique`.
+- Email, phone, employee_id — all in `metadata`, enforced via `unique_fields` when schema declares `x-unique`. In the current implementation this uniqueness index is user-backed (`unique_fields.user_id`), not yet generalized across every dedicated table.
 - `user_type` — discriminator for `human`, `service`, `ai_agent`. Same table, different schemas.
 
 ### 5. FK Integrity

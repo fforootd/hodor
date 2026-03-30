@@ -91,6 +91,8 @@ export interface FlowStep {
   step: string
   nodes: UINode[]
   branding: FlowBranding
+  captcha_required?: boolean
+  captcha_verified?: boolean
   identity?: FlowIdentity
   errors?: FlowError[]
   messages?: FlowMessage[]
@@ -155,6 +157,13 @@ export const flowApi = {
 
   get: (baseUrl = '', flowId: string) =>
     requestJSON<FlowStep>(`/v1/login/flows/${flowId}`, { headers: flowHeaders() }, baseUrl),
+
+  captchaChallenge: (baseUrl = '', flowId: string) =>
+    requestJSON<Record<string, unknown>>(
+      `/v1/login/flows/${flowId}/captcha/challenge`,
+      { headers: flowHeaders() },
+      baseUrl,
+    ),
 
   ready: async (baseUrl = '') => {
     const text = await requestText('/readyz', { headers: { Accept: 'text/plain' } }, baseUrl)

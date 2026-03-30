@@ -204,7 +204,10 @@ const isInteractiveIdentity = computed(() => {
   return !!(s['x-identifier'] || s['x-auth-methods'])
 })
 
-const hasLogin = computed(() => !!(currentSchema.value?.schema as any)?.['x-login'])
+const hasLogin = computed(() => {
+  const methods = (currentSchema.value?.schema as any)?.['x-auth-methods'] || {}
+  return Object.values(methods).some((method: any) => method?.interactive !== false && method?.enabled !== false)
+})
 const hasPassword = computed(() => {
   const methods = (currentSchema.value?.schema as any)?.['x-auth-methods'] || {}
   return methods.password?.enabled ?? false

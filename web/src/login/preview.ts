@@ -13,23 +13,63 @@ function buildAuthNodes(strategy: string): UINode[] {
       return [
         { type: 'button', label: 'Continue with passkey', action: 'passkey' },
         { type: 'divider' },
-        { type: 'input', name: 'identifier', label: 'Email', input_type: 'email', placeholder: 'name@example.com', required: true },
-        { type: 'input', name: 'password', label: 'Password', input_type: 'password', placeholder: '••••••••', required: true },
+        {
+          type: 'input',
+          name: 'identifier',
+          label: 'Email',
+          input_type: 'email',
+          placeholder: 'name@example.com',
+          required: true,
+        },
+        {
+          type: 'input',
+          name: 'password',
+          label: 'Password',
+          input_type: 'password',
+          placeholder: '••••••••',
+          required: true,
+        },
       ]
     case 'sso_only':
       return [
         {
           type: 'social_group',
           children: [
-            { type: 'sso_button', label: 'Continue with Google', action: 'sso', provider_id: 'google', template: 'google' },
-            { type: 'sso_button', label: 'Continue with Microsoft', action: 'sso', provider_id: 'entraid', template: 'entraid' },
+            {
+              type: 'sso_button',
+              label: 'Continue with Google',
+              action: 'sso',
+              provider_id: 'google',
+              template: 'google',
+            },
+            {
+              type: 'sso_button',
+              label: 'Continue with Microsoft',
+              action: 'sso',
+              provider_id: 'entraid',
+              template: 'entraid',
+            },
           ],
         },
       ]
     default:
       return [
-        { type: 'input', name: 'identifier', label: 'Email', input_type: 'email', placeholder: 'name@example.com', required: true },
-        { type: 'input', name: 'password', label: 'Password', input_type: 'password', placeholder: '••••••••', required: true },
+        {
+          type: 'input',
+          name: 'identifier',
+          label: 'Email',
+          input_type: 'email',
+          placeholder: 'name@example.com',
+          required: true,
+        },
+        {
+          type: 'input',
+          name: 'password',
+          label: 'Password',
+          input_type: 'password',
+          placeholder: '••••••••',
+          required: true,
+        },
       ]
   }
 }
@@ -68,6 +108,8 @@ export function buildPreviewFlowStep(options: LoginFlowPreviewOptions): FlowStep
     step: 'preview',
     nodes,
     branding: options.branding,
+    captcha_required: options.captchaEnabled,
+    captcha_verified: false,
     errors: [],
     messages: [],
   }

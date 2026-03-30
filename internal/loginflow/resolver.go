@@ -36,7 +36,7 @@ type LoginFlow struct {
 	ID          string          `json:"id"`
 	OrgID       string          `json:"org_id"`
 	Name        string          `json:"name"`
-	Strategy      string          `json:"strategy"`
+	Strategy    string          `json:"strategy"`
 	Config      json.RawMessage `json:"config"`
 	IsDefault   bool            `json:"is_default"`
 	Enabled     bool            `json:"enabled"`

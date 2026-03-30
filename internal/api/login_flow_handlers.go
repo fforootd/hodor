@@ -25,6 +25,10 @@ func (a *API) RegisterLoginFlowRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/login-flows/{id}/test", a.testLoginFlowAudience)
 	mux.HandleFunc("GET /v1/login-flows/{id}/export", a.exportLoginFlow)
 	mux.HandleFunc("POST /v1/login-flows/resolve", a.resolveLoginFlow)
+	mux.HandleFunc("POST /v1/login-flows/{id}/assets", a.uploadLoginFlowAsset)
+	mux.HandleFunc("POST /v1/login-flows/{id}/assets/import", a.importLoginFlowAsset)
+	mux.HandleFunc("DELETE /v1/login-flows/{id}/assets/{assetId}", a.deleteLoginFlowAsset)
+	mux.HandleFunc("GET /assets/login/{id}", a.serveLoginFlowAsset)
 	logging.Printf("[api] registered /v1/login-flows (full CRUD + promote/archive/test/export/resolve)")
 }
 

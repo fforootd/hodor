@@ -3,7 +3,7 @@
   "$version": "1.0",
   "type": "object",
   "x-table": "login_flows",
-  "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, audience targeting, and layout behavior. Supports gradual rollout via schema_id and user_id targeting. Inherits from the instance default and can be overridden at org/project/app level (ADR-009).",
+  "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, audience targeting, and layout behavior. Supports gradual rollout via schema_id and user_id targeting. Inherits from the instance default and can currently be overridden at the instance or org level.",
   "properties": {
     "display_name": {
       "type": "string",
@@ -16,7 +16,7 @@
     "is_default": {
       "type": "boolean",
       "default": false,
-      "description": "If true, this flow is the default for its scope (instance/org/app)"
+      "description": "If true, this flow is the default for its scope (instance or org)"
     },
     "state": {
       "type": "string",
@@ -31,13 +31,9 @@
     },
     "scope": {
       "type": "string",
-      "enum": ["instance", "org", "project", "app"],
+      "enum": ["instance", "org"],
       "default": "instance",
-      "description": "Level at which this flow applies (ADR-009 cascade)"
-    },
-    "app_id": {
-      "type": "string",
-      "description": "If scope=app, the specific app this flow is bound to"
+      "description": "Level at which this flow applies. Current runtime support is limited to instance and org targeting."
     },
     "audience": {
       "type": "object",

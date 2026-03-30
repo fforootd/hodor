@@ -7,8 +7,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -21,20 +21,23 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/loginflow"
 	"github.com/zitadel/zitadel/internal/notify"
+	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // Handler provides login-flow API endpoints.
 type Handler struct {
-	db        *database.DB
-	passwords *auth.Passwords
-	api       SessionCreator
-	notify    notify.Channel
-	baseURL   string
-	flows     *FlowStore
-	cookies   *session.CookieConfig
-	captcha   *captcha.AltchaVerifier
-	resolver  *loginflow.Resolver
+	db             *database.DB
+	passwords      *auth.Passwords
+	api            SessionCreator
+	notify         notify.Channel
+	baseURL        string
+	flows          *FlowStore
+	cookies        *session.CookieConfig
+	captchaHMACKey string
+	captchaHTTP    *http.Client
+	resolver       *loginflow.Resolver
 }
 
 // New creates a new login API handler.
@@ -44,15 +47,16 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, coo
 	hmacKey, _ := captcha.GenerateHMACKey()
 
 	return &Handler{
-		db:        db,
-		passwords: passwords,
-		api:       restAPI,
-		notify:    notify.NewStdout(),
-		baseURL:   "http://localhost:8080",
-		flows:     NewFlowStore(),
-		cookies:   cookies,
-		captcha:   captcha.NewAltchaVerifier(hmacKey, "SHA-256", 100000),
-		resolver:  resolver,
+		db:             db,
+		passwords:      passwords,
+		api:            restAPI,
+		notify:         notify.NewStdout(),
+		baseURL:        "http://localhost:8080",
+		flows:          NewFlowStore(),
+		cookies:        cookies,
+		captchaHMACKey: hmacKey,
+		captchaHTTP:    &http.Client{Timeout: 10 * time.Second},
+		resolver:       resolver,
 	}
 }
 
@@ -64,11 +68,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	// Flow API (schema-driven) — the sole interface for login UI.
 	mux.HandleFunc("POST /v1/login/flows", h.handleFlowCreate)
+	mux.HandleFunc("GET /v1/login/flows/{id}/captcha/challenge", h.handleFlowCaptchaChallenge)
 	mux.HandleFunc("POST /v1/login/flows/", h.handleFlowSubmit)
 	mux.HandleFunc("GET /v1/login/flows/", h.handleFlowGet)
-
-	// Captcha API — PoW challenge generation.
-	mux.HandleFunc("GET /v1/captcha/challenge", h.handleCaptchaChallenge)
 
 	// Magic Link (verification endpoint — used by email links).
 	mux.HandleFunc("POST /v1/auth/magic-link", h.handleMagicLinkRequest)
@@ -124,7 +126,7 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"strategy":               cfg.Login.Strategy,
+		"strategy":             cfg.Login.Strategy,
 		"auth_methods":         authMethods,
 		"mfa_required":         cfg.Login.MFARequired,
 		"registration_allowed": cfg.Login.RegistrationAllowed,
@@ -132,28 +134,24 @@ func (h *Handler) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// loadSSOProviders reads enabled SSO providers from the entities table.
+// loadSSOProviders reads enabled SSO providers from the dedicated providers table.
 func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
-	je := h.db.JSONExtract
 	var ssoProviders []map[string]any
 	rows, err := h.db.SQL().QueryContext(r.Context(),
-		fmt.Sprintf(`SELECT e.id, e.identifier, e.data FROM users e
-		 JOIN schemas s ON e.schema_id = s.id
-		 WHERE s.type = 'provider' AND e.state = 'active'
-		 ORDER BY CAST(%s AS INTEGER), e.identifier`, je("e.data", "display_order")))
+		`SELECT id, name, protocol, COALESCE(template, '')
+		 FROM providers
+		 WHERE enabled = 1 OR enabled = true
+		 ORDER BY display_order ASC, name ASC`,
+	)
 	if err != nil {
 		return ssoProviders
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var pid, pname, dataStr string
-		if rows.Scan(&pid, &pname, &dataStr) == nil {
-			var data map[string]any
-			json.Unmarshal([]byte(dataStr), &data)
-			ptemplate, _ := data["template"].(string)
-			pprotocol, _ := data["protocol"].(string)
+		var pid, pname, protocol, template string
+		if rows.Scan(&pid, &pname, &protocol, &template) == nil {
 			ssoProviders = append(ssoProviders, map[string]any{
-				"id": pid, "name": pname, "template": ptemplate, "protocol": pprotocol,
+				"id": pid, "name": pname, "template": template, "protocol": protocol,
 			})
 		}
 	}
@@ -176,25 +174,17 @@ func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
 }
 
 func (h *Handler) getDefaultSchemaConfigStrict(ctx context.Context) (*SchemaAuthConfig, error) {
-	var schemaJSON string
-	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT schema FROM schemas WHERE is_default = true ORDER BY created_at ASC LIMIT 1`,
-	).Scan(&schemaJSON)
-	if err != nil || schemaJSON == "" {
-		err = h.db.SQL().QueryRowContext(ctx,
-			`SELECT schema FROM schemas ORDER BY created_at ASC LIMIT 1`,
-		).Scan(&schemaJSON)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, errors.New("no default schema configured")
-			}
-			return nil, fmt.Errorf("load first schema: %w", err)
+	schemaRec, err := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("no default schema configured")
 		}
-		if schemaJSON == "" {
-			return nil, errors.New("no user schema configured")
-		}
+		return nil, err
 	}
-	return ExtractAuthConfig(schemaJSON), nil
+	cfg := ExtractAuthConfig(schemaRec.Schema)
+	cfg.SchemaID = schemaRec.ID
+	cfg.SchemaType = schemaRec.Type
+	return cfg, nil
 }
 
 // getResolvedConfig resolves the best login flow for the request context,
@@ -209,14 +199,26 @@ func (h *Handler) getResolvedConfig(r *http.Request, flowIDOverride string) *Sch
 	return cfg
 }
 
-// loadFlowConfig loads a specific login flow by ID for preview.
-func (h *Handler) loadFlowConfig(ctx context.Context, flowID string, r *http.Request) *SchemaAuthConfig {
-	cfg, err := h.loadFlowConfigStrict(ctx, flowID, r)
-	if err != nil {
-		logging.Printf("[login] preview flow %s not found: %v, falling back", flowID, err)
-		return h.getDefaultSchemaConfig(r)
+func (h *Handler) altchaVerifierForConfig(cfg *SchemaAuthConfig) *captcha.AltchaVerifier {
+	algorithm := "SHA-256"
+	maxNumber := 100000
+	if cfg != nil && cfg.Captcha != nil {
+		if cfg.Captcha.Algorithm != "" {
+			algorithm = cfg.Captcha.Algorithm
+		}
+		if cfg.Captcha.MaxNumber > 0 {
+			maxNumber = cfg.Captcha.MaxNumber
+		}
 	}
-	return cfg
+	return captcha.NewAltchaVerifier(h.captchaHMACKey, algorithm, maxNumber)
+}
+
+func remoteIPFromAddr(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return host
+	}
+	return addr
 }
 
 func (h *Handler) loadFlowConfigStrict(ctx context.Context, flowID string, r *http.Request) (*SchemaAuthConfig, error) {
@@ -232,23 +234,11 @@ func (h *Handler) loadFlowConfigStrict(ctx context.Context, flowID string, r *ht
 
 	lf := &loginflow.LoginFlow{
 		ID:          flowID,
-		Strategy:      strategy,
+		Strategy:    strategy,
 		Config:      json.RawMessage(configJSON),
 		AuthMethods: json.RawMessage(authMethodsJSON),
 	}
 	return h.buildConfigFromFlowStrict(ctx, lf, r)
-}
-
-// buildConfigFromFlow constructs a SchemaAuthConfig from a resolved login flow.
-// It starts with the flow's config (branding, captcha, etc.) and merges
-// the user schema's auth methods as narrower overrides.
-func (h *Handler) buildConfigFromFlow(ctx context.Context, lf *loginflow.LoginFlow, r *http.Request) *SchemaAuthConfig {
-	cfg, err := h.buildConfigFromFlowStrict(ctx, lf, r)
-	if err != nil {
-		logging.Printf("[login] flow build failed for %s: %v, falling back", lf.ID, err)
-		return h.getDefaultSchemaConfig(r)
-	}
-	return cfg
 }
 
 func (h *Handler) buildConfigFromFlowStrict(ctx context.Context, lf *loginflow.LoginFlow, r *http.Request) (*SchemaAuthConfig, error) {
@@ -381,15 +371,49 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 		// REGISTRATION: create identity in pending state.
 		purpose = "register"
 		newID := id.New()
-		_, err = h.db.SQL().ExecContext(r.Context(),
-			`INSERT INTO users (id, org_id, identifier, display_name, state, profile, metadata, created_at, updated_at)
-			 VALUES (?, 1, ?, ?, 'pending', '{}', '{}', datetime('now'), datetime('now'))`,
-			newID, email, email,
+		schemaRec, schemaErr := schema.ResolveDefaultHumanUserSchema(r.Context(), h.db.SQL())
+		if schemaErr != nil {
+			logging.Printf("[magic-link] default human user schema unavailable: %v", schemaErr)
+			httputil.WriteError(w, http.StatusInternalServerError, "registration is not available")
+			return
+		}
+
+		payload := schema.MaterializeUserData(schemaRec.Schema, email, email, map[string]any{})
+		if validateErr := schema.ValidateData(schemaRec.Schema, payload); validateErr != nil {
+			logging.Printf("[magic-link] default schema rejected pending identity for %s: %v", email, validateErr)
+			httputil.WriteError(w, http.StatusInternalServerError, "registration is not available")
+			return
+		}
+
+		tx, txErr := h.db.SQL().BeginTx(r.Context(), nil)
+		if txErr != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
+			return
+		}
+		defer tx.Rollback()
+
+		_, err = tx.ExecContext(r.Context(),
+			`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, 1, ?, ?, 'pending', ?, '{}', datetime('now'), datetime('now'))`,
+			newID, email, email, schemaRec.ID,
 		)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
 			return
 		}
+		if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, newID, "1", email); err != nil {
+			httputil.WriteError(w, http.StatusConflict, "identifier already exists")
+			return
+		}
+		if err := uniqueness.Enforce(r.Context(), tx, newID, "1", uniqueness.ExtractConstraints(schemaRec.Schema), payload); err != nil {
+			httputil.WriteError(w, http.StatusConflict, "identifier already exists")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
+			return
+		}
+
 		userID = newID
 		logging.Printf("[magic-link] created pending identity %s for %s", userID, email)
 	} else if err != nil {

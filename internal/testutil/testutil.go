@@ -22,6 +22,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/server"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // TestServer wraps a full Zitadel server for integration testing.
@@ -59,6 +60,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	if err := bootstrap.EnsureAdmin(t.Context(), db, ""); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
+	disableDefaultLoginFlowCaptcha(t, db)
 
 	// Read admin password from the identity.
 	var adminPwd string
@@ -103,6 +105,36 @@ func NewTestServer(t *testing.T) *TestServer {
 	}
 }
 
+func disableDefaultLoginFlowCaptcha(t *testing.T, db *database.DB) {
+	t.Helper()
+
+	var flowID, configJSON string
+	err := db.SQL().QueryRow(`SELECT id, COALESCE(config,'{}') FROM login_flows WHERE is_default = 1 OR is_default = true LIMIT 1`).Scan(&flowID, &configJSON)
+	if err != nil {
+		return
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+		t.Fatalf("parse default login flow config: %v", err)
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	config["captcha"] = map[string]any{
+		"provider": "none",
+		"mode":     "never",
+	}
+
+	updated, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal default login flow config: %v", err)
+	}
+	if _, err := db.SQL().Exec(`UPDATE login_flows SET config = ? WHERE id = ?`, string(updated), flowID); err != nil {
+		t.Fatalf("disable test captcha: %v", err)
+	}
+}
+
 // URL returns the test server base URL.
 func (ts *TestServer) URL() string {
 	return ts.Server.URL
@@ -132,12 +164,24 @@ func (ts *TestServer) CreateIdentity(identifier, displayName string) string {
 	userID = id.New()
 
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	_, err = ts.DB.SQL().Exec(
-		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'human', 'active', '{}', ?, ?)`,
+	tx, err := ts.DB.SQL().Begin()
+	if err != nil {
+		ts.t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'human', 'active', 'human_user_v1', '{}', ?, ?)`,
 		userID, ts.OrgID, identifier, displayName, now, now)
 	if err != nil {
 		ts.t.Fatalf("insert identity: %v", err)
+	}
+	if err := uniqueness.EnforceFromIdentifier(ts.t.Context(), tx, userID, ts.OrgID, identifier); err != nil {
+		ts.t.Fatalf("index identity: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		ts.t.Fatalf("commit identity: %v", err)
 	}
 	return userID
 }

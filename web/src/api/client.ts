@@ -146,14 +146,18 @@ async function fetchWithContext(
   // Include device fingerprint if available (non-blocking — uses cached value).
   const fingerprint = getDeviceFingerprint()
 
+  const headers = new Headers(opts.headers || {})
+  if (!(opts.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   try {
     return await fetch(`${baseUrl}${path}`, {
       ...opts,
       headers: {
-        'Content-Type': 'application/json',
         Traceparent: traceparent,
         ...(fingerprint ? { 'X-Fingerprint': fingerprint } : {}),
-        ...opts.headers,
+        ...Object.fromEntries(headers.entries()),
       },
       credentials: credentialsMode(baseUrl),
     })
@@ -223,4 +227,6 @@ export const api = {
       ...(body ? { body: JSON.stringify(body) } : {}),
       headers,
     }),
+  postForm: <T>(path: string, body: FormData, headers?: Record<string, string>) =>
+    requestJSON<T>(path, { method: 'POST', body, headers }),
 }

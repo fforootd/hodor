@@ -5,12 +5,7 @@
   </Alert>
 
   <template v-if="flowStep?.errors?.length">
-    <Alert
-      v-for="(err, i) in flowStep.errors"
-      :key="'ge-' + i"
-      variant="destructive"
-      class="mb-4"
-    >
+    <Alert v-for="(err, i) in flowStep.errors" :key="'ge-' + i" variant="destructive" class="mb-4">
       <AlertCircle class="size-4" />
       <AlertDescription>{{ err.message }}</AlertDescription>
     </Alert>
@@ -31,12 +26,7 @@
   </template>
 
   <Transition name="fade" mode="out-in">
-    <form
-      v-if="flowStep"
-      :key="flowStep.step"
-      @submit.prevent="emit('submit')"
-      class="space-y-4"
-    >
+    <form v-if="flowStep" :key="flowStep.step" @submit.prevent="emit('submit')" class="space-y-4">
       <template v-for="(node, i) in flowStep.nodes" :key="i">
         <h1 v-if="node.type === 'heading'" class="text-xl font-semibold text-center">
           {{ node.text }}
@@ -104,7 +94,10 @@
               :disabled="preview"
             />
             <p
-              v-if="confirmPasswords[node.name!] && formData[node.name!] !== confirmPasswords[node.name!]"
+              v-if="
+                confirmPasswords[node.name!] &&
+                formData[node.name!] !== confirmPasswords[node.name!]
+              "
               class="text-xs text-destructive"
             >
               Passwords do not match
@@ -160,7 +153,13 @@
           v-else-if="node.type === 'submit'"
           type="submit"
           class="w-full"
-          :disabled="preview || loading || node.disabled || !passwordsMatch"
+          :disabled="
+            preview ||
+            loading ||
+            node.disabled ||
+            !passwordsMatch ||
+            actionDisabled(node.action || '')
+          "
           @click="emit('action', node.action || '')"
         >
           <Spinner v-if="loading" class="size-4 mr-2" />
@@ -171,7 +170,8 @@
           <Separator />
           <span
             class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground"
-          >or</span>
+            >or</span
+          >
         </div>
 
         <div v-else-if="node.type === 'social_group'" class="space-y-2">
@@ -181,7 +181,7 @@
             type="button"
             variant="outline"
             class="w-full gap-2"
-            :disabled="preview"
+            :disabled="preview || actionDisabled(child.action || 'sso')"
             @click="emit('action', child.action || 'sso', { provider_id: child.provider_id || '' })"
           >
             <span class="text-base">{{ ssoIcon(child.template || '') }}</span>
@@ -194,7 +194,7 @@
           type="button"
           variant="outline"
           class="w-full"
-          :disabled="preview || loading || node.disabled"
+          :disabled="preview || loading || node.disabled || actionDisabled(node.action || '')"
           @click="emit('action', node.action || '')"
         >
           {{ node.label }}
@@ -205,7 +205,7 @@
           type="button"
           variant="outline"
           class="w-full gap-2"
-          :disabled="preview"
+          :disabled="preview || actionDisabled(node.action || 'sso')"
           @click="emit('action', node.action || 'sso', { provider_id: node.provider_id || '' })"
         >
           <span class="text-base">{{ ssoIcon(node.template || '') }}</span>
@@ -244,7 +244,8 @@
             :href="node.attributes.terms_url"
             target="_blank"
             class="underline underline-offset-4 hover:text-foreground"
-          >Terms of Service</a>
+            >Terms of Service</a
+          >
           <template v-if="node.attributes?.terms_url && node.attributes?.privacy_url">
             and
           </template>
@@ -253,53 +254,21 @@
             :href="node.attributes.privacy_url"
             target="_blank"
             class="underline underline-offset-4 hover:text-foreground"
-          >Privacy Policy</a>.
+            >Privacy Policy</a
+          >.
         </p>
 
-        <div v-else-if="node.type === 'captcha_altcha'" class="space-y-2">
-          <div class="flex items-center gap-2 rounded-md border border-input px-3 py-2 text-sm">
-            <Spinner v-if="props.captchaSolving" class="size-4" />
-            <svg
-              v-else-if="props.captchaSolved"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              class="size-5 text-green-500"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                clip-rule="evenodd"
-              />
-            </svg>
-            <div
-              v-else
-              class="size-4 rounded border-2 border-muted-foreground/30"
-              :class="preview ? 'cursor-default' : 'cursor-pointer'"
-              @click="!preview && emit('solve-captcha')"
-            />
-            <span class="text-muted-foreground text-xs">
-              {{
-                props.captchaSolving ? 'Verifying...' : props.captchaSolved ? 'Verified' : 'I am human'
-              }}
-            </span>
-          </div>
-        </div>
-
-        <div v-else-if="node.type === 'captcha_checkbox'" class="space-y-2">
-          <div class="flex items-center gap-2 rounded-md border border-input px-3 py-2 text-sm">
-            <input
-              type="checkbox"
-              class="accent-[var(--brand-primary,#6366f1)]"
-              :checked="!!formData[node.name!]"
-              :disabled="preview"
-              @click="!preview && (formData[node.name!] = 'verified')"
-            />
-            <span class="text-muted-foreground text-xs">
-              I am human ({{ node.attributes?.provider || 'captcha' }})
-            </span>
-          </div>
-        </div>
+        <CaptchaWidget
+          v-else-if="node.type === 'captcha_altcha' || node.type === 'captcha_checkbox'"
+          :node="node"
+          :preview="preview"
+          :captcha-solving="props.captchaSolving"
+          :verified="props.captchaSolved"
+          @solve-altcha="emit('solve-captcha')"
+          @token="emit('captcha-token', $event)"
+          @reset="emit('captcha-reset')"
+          @error="emit('captcha-error', $event)"
+        />
 
         <div v-else-if="node.type === 'fingerprint_collect'" class="hidden" />
 
@@ -324,96 +293,120 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
-import type { FlowStep } from '@/api/branding'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Spinner } from '@/components/ui/spinner'
-import { AlertCircle } from 'lucide-vue-next'
+  import { computed, reactive } from 'vue'
+  import type { FlowStep } from '@/api/branding'
+  import { Button } from '@/components/ui/button'
+  import { Input } from '@/components/ui/input'
+  import { Label } from '@/components/ui/label'
+  import { Separator } from '@/components/ui/separator'
+  import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+  import { Alert, AlertDescription } from '@/components/ui/alert'
+  import { Spinner } from '@/components/ui/spinner'
+  import { AlertCircle } from 'lucide-vue-next'
+  import CaptchaWidget from './CaptchaWidget.vue'
 
-const props = withDefaults(
-  defineProps<{
-    flowStep: FlowStep | null
-    submitError?: string
-    loading?: boolean
-    preview?: boolean
-    captchaSolving?: boolean
-    captchaSolved?: boolean
-    formData?: Record<string, any>
-    confirmPasswords?: Record<string, string>
-  }>(),
-  {
-    submitError: '',
-    loading: false,
-    preview: false,
-    captchaSolving: false,
-    captchaSolved: false,
-    formData: () => ({}),
-    confirmPasswords: () => ({}),
-  },
-)
-
-const emit = defineEmits<{
-  submit: []
-  action: [action: string, extra?: Record<string, string>]
-  'solve-captcha': []
-}>()
-
-const formData = reactive(props.formData)
-const confirmPasswords = reactive(props.confirmPasswords)
-
-const isRegistrationStep = computed(() => props.flowStep?.step === 'register')
-const firstInputIndex = computed(() => {
-  if (!props.flowStep) return -1
-  return props.flowStep.nodes.findIndex((n) => n.type === 'input')
-})
-const passwordsMatch = computed(() => {
-  if (!isRegistrationStep.value) return true
-  for (const key of Object.keys(confirmPasswords)) {
-    if (confirmPasswords[key] && formData[key] !== confirmPasswords[key]) {
-      return false
-    }
-  }
-  return true
-})
-const ssoIcons: Record<string, string> = {
-  google: '🔵',
-  entraid: '🟦',
-  gitlab: '🦊',
-  apple: '🍎',
-  github: '🐙',
-  custom: '🔑',
-}
-
-function ssoIcon(template: string) {
-  return ssoIcons[template] || '🔑'
-}
-
-function renderConsentLabel(label: string): string {
-  return label.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" class="underline underline-offset-4 hover:text-foreground">$1</a>',
+  const props = withDefaults(
+    defineProps<{
+      flowStep: FlowStep | null
+      submitError?: string
+      loading?: boolean
+      preview?: boolean
+      captchaSolving?: boolean
+      captchaSolved?: boolean
+      captchaRequired?: boolean
+      formData?: Record<string, any>
+      confirmPasswords?: Record<string, string>
+    }>(),
+    {
+      submitError: '',
+      loading: false,
+      preview: false,
+      captchaSolving: false,
+      captchaSolved: false,
+      captchaRequired: false,
+      formData: () => ({}),
+      confirmPasswords: () => ({}),
+    },
   )
-}
+
+  const emit = defineEmits<{
+    submit: []
+    action: [action: string, extra?: Record<string, string>]
+    'solve-captcha': []
+    'captcha-token': [token: string]
+    'captcha-reset': []
+    'captcha-error': [message: string]
+  }>()
+
+  const formData = reactive(props.formData)
+  const confirmPasswords = reactive(props.confirmPasswords)
+
+  const isRegistrationStep = computed(() => props.flowStep?.step === 'register')
+  const firstInputIndex = computed(() => {
+    if (!props.flowStep) return -1
+    return props.flowStep.nodes.findIndex((n) => n.type === 'input')
+  })
+  const passwordsMatch = computed(() => {
+    if (!isRegistrationStep.value) return true
+    for (const key of Object.keys(confirmPasswords)) {
+      if (confirmPasswords[key] && formData[key] !== confirmPasswords[key]) {
+        return false
+      }
+    }
+    return true
+  })
+  const ssoIcons: Record<string, string> = {
+    google: '🔵',
+    entraid: '🟦',
+    gitlab: '🦊',
+    apple: '🍎',
+    github: '🐙',
+    custom: '🔑',
+  }
+
+  function ssoIcon(template: string) {
+    return ssoIcons[template] || '🔑'
+  }
+
+  function renderConsentLabel(label: string): string {
+    return label.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="_blank" class="underline underline-offset-4 hover:text-foreground">$1</a>',
+    )
+  }
+
+  const protectedCaptchaActions = new Set([
+    'identifier',
+    'password',
+    'magic_link',
+    'sso',
+    'register_submit',
+    'send_reset',
+  ])
+
+  function actionDisabled(action: string): boolean {
+    return (
+      !!action &&
+      !!props.captchaRequired &&
+      !props.captchaSolved &&
+      protectedCaptchaActions.has(action)
+    )
+  }
 </script>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
-}
-.fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
+  .fade-enter-active,
+  .fade-leave-active {
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+  .fade-enter-from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  .fade-leave-to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 </style>

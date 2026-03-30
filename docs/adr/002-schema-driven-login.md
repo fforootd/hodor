@@ -212,7 +212,7 @@ This enables gradual rollout:
 | Branding (heading, colors, layout, CSS) | **Login flow** | `branding` in flow config |
 | Captcha, fingerprint, rate limiting | **Login flow** | `captcha`, `fingerprint`, `rate_limit` |
 | Registration field selection | **Login flow** | `registration.fields`, `registration.user_schema` |
-| Audience targeting | **Login flow** | `audience` (org_ids, schema_ids, user_ids, app_ids) |
+| Audience targeting | **Login flow** | `audience` (org_ids, schema_ids, user_ids) |
 
 ### Auth methods cascade
 
@@ -229,4 +229,3 @@ Example: The login flow enables `password + magic_link + sso`. A `service_accoun
 ### Why
 
 The original ADR assumed a 1:1 mapping between user schema and login experience. In practice, customers need multiple login experiences for the same user schema (e.g., "Quick signup" vs. "Full signup" for `human_user`). The login flow entity decouples UX from data shape, enabling audience-targeted, A/B-testable login experiences.
-

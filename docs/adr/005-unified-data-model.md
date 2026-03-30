@@ -140,5 +140,5 @@ Adding a new schema type with the right `x-display` annotations automatically ad
 - **No separate tables**: per-concept config lives in schema `data`
 - **Extensible**: new schema types add nav entries and API routes automatically
 - **Org scoping**: everything filters by org context
-- **Groups replace projects**: simpler model, same capability
+- **Groups and projects both exist today**: keep terminology and APIs aligned with the catalog/runtime
 - **Cascade config**: instance defaults with org/app overrides

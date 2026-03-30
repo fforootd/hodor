@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/redact"
+	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // RegisterAccountRoutes mounts self-service account endpoints.
@@ -106,10 +107,11 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load current identity data.
-	var currentMetadata, schemaID string
+	var currentMetadata, schemaID, identifier, currentDisplayName, orgID string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(metadata,'{}'), COALESCE(schema_id,'') FROM users WHERE id = ?`, userID,
-	).Scan(&currentMetadata, &schemaID)
+		`SELECT COALESCE(metadata,'{}'), COALESCE(schema_id,''), identifier, COALESCE(display_name,''), COALESCE(org_id,'')
+		 FROM users WHERE id = ?`, userID,
+	).Scan(&currentMetadata, &schemaID, &identifier, &currentDisplayName, &orgID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
@@ -160,25 +162,47 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	profileBytes, _ := json.Marshal(existingProfile)
+	nextDisplayName := currentDisplayName
+	if req.DisplayName != nil {
+		nextDisplayName = strings.TrimSpace(*req.DisplayName)
+	}
+
+	write, err := a.prepareExistingUserWrite(r.Context(), schemaID, identifier, nextDisplayName, existingProfile)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, userWriteBadRequest(err))
+		return
+	}
 
 	// Update.
-	updates := []string{"updated_at = datetime('now')"}
-	args := []any{}
+	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	defer tx.Rollback()
 
+	query := "UPDATE users SET updated_at = datetime('now'), metadata = ? WHERE id = ?"
+	args := []any{write.MetadataJSON, userID}
 	if req.DisplayName != nil {
-		updates = append(updates, "display_name = ?")
-		args = append(args, strings.TrimSpace(*req.DisplayName))
+		query = "UPDATE users SET updated_at = datetime('now'), display_name = ?, metadata = ? WHERE id = ?"
+		args = []any{nextDisplayName, write.MetadataJSON, userID}
 		changedFields = append(changedFields, "display_name")
 	}
 
-	updates = append(updates, "metadata = ?")
-	args = append(args, string(profileBytes))
-	args = append(args, userID)
-
-	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(updates, ", "))
-	_, err = a.db.SQL().ExecContext(r.Context(), query, args...)
+	_, err = tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	if err := reindexUserUniqueness(r.Context(), tx, userID, orgID, identifier, write); err != nil {
+		if v, ok := err.(*uniqueness.ViolationError); ok {
+			httputil.WriteError(w, http.StatusConflict, fmt.Sprintf("field %q value %q already exists", v.Field, v.Value))
+			return
+		}
+		httputil.WriteError(w, http.StatusConflict, "update failed")
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}

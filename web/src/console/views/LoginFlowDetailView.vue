@@ -103,6 +103,89 @@
 
         <Card>
           <CardHeader>
+            <CardTitle class="text-sm font-medium">Branding</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div
+              v-for="assetField in brandingAssetFields"
+              :key="assetField.key"
+              class="rounded-lg border p-3 space-y-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium">{{ assetField.label }}</p>
+                  <p class="text-xs text-muted-foreground">{{ assetField.description }}</p>
+                </div>
+                <Button
+                  v-if="form.branding[assetField.key]"
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  :disabled="assetBusy[assetField.key]"
+                  @click="removeBrandingAsset(assetField.key)"
+                >
+                  Remove
+                </Button>
+              </div>
+
+              <div v-if="form.branding[assetField.key]" class="rounded-md border bg-muted/20 p-2">
+                <img
+                  :src="form.branding[assetField.key]"
+                  :alt="assetField.label"
+                  class="max-h-16 max-w-full rounded object-contain"
+                />
+              </div>
+
+              <div class="space-y-1.5">
+                <Label :for="`upload-${assetField.key}`">Upload file</Label>
+                <input
+                  :id="`upload-${assetField.key}`"
+                  type="file"
+                  accept="image/*,.svg"
+                  class="block w-full text-sm"
+                  :disabled="assetBusy[assetField.key]"
+                  @change="onBrandingFileSelected(assetField.key, $event)"
+                />
+              </div>
+
+              <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <Input
+                  v-model="assetImportUrls[assetField.key]"
+                  :placeholder="assetField.placeholder"
+                  :disabled="assetBusy[assetField.key]"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
+                  @click="importBrandingAsset(assetField.key)"
+                >
+                  {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
+                </Button>
+              </div>
+
+              <p
+                v-if="assetField.key === 'cover_image' && !['split', 'card_image'].includes(form.layout)"
+                class="text-xs text-muted-foreground"
+              >
+                Cover images appear in the shared preview when the layout is Split or Card with image.
+              </p>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input
+                id="hide-powered-by"
+                v-model="form.branding.hide_zitadel_branding"
+                type="checkbox"
+                class="accent-primary"
+              />
+              <Label for="hide-powered-by">Hide “Powered by Zitadel” footer</Label>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <div class="flex items-center justify-between">
               <CardTitle class="text-sm font-medium">🛡️ Captcha</CardTitle>
               <Badge :variant="form.captcha.mode !== 'never' ? 'default' : 'outline'" class="text-xs">
@@ -342,12 +425,53 @@ interface LoginFlow {
   updated_at: string
 }
 
+type BrandingAssetField = 'logo_url' | 'logo_dark' | 'cover_image' | 'favicon'
+
 const flow = ref<LoginFlow | null>(null)
 const currentConfig = ref<Record<string, any>>({})
 const saving = ref(false)
 const promoting = ref(false)
 const previewFormData = reactive<Record<string, any>>({})
 const previewConfirmPasswords = reactive<Record<string, string>>({})
+const assetImportUrls = reactive<Record<string, string>>({
+  logo_url: '',
+  logo_dark: '',
+  cover_image: '',
+  favicon: '',
+})
+const assetBusy = reactive<Record<string, boolean>>({
+  logo_url: false,
+  logo_dark: false,
+  cover_image: false,
+  favicon: false,
+})
+
+const brandingAssetFields = [
+  {
+    key: 'logo_url',
+    label: 'Logo',
+    description: 'Used in the login card header on light backgrounds.',
+    placeholder: 'https://example.com/logo.svg',
+  },
+  {
+    key: 'logo_dark',
+    label: 'Dark Logo',
+    description: 'Used when dark mode is active and a dark-specific logo is available.',
+    placeholder: 'https://example.com/logo-dark.svg',
+  },
+  {
+    key: 'cover_image',
+    label: 'Cover Image',
+    description: 'Used by Split and Card with image layouts.',
+    placeholder: 'https://example.com/cover.jpg',
+  },
+  {
+    key: 'favicon',
+    label: 'Favicon',
+    description: 'Shown in the browser tab for the hosted login page.',
+    placeholder: 'https://example.com/favicon.png',
+  },
+] as const
 
 const layouts = [
   { id: 'centered', label: 'Centered' },
@@ -362,6 +486,13 @@ const form = reactive({
   priority: 0,
   strategy: 'identifier_first',
   layout: 'centered',
+  branding: {
+    logo_url: '',
+    logo_dark: '',
+    cover_image: '',
+    favicon: '',
+    hide_zitadel_branding: false,
+  },
   captcha: {
     provider: 'altcha',
     mode: 'risk_based',
@@ -394,7 +525,7 @@ const previewBranding = computed<FlowBranding>(() => {
   return {
     heading: branding.heading || 'Welcome back',
     description: branding.description || 'Sign in to your account',
-    logo_url: branding.logo_url || '',
+    logo_url: form.branding.logo_url || '',
     org_name: branding.org_name || 'Acme Corp',
     colors: {
       primary: '#6366f1',
@@ -412,12 +543,12 @@ const previewBranding = computed<FlowBranding>(() => {
     font_url: branding.font_url || '',
     texts: branding.texts || {},
     custom_css: branding.custom_css || '',
-    hide_zitadel_branding: branding.hide_zitadel_branding ?? false,
+    hide_zitadel_branding: form.branding.hide_zitadel_branding,
     layout: form.layout,
     dark_mode: branding.dark_mode || 'light',
-    cover_image: branding.cover_image || '',
-    logo_dark: branding.logo_dark || '',
-    favicon: branding.favicon || '',
+    cover_image: form.branding.cover_image || '',
+    logo_dark: form.branding.logo_dark || '',
+    favicon: form.branding.favicon || '',
     border_radius: branding.border_radius || 'md',
     terms_url: branding.terms_url || '',
     privacy_url: branding.privacy_url || '',
@@ -461,6 +592,11 @@ function populateForm(f: LoginFlow) {
   currentConfig.value = config
 
   form.layout = config.branding?.layout || 'centered'
+  form.branding.logo_url = config.branding?.logo_url || ''
+  form.branding.logo_dark = config.branding?.logo_dark || ''
+  form.branding.cover_image = config.branding?.cover_image || ''
+  form.branding.favicon = config.branding?.favicon || ''
+  form.branding.hide_zitadel_branding = config.branding?.hide_zitadel_branding ?? false
 
   if (config.captcha) {
     form.captcha.provider = config.captcha.provider || 'altcha'
@@ -506,14 +642,14 @@ async function saveFlow() {
         provider: form.captcha.provider,
         mode: form.captcha.mode,
         difficulty: form.captcha.difficulty,
-        steps: ['identifier', 'password'],
+        on: ['login'],
       },
       fingerprint: {
         ...(currentConfig.value.fingerprint || {}),
         enabled: form.fingerprint.enabled,
         provider: form.fingerprint.provider,
         persist: form.fingerprint.persist,
-        steps: ['identifier'],
+        on: ['login'],
       },
       rate_limit: {
         ...(currentConfig.value.rate_limit || {}),
@@ -530,6 +666,11 @@ async function saveFlow() {
       branding: {
         ...(currentConfig.value.branding || {}),
         layout: form.layout,
+        logo_url: form.branding.logo_url,
+        logo_dark: form.branding.logo_dark,
+        cover_image: form.branding.cover_image,
+        favicon: form.branding.favicon,
+        hide_zitadel_branding: form.branding.hide_zitadel_branding,
       },
     }
 
@@ -545,6 +686,72 @@ async function saveFlow() {
     console.error('Failed to save login flow:', e)
   } finally {
     saving.value = false
+  }
+}
+
+function extractAssetId(url: string): string {
+  if (!url) return ''
+  try {
+    const parsed = new URL(url, window.location.origin)
+    const match = parsed.pathname.match(/\/assets\/login\/([^/]+)$/)
+    return match?.[1] || ''
+  } catch {
+    return ''
+  }
+}
+
+async function onBrandingFileSelected(field: BrandingAssetField, event: Event) {
+  if (!flow.value) return
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  const body = new FormData()
+  body.append('slot', field)
+  body.append('file', file)
+
+  assetBusy[field] = true
+  try {
+    const resp = await api.postForm<{ url: string }>(`/v1/login-flows/${flow.value.id}/assets`, body)
+    form.branding[field] = resp.url
+  } catch (e) {
+    console.error(`Failed to upload ${field}:`, e)
+  } finally {
+    assetBusy[field] = false
+    input.value = ''
+  }
+}
+
+async function importBrandingAsset(field: BrandingAssetField) {
+  if (!flow.value || !assetImportUrls[field]) return
+  assetBusy[field] = true
+  try {
+    const resp = await api.post<{ url: string }>(`/v1/login-flows/${flow.value.id}/assets/import`, {
+      slot: field,
+      url: assetImportUrls[field],
+    })
+    form.branding[field] = resp.url
+    assetImportUrls[field] = ''
+  } catch (e) {
+    console.error(`Failed to import ${field}:`, e)
+  } finally {
+    assetBusy[field] = false
+  }
+}
+
+async function removeBrandingAsset(field: BrandingAssetField) {
+  if (!flow.value) return
+  const assetID = extractAssetId(form.branding[field])
+  assetBusy[field] = true
+  try {
+    if (assetID) {
+      await api.delete(`/v1/login-flows/${flow.value.id}/assets/${assetID}`)
+    }
+    form.branding[field] = ''
+  } catch (e) {
+    console.error(`Failed to remove ${field}:`, e)
+  } finally {
+    assetBusy[field] = false
   }
 }
 

@@ -227,15 +227,26 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	err := tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
 	if err == nil {
 		if onConflict == "update" {
-			// Upsert: update display_name and metadata.
-			metadataJSON := "{}"
-			if ident.Profile != nil {
-				b, _ := json.Marshal(ident.Profile)
-				metadataJSON = string(b)
+			var currentSchemaID, orgID string
+			err := tx.QueryRowContext(r.Context(),
+				`SELECT COALESCE(schema_id,''), COALESCE(org_id,'') FROM users WHERE id = ?`,
+				existingID,
+			).Scan(&currentSchemaID, &orgID)
+			if err != nil {
+				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 			}
-			tx.ExecContext(r.Context(),
+			write, err := a.prepareExistingUserWrite(r.Context(), currentSchemaID, ident.Identifier, ident.DisplayName, ident.Profile)
+			if err != nil {
+				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
+			}
+			if _, err := tx.ExecContext(r.Context(),
 				`UPDATE users SET display_name = ?, metadata = ?, updated_at = datetime('now') WHERE id = ?`,
-				ident.DisplayName, metadataJSON, existingID)
+				ident.DisplayName, write.MetadataJSON, existingID); err != nil {
+				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
+			}
+			if err := reindexUserUniqueness(r.Context(), tx, existingID, orgID, ident.Identifier, write); err != nil {
+				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
+			}
 			return ImportResult{Index: idx, Resource: "identity", Status: "updated", ID: existingID}
 		}
 		if onConflict == "skip" {
@@ -250,23 +261,25 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	if state == "" {
 		state = "active"
 	}
-	schemaID := ident.SchemaID
-	if schemaID == "" {
-		schemaID = "human_user_v1"
-	}
-
-	metadataJSON := "{}"
-	if ident.Profile != nil {
-		b, _ := json.Marshal(ident.Profile)
-		metadataJSON = string(b)
+	write, err := a.prepareUserWrite(r.Context(), ident.SchemaID, ident.Identifier, ident.DisplayName, ident.Profile, nil)
+	if err != nil {
+		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}
 
 	orgID := "_global"
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'human', ?, ?, ?, datetime('now'), datetime('now'))`,
-		newID, orgID, ident.Identifier, ident.DisplayName, state, schemaID, metadataJSON)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		newID, orgID, ident.Identifier, ident.DisplayName, func() string {
+			if write.Schema.Type == "service_user" || write.Schema.Type == "ai_agent" {
+				return write.Schema.Type
+			}
+			return "human"
+		}(), state, write.Schema.ID, write.MetadataJSON)
 	if err != nil {
+		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
+	}
+	if err := enforceUserUniqueness(r.Context(), tx, newID, orgID, ident.Identifier, write); err != nil {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}
 

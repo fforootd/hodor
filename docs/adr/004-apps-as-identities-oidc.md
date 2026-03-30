@@ -44,9 +44,9 @@ An OIDC client (app) is an identity whose schema declares `x-oidc` configuration
 | `grant_types` | Schema `x-oidc.grant_types` |
 | `client_name` | `identities.data.client_name` |
 
-### 2. No Projects — Apps Stand Alone
+### 2. Apps Stand Alone, Even When Projects Exist
 
-Projects were a container that added complexity without value. Apps are first-class identities. Group them by org if needed, or add tags/labels later.
+Apps are first-class identities. The current prototype still ships first-class `project` resources for org-level grouping and membership, but apps do not require project nesting to exist or authenticate.
 
 ### 3. OIDC Provider via `zitadel/oidc` v3
 
