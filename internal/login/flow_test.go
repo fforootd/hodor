@@ -192,6 +192,7 @@ func TestBuildNodes_AuthSelect(t *testing.T) {
 		CurrentStep:  StepAuthSelect,
 		DisplayName:  "Jane Doe",
 		Identifier:   "jane@acme.com",
+		RevealMode:   IdentityRevealModeKnownUser,
 		SSOProviders: []map[string]any{
 			{"id": "p_1", "name": "Google", "template": "google"},
 		},
@@ -214,6 +215,28 @@ func TestBuildNodes_AuthSelect(t *testing.T) {
 	}
 	if types["button"] < 2 {
 		t.Error("expected at least magic_link + passkey buttons")
+	}
+}
+
+func TestBuildNodes_AuthSelectAnonymousDoesNotExposeDerivedIdentity(t *testing.T) {
+	cfg := ExtractAuthConfig(testSchema)
+	flow := &Flow{
+		ID:           "f_test",
+		SchemaConfig: cfg,
+		CurrentStep:  StepAuthSelect,
+		Identifier:   "jane@acme.com",
+		DisplayName:  "Jane Doe",
+		RevealMode:   IdentityRevealModeAnonymous,
+	}
+
+	nodes := BuildNodes(flow)
+	for _, node := range nodes {
+		if node.Type == "avatar" {
+			t.Fatalf("did not expect avatar node in anonymous auth-select: %+v", node)
+		}
+		if node.Type == "heading" && node.Text != "jane@acme.com" {
+			t.Fatalf("heading = %q, want typed identifier", node.Text)
+		}
 	}
 }
 
@@ -259,6 +282,7 @@ func TestToFlowStep(t *testing.T) {
 		SchemaConfig: cfg,
 		CurrentStep:  StepIdentifier,
 		DisplayName:  "Jane",
+		RevealMode:   IdentityRevealModeKnownUser,
 	}
 
 	step := flow.ToFlowStep()
@@ -276,6 +300,23 @@ func TestToFlowStep(t *testing.T) {
 	}
 	if len(step.Nodes) == 0 {
 		t.Error("expected nodes in step")
+	}
+}
+
+func TestToFlowStep_OmitsIdentityForAnonymousFlows(t *testing.T) {
+	cfg := ExtractAuthConfig(testSchema)
+	flow := &Flow{
+		ID:           "f_test",
+		SchemaConfig: cfg,
+		CurrentStep:  StepAuthSelect,
+		Identifier:   "jane@acme.com",
+		DisplayName:  "Jane",
+		RevealMode:   IdentityRevealModeAnonymous,
+	}
+
+	step := flow.ToFlowStep()
+	if step.Identity != nil {
+		t.Fatalf("expected no identity payload for anonymous flow, got %+v", step.Identity)
 	}
 }
 

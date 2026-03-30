@@ -211,9 +211,9 @@ func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFl
 	var flows []LoginFlow
 	for rows.Next() {
 		var f LoginFlow
-		var audienceJSON, authMethodsJSON string
+		var configJSON, audienceJSON, authMethodsJSON string
 		var isDefault, enabled int
-		err := rows.Scan(&f.ID, &f.OrgID, &f.Name, &f.Preset, &f.Config,
+		err := rows.Scan(&f.ID, &f.OrgID, &f.Name, &f.Preset, &configJSON,
 			&isDefault, &enabled, &f.State, &f.Priority,
 			&audienceJSON, &authMethodsJSON)
 		if err != nil {
@@ -222,6 +222,7 @@ func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFl
 		}
 		f.IsDefault = isDefault == 1 || isDefault != 0
 		f.Enabled = enabled == 1 || enabled != 0
+		f.Config = json.RawMessage(configJSON)
 		_ = json.Unmarshal([]byte(audienceJSON), &f.Audience)
 		f.AuthMethods = json.RawMessage(authMethodsJSON)
 		flows = append(flows, f)
@@ -234,13 +235,13 @@ func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFl
 func (r *Resolver) TestAudience(ctx context.Context, flowID string, limit int) (*AudienceTestResult, error) {
 	// Load the flow.
 	var f LoginFlow
-	var audienceJSON, authMethodsJSON string
+	var configJSON, audienceJSON, authMethodsJSON string
 	var isDefault, enabled int
 	err := r.db.SQL().QueryRowContext(ctx,
 		`SELECT id, COALESCE(org_id,''), name, preset, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}')
 		 FROM login_flows WHERE id = ?`, flowID,
-	).Scan(&f.ID, &f.OrgID, &f.Name, &f.Preset, &f.Config,
+	).Scan(&f.ID, &f.OrgID, &f.Name, &f.Preset, &configJSON,
 		&isDefault, &enabled, &f.State, &f.Priority,
 		&audienceJSON, &authMethodsJSON)
 	if err != nil {
@@ -251,6 +252,8 @@ func (r *Resolver) TestAudience(ctx context.Context, flowID string, limit int) (
 	}
 	f.IsDefault = isDefault == 1
 	f.Enabled = enabled == 1
+	f.Config = json.RawMessage(configJSON)
+	f.AuthMethods = json.RawMessage(authMethodsJSON)
 	_ = json.Unmarshal([]byte(audienceJSON), &f.Audience)
 
 	// Fetch sample of users.

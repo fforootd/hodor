@@ -698,22 +698,31 @@ type FlowIdentity struct {
 	AvatarInitial string `json:"avatar_initial"`
 }
 
+type IdentityRevealMode string
+
+const (
+	IdentityRevealModeAnonymous IdentityRevealMode = "anonymous"
+	IdentityRevealModeKnownUser IdentityRevealMode = "known_user"
+)
+
 // Flow holds the server-side state for an in-progress login.
 type Flow struct {
-	ID           string
-	SchemaConfig *SchemaAuthConfig
-	CurrentStep  StepType
-	IduserID     string
-	Identifier   string
-	DisplayName  string
-	Verified     bool
-	SSOProviders []map[string]any
-	Errors       []FlowError       // accumulated errors for current step
-	Messages     []FlowMessage     // accumulated messages for current step
-	RedirectURI  string            // OIDC redirect_uri (stored from auth request)
-	OIDCState    string            // OIDC state parameter
-	RegData      map[string]string // registration form data (accumulated)
-	LoginFlowID  string            // if set, login flow schema was used
+	ID            string
+	SchemaConfig  *SchemaAuthConfig
+	CurrentStep   StepType
+	IduserID      string
+	Identifier    string
+	DisplayName   string
+	TrustedUserID string
+	RevealMode    IdentityRevealMode
+	Verified      bool
+	SSOProviders  []map[string]any
+	Errors        []FlowError       // accumulated errors for current step
+	Messages      []FlowMessage     // accumulated messages for current step
+	RedirectURI   string            // OIDC redirect_uri (stored from auth request)
+	OIDCState     string            // OIDC state parameter
+	RegData       map[string]string // registration form data (accumulated)
+	LoginFlowID   string            // if set, login flow schema was used
 
 	// Client signal accumulation (populated during flow, sent to session on complete)
 	CaptchaProvider string  // "altcha", "hcaptcha", etc.
@@ -937,17 +946,23 @@ func buildIdentifierNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 }
 
 func buildAuthSelectNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]string) []UINode {
+	heading := flow.authSelectHeading()
 	initial := ""
-	if flow.DisplayName != "" {
-		initial = string([]rune(flow.DisplayName)[0])
-	} else if flow.Identifier != "" {
-		initial = string([]rune(flow.Identifier)[0])
+	if flow.revealsKnownUserIdentity() {
+		switch {
+		case flow.DisplayName != "":
+			initial = string([]rune(flow.DisplayName)[0])
+		case flow.Identifier != "":
+			initial = string([]rune(flow.Identifier)[0])
+		}
 	}
 
 	nodes := []UINode{
-		{Type: "avatar", Initial: initial, Text: flow.DisplayName},
-		{Type: "heading", Text: flow.DisplayName},
+		{Type: "heading", Text: heading},
 		{Type: "description", Text: textOr(texts, "auth_select_description", "Choose how to sign in")},
+	}
+	if flow.revealsKnownUserIdentity() {
+		nodes = append([]UINode{{Type: "avatar", Initial: initial, Text: flow.DisplayName}}, nodes...)
 	}
 
 	// Sort auth methods by Position for deterministic rendering order.
@@ -1211,6 +1226,17 @@ func textOr(texts map[string]string, key, fallback string) string {
 	return fallback
 }
 
+func (f *Flow) revealsKnownUserIdentity() bool {
+	return f.RevealMode == IdentityRevealModeKnownUser
+}
+
+func (f *Flow) authSelectHeading() string {
+	if f.revealsKnownUserIdentity() && f.DisplayName != "" {
+		return f.DisplayName
+	}
+	return f.Identifier
+}
+
 // ToFlowStep converts flow state to the response sent to the UI.
 func (f *Flow) ToFlowStep() *FlowStep {
 	step := &FlowStep{
@@ -1222,7 +1248,7 @@ func (f *Flow) ToFlowStep() *FlowStep {
 		Messages: f.Messages,
 		CSS:      f.SchemaConfig.Branding.CustomCSS,
 	}
-	if f.DisplayName != "" {
+	if f.revealsKnownUserIdentity() && f.DisplayName != "" {
 		initial := string([]rune(f.DisplayName)[0])
 		step.Identity = &FlowIdentity{
 			DisplayName:   f.DisplayName,

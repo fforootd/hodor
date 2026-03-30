@@ -10,7 +10,7 @@
  *
  * Events emitted (native CustomEvent, bubbles + composed):
  *   - 'login-complete'  — { detail: { session_id, redirect_uri } }
- *   - 'login-error'     — { detail: { code, message } }
+ *   - 'login-error'     — { detail: { code, message, retryable, kind, status? } }
  *   - 'login-redirect'  — { detail: { redirect_url } }
  *
  * Build:

@@ -38,18 +38,32 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve the best login flow config (or use preview override).
-	cfg := h.getResolvedConfig(r, req.FlowID)
+	cfg, meta, err := h.getResolvedConfigStrict(r, req.FlowID)
+	if err != nil {
+		status, apiErr := h.classifyInitError(r.Context(), err)
+		logging.Printf(
+			"[login] init failed host=%s org=%s mode=%s resolved_flow=%s used_default_schema=%t err=%v code=%s kind=%s retryable=%t",
+			meta.Host, meta.OrgID, meta.ResolutionMode, meta.ResolvedFlowID, meta.UsedDefaultSchema, err, apiErr.Code, apiErr.Kind, apiErr.Retryable,
+		)
+		writeLoginError(w, status, apiErr)
+		return
+	}
 	ssoProviders := h.loadSSOProviders(r)
 
 	flowID := id.NewFlow()
 	flow := &Flow{
 		ID:              flowID,
 		SchemaConfig:    cfg,
+		RevealMode:      IdentityRevealModeAnonymous,
 		SSOProviders:    ssoProviders,
 		RedirectURI:     req.RedirectURI,
 		OIDCState:       req.State,
 		VisitorID:       req.Fingerprint,
 		FingerprintHash: req.Fingerprint,
+	}
+	if trustedUserID, ok := h.resolveTrustedUserID(r, req.State); ok {
+		flow.TrustedUserID = trustedUserID
+		flow.RevealMode = IdentityRevealModeKnownUser
 	}
 
 	// Determine entry step based on preset.
@@ -63,7 +77,7 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.flows.Put(flow)
-	logging.Printf("[flow] created %s (preset=%s, step=%s, login_flow=%s)", flowID, cfg.Login.Preset, flow.CurrentStep, cfg.LoginFlowID)
+	logging.Printf("[flow] created %s (preset=%s, step=%s, login_flow=%s, host=%s, org=%s)", flowID, cfg.Login.Preset, flow.CurrentStep, cfg.LoginFlowID, meta.Host, meta.OrgID)
 
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 }
@@ -73,13 +87,13 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 	flowID := extractFlowID(r.URL.Path, "submit")
 	if flowID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "missing flow_id")
+		writeLoginError(w, http.StatusBadRequest, loginBadRequest("Missing flow ID."))
 		return
 	}
 
 	flow, ok := h.flows.Get(flowID)
 	if !ok {
-		httputil.WriteError(w, http.StatusNotFound, "flow not found or expired")
+		writeLoginError(w, http.StatusNotFound, loginFlowNotFound("Login flow was not found or has expired."))
 		return
 	}
 
@@ -89,7 +103,7 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 
 	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		writeLoginError(w, http.StatusBadRequest, loginBadRequest("Invalid login request body."))
 		return
 	}
 
@@ -131,13 +145,14 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		flow.IduserID = ""
 		flow.Identifier = ""
 		flow.DisplayName = ""
+		flow.RevealMode = IdentityRevealModeAnonymous
 		flow.Verified = false
 		flow.Errors = nil
 		flow.Messages = nil
 		h.flows.Put(flow)
 		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
 	default:
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown action: %s", action))
+		writeLoginError(w, http.StatusBadRequest, loginBadRequest(fmt.Sprintf("Unknown login action %q.", action)))
 	}
 }
 
@@ -146,13 +161,13 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 	flowID := extractFlowIDFromPath(r.URL.Path)
 	if flowID == "" {
-		httputil.WriteError(w, http.StatusBadRequest, "missing flow_id")
+		writeLoginError(w, http.StatusBadRequest, loginBadRequest("Missing flow ID."))
 		return
 	}
 
 	flow, ok := h.flows.Get(flowID)
 	if !ok {
-		httputil.WriteError(w, http.StatusNotFound, "flow not found or expired")
+		writeLoginError(w, http.StatusNotFound, loginFlowNotFound("Login flow was not found or has expired."))
 		return
 	}
 
@@ -183,13 +198,19 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	}
 	if err != nil {
 		logging.Printf("[flow] %s identifier resolve error: %v", flow.ID, err)
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		writeLoginError(w, http.StatusInternalServerError, loginInternalError("Login could not continue. Please try again."))
 		return
 	}
 
 	flow.IduserID = resolved.UserID
 	flow.Identifier = identifier
-	flow.DisplayName = resolved.DisplayName
+	if flow.TrustedUserID != "" && flow.TrustedUserID == resolved.UserID {
+		flow.RevealMode = IdentityRevealModeKnownUser
+		flow.DisplayName = resolved.DisplayName
+	} else {
+		flow.RevealMode = IdentityRevealModeAnonymous
+		flow.DisplayName = ""
+	}
 	flow.CurrentStep = StepAuthSelect
 	flow.Errors = nil
 	h.flows.Put(flow)

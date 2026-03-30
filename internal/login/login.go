@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
@@ -166,51 +167,59 @@ func (h *Handler) loadSSOProviders(r *http.Request) []map[string]any {
 // getDefaultSchemaConfig loads the default identity schema and extracts auth config.
 // This is the fallback when no login flow is resolved.
 func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
+	cfg, err := h.getDefaultSchemaConfigStrict(r.Context())
+	if err != nil {
+		logging.Printf("[login] default schema fallback failed: %v", err)
+		return ExtractAuthConfig(`{}`)
+	}
+	return cfg
+}
+
+func (h *Handler) getDefaultSchemaConfigStrict(ctx context.Context) (*SchemaAuthConfig, error) {
 	var schemaJSON string
-	err := h.db.SQL().QueryRowContext(r.Context(),
+	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT schema FROM schemas WHERE is_default = true ORDER BY created_at ASC LIMIT 1`,
 	).Scan(&schemaJSON)
 	if err != nil || schemaJSON == "" {
-		err = h.db.SQL().QueryRowContext(r.Context(),
+		err = h.db.SQL().QueryRowContext(ctx,
 			`SELECT schema FROM schemas ORDER BY created_at ASC LIMIT 1`,
 		).Scan(&schemaJSON)
-		if err != nil || schemaJSON == "" {
-			return ExtractAuthConfig(`{}`)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, errors.New("no default schema configured")
+			}
+			return nil, fmt.Errorf("load first schema: %w", err)
+		}
+		if schemaJSON == "" {
+			return nil, errors.New("no user schema configured")
 		}
 	}
-	return ExtractAuthConfig(schemaJSON)
+	return ExtractAuthConfig(schemaJSON), nil
 }
 
 // getResolvedConfig resolves the best login flow for the request context,
 // then merges the flow's config with the user schema's auth methods.
 // Falls back to getDefaultSchemaConfig if no login flow matches.
 func (h *Handler) getResolvedConfig(r *http.Request, flowIDOverride string) *SchemaAuthConfig {
-	ctx := r.Context()
-
-	// Preview path: if a specific flow ID is provided, load it directly.
-	if flowIDOverride != "" {
-		return h.loadFlowConfig(ctx, flowIDOverride, r)
-	}
-
-	// Build user context from request hints.
-	orgID := httputil.ResolveOrgID(r, "")
-	uc := loginflow.UserContext{
-		OrgID: orgID,
-	}
-
-	// Resolve the best login flow.
-	lf, err := h.resolver.Resolve(ctx, uc)
+	cfg, _, err := h.getResolvedConfigStrict(r, flowIDOverride)
 	if err != nil {
-		logging.Printf("[login] flow resolution failed (org=%s): %v, falling back to schema config", orgID, err)
+		logging.Printf("[login] flow resolution failed: %v, falling back to schema config", err)
 		return h.getDefaultSchemaConfig(r)
 	}
-
-	logging.Printf("[login] resolved flow %s (%s) for org=%s", lf.ID, lf.Name, orgID)
-	return h.buildConfigFromFlow(ctx, lf, r)
+	return cfg
 }
 
 // loadFlowConfig loads a specific login flow by ID for preview.
 func (h *Handler) loadFlowConfig(ctx context.Context, flowID string, r *http.Request) *SchemaAuthConfig {
+	cfg, err := h.loadFlowConfigStrict(ctx, flowID, r)
+	if err != nil {
+		logging.Printf("[login] preview flow %s not found: %v, falling back", flowID, err)
+		return h.getDefaultSchemaConfig(r)
+	}
+	return cfg
+}
+
+func (h *Handler) loadFlowConfigStrict(ctx context.Context, flowID string, r *http.Request) (*SchemaAuthConfig, error) {
 	var configJSON, authMethodsJSON string
 	var preset string
 	err := h.db.SQL().QueryRowContext(ctx,
@@ -218,8 +227,7 @@ func (h *Handler) loadFlowConfig(ctx context.Context, flowID string, r *http.Req
 		 FROM login_flows WHERE id = ?`, flowID,
 	).Scan(&preset, &configJSON, &authMethodsJSON)
 	if err != nil {
-		logging.Printf("[login] preview flow %s not found: %v, falling back", flowID, err)
-		return h.getDefaultSchemaConfig(r)
+		return nil, err
 	}
 
 	lf := &loginflow.LoginFlow{
@@ -228,15 +236,27 @@ func (h *Handler) loadFlowConfig(ctx context.Context, flowID string, r *http.Req
 		Config:      json.RawMessage(configJSON),
 		AuthMethods: json.RawMessage(authMethodsJSON),
 	}
-	return h.buildConfigFromFlow(ctx, lf, r)
+	return h.buildConfigFromFlowStrict(ctx, lf, r)
 }
 
 // buildConfigFromFlow constructs a SchemaAuthConfig from a resolved login flow.
 // It starts with the flow's config (branding, captcha, etc.) and merges
 // the user schema's auth methods as narrower overrides.
 func (h *Handler) buildConfigFromFlow(ctx context.Context, lf *loginflow.LoginFlow, r *http.Request) *SchemaAuthConfig {
+	cfg, err := h.buildConfigFromFlowStrict(ctx, lf, r)
+	if err != nil {
+		logging.Printf("[login] flow build failed for %s: %v, falling back", lf.ID, err)
+		return h.getDefaultSchemaConfig(r)
+	}
+	return cfg
+}
+
+func (h *Handler) buildConfigFromFlowStrict(ctx context.Context, lf *loginflow.LoginFlow, r *http.Request) (*SchemaAuthConfig, error) {
 	// Start with the user schema config as the base for field definitions.
-	base := h.getDefaultSchemaConfig(r)
+	base, err := h.getDefaultSchemaConfigStrict(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Parse the login flow's config JSON to extract branding, captcha, etc.
 	flowCfg := ExtractLoginFlowConfig(string(lf.Config))
@@ -292,7 +312,41 @@ func (h *Handler) buildConfigFromFlow(ctx context.Context, lf *loginflow.LoginFl
 	}
 
 	base.LoginFlowID = lf.ID
-	return base
+	return base, nil
+}
+
+type resolvedConfigMeta struct {
+	Host              string
+	OrgID             string
+	ResolutionMode    string
+	ResolvedFlowID    string
+	UsedDefaultSchema bool
+}
+
+func (h *Handler) getResolvedConfigStrict(r *http.Request, flowIDOverride string) (*SchemaAuthConfig, resolvedConfigMeta, error) {
+	ctx := r.Context()
+	meta := resolvedConfigMeta{
+		Host:  r.Host,
+		OrgID: httputil.ResolveOrgID(r, ""),
+	}
+
+	// Preview path: if a specific flow ID is provided, load it directly.
+	if flowIDOverride != "" {
+		meta.ResolutionMode = "preview"
+		meta.ResolvedFlowID = flowIDOverride
+		cfg, err := h.loadFlowConfigStrict(ctx, flowIDOverride, r)
+		return cfg, meta, err
+	}
+
+	meta.ResolutionMode = "resolver"
+	lf, err := h.resolver.Resolve(ctx, loginflow.UserContext{OrgID: meta.OrgID})
+	if err != nil {
+		return nil, meta, err
+	}
+
+	meta.ResolvedFlowID = lf.ID
+	cfg, err := h.buildConfigFromFlowStrict(ctx, lf, r)
+	return cfg, meta, err
 }
 
 // Legacy login routes (handleLoginStart, handleLoginPassword, handleLoginComplete)
