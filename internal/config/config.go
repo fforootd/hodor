@@ -30,11 +30,12 @@ type Config struct {
 
 // ServerConfig controls HTTP server behavior.
 type ServerConfig struct {
-	Port           int      `toml:"port"`
-	ExternalDomain string   `toml:"external_domain"`
-	TLSCert        string   `toml:"tls_cert"`
-	TLSKey         string   `toml:"tls_key"`
-	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
+	Port             int      `toml:"port"`
+	ExternalDomain   string   `toml:"external_domain"`
+	ManagementSecret string   `toml:"management_secret"` // Bearer token for cloud control plane (ZITADEL_MANAGEMENT_SECRET)
+	TLSCert          string   `toml:"tls_cert"`
+	TLSKey           string   `toml:"tls_key"`
+	CookieSecrets    []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
 
 	// Sub-path deployment: host all routes under a prefix (e.g., "/auth").
 	BasePath      string             `toml:"base_path"`
@@ -449,6 +450,9 @@ func applyServerEnv(cfg *Config) {
 	}
 	if v := os.Getenv("ZITADEL_REAL_IP_HEADER"); v != "" {
 		cfg.Server.RealIPHeader = v
+	}
+	if v := os.Getenv("ZITADEL_MANAGEMENT_SECRET"); v != "" {
+		cfg.Server.ManagementSecret = v
 	}
 }
 

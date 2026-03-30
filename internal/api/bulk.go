@@ -204,10 +204,11 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 	configJSON, _ := json.Marshal(configMap)
 	overrideJSON, _ := json.Marshal(overrideMap)
 
+	orgID := "_global" // Bulk import defaults to global org for now.
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, '1', ?, ?, ?, ?, ?, ?, 1, 0, 'provider_v1', '{}', datetime('now'), datetime('now'))`,
-		provID, p.Name, p.Protocol, p.Template,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'provider_v1', '{}', datetime('now'), datetime('now'))`,
+		provID, orgID, p.Name, p.Protocol, p.Template,
 		string(configJSON), string(overrideJSON), autoReg)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: err.Error()}
@@ -260,10 +261,11 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 		metadataJSON = string(b)
 	}
 
+	orgID := "_global"
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'human', ?, ?, ?, datetime('now'), datetime('now'))`,
-		newID, ident.Identifier, ident.DisplayName, state, schemaID, metadataJSON)
+		 VALUES (?, ?, ?, ?, 'human', ?, ?, ?, datetime('now'), datetime('now'))`,
+		newID, orgID, ident.Identifier, ident.DisplayName, state, schemaID, metadataJSON)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}

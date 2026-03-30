@@ -81,52 +81,30 @@ func (s *Service) ListObjects(ctx context.Context, user, relation, objectType st
 // ──────────────────────────────────────────────────────────────────
 
 // OnBootstrap writes the initial FGA tuples for the admin user:
-//   - user:{adminID} → owner → instance:inst_root
-//   - org:_global → parent → instance:inst_root
+//   - user:{adminID} → owner → instance:self
+//   - org:_global → parent → instance:self
 //   - user:{adminID} → owner → org:_global
 //
-// It also grants ownership to the _platform service user if it exists,
-// enabling cross-instance endpoint management via root-gets-* bypass.
+// If a management secret is configured, the _mgmt user also gets ownership.
+// This function is idempotent: it checks if 'instance:self' already has an owner.
 func (s *Service) OnBootstrap(ctx context.Context, adminID string) error {
+	// 1. Check if bootstrap has already happened by looking for instance:self owner.
+	existing, err := s.ReadTuples(ctx, "", "owner", "instance:self")
+	if err == nil && len(existing) > 0 {
+		logging.Printf("[fga] bootstrap skipped: instance:self already has %d owner(s)", len(existing))
+		return nil
+	}
+
 	logging.Printf("[fga] bootstrapping tuples: admin=%s", adminID)
-	err := s.WriteTuples(ctx,
-		[3]string{"user:" + adminID, "owner", "instance:inst_root"},
+	err = s.WriteTuples(ctx,
+		[3]string{"user:" + adminID, "owner", "instance:self"},
 		// Global org — grants access when org_id is unknown/nullable.
-		[3]string{"instance:inst_root", "parent", "org:_global"},
+		[3]string{"instance:self", "parent", "org:_global"},
 		[3]string{"user:" + adminID, "owner", "org:_global"},
+		// Management secret user gets owner access.
+		[3]string{"user:_mgmt", "owner", "instance:self"},
 	)
-	if err != nil {
-		return err
-	}
-
-	// Grant _platform service user owner of inst_root (if seeded).
-	var platformID string
-	if qErr := s.db.QueryRowContext(ctx,
-		`SELECT id FROM users WHERE identifier = '_platform' LIMIT 1`,
-	).Scan(&platformID); qErr == nil && platformID != "" {
-		logging.Printf("[fga] granting _platform user (%s) owner of inst_root", platformID)
-		if wErr := s.WriteTuples(ctx,
-			[3]string{"user:" + platformID, "owner", "instance:inst_root"},
-		); wErr != nil {
-			logging.Printf("WARN: failed to grant _platform ownership: %v", wErr)
-		}
-	}
-
-	return nil
-}
-
-// OnInstanceCreated writes tuples when a new sub-instance is created:
-//   - instance:inst_root → parent → instance:{instanceID}
-//   - user:{creatorID} → owner → instance:{instanceID}
-func (s *Service) OnInstanceCreated(ctx context.Context, instanceID, creatorID string) error {
-	logging.Printf("[fga] instance created: id=%s creator=%s", instanceID, creatorID)
-	tuples := [][3]string{
-		{"instance:inst_root", "parent", "instance:" + instanceID},
-	}
-	if creatorID != "" {
-		tuples = append(tuples, [3]string{"user:" + creatorID, "owner", "instance:" + instanceID})
-	}
-	return s.WriteTuples(ctx, tuples...)
+	return err
 }
 
 // OnResourceCreated writes tuples when a new resource (identity) is created:
@@ -142,36 +120,30 @@ func (s *Service) OnResourceCreated(ctx context.Context, userID, creatorID, orgI
 }
 
 // OnResourceDeleted removes all tuples where user:{id} is the subject.
-// Uses direct SQL since OpenFGA's Read API requires an object type filter.
 func (s *Service) OnResourceDeleted(ctx context.Context, userID string) error {
 	userKey := "user:" + userID
 
-	// Query all tuples where this user is the subject.
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT object_type || ':' || object_id, relation
-		 FROM tuple WHERE store = ? AND user_object_type = 'user' AND user_object_id = ?`,
-		s.storeID, userID)
-	if err != nil {
-		return fmt.Errorf("fga: read tuples for user %s: %w", userID, err)
-	}
-	defer rows.Close()
+	// Zitadel object types that might have relations to this user.
+	// Since ADR-020, we don't have a generic "entity" type.
+	types := []string{"org", "project", "app", "group", "session", "user", "instance"}
 
 	var tuples [][3]string
-	for rows.Next() {
-		var object, relation string
-		if err := rows.Scan(&object, &relation); err != nil {
+	for _, t := range types {
+		existing, err := s.ReadTuples(ctx, userKey, "", t+":")
+		if err != nil {
+			// If a type doesn't exist in the model yet (e.g. module types), Read might fail.
 			continue
 		}
-		tuples = append(tuples, [3]string{userKey, relation, object})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("fga: read tuples iter: %w", err)
+		for _, entry := range existing {
+			tuples = append(tuples, [3]string{userKey, entry["relation"], entry["object"]})
+		}
 	}
 
 	if len(tuples) == 0 {
 		return nil
 	}
 
+	logging.Printf("[fga] deleting %d tuples for user %s", len(tuples), userID)
 	return s.DeleteTuples(ctx, tuples...)
 }
 
@@ -192,12 +164,9 @@ func (s *Service) OnGroupCreated(ctx context.Context, groupID, creatorID, orgID 
 }
 
 // OnOrgCreated writes tuples when a new org is created.
-func (s *Service) OnOrgCreated(ctx context.Context, orgID, creatorID, instanceID string) error {
-	if instanceID == "" {
-		instanceID = "inst_root"
-	}
+func (s *Service) OnOrgCreated(ctx context.Context, orgID, creatorID string) error {
 	return s.WriteTuples(ctx,
-		[3]string{"instance:" + instanceID, "parent", "org:" + orgID},
+		[3]string{"instance:self", "parent", "org:" + orgID},
 		[3]string{"user:" + creatorID, "owner", "org:" + orgID},
 	)
 }

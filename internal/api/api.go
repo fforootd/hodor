@@ -19,7 +19,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
-	"github.com/zitadel/zitadel/internal/instance"
+
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
@@ -90,9 +90,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Login Flow management (dedicated handlers with audience targeting)
 	a.RegisterLoginFlowRoutes(mux)
-
-	// Custom Endpoints management (domain → component routing)
-	a.RegisterEndpointRoutes(mux)
 
 	// Dynamic OpenAPI (generated from registry)
 	a.registerOpenAPIOperations()
@@ -175,13 +172,12 @@ type OrgRequest struct {
 }
 
 type OrgResponse struct {
-	ID         string `json:"id"`
-	InstanceID string `json:"instance_id"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	Metadata   any    `json:"metadata,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	Metadata  any    `json:"metadata,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // --- Org handlers ---
@@ -207,13 +203,10 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve instance_id from request context (multi-tenancy).
-	instanceID := instance.FromContext(r.Context())
-
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO orgs (id, instance_id, name, state, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, 'active', ?, ?, ?)`,
-		orgID, instanceID, req.Name, metadataJSON, now, now,
+		`INSERT INTO orgs (id, name, state, metadata, created_at, updated_at)
+		 VALUES (?, ?, 'active', ?, ?, ?)`,
+		orgID, req.Name, metadataJSON, now, now,
 	)
 	if err != nil {
 		logging.Printf("[createOrg] DB insert failed: %v", err)
@@ -242,18 +235,17 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		if creatorID == "" {
 			creatorID = "admin"
 		}
-		if err := svc.OnOrgCreated(r.Context(), orgID, creatorID, instanceID); err != nil {
+		if err := svc.OnOrgCreated(r.Context(), orgID, creatorID); err != nil {
 			logging.Printf("[fga] warn: failed to write org tuples: %v", err)
 		}
 	}
 
 	httputil.WriteJSON(w, http.StatusCreated, OrgResponse{
-		ID:         orgID,
-		InstanceID: instanceID,
-		Name:       req.Name,
-		State:      "active",
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:        orgID,
+		Name:      req.Name,
+		State:     "active",
+		CreatedAt: now,
+		UpdatedAt: now,
 	})
 }
 
@@ -288,10 +280,9 @@ func (a *API) updateOrg(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "metadata = ?")
 		args = append(args, string(metaJSON))
 	}
-	iid := instance.FromContext(r.Context())
-	args = append(args, orgID, iid)
+	args = append(args, orgID)
 
-	query := "UPDATE orgs SET " + strings.Join(setClauses, ", ") + " WHERE id = ? AND instance_id = ?"
+	query := "UPDATE orgs SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -309,8 +300,8 @@ func (a *API) updateOrg(w http.ResponseWriter, r *http.Request) {
 	var resp OrgResponse
 	var metaStr string
 	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, instance_id, name, state, COALESCE(metadata,'{}'), created_at, updated_at FROM orgs WHERE id = ?`, orgID,
-	).Scan(&resp.ID, &resp.InstanceID, &resp.Name, &resp.State, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
+		`SELECT id, name, state, COALESCE(metadata,'{}'), created_at, updated_at FROM orgs WHERE id = ?`, orgID,
+	).Scan(&resp.ID, &resp.Name, &resp.State, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "read-back failed")
 		return
@@ -327,8 +318,7 @@ func (a *API) deleteOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	iid := instance.FromContext(r.Context())
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM orgs WHERE id = ? AND instance_id = ?`, orgID, iid)
+	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM orgs WHERE id = ?`, orgID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -439,11 +429,11 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	iid := instance.FromContext(r.Context())
+	orgID := r.Header.Get("X-Org-Id")
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, '', ?, ?, ?, 'active', ?, ?, ?, ?)`,
-		userID, iid, req.Identifier, req.DisplayName, userType, req.SchemaID, metadataJSON, now, now,
+		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+		userID, orgID, req.Identifier, req.DisplayName, userType, req.SchemaID, metadataJSON, now, now,
 	)
 	if err != nil {
 		// Do not swallow the actual SQL error message!
@@ -457,7 +447,6 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce uniqueness via unique_fields table (ADR-016).
-	orgID := r.Header.Get("X-Org-Id")
 	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, userID, orgID, req.Identifier); err != nil {
 		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -549,7 +538,6 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// Build query dynamically based on filters.
-	iid := instance.FromContext(r.Context())
 	var where []string
 	var args []any
 	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.user_type, i.state, i.metadata, i.created_at, i.updated_at
@@ -559,9 +547,7 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 		where = append(where, `s.type = ?`)
 		args = append(args, schemaType)
 	}
-	// Instance scoping.
-	where = append(where, `i.instance_id = ?`)
-	args = append(args, iid)
+
 	if orgIDFilter != "" {
 		where = append(where, `i.org_id = ?`)
 		args = append(args, orgIDFilter)
@@ -634,10 +620,9 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "display_name = ?")
 		args = append(args, req.DisplayName)
 	}
-	iid := instance.FromContext(r.Context())
-	args = append(args, userID, iid)
+	args = append(args, userID)
 
-	query := "UPDATE users SET " + strings.Join(setClauses, ", ") + " WHERE id = ? AND instance_id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
+	query := "UPDATE users SET " + strings.Join(setClauses, ", ") + " WHERE id = ?" //nolint:gosec // G202: setClauses are hardcoded column names, not user input.
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -1236,15 +1221,13 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 // entityCounts returns entity counts per schema type for sidebar badges.
 // GET /v1/counts → { "human_user": 8, "service_user": 3, ... }
 func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
-	iid := instance.FromContext(r.Context())
 	counts := make(map[string]int)
 
 	// Count entities by schema type.
 	rows, err := a.db.SQL().QueryContext(r.Context(),
 		`SELECT s.type, COUNT(*) FROM users i
 		 JOIN schemas s ON i.schema_id = s.id
-		 WHERE i.instance_id = ?
-		 GROUP BY s.type`, iid)
+		 GROUP BY s.type`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1263,21 +1246,21 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 	// Count orgs from the dedicated orgs table.
 	var orgCount int
 	if err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM orgs WHERE instance_id = ?`, iid).Scan(&orgCount); err == nil {
+		`SELECT COUNT(*) FROM orgs `).Scan(&orgCount); err == nil {
 		counts["org"] = orgCount
 	}
 
 	// Count apps from the apps table.
 	var appCount int
 	if err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM apps WHERE instance_id = ?`, iid).Scan(&appCount); err == nil {
+		`SELECT COUNT(*) FROM apps `).Scan(&appCount); err == nil {
 		counts["apps"] = appCount
 	}
 
 	// Total user count (all types).
 	var userCount int
 	if err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM users WHERE instance_id = ?`, iid).Scan(&userCount); err == nil {
+		`SELECT COUNT(*) FROM users `).Scan(&userCount); err == nil {
 		counts["users"] = userCount
 	}
 
@@ -1552,26 +1535,9 @@ func (a *API) listResource(table string) http.HandlerFunc {
 			return
 		}
 
-		// Instance scoping: if the table has an instance_id column, filter by it.
-		iid := instance.FromContext(r.Context())
-		hasInstanceCol := false
-		for _, c := range colNames {
-			if c == "instance_id" {
-				hasInstanceCol = true
-				break
-			}
-		}
-		var query string
-		var args []any
-		if hasInstanceCol {
-			query = fmt.Sprintf(`SELECT %s FROM %s WHERE instance_id = ? AND id > ? ORDER BY id ASC LIMIT ?`,
-				strings.Join(colNames, ", "), table)
-			args = []any{iid, cursor, limit + 1}
-		} else {
-			query = fmt.Sprintf(`SELECT %s FROM %s WHERE id > ? ORDER BY id ASC LIMIT ?`,
-				strings.Join(colNames, ", "), table)
-			args = []any{cursor, limit + 1}
-		}
+		query := fmt.Sprintf(`SELECT %s FROM %s WHERE id > ? ORDER BY id ASC LIMIT ?`,
+			strings.Join(colNames, ", "), table)
+		args := []any{cursor, limit + 1}
 		rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
@@ -1642,26 +1608,9 @@ func (a *API) getResource(table string) http.HandlerFunc {
 			return
 		}
 
-		// Instance scoping: if the table has an instance_id column, filter by it.
-		iid := instance.FromContext(r.Context())
-		hasInstanceCol := false
-		for _, c := range colNames {
-			if c == "instance_id" {
-				hasInstanceCol = true
-				break
-			}
-		}
-		var query string
-		var args []any
-		if hasInstanceCol {
-			query = fmt.Sprintf(`SELECT %s FROM %s WHERE id = ? AND instance_id = ?`,
-				strings.Join(colNames, ", "), table)
-			args = []any{id, iid}
-		} else {
-			query = fmt.Sprintf(`SELECT %s FROM %s WHERE id = ?`,
-				strings.Join(colNames, ", "), table)
-			args = []any{id}
-		}
+		query := fmt.Sprintf(`SELECT %s FROM %s WHERE id = ?`,
+			strings.Join(colNames, ", "), table)
+		args := []any{id}
 		rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
@@ -2021,7 +1970,7 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'human', 'active', ?, ?, ?)`,
+		 VALUES (?, '_global', ?, ?, 'human', 'active', ?, ?, ?)`,
 		userID, req.Identifier, req.DisplayName, metadataJSON, now, now)
 	if err != nil {
 		return UserResponse{}, fmt.Errorf("insert: %w", err)

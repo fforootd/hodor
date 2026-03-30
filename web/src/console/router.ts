@@ -9,7 +9,6 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'dashboard', component: () => import('./views/DashboardView.vue') },
     // Instance management (ADR-021: multi-tenancy)
-    { path: '/instances', name: 'instances', component: () => import('./views/InstanceListView.vue') },
     // Unified aggregate views
     { path: '/users', name: 'users', component: () => import('./views/UnifiedUsersView.vue') },
     { path: '/applications', name: 'applications', component: () => import('./views/UnifiedAppsView.vue') },
@@ -60,7 +59,6 @@ const router = createRouter({
     { path: '/login-flows', name: 'login-flows', component: () => import('./views/LoginFlowListView.vue') },
     { path: '/login-flows/:id', name: 'login-flow-detail', component: () => import('./views/LoginFlowDetailView.vue') },
     // Custom Endpoints (domain → component routing)
-    { path: '/endpoints', name: 'endpoints', component: () => import('./views/EndpointsView.vue') },
   ],
 })
 

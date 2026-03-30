@@ -10,7 +10,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
-	"github.com/zitadel/zitadel/internal/instance"
+
 	"github.com/zitadel/zitadel/internal/logging"
 )
 
@@ -69,11 +69,8 @@ func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
 	limit, cursor := parsePagination(r)
 	orgID := r.URL.Query().Get("org_id")
 
-	iid := instance.FromContext(r.Context())
 	var where []string
 	var args []any
-	where = append(where, "g.instance_id = ?")
-	args = append(args, iid)
 	where = append(where, "g.id > ?")
 	args = append(args, cursor)
 	if orgID != "" {
@@ -145,11 +142,10 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	iid := instance.FromContext(r.Context())
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO groups (id, instance_id, org_id, name, description, state, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
-		groupID, iid, orgID, req.Name, req.Description, metadataJSON, now, now,
+		`INSERT INTO groups (id, org_id, name, description, state, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+		groupID, orgID, req.Name, req.Description, metadataJSON, now, now,
 	)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -195,12 +191,11 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 
 	var g GroupResponse
 	var metaStr string
-	iid := instance.FromContext(r.Context())
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT g.id, g.org_id, g.name, g.description, g.state,
 		 COALESCE(g.metadata,'{}'), g.created_at, g.updated_at,
 		 (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) as member_count
-		 FROM groups g WHERE g.id = ? AND g.instance_id = ?`, groupID, iid,
+		 FROM groups g WHERE g.id = ?`, groupID,
 	).Scan(&g.ID, &g.OrgID, &g.Name, &g.Description, &g.State,
 		&metaStr, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount)
 	if err != nil {
@@ -246,10 +241,9 @@ func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "metadata = ?")
 		args = append(args, string(metaJSON))
 	}
-	iid := instance.FromContext(r.Context())
-	args = append(args, groupID, iid)
+	args = append(args, groupID)
 
-	query := "UPDATE groups SET " + strings.Join(setClauses, ", ") + " WHERE id = ? AND instance_id = ?"
+	query := "UPDATE groups SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -274,8 +268,7 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	iid := instance.FromContext(r.Context())
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM groups WHERE id = ? AND instance_id = ?`, groupID, iid)
+	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM groups WHERE id = ?`, groupID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -448,11 +441,8 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 	limit, cursor := parsePagination(r)
 	orgID := r.URL.Query().Get("org_id")
 
-	iid := instance.FromContext(r.Context())
 	var where []string
 	var args []any
-	where = append(where, "p.instance_id = ?")
-	args = append(args, iid)
 	where = append(where, "p.id > ?")
 	args = append(args, cursor)
 	if orgID != "" {
@@ -524,11 +514,10 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	iid := instance.FromContext(r.Context())
 	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO projects (id, instance_id, org_id, name, description, state, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
-		projectID, iid, orgID, req.Name, req.Description, metadataJSON, now, now,
+		`INSERT INTO projects (id, org_id, name, description, state, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+		projectID, orgID, req.Name, req.Description, metadataJSON, now, now,
 	)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -574,12 +563,11 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 
 	var p ProjectResponse
 	var metaStr string
-	iid := instance.FromContext(r.Context())
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT p.id, p.org_id, p.name, p.description, p.state,
 		 COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
 		 (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) as member_count
-		 FROM projects p WHERE p.id = ? AND p.instance_id = ?`, projectID, iid,
+		 FROM projects p WHERE p.id = ?`, projectID,
 	).Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.State,
 		&metaStr, &p.CreatedAt, &p.UpdatedAt, &p.MemberCount)
 	if err != nil {
@@ -625,10 +613,9 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "metadata = ?")
 		args = append(args, string(metaJSON))
 	}
-	iid := instance.FromContext(r.Context())
-	args = append(args, projectID, iid)
+	args = append(args, projectID)
 
-	query := "UPDATE projects SET " + strings.Join(setClauses, ", ") + " WHERE id = ? AND instance_id = ?"
+	query := "UPDATE projects SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
 	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
@@ -651,8 +638,7 @@ func (a *API) deleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	iid := instance.FromContext(r.Context())
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM projects WHERE id = ? AND instance_id = ?`, projectID, iid)
+	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM projects WHERE id = ?`, projectID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

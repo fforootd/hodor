@@ -100,7 +100,7 @@ func seedIdentity(t *testing.T, db *database.DB) string {
 	userID := id.New()
 	_, err := db.SQL().Exec(
 		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
-		 VALUES (?, '1', 'test@test.com', 'Test', 'human', 'active', '{}', ?, ?)`,
+		 VALUES (?, '_global', 'test@test.com', 'Test', 'human', 'active', '{}', ?, ?)`,
 		userID, now, now)
 	if err != nil {
 		t.Fatalf("seed identity: %v", err)
@@ -133,7 +133,7 @@ func seedSessionToken(t *testing.T, db *database.DB, userID string, expiresAt, r
 
 	_, err = db.SQL().Exec(
 		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, revoked_at)
-		 VALUES (?, ?, '1', ?, 'test', '127.0.0.1', '{}', ?, ?, ?)`,
+		 VALUES (?, ?, '_global', ?, 'test', '127.0.0.1', '{}', ?, ?, ?)`,
 		sessionID, userID, hash, now, expiresAt, revokedSession)
 	if err != nil {
 		t.Fatalf("seed session: %v", err)

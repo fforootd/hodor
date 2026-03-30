@@ -77,6 +77,7 @@ const stubComponents = {
 vi.mock('lucide-vue-next', () => ({
   Plus: { template: '<span class="icon-plus" />' },
   Search: { template: '<span class="icon-search" />' },
+  FolderOpen: { template: '<span class="icon-folder-open" />' },
   ChevronDown: { template: '<span class="icon-chevron-down" />' },
   ArrowUpDown: { template: '<span class="icon-arrow-updown" />' },
   ArrowUp: { template: '<span class="icon-arrow-up" />' },
@@ -128,7 +129,7 @@ describe('IdentityListView', () => {
     const wrapper = await mountView(() =>
       Promise.resolve(mockResponse({ items: [] })),
     )
-    expect(wrapper.text()).toContain('No results found.')
+    expect(wrapper.text()).toContain('No Human Users Yet')
     expect(wrapper.text()).toContain('0 human users total')
   })
 

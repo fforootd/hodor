@@ -1,28 +1,13 @@
 -- +goose Up
--- Zitadel baseline schema — SQLite (ADR-021/022: multi-tenant, dedicated resource tables)
--- All tenant-scoped tables carry an instance_id column for row-level isolation.
+-- Zitadel baseline schema — SQLite (single-tenant, dedicated resource tables)
 
--- ============================================================================
--- INSTANCES
--- ============================================================================
-CREATE TABLE IF NOT EXISTS instances (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    domain     TEXT DEFAULT '',
-    is_root    BOOLEAN DEFAULT 0,
-    state      TEXT NOT NULL DEFAULT 'active',
-    settings   TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_instances_domain ON instances(domain) WHERE domain != '';
+
 
 -- ============================================================================
 -- ORGS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS orgs (
     id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL REFERENCES instances(id),
     name        TEXT NOT NULL,
     state       TEXT NOT NULL DEFAULT 'active',
     schema_id   TEXT DEFAULT '',
@@ -30,14 +15,12 @@ CREATE TABLE IF NOT EXISTS orgs (
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_orgs_instance ON orgs(instance_id);
 
 -- ============================================================================
 -- SCHEMAS — registry for validation, UI generation, engine bindings
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS schemas (
     id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     type        TEXT NOT NULL,
     org_id      TEXT NOT NULL DEFAULT '1',
     schema      TEXT NOT NULL,
@@ -48,7 +31,6 @@ CREATE TABLE IF NOT EXISTS schemas (
     created_by  TEXT DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_schema_instance ON schemas(instance_id);
 CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id);
 CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default);
 CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
@@ -58,7 +40,6 @@ CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
-    instance_id   TEXT NOT NULL DEFAULT 'inst_root',
     org_id        TEXT NOT NULL DEFAULT '1',
     identifier    TEXT NOT NULL,
     display_name  TEXT DEFAULT '',
@@ -68,9 +49,8 @@ CREATE TABLE IF NOT EXISTS users (
     metadata      TEXT DEFAULT '{}',
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(instance_id, org_id, identifier)
+    UNIQUE(org_id, identifier)
 );
-CREATE INDEX IF NOT EXISTS idx_users_instance ON users(instance_id);
 CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
 CREATE INDEX IF NOT EXISTS idx_users_type ON users(user_type);
 CREATE INDEX IF NOT EXISTS idx_users_state ON users(state);
@@ -94,7 +74,6 @@ CREATE INDEX IF NOT EXISTS idx_creds_type ON credentials(user_id, type);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS providers (
     id              TEXT PRIMARY KEY,
-    instance_id     TEXT NOT NULL DEFAULT 'inst_root',
     org_id          TEXT NOT NULL DEFAULT '1',
     name            TEXT NOT NULL,
     protocol        TEXT NOT NULL DEFAULT 'oidc',
@@ -108,9 +87,8 @@ CREATE TABLE IF NOT EXISTS providers (
     metadata        TEXT DEFAULT '{}',
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(instance_id, org_id, name)
+    UNIQUE(org_id, name)
 );
-CREATE INDEX IF NOT EXISTS idx_providers_instance ON providers(instance_id);
 CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 
 -- ============================================================================
@@ -118,7 +96,6 @@ CREATE INDEX IF NOT EXISTS idx_providers_org ON providers(org_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS apps (
     id             TEXT PRIMARY KEY,
-    instance_id    TEXT NOT NULL DEFAULT 'inst_root',
     org_id         TEXT NOT NULL DEFAULT '1',
     name           TEXT NOT NULL,
     app_type       TEXT NOT NULL DEFAULT 'oidc',
@@ -133,7 +110,6 @@ CREATE TABLE IF NOT EXISTS apps (
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_apps_instance ON apps(instance_id);
 CREATE INDEX IF NOT EXISTS idx_apps_org ON apps(org_id);
 
 -- ============================================================================
@@ -141,7 +117,6 @@ CREATE INDEX IF NOT EXISTS idx_apps_org ON apps(org_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS actions (
     id           TEXT PRIMARY KEY,
-    instance_id  TEXT NOT NULL DEFAULT 'inst_root',
     org_id       TEXT NOT NULL DEFAULT '1',
     name         TEXT NOT NULL,
     hook         TEXT NOT NULL DEFAULT 'on_event',
@@ -157,7 +132,6 @@ CREATE TABLE IF NOT EXISTS actions (
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_actions_instance ON actions(instance_id);
 CREATE INDEX IF NOT EXISTS idx_actions_org ON actions(org_id);
 CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
 
@@ -166,7 +140,6 @@ CREATE INDEX IF NOT EXISTS idx_actions_hook ON actions(hook, enabled);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS login_flows (
     id           TEXT PRIMARY KEY,
-    instance_id  TEXT NOT NULL DEFAULT 'inst_root',
     org_id       TEXT,
     name         TEXT NOT NULL,
     preset       TEXT DEFAULT 'identifier_first',
@@ -183,7 +156,6 @@ CREATE TABLE IF NOT EXISTS login_flows (
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_lf_instance ON login_flows(instance_id);
 CREATE INDEX IF NOT EXISTS idx_lf_org ON login_flows(org_id);
 CREATE INDEX IF NOT EXISTS idx_lf_state ON login_flows(state, enabled);
 
@@ -209,7 +181,6 @@ CREATE INDEX IF NOT EXISTS idx_linked_provider ON linked_identities(provider_id,
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS sessions (
     id             TEXT PRIMARY KEY,
-    instance_id    TEXT NOT NULL DEFAULT 'inst_root',
     user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     org_id         TEXT NOT NULL DEFAULT '1',
     token_hash     TEXT NOT NULL DEFAULT '',
@@ -222,7 +193,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     revoked_at     TEXT,
     fingerprint    TEXT DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_instance ON sessions(instance_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
 
@@ -261,7 +231,6 @@ CREATE INDEX IF NOT EXISTS idx_tokens_app     ON tokens(application_id) WHERE ap
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS secrets (
     id                TEXT PRIMARY KEY,
-    instance_id       TEXT NOT NULL DEFAULT 'inst_root',
     secret_type       TEXT NOT NULL,      -- 'oidc_signing', 'oidc_encryption', 'certmagic', 'idp_secret', 'webhook_signing'
     algorithm         TEXT NOT NULL DEFAULT 'RS256',
 
@@ -275,7 +244,6 @@ CREATE TABLE IF NOT EXISTS secrets (
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_secrets_type ON secrets(secret_type);
-CREATE INDEX IF NOT EXISTS idx_secrets_instance ON secrets(instance_id);
 CREATE INDEX IF NOT EXISTS idx_secrets_enc_key ON secrets(encryption_key_id);
 
 -- ============================================================================
@@ -323,7 +291,6 @@ CREATE INDEX IF NOT EXISTS idx_fingerprints_type ON fingerprints(type);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS events (
     id              TEXT PRIMARY KEY,
-    instance_id     TEXT NOT NULL DEFAULT 'inst_root',
     event_type      TEXT NOT NULL,
     category        TEXT NOT NULL DEFAULT '',
     org_id          TEXT NOT NULL DEFAULT '0',
@@ -348,7 +315,6 @@ CREATE TABLE IF NOT EXISTS events (
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     shipped_at      TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_events_instance ON events(instance_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(aggregate_id, aggregate_type);
@@ -366,7 +332,6 @@ CREATE INDEX IF NOT EXISTS idx_events_delegation ON events(delegation_type) WHER
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS domains (
     id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     domain      TEXT NOT NULL,
     is_primary  BOOLEAN DEFAULT 0,
@@ -374,34 +339,10 @@ CREATE TABLE IF NOT EXISTS domains (
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(domain)
 );
-CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 CREATE INDEX IF NOT EXISTS idx_domains_org ON domains(org_id);
 
 -- ============================================================================
--- ENDPOINTS — configurable domain+path → component routing per instance
--- Supports white-labeling: customers map their own domains to Zitadel components.
--- Components: login, api, oidc, console, account
--- ============================================================================
-CREATE TABLE IF NOT EXISTS endpoints (
-    id              TEXT PRIMARY KEY,
-    instance_id     TEXT NOT NULL DEFAULT 'inst_root',
-    domain          TEXT NOT NULL,
-    path            TEXT NOT NULL DEFAULT '/',
-    component       TEXT NOT NULL CHECK(component IN ('login', 'api', 'oidc', 'console', 'account')),
-    enabled         BOOLEAN NOT NULL DEFAULT 1,
-    tls_mode        TEXT NOT NULL DEFAULT 'auto' CHECK(tls_mode IN ('auto', 'manual', 'external', 'off')),
-    tls_status      TEXT NOT NULL DEFAULT 'pending' CHECK(tls_status IN ('pending', 'provisioning', 'active', 'error', 'external', 'off')),
-    tls_error       TEXT DEFAULT '',
-    cert_expires    TEXT DEFAULT NULL,
-    dns_verified    BOOLEAN NOT NULL DEFAULT 0,
-    dns_method      TEXT DEFAULT NULL CHECK(dns_method IS NULL OR dns_method IN ('txt', 'cname')),
-    dns_token       TEXT DEFAULT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(domain, path)
-);
-CREATE INDEX IF NOT EXISTS idx_endpoints_instance ON endpoints(instance_id);
-CREATE INDEX IF NOT EXISTS idx_endpoints_domain ON endpoints(domain);
+
 
 -- ============================================================================
 -- UNIQUE FIELDS — schema-driven uniqueness (ADR-016)
@@ -422,16 +363,14 @@ CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS settings (
     id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     type        TEXT NOT NULL,
     scope       TEXT NOT NULL DEFAULT 'instance',
     scope_id    TEXT NOT NULL DEFAULT '',
     data        TEXT NOT NULL DEFAULT '{}',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(instance_id, type, scope, scope_id)
+    UNIQUE(type, scope, scope_id)
 );
-CREATE INDEX IF NOT EXISTS idx_settings_instance ON settings(instance_id);
 CREATE INDEX IF NOT EXISTS idx_settings_type ON settings(type, scope);
 
 -- ============================================================================
@@ -491,7 +430,6 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS groups (
     id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL DEFAULT '1',
     name        TEXT NOT NULL,
     description TEXT DEFAULT '',
@@ -499,9 +437,8 @@ CREATE TABLE IF NOT EXISTS groups (
     metadata    TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(instance_id, org_id, name)
+    UNIQUE(org_id, name)
 );
-CREATE INDEX IF NOT EXISTS idx_groups_instance ON groups(instance_id);
 CREATE INDEX IF NOT EXISTS idx_groups_org ON groups(org_id);
 
 -- GROUP MEMBERS — join table for group membership
@@ -520,7 +457,6 @@ CREATE INDEX IF NOT EXISTS idx_gm_user  ON group_members(user_id);
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS projects (
     id          TEXT PRIMARY KEY,
-    instance_id TEXT NOT NULL DEFAULT 'inst_root',
     org_id      TEXT NOT NULL DEFAULT '1',
     name        TEXT NOT NULL,
     description TEXT DEFAULT '',
@@ -528,9 +464,8 @@ CREATE TABLE IF NOT EXISTS projects (
     metadata    TEXT DEFAULT '{}',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(instance_id, org_id, name)
+    UNIQUE(org_id, name)
 );
-CREATE INDEX IF NOT EXISTS idx_projects_instance ON projects(instance_id);
 CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
 
 -- PROJECT MEMBERS — join table for project membership
@@ -574,7 +509,6 @@ CREATE TABLE IF NOT EXISTS saved_queries (
 );
 CREATE INDEX IF NOT EXISTS idx_saved_queries_name ON saved_queries(name);
 
-INSERT OR IGNORE INTO instances (id, name, is_root) VALUES ('inst_root', 'Zitadel', 1);
 
 -- +goose Down
 DROP TABLE IF EXISTS project_members;
@@ -588,7 +522,6 @@ DROP TABLE IF EXISTS cache;
 DROP TABLE IF EXISTS jobs;
 DROP TABLE IF EXISTS settings;
 DROP TABLE IF EXISTS unique_fields;
-DROP TABLE IF EXISTS endpoints;
 DROP TABLE IF EXISTS domains;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS auth_states;
@@ -604,4 +537,3 @@ DROP TABLE IF EXISTS credentials;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS schemas;
 DROP TABLE IF EXISTS orgs;
-DROP TABLE IF EXISTS instances;

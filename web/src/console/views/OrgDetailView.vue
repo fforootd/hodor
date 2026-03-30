@@ -57,7 +57,6 @@
           <span class="text-muted-foreground">ID</span>
           <span class="font-mono text-xs break-all">{{ org.id }}</span>
           <span class="text-muted-foreground">Instance</span>
-          <span class="font-mono text-xs">{{ org.instance_id || '—' }}</span>
           <span class="text-muted-foreground">Created</span>
           <span>{{ formatDate(org.created_at) }}</span>
           <span class="text-muted-foreground">Updated</span>

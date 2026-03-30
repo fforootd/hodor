@@ -2,8 +2,8 @@ package fga
 
 import (
 	"github.com/zitadel/zitadel/internal/httputil"
-	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/mgmt"
 	"net/http"
 	"strings"
 )
@@ -46,17 +46,18 @@ func (m *Middleware) Gate(next http.Handler) http.Handler {
 			return
 		}
 
-		// Fast-path: root instance admin gets * (wildcard).
-		// The root instance is the operator's instance — its owners can manage
-		// everything without needing per-type FGA tuples. This is the zero-config
-		// default described in docs/design/developer-experience.md.
-		iid := instance.FromContext(r.Context())
-		if iid == "inst_root" {
-			isOwner, err := m.svc.Check(r.Context(), "user:"+userID, "owner", "instance:inst_root")
-			if err == nil && isOwner {
-				next.ServeHTTP(w, r)
-				return
-			}
+		// Fast-path: instance owner gets * (wildcard).
+		// Single-tenant: the owner of instance:self is the super-admin.
+		isOwner, err := m.svc.Check(r.Context(), "user:"+userID, "owner", "instance:self")
+		if err == nil && isOwner {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Management secret users always get through.
+		if r.Header.Get("X-Token-Type") == "management" && userID == mgmt.ManagementUserID {
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		// What FGA type is this route about?
@@ -177,11 +178,11 @@ func (cfg AuthZConfig) resolveObject(resourceID string, r *http.Request) string 
 	// Everything else follows the default scope.
 	switch cfg.Scope {
 	case "instance":
-		return "instance:" + instance.FromContext(r.Context())
+		return "instance:self"
 	case "org":
 		return "org:" + resolveOrgID(r)
 	default:
-		return "instance:" + instance.FromContext(r.Context())
+		return "instance:self"
 	}
 }
 

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/httputil"
-	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/mgmt"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
 )
@@ -17,11 +17,18 @@ import (
 // AuthGate is the top-level default-deny middleware.
 // Every request not on the public allowlist must carry a valid token.
 // On success, it injects X-Identity-Id, X-Session-Id, and X-Token-Type headers.
-func AuthGate(cookieCfg *session.CookieConfig, db *sql.DB) func(http.Handler) http.Handler {
+func AuthGate(cookieCfg *session.CookieConfig, db *sql.DB, mgmtCfg *mgmt.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Allow public routes unconditionally.
 			if httputil.IsPublicRoute(r.Method, r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Management secret bypass: cloud control plane gets full access.
+			if mgmtCfg.IsManagementRequest(r) {
+				mgmt.InjectManagementIdentity(r)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -148,7 +155,7 @@ func (a *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 		// Use FGA to check admin access when available.
 		if svc := FGAService; svc != nil {
-			allowed, err := svc.Check(r.Context(), "user:"+callerID, "admin", "instance:"+instance.FromContext(r.Context()))
+			allowed, err := svc.Check(r.Context(), "user:"+callerID, "admin", "instance:self")
 			if err != nil || !allowed {
 				writeError(w, http.StatusForbidden, "admin access required")
 				return

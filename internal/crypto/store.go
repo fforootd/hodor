@@ -10,7 +10,6 @@ import (
 // SecretMeta holds non-sensitive metadata about a stored secret.
 type SecretMeta struct {
 	ID              string
-	InstanceID      string
 	SecretType      string
 	Algorithm       string
 	EncryptionKeyID string
@@ -35,15 +34,9 @@ func NewSecretStore(db *sql.DB, box *SecretBox) *SecretStore {
 type PutOption func(*putOpts)
 
 type putOpts struct {
-	instanceID string
-	algorithm  string
-	publicKey  []byte
-	expiresAt  *time.Time
-}
-
-// WithInstanceID sets the instance_id for multi-tenant isolation.
-func WithInstanceID(id string) PutOption {
-	return func(o *putOpts) { o.instanceID = id }
+	algorithm string
+	publicKey []byte
+	expiresAt *time.Time
 }
 
 // WithAlgorithm sets the algorithm field (e.g., "RS256", "AES256").
@@ -65,8 +58,7 @@ func WithExpiresAt(t time.Time) PutOption {
 // exists, it is replaced (upsert).
 func (s *SecretStore) Put(ctx context.Context, id, secretType string, plaintext []byte, opts ...PutOption) error {
 	o := &putOpts{
-		instanceID: "inst_root",
-		algorithm:  "RS256",
+		algorithm: "RS256",
 	}
 	for _, fn := range opts {
 		fn(o)
@@ -84,9 +76,9 @@ func (s *SecretStore) Put(ctx context.Context, id, secretType string, plaintext 
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO secrets (id, instance_id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, o.instanceID, secretType, o.algorithm,
+		`INSERT OR REPLACE INTO secrets (id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, secretType, o.algorithm,
 		sealed.KeyID, sealed.Ciphertext, sealed.Nonce,
 		o.publicKey, expiresAt,
 	)
@@ -144,7 +136,7 @@ func (s *SecretStore) Delete(ctx context.Context, id string) error {
 // List returns metadata (no decryption) for all secrets of a given type.
 func (s *SecretStore) List(ctx context.Context, secretType string) ([]SecretMeta, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, instance_id, secret_type, algorithm, encryption_key_id, expires_at, created_at
+		`SELECT id, secret_type, algorithm, encryption_key_id, expires_at, created_at
 		 FROM secrets WHERE secret_type = ?
 		 ORDER BY created_at DESC`, secretType,
 	)
@@ -157,7 +149,7 @@ func (s *SecretStore) List(ctx context.Context, secretType string) ([]SecretMeta
 	for rows.Next() {
 		var m SecretMeta
 		var expiresAt, createdAt sql.NullString
-		if err := rows.Scan(&m.ID, &m.InstanceID, &m.SecretType, &m.Algorithm,
+		if err := rows.Scan(&m.ID, &m.SecretType, &m.Algorithm,
 			&m.EncryptionKeyID, &expiresAt, &createdAt); err != nil {
 			return nil, err
 		}

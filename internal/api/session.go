@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"github.com/zitadel/zitadel/internal/httputil"
-	"github.com/zitadel/zitadel/internal/instance"
+
 	"time"
 
 	"github.com/zitadel/zitadel/internal/id"
@@ -186,12 +186,11 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		return nil, fmt.Errorf("check identity: %w", err)
 	}
 
-	iid := instance.FromContext(ctx)
 	// Insert session (metadata record).
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
-		 VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
-		sessionID, iid, userID, tokenHash,
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
+		 VALUES (?, ?, '_global', ?, ?, ?, ?, ?, ?)`,
+		sessionID, userID, tokenHash,
 		userAgent, ipAddress, string(metadataJSON),
 		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
 	)
@@ -257,14 +256,13 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.URL.Query().Get("user_id"), ""
 	limit := 50
 
-	iid := instance.FromContext(r.Context())
 	query := `SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
-	          FROM sessions WHERE instance_id = ? ORDER BY created_at DESC LIMIT ?`
-	args := []any{iid, limit}
+	          FROM sessions ORDER BY created_at DESC LIMIT ?`
+	args := []any{limit}
 	if userID != "" {
 		query = `SELECT id, user_id, org_id, user_agent, ip_address, created_at, expires_at, revoked_at
-		         FROM sessions WHERE instance_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?`
-		args = []any{iid, userID, limit}
+		         FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+		args = []any{userID, limit}
 	}
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)

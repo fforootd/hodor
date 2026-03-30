@@ -27,9 +27,9 @@ import (
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/fga"
-	"github.com/zitadel/zitadel/internal/instance"
 	"github.com/zitadel/zitadel/internal/jobs"
 	"github.com/zitadel/zitadel/internal/login"
+	"github.com/zitadel/zitadel/internal/mgmt"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/ratelimit"
 	"github.com/zitadel/zitadel/internal/session"
@@ -78,8 +78,6 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
 	restAPI := api.New(db, bus, cookieCfg)
 	restAPI.RegisterRoutes(mux)
-	restAPI.RegisterInstanceRoutes(mux)
-	restAPI.RegisterInstanceProxyRoutes(mux, mux)
 
 	// Mount template catalog API (ADR-015).
 	catalogSvc := catalog.New(cfg.Catalog, db.SQL())
@@ -241,7 +239,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 			`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`,
 		).Scan(&adminID); err == nil && adminID != "" {
 			// Check if tuples already exist for this admin.
-			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:inst_root")
+			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:self")
 			if len(tuples) == 0 {
 				if err := fgaSvc.OnBootstrap(ctx, adminID); err != nil {
 					logging.Printf("WARN: FGA post-init bootstrap failed: %v", err)
@@ -278,12 +276,12 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	catalogSvc.StartBackground()
 
 	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → RateLimit → AuthGate → FGAGate → RequestLog → OTel.
+	mgmtCfg := &mgmt.Config{Secret: cfg.Server.ManagementSecret}
 	var handler http.Handler = mux
 	handler = api.RequestLogMiddleware()(handler)
 	handler = fgaMiddleware.Gate(handler)
-	handler = api.AuthGate(cookieCfg, db.SQL())(handler)
+	handler = api.AuthGate(cookieCfg, db.SQL(), mgmtCfg)(handler)
 	handler = ratelimit.Middleware(rateLimiter, FromContext)(handler)
-	handler = instance.Middleware(db.SQL())(handler)
 	handler = AppGate(paths, &cfg.Server.AppAccess)(handler)
 	handler = SecurityHeaders(cfg.Server.SecurityHeaders, isSecure)(handler)
 	handler = RealIP(realIPCfg)(handler)

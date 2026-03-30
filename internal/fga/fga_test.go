@@ -37,14 +37,14 @@ func TestCheck_InstanceOwner(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Write: user:admin is owner of instance:inst_root.
-	err := svc.WriteTuple(ctx, "user:admin", "owner", "instance:inst_root")
+	// Write: user:admin is owner of instance:self.
+	err := svc.WriteTuple(ctx, "user:admin", "owner", "instance:self")
 	if err != nil {
 		t.Fatalf("write tuple: %v", err)
 	}
 
 	// owner should have admin rights.
-	allowed, err := svc.Check(ctx, "user:admin", "can_manage_orgs", "instance:inst_root")
+	allowed, err := svc.Check(ctx, "user:admin", "can_manage_orgs", "instance:self")
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCheck_InstanceOwner(t *testing.T) {
 	}
 
 	// owner should have viewer rights.
-	allowed, err = svc.Check(ctx, "user:admin", "can_view_audit", "instance:inst_root")
+	allowed, err = svc.Check(ctx, "user:admin", "can_view_audit", "instance:self")
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestCheck_InstanceOwner(t *testing.T) {
 	}
 
 	// random user should NOT have admin rights.
-	allowed, err = svc.Check(ctx, "user:random", "can_manage_orgs", "instance:inst_root")
+	allowed, err = svc.Check(ctx, "user:random", "can_manage_orgs", "instance:self")
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestCheck_OrgHierarchy(t *testing.T) {
 	}
 
 	// Explicitly create org (no default org at bootstrap).
-	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCheck_GroupMembership(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestCheck_ProjectPermissions(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestOnResourceCreatedAndDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestEnableModule_RBAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	err = svc.OnOrgCreated(ctx, "org1", "admin", "inst_root")
+	err = svc.OnOrgCreated(ctx, "org1", "admin")
 	if err != nil {
 		t.Fatalf("create org: %v", err)
 	}

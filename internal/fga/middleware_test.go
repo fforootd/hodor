@@ -67,13 +67,13 @@ func TestResolveObject(t *testing.T) {
 		orgID      string
 		want       string
 	}{
-		// Instance-scoped: always instance:inst_root
-		{"schema_list", AuthZConfig{Scope: "instance", FGAType: "schema"}, "", "GET", "", "instance:inst_root"},
-		{"schema_resource", AuthZConfig{Scope: "instance", FGAType: "schema"}, "abc", "GET", "", "instance:inst_root"},
-		{"provider_create", AuthZConfig{Scope: "instance", FGAType: "provider"}, "", "POST", "", "instance:inst_root"},
-		{"session_list", AuthZConfig{Scope: "instance", FGAType: "session"}, "", "GET", "", "instance:inst_root"},
-		{"entity_list", AuthZConfig{Scope: "instance", FGAType: "entity"}, "", "GET", "", "instance:inst_root"},
-		{"entity_resource", AuthZConfig{Scope: "instance", FGAType: "entity"}, "abc", "GET", "", "instance:inst_root"},
+		// Instance-scoped: always instance:self
+		{"schema_list", AuthZConfig{Scope: "instance", FGAType: "schema"}, "", "GET", "", "instance:self"},
+		{"schema_resource", AuthZConfig{Scope: "instance", FGAType: "schema"}, "abc", "GET", "", "instance:self"},
+		{"provider_create", AuthZConfig{Scope: "instance", FGAType: "provider"}, "", "POST", "", "instance:self"},
+		{"session_list", AuthZConfig{Scope: "instance", FGAType: "session"}, "", "GET", "", "instance:self"},
+		{"entity_list", AuthZConfig{Scope: "instance", FGAType: "entity"}, "", "GET", "", "instance:self"},
+		{"entity_resource", AuthZConfig{Scope: "instance", FGAType: "entity"}, "abc", "GET", "", "instance:self"},
 
 		// Org-scoped: check against org
 		{"app_list", AuthZConfig{Scope: "org", FGAType: "app"}, "", "GET", "org1", "org:org1"},
@@ -82,8 +82,8 @@ func TestResolveObject(t *testing.T) {
 		{"app_no_org", AuthZConfig{Scope: "org", FGAType: "app"}, "", "GET", "", "org:_global"},
 
 		// Org with resource scope override: resource-level for specific org
-		{"org_list", AuthZConfig{Scope: "instance", FGAType: "org"}, "", "GET", "", "instance:inst_root"},
-		{"org_create", AuthZConfig{Scope: "instance", FGAType: "org"}, "", "POST", "", "instance:inst_root"},
+		{"org_list", AuthZConfig{Scope: "instance", FGAType: "org"}, "", "GET", "", "instance:self"},
+		{"org_create", AuthZConfig{Scope: "instance", FGAType: "org"}, "", "POST", "", "instance:self"},
 		{"org_resource", AuthZConfig{Scope: "instance", FGAType: "org", ResourceScope: "resource"}, "org1", "GET", "", "org:org1"},
 		{"org_resource_patch", AuthZConfig{Scope: "instance", FGAType: "org", ResourceScope: "resource"}, "org1", "PATCH", "", "org:org1"},
 	}

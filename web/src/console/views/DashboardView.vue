@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, markRaw } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -63,12 +63,12 @@ import { Users, Building2, AppWindow, FileJson, Globe, Activity } from 'lucide-v
 import { countsApi, schemaApi, providerApi, eventApi, orgApi } from '@/api/resources'
 
 const stats = ref([
-  { label: 'Users', value: '—', icon: Users, description: 'Total users' },
-  { label: 'Organizations', value: '—', icon: Building2, description: 'Active orgs' },
-  { label: 'Applications', value: '—', icon: AppWindow, description: 'Registered apps' },
-  { label: 'Schemas', value: '—', icon: FileJson, description: 'Active schemas' },
-  { label: 'Providers', value: '—', icon: Globe, description: 'Configured providers' },
-  { label: 'Events', value: '—', icon: Activity, description: 'Last 1 hour' },
+  { label: 'Users', value: '—', icon: markRaw(Users), description: 'Total users' },
+  { label: 'Organizations', value: '—', icon: markRaw(Building2), description: 'Active orgs' },
+  { label: 'Applications', value: '—', icon: markRaw(AppWindow), description: 'Registered apps' },
+  { label: 'Schemas', value: '—', icon: markRaw(FileJson), description: 'Active schemas' },
+  { label: 'Providers', value: '—', icon: markRaw(Globe), description: 'Configured providers' },
+  { label: 'Events', value: '—', icon: markRaw(Activity), description: 'Last 1 hour' },
 ])
 
 const recentEvents = ref<any[]>([])
