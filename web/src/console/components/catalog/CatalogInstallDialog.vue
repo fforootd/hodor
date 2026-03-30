@@ -157,7 +157,7 @@ watch(() => props.open, async (isOpen) => {
   formValues.value = {}
 
   try {
-    detail.value = await catalogApi.get(props.templateId) as CatalogDetail
+    detail.value = await catalogApi.get(props.templateId) as unknown as CatalogDetail
     // Pre-fill defaults
     if (detail.value.variables) {
       for (const [key, v] of Object.entries(detail.value.variables)) {
@@ -182,7 +182,11 @@ async function install() {
     toast.success(`Installed "${detail.value?.template?.name || props.templateId}"`, {
       description: `Entity ${result.id} created`,
     })
-    emit('installed', { ...result, type: templateType })
+    emit('installed', {
+      id: result.id,
+      template_id: result.template_id,
+      type: templateType,
+    })
     emit('update:open', false)
   } catch (e: any) {
     toast.error('Install failed', { description: e.message })

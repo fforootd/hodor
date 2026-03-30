@@ -103,8 +103,12 @@ func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
 			&metaStr, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount); err != nil {
 			continue
 		}
-		json.Unmarshal([]byte(metaStr), &g.Metadata) //nolint:errcheck
+		_ = json.Unmarshal([]byte(metaStr), &g.Metadata)
 		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
+		return
 	}
 
 	var nextCursor string
@@ -203,7 +207,7 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	json.Unmarshal([]byte(metaStr), &g.Metadata) //nolint:errcheck
+	_ = json.Unmarshal([]byte(metaStr), &g.Metadata)
 
 	httputil.WriteJSON(w, http.StatusOK, g)
 }
@@ -314,6 +318,10 @@ func (a *API) listGroupMembers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		members = append(members, m)
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
+		return
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: members})
@@ -474,8 +482,12 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 			&metaStr, &p.CreatedAt, &p.UpdatedAt, &p.MemberCount); err != nil {
 			continue
 		}
-		json.Unmarshal([]byte(metaStr), &p.Metadata) //nolint:errcheck
+		_ = json.Unmarshal([]byte(metaStr), &p.Metadata)
 		projects = append(projects, p)
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
+		return
 	}
 
 	var nextCursor string
@@ -574,7 +586,7 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	json.Unmarshal([]byte(metaStr), &p.Metadata) //nolint:errcheck
+	_ = json.Unmarshal([]byte(metaStr), &p.Metadata)
 
 	httputil.WriteJSON(w, http.StatusOK, p)
 }
@@ -683,6 +695,10 @@ func (a *API) listProjectMembers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		members = append(members, m)
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
+		return
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: members})

@@ -37,14 +37,14 @@ func TestCheck_InstanceOwner(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	// Write: user:admin is owner of instance:default.
-	err := svc.WriteTuple(ctx, "user:admin", "owner", "instance:default")
+	// Write: user:admin is owner of instance:inst_root.
+	err := svc.WriteTuple(ctx, "user:admin", "owner", "instance:inst_root")
 	if err != nil {
 		t.Fatalf("write tuple: %v", err)
 	}
 
 	// owner should have admin rights.
-	allowed, err := svc.Check(ctx, "user:admin", "can_manage_orgs", "instance:default")
+	allowed, err := svc.Check(ctx, "user:admin", "can_manage_orgs", "instance:inst_root")
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCheck_InstanceOwner(t *testing.T) {
 	}
 
 	// owner should have viewer rights.
-	allowed, err = svc.Check(ctx, "user:admin", "can_view_audit", "instance:default")
+	allowed, err = svc.Check(ctx, "user:admin", "can_view_audit", "instance:inst_root")
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestCheck_InstanceOwner(t *testing.T) {
 	}
 
 	// random user should NOT have admin rights.
-	allowed, err = svc.Check(ctx, "user:random", "can_manage_orgs", "instance:default")
+	allowed, err = svc.Check(ctx, "user:random", "can_manage_orgs", "instance:inst_root")
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}

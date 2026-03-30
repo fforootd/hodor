@@ -18,7 +18,7 @@ func TestCacheSink_Buffered(t *testing.T) {
 
 	// Write 100 records.
 	for i := 0; i < 100; i++ {
-		record := slog.NewRecord(time.Now(), slog.LevelInfo, "log.info", 0)
+		record := slog.NewRecord(time.Now(), slog.LevelInfo, "request.api", 0)
 		record.AddAttrs(slog.String("key", "value"))
 		if err := sink.Handle(context.Background(), record); err != nil {
 			t.Fatalf("handle %d: %v", i, err)

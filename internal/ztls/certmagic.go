@@ -8,7 +8,9 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/caddyserver/certmagic"
 
@@ -98,8 +100,11 @@ func (m *Manager) HTTPChallengeHandler(httpsPort int) http.Handler {
 
 	// ACME issuer's HTTP challenge handler wraps a redirect-to-HTTPS handler.
 	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		target := fmt.Sprintf("https://%s:%d%s", host, httpsPort, r.URL.RequestURI())
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		target := fmt.Sprintf("https://%s%s", net.JoinHostPort(host, strconv.Itoa(httpsPort)), r.URL.RequestURI())
 		if httpsPort == 443 {
 			target = fmt.Sprintf("https://%s%s", host, r.URL.RequestURI())
 		}

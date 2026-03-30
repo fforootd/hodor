@@ -30,11 +30,11 @@ type Config struct {
 
 // ServerConfig controls HTTP server behavior.
 type ServerConfig struct {
-	Port              int      `toml:"port"`
-	ExternalDomain    string   `toml:"external_domain"`
-	TLSCert           string   `toml:"tls_cert"`
-	TLSKey            string   `toml:"tls_key"`
-	CookieSecrets []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
+	Port           int      `toml:"port"`
+	ExternalDomain string   `toml:"external_domain"`
+	TLSCert        string   `toml:"tls_cert"`
+	TLSKey         string   `toml:"tls_key"`
+	CookieSecrets  []string `toml:"cookie_secrets"` // HMAC keys for session cookies; first signs, all verify
 
 	// Sub-path deployment: host all routes under a prefix (e.g., "/auth").
 	BasePath      string             `toml:"base_path"`
@@ -122,8 +122,8 @@ type EncryptionConfig struct {
 
 // EncryptionKey is a named 32-byte symmetric key for AES-256-GCM.
 type EncryptionKey struct {
-	ID     string `toml:"id"`     // e.g. "key_v1_2025"
-	Secret string `toml:"secret"` // 64-char hex string (32 bytes)
+	ID     string `json:"id"     toml:"id"`     // e.g. "key_v1_2025"
+	Secret string `json:"secret" toml:"secret"` // 64-char hex string (32 bytes)
 }
 
 // KeyMap returns the key ring as a map[id]hexSecret suitable for crypto.NewSecretBox.

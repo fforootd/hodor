@@ -109,8 +109,12 @@ func (a *API) listFingerprints(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&fp.ID, &fp.Type, &rawDataStr, &fp.CreatedAt); err != nil {
 			continue
 		}
-		json.Unmarshal([]byte(rawDataStr), &fp.RawData)
+		_ = json.Unmarshal([]byte(rawDataStr), &fp.RawData)
 		fps = append(fps, fp)
+	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "row iteration failed")
+		return
 	}
 
 	var nextCursor string

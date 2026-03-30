@@ -26,21 +26,21 @@ type EndpointRequest struct {
 }
 
 type EndpointResponse struct {
-	ID           string `json:"id"`
-	InstanceID   string `json:"instance_id"`
-	Domain       string `json:"domain"`
-	Path         string `json:"path"`
-	Component    string `json:"component"`
-	Enabled      bool   `json:"enabled"`
-	TLSMode      string `json:"tls_mode"`
-	TLSStatus    string `json:"tls_status"`
-	TLSError     string `json:"tls_error,omitempty"`
-	CertExpires  string `json:"cert_expires,omitempty"`
-	DNSVerified  bool   `json:"dns_verified"`
-	DNSMethod    string `json:"dns_method,omitempty"`
-	DNSToken     string `json:"dns_token,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID          string `json:"id"`
+	InstanceID  string `json:"instance_id"`
+	Domain      string `json:"domain"`
+	Path        string `json:"path"`
+	Component   string `json:"component"`
+	Enabled     bool   `json:"enabled"`
+	TLSMode     string `json:"tls_mode"`
+	TLSStatus   string `json:"tls_status"`
+	TLSError    string `json:"tls_error,omitempty"`
+	CertExpires string `json:"cert_expires,omitempty"`
+	DNSVerified bool   `json:"dns_verified"`
+	DNSMethod   string `json:"dns_method,omitempty"`
+	DNSToken    string `json:"dns_token,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 var validComponents = map[string]bool{

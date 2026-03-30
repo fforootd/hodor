@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -62,60 +63,7 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	iid := instance.FromContext(r.Context())
-	query := `SELECT id, event_type, org_id, actor_id, actor_type,
-	                 aggregate_id, aggregate_type, payload, metadata, created_at,
-	                 request_id, session_id, flow_id, fingerprint,
-	                 client_id, token_id, delegation_type, sdk_name, sdk_version
-	          FROM events WHERE instance_id = ? AND id > ?`
-	args := []any{iid, cursor}
-
-	if orgID := r.URL.Query().Get("org_id"); orgID != "" {
-		query += ` AND org_id = ?`
-		args = append(args, orgID)
-	}
-	if aggType := r.URL.Query().Get("aggregate_type"); aggType != "" {
-		query += ` AND aggregate_type = ?`
-		args = append(args, aggType)
-	}
-	if aggID := r.URL.Query().Get("aggregate_id"); aggID != "" {
-		query += ` AND aggregate_id = ?`
-		args = append(args, aggID)
-	}
-	if sessionID := r.URL.Query().Get("session_id"); sessionID != "" {
-		query += ` AND session_id = ?`
-		args = append(args, sessionID)
-	}
-	if fingerprint := r.URL.Query().Get("fingerprint"); fingerprint != "" {
-		query += ` AND fingerprint = ?`
-		args = append(args, fingerprint)
-	}
-	if clientID := r.URL.Query().Get("client_id"); clientID != "" {
-		query += ` AND client_id = ?`
-		args = append(args, clientID)
-	}
-	if delegationType := r.URL.Query().Get("delegation_type"); delegationType != "" {
-		query += ` AND delegation_type = ?`
-		args = append(args, delegationType)
-	}
-	if types := r.URL.Query().Get("types"); types != "" {
-		typeList := strings.Split(types, ",")
-		query += ` AND event_type IN (`
-		for i, t := range typeList {
-			if i > 0 {
-				query += ","
-			}
-			query += "?"
-			args = append(args, strings.TrimSpace(t))
-		}
-		query += `)`
-	}
-	if since := r.URL.Query().Get("since"); since != "" {
-		query += ` AND created_at >= ?`
-		args = append(args, since)
-	}
-
-	query += ` ORDER BY id ASC LIMIT ?`
-	args = append(args, limit+1)
+	query, args := a.buildEventsQuery(r, iid, cursor, limit)
 
 	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -126,48 +74,10 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 
 	var events []EventResponse
 	for rows.Next() {
-		var evt EventResponse
-		var payloadStr, metadataStr string
-		var requestID, sessionID, flowID, fingerprint *string
-		var clientID, tokenID, delegationType, sdkName, sdkVersion *string
-		if err := rows.Scan(
-			&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
-			&evt.AggregateID, &evt.AggregateType,
-			&payloadStr, &metadataStr, &evt.CreatedAt,
-			&requestID, &sessionID, &flowID, &fingerprint,
-			&clientID, &tokenID, &delegationType, &sdkName, &sdkVersion,
-		); err != nil {
+		evt, err := a.scanEventRow(rows)
+		if err != nil {
 			continue
 		}
-		if requestID != nil {
-			evt.RequestID = *requestID
-		}
-		if sessionID != nil {
-			evt.SessionID = *sessionID
-		}
-		if flowID != nil {
-			evt.FlowID = *flowID
-		}
-		if fingerprint != nil {
-			evt.Fingerprint = *fingerprint
-		}
-		if clientID != nil {
-			evt.ClientID = *clientID
-		}
-		if tokenID != nil {
-			evt.TokenID = *tokenID
-		}
-		if delegationType != nil {
-			evt.DelegationType = *delegationType
-		}
-		if sdkName != nil {
-			evt.SDKName = *sdkName
-		}
-		if sdkVersion != nil {
-			evt.SDKVersion = *sdkVersion
-		}
-		json.Unmarshal([]byte(payloadStr), &evt.Payload)
-		json.Unmarshal([]byte(metadataStr), &evt.Metadata)
 		events = append(events, evt)
 	}
 	if err := rows.Err(); err != nil {
@@ -182,6 +92,99 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: events, NextCursor: nextCursor})
+}
+
+func (a *API) buildEventsQuery(r *http.Request, iid, cursor string, limit int) (string, []any) {
+	query := `SELECT id, event_type, org_id, actor_id, actor_type,
+	                 aggregate_id, aggregate_type, payload, metadata, created_at,
+	                 request_id, session_id, flow_id, fingerprint,
+	                 client_id, token_id, delegation_type, sdk_name, sdk_version
+	          FROM events WHERE instance_id = ? AND id > ?`
+	args := []any{iid, cursor}
+
+	params := map[string]string{
+		"org_id":          r.URL.Query().Get("org_id"),
+		"aggregate_type":  r.URL.Query().Get("aggregate_type"),
+		"aggregate_id":    r.URL.Query().Get("aggregate_id"),
+		"session_id":      r.URL.Query().Get("session_id"),
+		"fingerprint":     r.URL.Query().Get("fingerprint"),
+		"client_id":       r.URL.Query().Get("client_id"),
+		"delegation_type": r.URL.Query().Get("delegation_type"),
+		"created_at >= ?": r.URL.Query().Get("since"),
+	}
+
+	for col, val := range params {
+		if val == "" {
+			continue
+		}
+		if strings.Contains(col, "?") {
+			query += " AND " + col
+		} else {
+			query += fmt.Sprintf(" AND %s = ?", col)
+		}
+		args = append(args, val)
+	}
+
+	if types := r.URL.Query().Get("types"); types != "" {
+		typeList := strings.Split(types, ",")
+		placeholders := make([]string, len(typeList))
+		for i, t := range typeList {
+			placeholders[i] = "?"
+			args = append(args, strings.TrimSpace(t))
+		}
+		query += fmt.Sprintf(" AND event_type IN (%s)", strings.Join(placeholders, ","))
+	}
+
+	query += ` ORDER BY id ASC LIMIT ?`
+	args = append(args, limit+1)
+	return query, args
+}
+
+func (a *API) scanEventRow(rows *sql.Rows) (EventResponse, error) {
+	var evt EventResponse
+	var payloadStr, metadataStr string
+	var requestID, sessionID, flowID, fingerprint *string
+	var clientID, tokenID, delegationType, sdkName, sdkVersion *string
+	err := rows.Scan(
+		&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
+		&evt.AggregateID, &evt.AggregateType,
+		&payloadStr, &metadataStr, &evt.CreatedAt,
+		&requestID, &sessionID, &flowID, &fingerprint,
+		&clientID, &tokenID, &delegationType, &sdkName, &sdkVersion,
+	)
+	if err != nil {
+		return evt, err
+	}
+	if requestID != nil {
+		evt.RequestID = *requestID
+	}
+	if sessionID != nil {
+		evt.SessionID = *sessionID
+	}
+	if flowID != nil {
+		evt.FlowID = *flowID
+	}
+	if fingerprint != nil {
+		evt.Fingerprint = *fingerprint
+	}
+	if clientID != nil {
+		evt.ClientID = *clientID
+	}
+	if tokenID != nil {
+		evt.TokenID = *tokenID
+	}
+	if delegationType != nil {
+		evt.DelegationType = *delegationType
+	}
+	if sdkName != nil {
+		evt.SDKName = *sdkName
+	}
+	if sdkVersion != nil {
+		evt.SDKVersion = *sdkVersion
+	}
+	_ = json.Unmarshal([]byte(payloadStr), &evt.Payload)
+	_ = json.Unmarshal([]byte(metadataStr), &evt.Metadata)
+	return evt, nil
 }
 
 func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {

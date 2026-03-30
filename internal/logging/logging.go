@@ -221,7 +221,7 @@ func startDrainer(db *sql.DB, cfg AnalyticsSinkConfig) {
 		globalDrainerCancel()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec
 	globalDrainerCancel = cancel
 
 	drainer := NewDrainer(globalCache, db, interval, batch)

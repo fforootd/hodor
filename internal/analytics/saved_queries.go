@@ -61,6 +61,10 @@ func (e *Engine) handleListQueries(w http.ResponseWriter, r *http.Request) {
 		}
 		queries = append(queries, q)
 	}
+	if err := rows.Err(); err != nil {
+		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "row iteration failed"})
+		return
+	}
 	if queries == nil {
 		queries = []SavedQuery{}
 	}

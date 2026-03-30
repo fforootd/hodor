@@ -555,17 +555,25 @@ export const instanceApiPrefix = computed(() => {
 
 export function switchInstance(instanceId: string | null) {
   currentInstance.value = instanceId
-  if (instanceId) {
-    localStorage.setItem('zitadel_instance', instanceId)
-  } else {
-    localStorage.removeItem('zitadel_instance')
+  if (typeof window !== 'undefined' && window.localStorage) {
+    if (instanceId) {
+      window.localStorage.setItem('zitadel_instance', instanceId)
+    } else {
+      window.localStorage.removeItem('zitadel_instance')
+    }
   }
 }
 
 // Restore instance from localStorage on load.
-const savedInstance = localStorage.getItem('zitadel_instance')
-if (savedInstance) {
-  currentInstance.value = savedInstance
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const savedInstance = window.localStorage.getItem('zitadel_instance')
+    if (savedInstance) {
+      currentInstance.value = savedInstance
+    }
+  }
+} catch (e) {
+  // Ignore localStorage errors in non-browser environments.
 }
 
 export const instanceApi = {

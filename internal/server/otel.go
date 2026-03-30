@@ -39,9 +39,9 @@ func RequestContextMiddleware(next http.Handler) http.Handler {
 		}
 
 		// SDK info headers (informational, not trusted for authz).
-		if sdkName := r.Header.Get("X-SDK-Name"); sdkName != "" {
+		if sdkName := r.Header.Get("X-Sdk-Name"); sdkName != "" {
 			ctx = telemetry.WithSDKName(ctx, sdkName)
-			if sdkVersion := r.Header.Get("X-SDK-Version"); sdkVersion != "" {
+			if sdkVersion := r.Header.Get("X-Sdk-Version"); sdkVersion != "" {
 				ctx = telemetry.WithSDKVersion(ctx, sdkVersion)
 			}
 		}

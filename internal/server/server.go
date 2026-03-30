@@ -357,7 +357,13 @@ func (s *Server) ListenAndServe() error {
 			go func() {
 				httpAddr := fmt.Sprintf(":%d", httpPort)
 				logging.Printf("[tls] HTTP listener on %s (ACME challenges + HTTPS redirect)", httpAddr)
-				if err := http.ListenAndServe(httpAddr, s.tlsMgr.HTTPChallengeHandler(httpsPort)); err != nil {
+				srv := &http.Server{
+					Addr:              httpAddr,
+					Handler:           s.tlsMgr.HTTPChallengeHandler(httpsPort),
+					ReadTimeout:       5 * time.Second,
+					ReadHeaderTimeout: 5 * time.Second,
+				}
+				if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 					logging.Printf("WARN: HTTP listener error: %v", err)
 				}
 			}()

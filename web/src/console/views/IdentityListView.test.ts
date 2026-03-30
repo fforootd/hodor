@@ -1,6 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createWebHistory } from 'vue-router'
+
+// Provide localStorage mock for the entire test file (must run before imports that use it).
+if (!globalThis.localStorage || typeof globalThis.localStorage.getItem !== 'function') {
+  const store: Record<string, string> = {}
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: (key: string) => store[key] ?? null,
+      setItem: (key: string, value: string) => { store[key] = value },
+      removeItem: (key: string) => { delete store[key] },
+      clear: () => { Object.keys(store).forEach((k) => delete store[k]) },
+    },
+    writable: true,
+    configurable: true,
+  })
+}
+
+// Map window.localStorage for browser-like environments.
+if (typeof window !== 'undefined' && !window.localStorage) {
+  (window as any).localStorage = globalThis.localStorage
+}
+
 import IdentityListView from './IdentityListView.vue'
 
 // Stub all shadcn-vue components as simple pass-through elements.
@@ -85,20 +106,6 @@ function makeRouter() {
 describe('IdentityListView', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    // Provide localStorage mock for happy-dom.
-    if (!globalThis.localStorage || typeof globalThis.localStorage.getItem !== 'function') {
-      const store: Record<string, string> = {}
-      Object.defineProperty(globalThis, 'localStorage', {
-        value: {
-          getItem: (key: string) => store[key] ?? null,
-          setItem: (key: string, value: string) => { store[key] = value },
-          removeItem: (key: string) => { delete store[key] },
-          clear: () => { Object.keys(store).forEach((k) => delete store[k]) },
-        },
-        writable: true,
-        configurable: true,
-      })
-    }
   })
 
   async function mountView(fetchImpl: typeof fetch) {
