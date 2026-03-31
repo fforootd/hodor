@@ -8,36 +8,101 @@ import (
 )
 
 func TestOpenAPISpecGeneration(t *testing.T) {
+	spec := newOpenAPISpec()
+
+	assertTopLevelSpec(t, spec)
+	paths := requireMap(t, spec, "paths")
+	assertMinimumPaths(t, paths)
+	assertCriticalPaths(t, paths)
+	components := requireMap(t, spec, "components")
+	assertComponents(t, components)
+	assertProtectedOperationSecurity(t, paths)
+	assertTags(t, spec)
+	assertSchemaTypeFilter(t, paths, "/v1/users")
+	assertSchemaTypeFilter(t, paths, "/v1/apps")
+}
+
+func TestOpenAPISpecJSON(t *testing.T) {
 	a := api.New(nil, nil, nil)
 	a.RegisterOpenAPIOnly()
 
-	spec := a.Spec().Spec()
+	data, err := a.Spec().SpecJSON()
+	if err != nil {
+		t.Fatalf("SpecJSON failed: %v", err)
+	}
 
-	// Verify top-level structure.
+	// Verify it's valid JSON.
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated spec is not valid JSON: %v", err)
+	}
+
+	// Verify minimum size (should be substantial).
+	if len(data) < 10000 {
+		t.Errorf("spec seems too small: %d bytes", len(data))
+	}
+}
+
+func TestOpenAPIOperationIDs(t *testing.T) {
+	paths := requireMap(t, newOpenAPISpec(), "paths")
+
+	seen := map[string]bool{}
+	for path, methods := range paths {
+		methodMap, ok := methods.(map[string]any)
+		if !ok {
+			t.Errorf("path %s: expected method map, got %T", path, methods)
+			continue
+		}
+		for method, opAny := range methodMap {
+			op, ok := opAny.(map[string]any)
+			if !ok {
+				t.Errorf("%s %s: expected operation map, got %T", method, path, opAny)
+				continue
+			}
+			opID, ok := op["operationId"].(string)
+			if !ok || opID == "" {
+				t.Errorf("%s %s: missing operationId", method, path)
+				continue
+			}
+			if seen[opID] {
+				t.Errorf("duplicate operationId: %s", opID)
+			}
+			seen[opID] = true
+		}
+	}
+}
+
+func newOpenAPISpec() map[string]any {
+	a := api.New(nil, nil, nil)
+	a.RegisterOpenAPIOnly()
+	return a.Spec().Spec()
+}
+
+func assertTopLevelSpec(t *testing.T, spec map[string]any) {
+	t.Helper()
+
 	if spec["openapi"] != "3.1.0" {
 		t.Errorf("expected openapi 3.1.0, got %v", spec["openapi"])
 	}
 
-	info, ok := spec["info"].(map[string]any)
-	if !ok {
-		t.Fatal("missing info object")
-	}
+	info := requireMap(t, spec, "info")
 	if info["title"] != "Zitadel API" {
 		t.Errorf("expected title 'Zitadel API', got %v", info["title"])
 	}
+}
 
-	paths, ok := spec["paths"].(map[string]any)
-	if !ok {
-		t.Fatal("missing paths object")
-	}
+func assertMinimumPaths(t *testing.T, paths map[string]any) {
+	t.Helper()
 
-	// Verify minimum endpoint coverage.
 	minPaths := 35
 	if len(paths) < minPaths {
 		t.Errorf("expected at least %d paths, got %d", minPaths, len(paths))
 	}
+}
 
-	// Verify critical endpoints are present.
+func assertCriticalPaths(t *testing.T, paths map[string]any) {
+	t.Helper()
+
 	criticalPaths := []string{
 		"/v1/users",
 		"/v1/users/{id}",
@@ -66,42 +131,31 @@ func TestOpenAPISpecGeneration(t *testing.T) {
 			t.Errorf("critical path %s missing from spec", p)
 		}
 	}
+}
 
-	// Verify components/schemas exist.
-	components, ok := spec["components"].(map[string]any)
-	if !ok {
-		t.Fatal("missing components")
-	}
-	schemas, ok := components["schemas"].(map[string]any)
-	if !ok {
-		t.Fatal("missing components/schemas")
-	}
+func assertComponents(t *testing.T, components map[string]any) {
+	t.Helper()
+
+	schemas := requireMap(t, components, "schemas")
 	minSchemas := 20
 	if len(schemas) < minSchemas {
 		t.Errorf("expected at least %d schemas, got %d", minSchemas, len(schemas))
 	}
 
-	// Verify security scheme.
-	secSchemes, ok := components["securitySchemes"].(map[string]any)
-	if !ok {
-		t.Fatal("missing securitySchemes")
-	}
+	secSchemes := requireMap(t, components, "securitySchemes")
 	if _, exists := secSchemes["bearerAuth"]; !exists {
 		t.Error("bearerAuth security scheme missing")
 	}
 	if _, exists := secSchemes["cookieAuth"]; !exists {
 		t.Error("cookieAuth security scheme missing")
 	}
+}
 
-	// Verify protected operations allow cookie OR bearer auth.
-	accountPath, ok := paths["/v1/account/profile"].(map[string]any)
-	if !ok {
-		t.Fatal("missing /v1/account/profile path")
-	}
-	getProfile, ok := accountPath["get"].(map[string]any)
-	if !ok {
-		t.Fatal("missing GET /v1/account/profile operation")
-	}
+func assertProtectedOperationSecurity(t *testing.T, paths map[string]any) {
+	t.Helper()
+
+	accountPath := requireMap(t, paths, "/v1/account/profile")
+	getProfile := requireMap(t, accountPath, "get")
 	security, ok := getProfile["security"].([]map[string]any)
 	if !ok || len(security) != 2 {
 		t.Fatalf("expected two security alternatives for GET /v1/account/profile, got %T %#v", getProfile["security"], getProfile["security"])
@@ -112,8 +166,11 @@ func TestOpenAPISpecGeneration(t *testing.T) {
 	if _, ok := security[1]["bearerAuth"]; !ok {
 		t.Error("expected bearerAuth to remain available")
 	}
+}
 
-	// Verify tags are present.
+func assertTags(t *testing.T, spec map[string]any) {
+	t.Helper()
+
 	tags, ok := spec["tags"].([]map[string]any)
 	if !ok {
 		t.Fatal("missing tags")
@@ -121,96 +178,39 @@ func TestOpenAPISpecGeneration(t *testing.T) {
 	if len(tags) < 10 {
 		t.Errorf("expected at least 10 tags, got %d", len(tags))
 	}
+}
 
-	usersPath, ok := paths["/v1/users"].(map[string]any)
+func assertSchemaTypeFilter(t *testing.T, paths map[string]any, path string) {
+	t.Helper()
+
+	pathItem := requireMap(t, paths, path)
+	getOp := requireMap(t, pathItem, "get")
+	params, ok := getOp["parameters"].([]map[string]any)
 	if !ok {
-		t.Fatal("missing /v1/users path")
+		t.Fatalf("missing GET %s parameters", path)
 	}
-	listUsers, ok := usersPath["get"].(map[string]any)
-	if !ok {
-		t.Fatal("missing GET /v1/users operation")
-	}
-	userParams, ok := listUsers["parameters"].([]map[string]any)
-	if !ok {
-		t.Fatal("missing GET /v1/users parameters")
-	}
-	var foundUserSchemaType bool
-	for _, param := range userParams {
+	var foundSchemaType bool
+	for _, param := range params {
 		if param["name"] == "schema_type" {
-			foundUserSchemaType = true
+			foundSchemaType = true
 			break
 		}
 	}
-	if !foundUserSchemaType {
-		t.Error("expected GET /v1/users to document schema_type filter")
-	}
-
-	appsPath, ok := paths["/v1/apps"].(map[string]any)
-	if !ok {
-		t.Fatal("missing /v1/apps path")
-	}
-	listApps, ok := appsPath["get"].(map[string]any)
-	if !ok {
-		t.Fatal("missing GET /v1/apps operation")
-	}
-	appParams, ok := listApps["parameters"].([]map[string]any)
-	if !ok {
-		t.Fatal("missing GET /v1/apps parameters")
-	}
-	var foundAppSchemaType bool
-	for _, param := range appParams {
-		if param["name"] == "schema_type" {
-			foundAppSchemaType = true
-			break
-		}
-	}
-	if !foundAppSchemaType {
-		t.Error("expected GET /v1/apps to document schema_type filter")
+	if !foundSchemaType {
+		t.Errorf("expected GET %s to document schema_type filter", path)
 	}
 }
 
-func TestOpenAPISpecJSON(t *testing.T) {
-	a := api.New(nil, nil, nil)
-	a.RegisterOpenAPIOnly()
+func requireMap(t *testing.T, parent map[string]any, key string) map[string]any {
+	t.Helper()
 
-	data, err := a.Spec().SpecJSON()
-	if err != nil {
-		t.Fatalf("SpecJSON failed: %v", err)
+	value, ok := parent[key]
+	if !ok {
+		t.Fatalf("missing %s", key)
 	}
-
-	// Verify it's valid JSON.
-	var parsed map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("generated spec is not valid JSON: %v", err)
+	child, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s is %T, want map[string]any", key, value)
 	}
-
-	// Verify minimum size (should be substantial).
-	if len(data) < 10000 {
-		t.Errorf("spec seems too small: %d bytes", len(data))
-	}
-}
-
-func TestOpenAPIOperationIDs(t *testing.T) {
-	a := api.New(nil, nil, nil)
-	a.RegisterOpenAPIOnly()
-
-	spec := a.Spec().Spec()
-	paths := spec["paths"].(map[string]any)
-
-	seen := map[string]bool{}
-	for path, methods := range paths {
-		methodMap := methods.(map[string]any)
-		for method, opAny := range methodMap {
-			op := opAny.(map[string]any)
-			opID, ok := op["operationId"].(string)
-			if !ok || opID == "" {
-				t.Errorf("%s %s: missing operationId", method, path)
-				continue
-			}
-			if seen[opID] {
-				t.Errorf("duplicate operationId: %s", opID)
-			}
-			seen[opID] = true
-		}
-	}
+	return child
 }
