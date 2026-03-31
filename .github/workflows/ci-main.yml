@@ -8,9 +8,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-env:
-  POSTGRES_LATEST: "18"
-
 permissions:
   contents: read
 
@@ -140,7 +137,7 @@ jobs:
     name: Postgres Latest
     runs-on: ubuntu-latest
     env:
-      TEST_POSTGRES_VERSION: ${{ env.POSTGRES_LATEST }}
+      TEST_POSTGRES_VERSION: "18"
     steps:
       - uses: actions/checkout@v6.0.2
 
