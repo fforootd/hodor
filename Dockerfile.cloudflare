@@ -4,31 +4,37 @@
 # Self-contained multi-stage build for Cloudflare Containers.
 # Target architecture: linux/amd64 (required by CF Containers).
 #
-# This file lives at the deploy/ level but MUST be built from the repo root:
-#   docker build -f deploy/cloudflare-containers/Dockerfile .
+# Layer caching strategy:
+#   1. go.mod/go.sum  → module download (changes rarely)
+#   2. cmd/ internal/ → Go source (changes on code edits)
+#   3. web/dist/      → frontend embed (changes on frontend builds)
+#   4. go build       → only re-runs when layers 2 or 3 change
 #
-# Wrangler handles this automatically when image is set to this path.
-#
-# Why not use Dockerfile.goreleaser?
-#   - It's FROM scratch (no CA certs, no shell for SSH/debugging)
-#   - It expects goreleaser to pre-stage the binary, can't `docker build` standalone
-#
-# Alternative: use the GHCR image published by goreleaser. See wrangler.jsonc.
+# Combined with .dockerignore (excludes node_modules, .git, docs, deploy),
+# this keeps the build context ~15MB and avoids cache invalidation from
+# non-Go changes like docs, config, or Worker TS edits.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: Build Go binary ────────────────────────────────────────────────
-#
-# The Cloudflare Wrangler config runs `npm --prefix ../.. run build` before
-# deploy and points Workers Assets at `web/dist`. We copy that exact prebuilt
-# frontend into the Go embed directory here so the container-served HTML and
-# the Worker-served asset bundle always share the same hashed filenames.
 FROM --platform=linux/amd64 golang:1.26-bookworm AS go
 
 WORKDIR /build
+
+# Layer 1: Module cache (changes only when dependencies change)
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
+
+# Layer 2: Go source (changes on code edits only)
+COPY cmd/ cmd/
+COPY internal/ internal/
+
+# Layer 3: Frontend embed (changes on frontend builds only)
+# Wrangler runs `npm run build` before deploy, producing web/dist/.
+# We copy it into the Go embed directory so the container-served HTML
+# and the Worker-served asset bundle share the same hashed filenames.
 COPY web/dist/ internal/server/webdist/
+
+# Layer 4: Build (re-runs only when Go source or frontend changes)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /zitadel ./cmd/zitadel
 
