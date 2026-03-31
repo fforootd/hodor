@@ -11,40 +11,25 @@
           >
             <ArrowLeft class="size-4" />
           </Button>
-          <div class="space-y-3">
-            <div class="flex flex-wrap items-center gap-2">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <h1 class="text-2xl font-semibold tracking-tight">
+                {{ flow?.name || 'Login Flow' }}
+              </h1>
               <Badge v-if="flow?.is_default" variant="default">Default</Badge>
               <Badge :variant="stateVariant(flow?.state)" class="text-xs capitalize">{{
                 flow?.state || 'draft'
               }}</Badge>
-              <Badge v-if="templateSource" variant="secondary">Template-backed</Badge>
+              <Badge v-if="templateSource" variant="secondary">Template</Badge>
             </div>
-            <div class="space-y-1">
-              <h1 class="text-3xl font-semibold tracking-tight">
-                {{ flow?.name || 'Login Flow' }}
-              </h1>
-              <p class="max-w-2xl text-sm text-muted-foreground">
-                <template v-if="flow?.is_default">
-                  Tune the default login experience, protections, and branding used for every user
-                  who does not match a more specific flow.
-                </template>
-                <template v-else>
-                  Configure the strategy, protections, and visual shell for this login flow.
-                </template>
-              </p>
-            </div>
-
-            <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <div class="rounded-full border bg-muted/40 px-3 py-1">
-                Strategy: <span class="font-medium text-foreground">{{ strategyLabel }}</span>
-              </div>
-              <div class="rounded-full border bg-muted/40 px-3 py-1">
-                Layout: <span class="font-medium text-foreground">{{ currentLayoutLabel }}</span>
-              </div>
-              <div class="rounded-full border bg-muted/40 px-3 py-1">
-                Priority: <span class="font-medium text-foreground">{{ form.priority }}</span>
-              </div>
-            </div>
+            <p class="max-w-2xl text-sm text-muted-foreground">
+              <template v-if="flow?.is_default">
+                Fallback experience for anyone who does not match a more specific flow.
+              </template>
+              <template v-else>
+                Configure the strategy, protections, and visual shell for this login flow.
+              </template>
+            </p>
           </div>
         </div>
 
@@ -66,18 +51,6 @@
         </div>
       </div>
     </section>
-
-    <Alert
-      v-if="flow?.is_default"
-      class="border-primary/20 bg-primary/[0.04] text-primary-foreground"
-    >
-      <Shield class="size-4 text-primary" />
-      <AlertTitle class="text-sm font-medium text-foreground">Default flow coverage</AlertTitle>
-      <AlertDescription class="text-xs text-muted-foreground">
-        All unmatched users inherit this experience. Changes here affect every login that is not
-        handled by a more specific targeted flow.
-      </AlertDescription>
-    </Alert>
 
     <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
       <div class="min-w-0 space-y-6">
@@ -177,54 +150,62 @@
                 </div>
               </CardHeader>
               <CardContent class="space-y-5 pt-5">
-                <div class="grid gap-4 lg:grid-cols-2">
-                  <div
+                <Accordion type="multiple" :default-value="openAssets" class="w-full">
+                  <AccordionItem
                     v-for="assetField in brandingAssetFields"
                     :key="assetField.key"
-                    class="rounded-xl border bg-muted/10 p-4"
+                    :value="assetField.key"
                   >
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <p class="text-sm font-medium">{{ assetField.label }}</p>
-                        <p class="mt-1 text-xs text-muted-foreground">
-                          {{ assetField.description }}
-                        </p>
-                      </div>
-                      <Button
-                        v-if="form.branding[assetField.key]"
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        :disabled="assetBusy[assetField.key]"
-                        @click="removeBrandingAsset(assetField.key)"
-                      >
-                        Remove
-                      </Button>
-                    </div>
-
-                    <div class="mt-4 space-y-3">
-                      <div class="rounded-lg border border-dashed bg-background/80 p-3">
+                    <AccordionTrigger class="py-3 hover:no-underline">
+                      <div class="flex items-center gap-3">
                         <div
                           v-if="form.branding[assetField.key]"
-                          class="flex min-h-24 items-center justify-center rounded-md bg-muted/20 p-3"
+                          class="size-8 rounded border overflow-hidden bg-muted/20 flex items-center justify-center shrink-0"
                         >
                           <img
                             :src="form.branding[assetField.key]"
                             :alt="assetField.label"
-                            class="max-h-20 max-w-full rounded object-contain"
+                            class="max-h-full max-w-full object-contain"
                           />
                         </div>
                         <div
                           v-else
-                          class="flex min-h-24 flex-col items-center justify-center rounded-md bg-muted/20 text-center"
+                          class="size-8 rounded border bg-muted/20 flex items-center justify-center shrink-0"
                         >
-                          <ImageIcon class="mb-2 size-4 text-muted-foreground" />
-                          <p class="text-xs text-muted-foreground">No asset uploaded yet</p>
+                          <ImageIcon class="size-3 text-muted-foreground" />
+                        </div>
+                        <div class="text-left">
+                          <p class="text-sm font-medium">{{ assetField.label }}</p>
+                          <p class="text-xs text-muted-foreground">
+                            {{ form.branding[assetField.key] ? 'Uploaded' : 'Not set' }}
+                          </p>
                         </div>
                       </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div class="space-y-3 pb-2">
+                        <p class="text-xs text-muted-foreground">{{ assetField.description }}</p>
 
-                      <div class="space-y-2">
-                        <Label :for="`upload-${assetField.key}`">Upload file</Label>
+                        <div
+                          v-if="form.branding[assetField.key]"
+                          class="flex items-center justify-between rounded-lg border border-dashed bg-background/80 p-3"
+                        >
+                          <img
+                            :src="form.branding[assetField.key]"
+                            :alt="assetField.label"
+                            class="max-h-16 max-w-[50%] rounded object-contain"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            :disabled="assetBusy[assetField.key]"
+                            @click.stop="removeBrandingAsset(assetField.key)"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+
                         <input
                           :id="`upload-${assetField.key}`"
                           type="file"
@@ -233,36 +214,37 @@
                           :disabled="assetBusy[assetField.key]"
                           @change="onBrandingFileSelected(assetField.key, $event)"
                         />
-                      </div>
 
-                      <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
-                        <Input
-                          v-model="assetImportUrls[assetField.key]"
-                          :placeholder="assetField.placeholder"
-                          :disabled="assetBusy[assetField.key]"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
-                          @click="importBrandingAsset(assetField.key)"
+                        <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
+                          <Input
+                            v-model="assetImportUrls[assetField.key]"
+                            :placeholder="assetField.placeholder"
+                            :disabled="assetBusy[assetField.key]"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
+                            @click="importBrandingAsset(assetField.key)"
+                          >
+                            {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
+                          </Button>
+                        </div>
+
+                        <p
+                          v-if="
+                            assetField.key === 'cover_image' &&
+                            !['split', 'card_image'].includes(form.layout)
+                          "
+                          class="text-xs text-muted-foreground"
                         >
-                          {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
-                        </Button>
+                          Cover art only appears in Split and Card with image layouts.
+                        </p>
                       </div>
-
-                      <p
-                        v-if="
-                          assetField.key === 'cover_image' &&
-                          !['split', 'card_image'].includes(form.layout)
-                        "
-                        class="text-xs text-muted-foreground"
-                      >
-                        Cover art only appears in Split and Card with image layouts.
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
 
                 <Separator />
 
@@ -584,32 +566,20 @@
           <CardHeader class="border-b bg-muted/20 pb-4">
             <div class="flex items-start gap-3">
               <div class="rounded-lg border bg-background p-2">
-                <BadgeCheck class="size-4 text-muted-foreground" />
+                <Eye class="size-4 text-muted-foreground" />
               </div>
               <div>
-                <CardTitle class="text-base">Shared preview</CardTitle>
+                <CardTitle class="text-base">Live preview</CardTitle>
                 <p class="mt-1 text-sm text-muted-foreground">
-                  Uses the same Vue renderer and layout shells as the hosted login page and the
-                  published web component.
+                  Updates as you edit.
                 </p>
               </div>
             </div>
           </CardHeader>
 
           <CardContent class="space-y-5 pt-5">
-            <div
-              class="rounded-2xl border bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.14),transparent_45%),linear-gradient(180deg,rgba(244,244,245,0.8),rgba(244,244,245,0.2))] p-4"
-            >
-              <div class="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p class="text-sm font-medium">Layout</p>
-                  <p class="text-xs text-muted-foreground">
-                    Visual shell only. Runtime behavior stays shared.
-                  </p>
-                </div>
-                <Badge variant="secondary">{{ currentLayoutLabel }}</Badge>
-              </div>
-
+            <div>
+              <p class="text-xs font-medium text-muted-foreground mb-2">Layout</p>
               <div class="flex flex-wrap gap-2">
                 <Button
                   v-for="layout in layouts"
@@ -617,8 +587,10 @@
                   type="button"
                   size="sm"
                   :variant="form.layout === layout.id ? 'default' : 'outline'"
+                  class="flex items-center gap-1.5"
                   @click="form.layout = layout.id"
                 >
+                  <component :is="layout.icon" class="size-3.5" />
                   {{ layout.label }}
                 </Button>
               </div>
@@ -634,39 +606,6 @@
                 />
               </LoginShell>
             </div>
-
-            <Separator />
-
-            <div class="grid gap-2 text-xs">
-              <div class="rounded-lg border bg-background px-3 py-2">
-                <span class="font-medium text-foreground">Strategy</span>
-                <span class="text-muted-foreground"> · {{ strategyLabel }}</span>
-              </div>
-              <div v-if="templateSource" class="rounded-lg border bg-background px-3 py-2">
-                <span class="font-medium text-foreground">Template source</span>
-                <span class="font-mono text-muted-foreground"> · {{ templateSource }}</span>
-              </div>
-              <div v-if="form.telemetry.enabled" class="rounded-lg border bg-background px-3 py-2">
-                <span class="font-medium text-foreground">Telemetry</span>
-                <span class="text-muted-foreground">
-                  · {{ Math.round(form.telemetry.sampleRate * 100) }}% sample rate</span
-                >
-              </div>
-              <div
-                v-if="form.fingerprint.enabled"
-                class="rounded-lg border bg-background px-3 py-2"
-              >
-                <span class="font-medium text-foreground">Fingerprinting</span>
-                <span class="text-muted-foreground"> · {{ form.fingerprint.provider }}</span>
-              </div>
-              <div class="rounded-lg border bg-background px-3 py-2">
-                <span class="font-medium text-foreground">Rate limit</span>
-                <span class="text-muted-foreground">
-                  · {{ form.rateLimit.maxAttempts }} attempts / {{ form.rateLimit.windowSeconds }}s
-                  (per {{ form.rateLimit.scope }})
-                </span>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -679,7 +618,7 @@
   import { useRoute, useRouter } from 'vue-router'
   import { api } from '@/api/client'
   import type { FlowBranding } from '@/api/branding'
-  import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+  import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
   import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
   import { Badge } from '@/components/ui/badge'
   import { Button } from '@/components/ui/button'
@@ -700,15 +639,19 @@
     Activity,
     ArrowLeft,
     ArrowUp,
-    BadgeCheck,
+    Columns2,
+    Eye,
     Gauge,
     ImageIcon,
     LayoutPanelTop,
+    Minus,
     Palette,
     Radar,
     Shield,
     ShieldCheck,
     Sparkles,
+    Square,
+    GalleryHorizontalEnd,
   } from 'lucide-vue-next'
   import LoginShell from '@/login/components/LoginShell.vue'
   import LoginNodeRenderer from '@/login/components/LoginNodeRenderer.vue'
@@ -783,12 +726,18 @@
   ] as const
 
   const layouts = [
-    { id: 'centered', label: 'Centered' },
-    { id: 'split', label: 'Split' },
-    { id: 'muted', label: 'Muted' },
-    { id: 'card_image', label: 'Card with image' },
-    { id: 'minimal', label: 'Minimal' },
+    { id: 'centered', label: 'Centered', icon: LayoutPanelTop },
+    { id: 'split', label: 'Split', icon: Columns2 },
+    { id: 'muted', label: 'Muted', icon: Square },
+    { id: 'card_image', label: 'Card with image', icon: GalleryHorizontalEnd },
+    { id: 'minimal', label: 'Minimal', icon: Minus },
   ]
+
+  const openAssets = computed(() =>
+    brandingAssetFields
+      .filter(f => form.branding[f.key])
+      .map(f => f.key)
+  )
 
   const strategyLabels: Record<string, string> = {
     identifier_first: 'Identifier first',

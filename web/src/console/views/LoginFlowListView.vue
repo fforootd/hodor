@@ -2,10 +2,9 @@
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-bold tracking-tight">Login Flows</h1>
-        <p class="text-muted-foreground text-sm mt-1">
-          Manage login experiences. Templates are the fastest way to start, and the default flow
-          applies to users not matched by a more specific flow.
+        <h1 class="text-2xl font-semibold tracking-tight">Login Flows</h1>
+        <p class="text-sm text-muted-foreground">
+          {{ loading ? 'Loading…' : `${flows.length} flow${flows.length !== 1 ? 's' : ''}` }}
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -20,121 +19,63 @@
       </div>
     </div>
 
+    <Empty v-if="!loading && flows.length === 0" class="border border-dashed">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Shield />
+        </EmptyMedia>
+        <EmptyTitle>No Login Flows</EmptyTitle>
+        <EmptyDescription>Something went wrong — the default flow should always exist.</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+
     <div v-if="loading" class="flex justify-center py-12">
       <Spinner class="size-6" />
     </div>
 
-    <div v-else-if="flows.length === 0" class="text-center py-12">
-      <div class="text-4xl mb-3">🔐</div>
-      <h3 class="text-lg font-semibold">No Login Flows</h3>
-      <p class="text-muted-foreground text-sm mt-1">Something went wrong — the default flow should always exist.</p>
-    </div>
-
-    <div v-else class="space-y-4">
-      <Card
-        v-if="defaultFlow"
-        class="border-primary/20 bg-primary/[0.02] hover:shadow-md transition-shadow cursor-pointer"
-        @click="$router.push(`/login-flows/${defaultFlow.id}`)"
-      >
-        <CardHeader class="pb-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2.5">
-              <div class="flex items-center justify-center size-8 rounded-md bg-primary/10">
-                <Shield class="size-4 text-primary" />
-              </div>
-              <div>
-                <CardTitle class="text-base">{{ defaultFlow.name || 'Default Login' }}</CardTitle>
-                <p class="text-xs text-muted-foreground mt-0.5">
-                  Applies to all users not matched by a specific flow
-                </p>
-              </div>
-            </div>
-            <div class="flex items-center gap-2">
-              <Badge variant="default" class="text-xs">Default</Badge>
-              <Badge v-if="isTemplateBacked(defaultFlow)" variant="secondary" class="text-xs">Template</Badge>
-              <Badge :variant="stateVariant(defaultFlow.state)" class="text-xs">{{ defaultFlow.state }}</Badge>
-            </div>
+    <DataTable
+      v-if="!loading && flows.length > 0"
+      :columns="columns as any"
+      :data="filteredItems"
+      v-model:rowSelection="selectedRows"
+    >
+      <template #toolbar="{ table }">
+        <div class="flex items-center justify-between w-full mb-4">
+          <div class="w-full max-w-lg relative">
+            <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
+            <Input
+              placeholder="Search flows…"
+              class="pl-9 bg-background w-full relative z-0"
+              :model-value="globalSearch"
+              @update:model-value="val => applySearchQuery(String(val), table)"
+            />
           </div>
-        </CardHeader>
-        <CardContent class="text-sm text-muted-foreground space-y-2">
-          <div class="flex flex-wrap gap-1.5">
-            <Badge variant="outline" class="text-xs">Strategy: {{ formatStrategy(defaultFlow.strategy) }}</Badge>
-            <Badge v-if="getLayout(defaultFlow)" variant="outline" class="text-xs">
-              Layout: {{ getLayoutLabel(getLayout(defaultFlow)) }}
-            </Badge>
-            <Badge v-if="getCaptcha(defaultFlow)" variant="outline" class="text-xs">
-              🛡️ {{ getCaptchaProvider(defaultFlow) }}
-            </Badge>
-            <Badge v-if="getFingerprint(defaultFlow)" variant="outline" class="text-xs">🔍 Fingerprint</Badge>
-            <Badge v-if="getRateLimit(defaultFlow)" variant="outline" class="text-xs">⏱️ Rate limit</Badge>
-            <Badge v-if="getTelemetry(defaultFlow)" variant="outline" class="text-xs">📊 Telemetry</Badge>
-          </div>
-          <div class="flex items-center justify-between pt-1 text-xs text-muted-foreground/70">
-            <span>Priority: {{ defaultFlow.priority }}</span>
-            <span>{{ formatDate(defaultFlow.created_at) }}</span>
-          </div>
-        </CardContent>
-      </Card>
 
-      <div v-if="customFlows.length > 0" class="flex items-center gap-3 py-1">
-        <div class="flex-1 h-px bg-border" />
-        <span class="text-xs text-muted-foreground font-medium">Custom Flows</span>
-        <div class="flex-1 h-px bg-border" />
-      </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" class="ml-auto">
+                View <ChevronDown class="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuCheckboxItem
+                v-for="column in table.getAllColumns().filter((col: any) => col.getCanHide())"
+                :key="column.id"
+                class="capitalize"
+                :checked="table.getState().columnVisibility[column.id] !== false"
+                @update:checked="(val: boolean) => column.toggleVisibility(!!val)"
+              >
+                {{ column.id.replace('_', ' ') }}
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </template>
 
-      <div v-if="customFlows.length > 0" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card
-          v-for="flow in customFlows"
-          :key="flow.id"
-          class="group hover:shadow-md transition-shadow cursor-pointer"
-          @click="$router.push(`/login-flows/${flow.id}`)"
-        >
-          <CardHeader class="pb-3">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="text-xl">🔐</span>
-                <CardTitle class="text-base">{{ flow.name }}</CardTitle>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <Badge v-if="isTemplateBacked(flow)" variant="secondary" class="text-xs">Template</Badge>
-                <Badge :variant="stateVariant(flow.state)" class="text-xs">{{ flow.state }}</Badge>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent class="text-sm text-muted-foreground space-y-2">
-            <div v-if="hasAudience(flow)" class="flex flex-wrap gap-1.5">
-              <Badge v-if="audienceSchemaCount(flow)" variant="secondary" class="text-xs">
-                {{ audienceSchemaCount(flow) }} schema{{ audienceSchemaCount(flow) > 1 ? 's' : '' }}
-              </Badge>
-              <Badge v-if="audienceUserCount(flow)" variant="secondary" class="text-xs">
-                {{ audienceUserCount(flow) }} user{{ audienceUserCount(flow) > 1 ? 's' : '' }}
-              </Badge>
-              <Badge v-if="audienceOrgCount(flow)" variant="secondary" class="text-xs">
-                {{ audienceOrgCount(flow) }} org{{ audienceOrgCount(flow) > 1 ? 's' : '' }}
-              </Badge>
-            </div>
-            <div v-else class="text-xs text-muted-foreground/60 italic">No audience targeting</div>
-
-            <div class="flex flex-wrap gap-1.5">
-              <Badge variant="outline" class="text-xs">Strategy: {{ formatStrategy(flow.strategy) }}</Badge>
-              <Badge v-if="getLayout(flow)" variant="outline" class="text-xs">
-                Layout: {{ getLayoutLabel(getLayout(flow)) }}
-              </Badge>
-              <Badge v-if="getCaptcha(flow)" variant="outline" class="text-xs">
-                🛡️ {{ getCaptchaProvider(flow) }}
-              </Badge>
-              <Badge v-if="getFingerprint(flow)" variant="outline" class="text-xs">🔍 Fingerprint</Badge>
-              <Badge v-if="getRateLimit(flow)" variant="outline" class="text-xs">⏱️ Rate limit</Badge>
-            </div>
-
-            <div class="flex items-center justify-between pt-1 text-xs text-muted-foreground/70">
-              <span>Priority: {{ flow.priority }}</span>
-              <span>{{ formatDate(flow.created_at) }}</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      <template #pagination="{ table }">
+        <DataTablePagination :table="table" />
+      </template>
+    </DataTable>
 
     <Dialog v-model:open="showCreateDialog">
       <DialogContent class="sm:max-w-md">
@@ -192,16 +133,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { api } from '@/api/client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import DataTable from '@/components/ui/data-table/DataTable.vue'
+import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuCheckboxItem,
+} from '@/components/ui/dropdown-menu'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Plus, Shield, Store } from 'lucide-vue-next'
+import {
+  Plus, Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown,
+  Shield, Store, CheckCircle2, Ban, Clock,
+} from 'lucide-vue-next'
+import { createColumnHelper } from '@tanstack/vue-table'
 
 interface LoginFlow {
   id: string
@@ -223,9 +174,19 @@ const flows = ref<LoginFlow[]>([])
 const loading = ref(true)
 const showCreateDialog = ref(false)
 const creating = ref(false)
+const selectedRows = ref({})
+const globalSearch = ref('')
+const searchQuery = ref('')
 
-const defaultFlow = computed(() => flows.value.find((f) => f.is_default))
-const customFlows = computed(() => flows.value.filter((f) => !f.is_default))
+const filteredItems = computed(() => {
+  if (!searchQuery.value.trim()) return flows.value
+  const q = searchQuery.value.toLowerCase()
+  return flows.value.filter(f =>
+    f.name?.toLowerCase().includes(q) ||
+    f.strategy?.toLowerCase().includes(q) ||
+    f.state?.toLowerCase().includes(q)
+  )
+})
 
 const newFlow = ref({
   name: '',
@@ -233,48 +194,34 @@ const newFlow = ref({
   strategy: 'identifier_first',
 })
 
+let activeTable: any = null
+
+function applySearchQuery(query: string, table: any) {
+  if (table) activeTable = table
+  globalSearch.value = query
+  searchQuery.value = query
+  const filters: { id: string; value: string }[] = []
+  if (query.trim()) {
+    filters.push({ id: 'name', value: query.trim() })
+  }
+  if (activeTable) {
+    activeTable.setColumnFilters(filters)
+  }
+}
+
+function getSortIcon(column: any) {
+  const isSorted = column.getIsSorted()
+  if (isSorted === 'asc') return ArrowUp
+  if (isSorted === 'desc') return ArrowDown
+  return ArrowUpDown
+}
+
 function getConfig(flow: LoginFlow): any {
   if (!flow.config) return {}
   if (typeof flow.config === 'string') {
     try { return JSON.parse(flow.config) } catch { return {} }
   }
   return flow.config
-}
-
-function getCaptcha(flow: LoginFlow) {
-  return getConfig(flow).captcha
-}
-
-function getCaptchaProvider(flow: LoginFlow) {
-  return getCaptcha(flow)?.provider || 'altcha'
-}
-
-function getFingerprint(flow: LoginFlow) {
-  const fp = getConfig(flow).fingerprint
-  return fp?.enabled === false ? null : fp
-}
-
-function getRateLimit(flow: LoginFlow) {
-  return getConfig(flow).rate_limit
-}
-
-function getTelemetry(flow: LoginFlow) {
-  const telemetry = getConfig(flow).telemetry
-  return telemetry?.enabled === false ? null : telemetry
-}
-
-function getLayout(flow: LoginFlow) {
-  return getConfig(flow).branding?.layout || ''
-}
-
-function getLayoutLabel(layout: string) {
-  switch (layout) {
-    case 'card_image': return 'Card with image'
-    default:
-      return layout
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (char) => char.toUpperCase())
-  }
 }
 
 function formatStrategy(strategy: string) {
@@ -287,8 +234,26 @@ function formatStrategy(strategy: string) {
   }
 }
 
-function isTemplateBacked(flow: LoginFlow) {
-  return Boolean(flow.metadata?._catalog?.template_id)
+function getProtections(flow: LoginFlow): string[] {
+  const config = getConfig(flow)
+  const parts: string[] = []
+  if (config.captcha && config.captcha.mode !== 'never' && config.captcha.provider !== 'none') {
+    parts.push(config.captcha.provider || 'Captcha')
+  }
+  if (config.fingerprint && config.fingerprint.enabled !== false) {
+    parts.push('Fingerprint')
+  }
+  if (config.rate_limit) {
+    parts.push('Rate limit')
+  }
+  if (config.telemetry && config.telemetry.enabled !== false) {
+    parts.push('Telemetry')
+  }
+  return parts
+}
+
+function safeJSON(value: string) {
+  try { return JSON.parse(value) } catch { return {} }
 }
 
 function hasAudience(flow: LoginFlow) {
@@ -297,34 +262,112 @@ function hasAudience(flow: LoginFlow) {
   return audience.schema_ids?.length > 0 || audience.user_ids?.length > 0 || audience.org_ids?.length > 0
 }
 
-function audienceSchemaCount(flow: LoginFlow) {
-  return (typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience || {}).schema_ids?.length || 0
+function audienceSummary(flow: LoginFlow): string {
+  if (!hasAudience(flow)) return ''
+  const audience = typeof flow.audience === 'string' ? safeJSON(flow.audience) : (flow.audience || {})
+  const parts: string[] = []
+  if (audience.schema_ids?.length) parts.push(`${audience.schema_ids.length} schema${audience.schema_ids.length > 1 ? 's' : ''}`)
+  if (audience.user_ids?.length) parts.push(`${audience.user_ids.length} user${audience.user_ids.length > 1 ? 's' : ''}`)
+  if (audience.org_ids?.length) parts.push(`${audience.org_ids.length} org${audience.org_ids.length > 1 ? 's' : ''}`)
+  return parts.join(', ')
 }
 
-function audienceUserCount(flow: LoginFlow) {
-  return (typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience || {}).user_ids?.length || 0
-}
+const columnHelper = createColumnHelper<LoginFlow>()
 
-function audienceOrgCount(flow: LoginFlow) {
-  return (typeof flow.audience === 'string' ? safeJSON(flow.audience) : flow.audience || {}).org_ids?.length || 0
-}
-
-function safeJSON(value: string) {
-  try { return JSON.parse(value) } catch { return {} }
-}
-
-function stateVariant(state?: string): 'default' | 'secondary' | 'outline' | 'destructive' {
-  switch (state) {
-    case 'active': return 'default'
-    case 'testing': return 'secondary'
-    case 'archived': return 'destructive'
-    default: return 'outline'
-  }
-}
-
-function formatDate(value?: string) {
-  return value ? new Date(value).toLocaleDateString() : ''
-}
+const columns = computed(() => [
+  columnHelper.accessor('name', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+    }, () => ['Name', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => {
+      const flow = info.row.original
+      const name = info.getValue() || 'Unnamed Flow'
+      return h('div', { class: 'flex items-center gap-3' }, [
+        h('div', {
+          class: 'flex items-center justify-center size-8 rounded-lg text-xs font-semibold ' +
+            (flow.is_default ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'),
+        }, [h(Shield, { class: 'size-4' })]),
+        h('div', { class: 'min-w-0' }, [
+          h('div', { class: 'flex items-center gap-2' }, [
+            h(RouterLink, {
+              to: `/login-flows/${flow.id}`,
+              class: 'font-medium text-primary hover:underline',
+            }, () => name),
+            ...(flow.is_default ? [h(Badge, { variant: 'default', class: 'text-[10px] px-1.5 py-0' }, () => 'Default')] : []),
+          ]),
+          h('p', { class: 'text-xs text-muted-foreground mt-0.5 truncate' },
+            flow.is_default
+              ? 'Fallback for all unmatched users'
+              : (audienceSummary(flow) || 'No audience targeting')
+          ),
+        ]),
+      ])
+    },
+    filterFn: (row, _id, filterValue) => {
+      const name = (row.original.name || '').toLowerCase()
+      return name.includes(filterValue.toLowerCase())
+    },
+  }),
+  columnHelper.accessor('strategy', {
+    header: 'Strategy',
+    cell: info => h('span', { class: 'text-sm' }, formatStrategy(info.getValue())),
+  }),
+  columnHelper.accessor('state', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+    }, () => ['State', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => {
+      const state = (info.getValue() as string) || 'draft'
+      const variant = state === 'active' ? 'outline' : state === 'archived' ? 'outline' : 'outline'
+      const colorClass = state === 'active'
+        ? 'text-green-700 bg-green-100 border-green-200'
+        : state === 'testing'
+          ? 'text-amber-700 bg-amber-100 border-amber-200'
+          : state === 'archived'
+            ? 'text-red-700 bg-red-100 border-red-200'
+            : 'text-muted-foreground'
+      const icon = state === 'active' ? CheckCircle2 : state === 'archived' ? Ban : Clock
+      return h(Badge, {
+        variant,
+        class: `font-normal flex items-center gap-1 capitalize ${colorClass}`,
+      }, () => [
+        h(icon, { class: 'w-3 h-3 shrink-0' }),
+        h('span', state),
+      ])
+    },
+  }),
+  columnHelper.display({
+    id: 'protections',
+    header: 'Protections',
+    cell: ({ row }) => {
+      const parts = getProtections(row.original)
+      if (parts.length === 0) return h('span', { class: 'text-xs text-muted-foreground' }, '—')
+      return h('span', { class: 'text-xs text-muted-foreground' }, parts.join(' · '))
+    },
+  }),
+  columnHelper.accessor('priority', {
+    header: 'Priority',
+    cell: info => h('span', { class: 'text-sm tabular-nums' }, String(info.getValue() ?? 0)),
+    meta: { defaultHidden: true },
+  }),
+  columnHelper.accessor('created_at', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+    }, () => ['Created', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => {
+      if (!info.getValue()) return h('span', '—')
+      const d = new Date(info.getValue()!)
+      return h('span', { class: 'text-sm text-muted-foreground whitespace-nowrap' }, d.toLocaleDateString())
+    },
+    meta: { defaultHidden: true },
+  }),
+])
 
 async function loadFlows() {
   loading.value = true
