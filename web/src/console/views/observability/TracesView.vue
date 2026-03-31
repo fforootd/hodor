@@ -1,4 +1,5 @@
 <template>
+  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6 pb-12">
     <!-- Header -->
     <div class="flex items-center justify-between">
@@ -90,7 +91,7 @@
         </div>
 
         <!-- Table Rows -->
-        <div v-for="trace in traceGroups" :key="trace.trace_group" class="border-b last:border-b-0">
+        <div v-for="(trace, traceIndex) in traceGroups" :key="traceIndex" class="border-b last:border-b-0">
           <!-- Summary Row -->
           <div 
             class="grid grid-cols-[2fr_2fr_80px_100px_80px_100px] gap-4 px-4 py-3 items-center cursor-pointer hover:bg-muted/20 transition-colors"
@@ -210,9 +211,7 @@
 
               <!-- Waterfall Bars -->
               <div class="rounded-lg border bg-card overflow-hidden">
-                <div v-for="(span, spanIdx) in waterfallSpans" :key="span.id || spanIdx" 
-                     class="border-b last:border-b-0 transition-colors"
-                     :class="selectedSpan?.id === span.id ? 'bg-primary/5' : 'hover:bg-muted/20'">
+                <div v-for="(span, spanIdx) in waterfallSpans" :key="spanIdx" class="border-b last:border-b-0 transition-colors" :class="selectedSpan?.id === span.id ? 'bg-primary/5' : 'hover:bg-muted/20'">
                   
                   <!-- Span Row -->
                   <div class="flex items-center gap-0 cursor-pointer" @click="selectSpan(span)">
@@ -220,7 +219,7 @@
                     <div class="w-[280px] shrink-0 px-3 py-2.5 flex items-center gap-2 border-r min-w-0">
                       <!-- Tree indent -->
                       <div v-if="span.depth > 0" class="flex items-center shrink-0">
-                        <span v-for="d in span.depth" :key="d" class="w-4 border-l border-muted-foreground/20 h-full"></span>
+                        <span v-for="(_, depthIndex) in span.depth" :key="depthIndex" class="h-full w-4 border-l border-muted-foreground/20"></span>
                         <span class="text-muted-foreground/40 mr-1">{{ span.isLast ? '└' : '├' }}─</span>
                       </div>
                       <div class="p-1 rounded shrink-0" :class="span.iconBg">

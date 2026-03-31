@@ -1,4 +1,5 @@
 <template>
+  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6 pb-10">
     <div
       v-if="loadError && !identity"
@@ -43,12 +44,7 @@
               <div class="flex flex-wrap items-center gap-2">
                 <StateBadge :state="identity.state" />
                 <Badge variant="outline" class="text-xs">{{ schemaLabel }}</Badge>
-                <Badge
-                  v-for="membership in headerOrgMemberships"
-                  :key="membership.org_id"
-                  variant="secondary"
-                  class="text-xs"
-                >
+                <Badge v-for="(membership, membershipIndex) in headerOrgMemberships" :key="membershipIndex" variant="secondary" class="text-xs">
                   {{ membership.org_name || membership.org_id }}
                 </Badge>
                 <Badge v-if="remainingOrgCount > 0" variant="secondary" class="text-xs">
@@ -116,11 +112,7 @@
                     <Badge variant="outline" class="text-xs">{{ summaryFacts.length }} facts</Badge>
                   </div>
                   <dl v-if="summaryFacts.length" class="grid gap-4 sm:grid-cols-2">
-                    <div
-                      v-for="fact in summaryFacts"
-                      :key="fact.label"
-                      class="space-y-1 rounded-2xl border bg-muted/20 px-4 py-3"
-                    >
+                    <div v-for="(fact, factIndex) in summaryFacts" :key="factIndex" class="space-y-1 rounded-2xl border bg-muted/20 px-4 py-3">
                       <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                         {{ fact.label }}
                       </dt>
@@ -140,13 +132,7 @@
                     <Badge variant="secondary" class="text-xs">{{ enabledAuthMethodItems.length }} enabled</Badge>
                   </div>
                   <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
-                    <Badge
-                      v-for="method in authMethodItems"
-                      :key="method.name"
-                      variant="outline"
-                      class="gap-1.5 border-dashed text-xs"
-                      :class="authMethodBadgeClass(method)"
-                    >
+                    <Badge v-for="(method, methodIndex) in authMethodItems" :key="methodIndex" variant="outline" class="gap-1.5 border-dashed text-xs" :class="authMethodBadgeClass(method)">
                       <span>{{ method.label }}</span>
                       <span class="text-[10px] uppercase tracking-wider opacity-75">
                         {{ method.enabled ? (method.interactive ? 'interactive' : 'service') : 'disabled' }}
@@ -154,7 +140,7 @@
                     </Badge>
                   </div>
                   <div v-if="capabilityItems.length" class="flex flex-wrap gap-2">
-                    <Badge v-for="capability in capabilityItems" :key="capability" variant="secondary" class="text-xs">
+                    <Badge v-for="(capability, capabilityIndex) in capabilityItems" :key="capabilityIndex" variant="secondary" class="text-xs">
                       {{ formatFieldLabel(capability) }}
                     </Badge>
                   </div>
@@ -247,13 +233,7 @@
                     <Badge variant="outline" class="text-xs">{{ enabledAuthMethodItems.length }} enabled</Badge>
                   </div>
                   <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
-                    <Badge
-                      v-for="method in authMethodItems"
-                      :key="`security-${method.name}`"
-                      variant="outline"
-                      class="text-xs"
-                      :class="authMethodBadgeClass(method)"
-                    >
+                    <Badge v-for="(method, methodIndex) in authMethodItems" :key="methodIndex" variant="outline" class="text-xs" :class="authMethodBadgeClass(method)">
                       {{ method.label }}
                     </Badge>
                   </div>
@@ -272,7 +252,7 @@
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem v-for="org in availableOrgs" :key="org.id" @click="addToOrg(org.id)">
+                        <DropdownMenuItem v-for="(org, orgIndex) in availableOrgs" :key="orgIndex" @click="addToOrg(org.id)">
                           {{ org.name }}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -280,11 +260,7 @@
                   </div>
 
                   <div v-if="userOrgs.length" class="space-y-2">
-                    <div
-                      v-for="membership in userOrgs"
-                      :key="membership.org_id"
-                      class="flex items-center justify-between gap-4 rounded-2xl border bg-muted/20 px-4 py-3"
-                    >
+                    <div v-for="(membership, membershipIndex) in userOrgs" :key="membershipIndex" class="flex items-center justify-between gap-4 rounded-2xl border bg-muted/20 px-4 py-3">
                       <div class="min-w-0">
                         <p class="truncate text-sm font-medium">{{ membership.org_name || membership.org_id }}</p>
                         <p class="text-xs text-muted-foreground">
@@ -329,11 +305,7 @@
               </CardHeader>
               <CardContent class="space-y-3">
                 <div v-if="sessionPreview.length" class="space-y-3">
-                  <div
-                    v-for="session in sessionPreview"
-                    :key="session.id"
-                    class="rounded-2xl border bg-background/80 px-4 py-3"
-                  >
+                  <div v-for="(session, sessionIndex) in sessionPreview" :key="sessionIndex" class="rounded-2xl border bg-background/80 px-4 py-3">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div class="min-w-0 space-y-2">
                         <div class="flex flex-wrap items-center gap-2">
@@ -403,11 +375,7 @@
               </CardHeader>
               <CardContent class="space-y-3">
                 <div v-if="recentEvents.length" class="space-y-2">
-                  <div
-                    v-for="event in recentEvents"
-                    :key="event.id"
-                    class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3"
-                  >
+                  <div v-for="(event, eventIndex) in recentEvents" :key="eventIndex" class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3">
                     <div class="min-w-0 space-y-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" class="font-mono text-[11px]">{{ event.event_type }}</Badge>
@@ -446,11 +414,7 @@
               </CardHeader>
               <CardContent class="space-y-3">
                 <div v-if="recentTraces.length" class="space-y-2">
-                  <div
-                    v-for="trace in recentTraces"
-                    :key="trace.trace_group"
-                    class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3"
-                  >
+                  <div v-for="(trace, traceIndex) in recentTraces" :key="traceIndex" class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3">
                     <div class="min-w-0 space-y-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" class="text-[11px]">

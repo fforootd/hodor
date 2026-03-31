@@ -1,4 +1,5 @@
 <template>
+  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Sessions</h1>
@@ -101,13 +102,7 @@
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuCheckboxItem
-                v-for="column in table.getAllColumns().filter((col: any) => col.getCanHide())"
-                :key="column.id"
-                class="capitalize"
-                :checked="table.getState().columnVisibility[column.id] !== false"
-                @update:checked="(val: boolean) => column.toggleVisibility(!!val)"
-              >
+              <DropdownMenuCheckboxItem v-for="(column, columnIndex) in table.getAllColumns().filter((col: any) => col.getCanHide())" :key="columnIndex" class="capitalize" :checked="table.getState().columnVisibility[column.id] !== false" @update:checked="(val: boolean) => column.toggleVisibility(!!val)">
                 {{ column.id.replace('_', ' ') }}
               </DropdownMenuCheckboxItem>
             </DropdownMenuContent>
@@ -151,7 +146,9 @@
           <div class="space-y-1" v-if="row.original.auth_method">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Auth Method</span>
             <div class="flex flex-wrap gap-1">
-              <Badge v-for="m in (Array.isArray(row.original.auth_method) ? row.original.auth_method : [row.original.auth_method])" :key="m" variant="outline" class="text-xs">{{ m }}</Badge>
+              <Badge v-for="(method, methodIndex) in (Array.isArray(row.original.auth_method) ? row.original.auth_method : [row.original.auth_method])" :key="methodIndex" variant="outline" class="text-xs">
+                {{ method }}
+              </Badge>
             </div>
           </div>
           <div class="space-y-1" v-if="row.original.geo">

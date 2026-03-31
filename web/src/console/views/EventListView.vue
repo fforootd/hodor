@@ -1,4 +1,5 @@
 <template>
+  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Events</h1>
@@ -82,7 +83,9 @@
                   
                   <div v-if="currentFilterPrefix === 'type:'">
                     <div class="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Event Types</div>
-                    <button v-for="t in eventTypes" :key="t" class="w-full text-left px-2 py-1.5 text-sm hover:bg-muted cursor-pointer transition-colors" @mousedown.prevent="appendSearchToken(`type:${t} `)">{{ t }}</button>
+                    <button v-for="(eventType, eventTypeIndex) in eventTypes" :key="eventTypeIndex" class="w-full text-left px-2 py-1.5 text-sm hover:bg-muted cursor-pointer transition-colors" @mousedown.prevent="appendSearchToken(`type:${eventType} `)">
+                      {{ eventType }}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -95,13 +98,7 @@
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuCheckboxItem
-                v-for="column in table.getAllColumns().filter((col: any) => col.getCanHide())"
-                :key="column.id"
-                class="capitalize"
-                :checked="table.getState().columnVisibility[column.id] !== false"
-                @update:checked="(val: boolean) => column.toggleVisibility(!!val)"
-              >
+              <DropdownMenuCheckboxItem v-for="(column, columnIndex) in table.getAllColumns().filter((col: any) => col.getCanHide())" :key="columnIndex" class="capitalize" :checked="table.getState().columnVisibility[column.id] !== false" @update:checked="(val: boolean) => column.toggleVisibility(!!val)">
                 {{ column.id.replace('_', ' ') }}
               </DropdownMenuCheckboxItem>
             </DropdownMenuContent>

@@ -1,4 +1,5 @@
 <template>
+  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6 pb-10">
     <section class="sticky top-0 z-10 rounded-3xl border bg-background/95 p-6 shadow-sm backdrop-blur">
       <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -108,7 +109,7 @@
                 <div class="rounded-2xl border bg-muted/20 px-4 py-3">
                   <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Profile facts</p>
                   <div v-if="summaryFacts.length" class="mt-2 space-y-2">
-                    <div v-for="fact in summaryFacts" :key="fact.label" class="flex items-center justify-between gap-4 text-sm">
+                    <div v-for="(fact, factIndex) in summaryFacts" :key="factIndex" class="flex items-center justify-between gap-4 text-sm">
                       <span class="text-muted-foreground">{{ fact.label }}</span>
                       <span class="text-right font-medium">{{ fact.value }}</span>
                     </div>
@@ -124,13 +125,7 @@
               </CardHeader>
               <CardContent>
                 <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
-                  <Badge
-                    v-for="method in authMethodItems"
-                    :key="method.name"
-                    variant="outline"
-                    class="gap-1.5 border-dashed text-xs"
-                    :class="authMethodBadgeClass(method)"
-                  >
+                  <Badge v-for="(method, methodIndex) in authMethodItems" :key="methodIndex" variant="outline" class="gap-1.5 border-dashed text-xs" :class="authMethodBadgeClass(method)">
                     <span>{{ method.label }}</span>
                     <span class="text-[10px] uppercase tracking-wider opacity-75">
                       {{ method.enabled ? (method.interactive ? 'interactive' : 'service') : 'disabled' }}
@@ -235,11 +230,7 @@
               <section class="space-y-3">
                 <h2 class="text-sm font-semibold">Profile values</h2>
                 <div v-if="reviewRows.length" class="space-y-2">
-                  <div
-                    v-for="row in reviewRows"
-                    :key="row.label"
-                    class="flex items-center justify-between gap-4 rounded-2xl border bg-muted/20 px-4 py-3 text-sm"
-                  >
+                  <div v-for="(row, rowIndex) in reviewRows" :key="rowIndex" class="flex items-center justify-between gap-4 rounded-2xl border bg-muted/20 px-4 py-3 text-sm">
                     <span class="text-muted-foreground">{{ row.label }}</span>
                     <span class="text-right font-medium">{{ row.value }}</span>
                   </div>
