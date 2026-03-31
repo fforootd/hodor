@@ -49,9 +49,9 @@ func migrateSQLite(db *DB) error {
 
 	ver, err := goose.GetDBVersion(db.sql)
 	if err == nil {
-		logging.Printf("schema ready (dialect=sqlite, version=%d)", ver)
+		logging.Printf("schema ready (dialect=%s, version=%d)", db.dialect, ver)
 	} else {
-		logging.Printf("schema ready (dialect=sqlite)")
+		logging.Printf("schema ready (dialect=%s)", db.dialect)
 	}
 	return nil
 }
@@ -195,5 +195,8 @@ func (d *DB) gooseDialect() string {
 }
 
 func (d *DB) migrationDir() string {
-	return "migrations/" + d.dialect
+	if d.dialect == "postgres" {
+		return "migrations/postgres"
+	}
+	return "migrations/sqlite"
 }

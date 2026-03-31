@@ -517,6 +517,14 @@
     icon?: string
   }
 
+  interface ConsoleBootstrapResponse {
+    meta: Record<string, any>
+    counts: Record<string, number>
+    orgs?: {
+      items?: Array<Record<string, any>>
+    }
+  }
+
   const navItems = ref<NavItem[]>([])
   const navGroupDefs = ref<Record<string, NavGroupDef>>({})
   const entityCounts = ref<Record<string, number>>({})
@@ -529,15 +537,11 @@
     dispose: disposeBootstrap,
   } = useAppBootstrap(
     async () => {
-      const [meta, counts, orgList] = await Promise.all([
-        api.get<any>('/v1/schemas/$meta'),
-        api.get<Record<string, number>>('/v1/counts'),
-        api.get<{ items?: Array<Record<string, any>> }>('/v1/orgs'),
-      ])
+      const bootstrap = await api.get<ConsoleBootstrapResponse>('/v1/console/bootstrap')
 
-      hydrateNav(meta)
-      applyCounts(counts)
-      applyOrgs(orgList.items || [])
+      hydrateNav(bootstrap.meta || {})
+      applyCounts(bootstrap.counts || {})
+      applyOrgs(bootstrap.orgs?.items || [])
     },
     {
       waitForReady: createReadyzWaiter(),

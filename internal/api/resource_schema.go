@@ -8,7 +8,7 @@ import (
 )
 
 func (a *API) resolveResourceSchema(ctx context.Context, schemaType, requestedSchemaID string) (*schema.SchemaRecord, error) {
-	return schema.ResolveSchemaForType(ctx, a.db.SQL(), schemaType, requestedSchemaID, a.db.Dialect())
+	return schema.ResolveSchemaForTypeCached(ctx, a.db.SQL(), schemaType, requestedSchemaID, a.schemaCache, a.db.Dialect())
 }
 
 func objectMapOrEmpty(value any) (map[string]any, error) {

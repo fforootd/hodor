@@ -3,6 +3,7 @@
 //   - "sqlite://..." or "" → SQLite (WAL mode, pure Go)
 //   - "postgres://..." → PostgreSQL (pgx)
 //   - "d1://..." → Cloudflare D1 (via HTTP proxy, SQLite-compatible dialect)
+//   - "libsql://..." / "https://..." / "wss://..." → libSQL/Turso (remote SQLite-compatible)
 package database
 
 import (
@@ -18,7 +19,7 @@ import (
 // DB wraps a *sql.DB with dialect awareness.
 type DB struct {
 	sql     *sql.DB
-	dialect string // "sqlite", "postgres", or "d1"
+	dialect string // "sqlite", "postgres", "d1", or "libsql"
 }
 
 // SQL returns the underlying *sql.DB.
@@ -26,16 +27,16 @@ func (d *DB) SQL() *sql.DB {
 	return d.sql
 }
 
-// Dialect returns "sqlite", "postgres", or "d1".
-// D1 uses SQLite-compatible SQL syntax.
+// Dialect returns "sqlite", "postgres", "d1", or "libsql".
+// D1 and libSQL use SQLite-compatible SQL syntax.
 func (d *DB) Dialect() string {
 	return d.dialect
 }
 
 // IsSQLiteCompat reports whether the dialect uses SQLite SQL syntax.
-// Both "sqlite" and "d1" return true.
+// "sqlite", "d1", and "libsql" return true.
 func (d *DB) IsSQLiteCompat() bool {
-	return d.dialect == "sqlite" || d.dialect == "d1"
+	return d.dialect == "sqlite" || d.dialect == "d1" || d.dialect == "libsql"
 }
 
 // Close closes the database connection.
@@ -45,7 +46,8 @@ func (d *DB) Close() error {
 
 // Open connects to a database based on the connection string.
 // Empty string or "sqlite://..." opens SQLite; "postgres://..." opens Postgres;
-// "d1://..." opens a Cloudflare D1 database via the HTTP proxy driver.
+// "d1://..." opens a Cloudflare D1 database via the HTTP proxy driver; and
+// libSQL-compatible URLs open a remote libSQL/Turso database.
 func Open(connStr string) (*DB, error) {
 	switch {
 	case connStr == "" || strings.HasPrefix(connStr, "sqlite://"):
@@ -54,6 +56,26 @@ func Open(connStr string) (*DB, error) {
 		return openPostgres(connStr)
 	case strings.HasPrefix(connStr, "d1://"):
 		return openD1(connStr)
+	case isLibSQLURL(connStr):
+		return openLibSQL(connStr)
+	default:
+		return nil, fmt.Errorf("unsupported database URL scheme: %s", connStr)
+	}
+}
+
+// OpenForFGA connects to a database for the embedded OpenFGA service.
+// For libSQL/Turso, this uses a connector that downgrades unsupported
+// non-default transaction isolation levels to the driver's default.
+func OpenForFGA(connStr string) (*DB, error) {
+	switch {
+	case connStr == "" || strings.HasPrefix(connStr, "sqlite://"):
+		return openSQLite(connStr)
+	case strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://"):
+		return openPostgres(connStr)
+	case strings.HasPrefix(connStr, "d1://"):
+		return openD1(connStr)
+	case isLibSQLURL(connStr):
+		return openLibSQLForFGA(connStr)
 	default:
 		return nil, fmt.Errorf("unsupported database URL scheme: %s", connStr)
 	}
@@ -67,7 +89,7 @@ type PoolConfig struct {
 }
 
 // OpenWithConfig connects to a database with explicit pool settings.
-// For SQLite and D1, pool settings are ignored.
+// SQLite and D1 ignore pool settings; Postgres and libSQL use them.
 func OpenWithConfig(connStr string, pool PoolConfig) (*DB, error) {
 	switch {
 	case connStr == "" || strings.HasPrefix(connStr, "sqlite://"):
@@ -76,6 +98,8 @@ func OpenWithConfig(connStr string, pool PoolConfig) (*DB, error) {
 		return openPostgresWithPool(connStr, pool.MaxOpenConns, pool.MaxIdleConns, pool.ConnMaxLifetime)
 	case strings.HasPrefix(connStr, "d1://"):
 		return openD1(connStr)
+	case isLibSQLURL(connStr):
+		return openLibSQLWithPool(connStr, pool.MaxOpenConns, pool.MaxIdleConns, pool.ConnMaxLifetime)
 	default:
 		return nil, fmt.Errorf("unsupported database URL scheme: %s", connStr)
 	}

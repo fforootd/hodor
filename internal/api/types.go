@@ -398,6 +398,13 @@ type SearchResponse struct {
 // CountsResponse is returned from GET /v1/counts.
 type CountsResponse map[string]int
 
+// ConsoleBootstrapResponse is returned from GET /v1/console/bootstrap.
+type ConsoleBootstrapResponse struct {
+	Meta   map[string]any `json:"meta"`
+	Counts CountsResponse `json:"counts"`
+	Orgs   ListResponse   `json:"orgs"`
+}
+
 // --- Login / Auth ---
 
 // LoginStartRequest is the body for POST /v1/login/start.

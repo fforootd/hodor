@@ -88,6 +88,18 @@ go run ./cmd/zitadel start
 
 That keeps the original DX promise: SQLite-first startup with no Docker or external services required.
 
+For explicit self-hosted operator flows, use:
+
+```bash
+printf '%s\n' 'super-secret-password' | \
+  go run ./cmd/zitadel bootstrap admin --password-stdin
+
+printf '%s\n' 'new-secret-password' | \
+  go run ./cmd/zitadel recover admin --identifier admin --password-stdin
+```
+
+That path is documented in [Bootstrap and Recovery](/Users/ffo/git/hodor/zitadel/docs/guides/bootstrap-recovery.md). The interactive `start` bootstrap flow remains in place for local DX compatibility.
+
 ## Notifications In Local Dev
 
 Local notification delivery is zero-config by default:

@@ -6,21 +6,18 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"os"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	"golang.org/x/term"
-
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/schema"
-	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // EnsureAdmin checks if any users exist. If not, it creates a default
@@ -39,12 +36,11 @@ func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 		logging.Printf("WARN: seed default login flow: %v", err)
 	}
 
-	var count int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	hasUsers, err := HasAnyUsers(ctx, db)
 	if err != nil {
-		return fmt.Errorf("count users: %w", err)
+		return err
 	}
-	if count > 0 {
+	if hasUsers {
 		return nil // Already bootstrapped.
 	}
 
@@ -67,7 +63,7 @@ func EnsureAdmin(ctx context.Context, db *database.DB, seedFile string) error {
 
 // isInteractiveTerminal checks if stdin is a terminal.
 func isInteractiveTerminal() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	return IsInteractive(os.Stdin)
 }
 
 // runFirstRunWizard prompts the user for admin credentials.
@@ -97,32 +93,9 @@ func runFirstRunWizard(ctx context.Context, db *database.DB) error {
 		email = "admin@zitadel.local"
 	}
 
-	// Password.
-	fmt.Print("  Admin password: ")
-	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println() // newline after hidden input
-	if err != nil || len(passwordBytes) == 0 {
-		// Fallback to visible input if terminal password reading fails.
-		fmt.Print("  Admin password (visible): ")
-		passwordStr, _ := reader.ReadString('\n')
-		passwordBytes = []byte(strings.TrimSpace(passwordStr))
-	}
-	password := string(passwordBytes)
-	if len(password) < 6 {
-		return fmt.Errorf("password must be at least 6 characters")
-	}
-
-	// Confirm.
-	fmt.Print("  Confirm password: ")
-	confirmBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println()
+	password, err := PromptPassword(os.Stdin, os.Stdout, "  Admin password: ", "  Confirm password: ")
 	if err != nil {
-		fmt.Print("  Confirm password (visible): ")
-		confirmStr, _ := reader.ReadString('\n')
-		confirmBytes = []byte(strings.TrimSpace(confirmStr))
-	}
-	if string(confirmBytes) != password {
-		return fmt.Errorf("passwords do not match")
+		return err
 	}
 
 	if err := createAdmin(ctx, db, username, email, password); err != nil {
@@ -169,45 +142,14 @@ func createRandomAdmin(ctx context.Context, db *database.DB) error {
 
 // createAdmin inserts the admin user with password credentials.
 func createAdmin(ctx context.Context, db *database.DB, username, email, password string) error {
-	userID := id.New()
-
-	// User-org relationship is managed by FGA, not by a column.
-	orgID := ""
-
-	tx, err := db.SQL().BeginTx(ctx, nil)
+	record, err := CreateAdmin(ctx, db, CreateAdminOptions{
+		Username:  username,
+		Email:     email,
+		Password:  password,
+		Passwords: auth.NewPasswordsDev(db),
+	})
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Create the admin user with the actual default org ID.
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, 'Admin', 'human', 'active', 'human_user_v1', ?, datetime('now'), datetime('now'))`,
-		userID, orgID, username, fmt.Sprintf(`{"email":%q}`, email),
-	)
-	if err != nil {
-		return fmt.Errorf("insert admin user: %w", err)
-	}
-
-	// Enforce uniqueness (ADR-016): register identifier + email in unique_fields.
-	if err := uniqueness.EnforceFromIdentifier(ctx, tx, userID, orgID, username); err != nil {
-		logging.Printf("WARN: bootstrap unique identifier: %v", err)
-	}
-	// Also register email at instance scope.
-	_ = uniqueness.Enforce(ctx, tx, userID, orgID,
-		[]uniqueness.FieldConstraint{{FieldName: "email", Scope: uniqueness.ScopeInstance}},
-		map[string]any{"email": email},
-	)
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-
-	// Set password (outside tx — uses its own transaction).
-	pw := auth.NewPasswordsDev(db)
-	if err := pw.SetPassword(ctx, userID, password); err != nil {
-		return fmt.Errorf("set admin password: %w", err)
+		return err
 	}
 
 	// Seed the default console OIDC client.
@@ -217,10 +159,10 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 
 	// Bootstrap FGA tuples (instance-level only; no default org).
 	if fgaSvc := api.FGAService; fgaSvc != nil {
-		if err := fgaSvc.OnBootstrap(ctx, userID); err != nil {
+		if err := fgaSvc.OnBootstrap(ctx, record.UserID); err != nil {
 			logging.Printf("WARN: FGA bootstrap tuples failed: %v", err)
 		} else {
-			logging.Printf("[fga] bootstrap tuples written: admin=%s", userID)
+			logging.Printf("[fga] bootstrap tuples written: admin=%s", record.UserID)
 		}
 	}
 
@@ -241,9 +183,11 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	consoleID := id.New()
 	redirectURIs := `["http://localhost:5173/console", "http://localhost:8080/console"]`
 
-	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO apps (id, org_id, name, app_type, client_id, redirect_uris, state, schema_id, created_at, updated_at)
-		 VALUES (?, '', 'Zitadel Console', 'oidc', 'console', ?, 'active', 'app_v1', datetime('now'), datetime('now'))`,
+	query := fmt.Sprintf(`INSERT INTO apps (id, org_id, name, app_type, client_id, redirect_uris, state, schema_id, created_at, updated_at)
+		 VALUES (%s, '', 'Zitadel Console', 'oidc', 'console', %s, 'active', 'app_v1', %s, %s)`,
+		db.Placeholder(1), db.Placeholder(2), db.TimestampNow(), db.TimestampNow())
+
+	_, err = db.SQL().ExecContext(ctx, query,
 		consoleID, redirectURIs,
 	)
 	if err != nil {

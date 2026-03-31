@@ -201,7 +201,7 @@ type DatabaseConfig struct {
 	//   ""      — same as "auto"
 	Bootstrap string `toml:"bootstrap"`
 
-	// Connection pool settings (Postgres only; ignored for SQLite).
+	// Connection pool settings (Postgres and libSQL only; ignored for SQLite and D1).
 	MaxOpenConns    int    `toml:"max_open_conns"`    // default: 25
 	MaxIdleConns    int    `toml:"max_idle_conns"`    // default: 5
 	ConnMaxLifetime string `toml:"conn_max_lifetime"` // default: "1h" (duration string)

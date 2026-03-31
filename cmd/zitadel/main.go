@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -29,18 +30,7 @@ import (
 var version = "dev"
 
 func main() {
-	root := &cobra.Command{
-		Use:   "zitadel",
-		Short: "Identity infrastructure for humans and AI",
-		Long:  "Zitadel — open-source identity platform with unified auth, fine-grained authorization, and AI agent governance.",
-	}
-
-	root.AddCommand(startCmd())
-	root.AddCommand(migrateCmd())
-	root.AddCommand(seedCmd())
-	root.AddCommand(versionCmd())
-	root.AddCommand(openapiExportCmd())
-
+	root := newRootCmd()
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -219,7 +209,7 @@ func startCmd() *cobra.Command {
 
 			cli.PrintLogo()
 			logging.Printf("Zitadel %s starting on :%d", version, cfg.Server.Port)
-			logging.Printf("Database: %s", cfg.Database.URL)
+			logging.Printf("Database: %s", redactDatabaseURL(cfg.Database.URL))
 			if cfg.Observability.Sinks.Analytics.Enabled {
 				logging.Printf("Local cache: %s (disposable analytics buffer)", cfg.Observability.CachePath)
 			}
@@ -236,6 +226,34 @@ func startCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&autoMigrate, "auto-migrate", false, "force auto-migrate and auto-bootstrap regardless of config")
 
 	return cmd
+}
+
+func redactDatabaseURL(raw string) string {
+	if raw == "" {
+		return raw
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+
+	if parsed.User != nil {
+		username := parsed.User.Username()
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			parsed.User = url.UserPassword(username, "REDACTED")
+		}
+	}
+
+	query := parsed.Query()
+	for _, key := range []string{"authToken", "auth_token", "jwt"} {
+		if query.Has(key) {
+			query.Set(key, "REDACTED")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+
+	return parsed.String()
 }
 
 // migrateCmd runs schema migrations and exits.

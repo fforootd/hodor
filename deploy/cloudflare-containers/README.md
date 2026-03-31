@@ -1,12 +1,12 @@
-# Deploy Zitadel to Cloudflare Workers + Containers + D1
+# Deploy Zitadel to Cloudflare Workers + Containers + Turso
 
-This example runs the real Zitadel Go binary in a single Cloudflare Container and stores data in Cloudflare D1 through the repository's built-in `d1://` SQL driver.
+This example runs the real Zitadel Go binary in a single Cloudflare Container and stores data in a remote Turso database over `libsql://`.
 
 It is intentionally opinionated:
 
 - One named container instance
 - Scale to zero after inactivity
-- D1 as the durable database
+- Turso as the durable database
 - Cloudflare TLS terminated at the edge
 - Deterministic admin bootstrap through the production seed file
 
@@ -17,30 +17,29 @@ That makes it much easier to share and support than the previous draft.
 ```text
 Client
   -> Worker
-     -> Container (:8080, Zitadel)
-        -> http://d1.local/query|exec
-           -> Worker outboundByHost handler
-              -> env.DB (D1)
+     -> Workers Assets (/assets/*)
+     -> Container (:8080, Zitadel for HTML, API, OIDC)
+        -> libsql://<db>.turso.io
 ```
 
 Key details:
 
-- The Worker proxies inbound HTTP traffic to one named `ZitadelContainer`.
-- The container starts with runtime env vars derived from Worker secrets and the incoming request host.
-- Zitadel connects to `d1://d1.local`.
-- `@cloudflare/containers` `outboundByHost` intercepts those container HTTP calls and translates them into D1 binding calls.
+- The Worker serves hashed frontend bundles from Workers Assets.
+- The Worker proxies HTML shells, API traffic, OIDC traffic, and dynamic login assets to one named `ZitadelContainer`.
+- The container starts with runtime env vars derived from Worker secrets and the first incoming request host.
+- Zitadel connects directly to Turso using `ZITADEL_DATABASE_URL=libsql://...`.
+- The Go binary uses the standard `database/sql` path, so the Cloudflare side stays thin.
 
-## Why The Old Version Broke
+## Why This Version Exists
 
-The previous example looked like a D1 deployment, but it was not:
+The old draft tried to be too clever with container lifecycle and database proxying.
 
-- D1 outbound support was commented out.
-- The container silently used local SQLite instead.
-- Several env var names did not match the actual Zitadel config.
-- `ZITADEL_COOKIE_SECRETS` was documented but ignored by the server.
-- The Worker never exported `ContainerProxy`, which outbound interception now requires.
+This version keeps the Worker close to Cloudflare's stateless example:
 
-This version fixes those issues.
+- One stable Durable Object identity
+- Let the SDK start the container on demand
+- Treat Turso as a normal external database
+- Keep the Worker focused on config and proxying
 
 ## Prerequisites
 
@@ -57,27 +56,45 @@ npm install
 npx wrangler login
 ```
 
-Create the D1 database:
-
-```bash
-npx wrangler d1 create zitadel-db
-```
-
-Copy the returned `database_id` into [wrangler.jsonc](/Users/ffo/git/hodor/zitadel/deploy/cloudflare-containers/wrangler.jsonc).
-
 Set the required Worker secrets:
 
 ```bash
+npx wrangler secret put ZITADEL_DATABASE_URL
+npx wrangler secret put ZITADEL_DATABASE_AUTH_TOKEN
 npx wrangler secret put ZITADEL_ADMIN_PASSWORD
 npx wrangler secret put ZITADEL_ADMIN_PAT
 npx wrangler secret put ZITADEL_COOKIE_SECRETS
 ```
+
+Recommended values:
+
+- `ZITADEL_DATABASE_URL`: `libsql://<db>.turso.io`
+- `ZITADEL_DATABASE_AUTH_TOKEN`: output of `turso db tokens create <db-name>`
 
 Deploy:
 
 ```bash
 npx wrangler deploy
 ```
+
+For production debugging and any deploy where you need to prove the
+container image changed, use the immutable deploy flow instead:
+
+```bash
+npm run deploy:immutable
+```
+
+That script:
+
+- Uses Cloudflare's supported `wrangler containers build -p -t ...` flow to build and push a fresh image
+- Tags the image uniquely from git SHA and UTC time
+- Creates a temporary repo-root `Dockerfile` from [Dockerfile.cloudflare](/Users/ffo/git/hodor/zitadel/Dockerfile.cloudflare) so Wrangler can build from the repo root context
+- Generates a temporary Wrangler config that points at that exact registry image
+- Deploys with `--containers-rollout=immediate`
+
+This avoids the ambiguity of the implicit Dockerfile-path image flow, where
+Cloudflare versions can appear to roll forward while the active image
+reference stays unchanged.
 
 After deploy, open your Worker hostname and log in with:
 
@@ -98,7 +115,7 @@ Fill in real values, then run:
 npx wrangler dev
 ```
 
-For local dev, the Worker derives `ZITADEL_EXTERNAL_DOMAIN` and TLS mode from the incoming request if you do not set overrides explicitly.
+For local dev, the Worker derives `ZITADEL_EXTERNAL_DOMAIN` and TLS mode from the first incoming request if you do not set overrides explicitly.
 
 ## Configuration Model
 
@@ -106,9 +123,13 @@ This example keeps the Worker configuration surface intentionally small.
 
 Required secrets:
 
+- `ZITADEL_DATABASE_URL`: remote libSQL/Turso database URL, for example `libsql://test-ffozitadel.aws-us-west-2.turso.io`
+- `ZITADEL_DATABASE_AUTH_TOKEN`: Turso database auth token
 - `ZITADEL_ADMIN_PASSWORD`: bootstrap admin password used by the seed file
 - `ZITADEL_ADMIN_PAT`: bootstrap PAT for API access
 - `ZITADEL_COOKIE_SECRETS`: stable HMAC key material for session cookies
+
+For Turso-hosted databases, `ZITADEL_DATABASE_AUTH_TOKEN` is effectively required unless you embed a token in the database URL query string.
 
 Optional vars or secrets:
 
@@ -120,43 +141,46 @@ Optional vars or secrets:
 - `ZITADEL_DATABASE_BOOTSTRAP`: e.g. `skip` after first bootstrap
 - `ZITADEL_ENCRYPTION_ACTIVE_KEY_ID` and `ZITADEL_ENCRYPTION_KEYS`: recommended if you do not want secrets stored in plaintext mode
 
-## D1 Bridge Notes
+## Database Notes
 
-The Go side already speaks `d1://` through [d1driver.go](/Users/ffo/git/hodor/zitadel/internal/database/d1driver/d1driver.go).
+- The Go runtime now accepts `libsql://`, `https://`, `ws://`, and `wss://` URLs through the standard database layer.
+- If `ZITADEL_DATABASE_AUTH_TOKEN` is set, Zitadel uses the libSQL connector instead of embedding the token in the URL.
+- Startup logs redact database passwords and `authToken` query params so secrets do not spill into Cloudflare logs.
 
-This example's Worker provides the other half:
-
-- `POST http://d1.local/query` runs D1 `.raw({ columnNames: true })`
-- `POST http://d1.local/exec` runs D1 `.run()`
-
-That lets Zitadel keep using the standard `database/sql` path while the Worker translates calls into the D1 binding API.
+This example no longer includes the old D1 outbound bridge. If you want D1 again later, it should live as a separate example rather than sharing this Turso-first worker.
 
 ## Operational Commands
 
 ```bash
 npm run typecheck
+npm run deploy:immutable
 npx wrangler tail
 npx wrangler containers list
 npx wrangler containers images list
-npx wrangler d1 info zitadel-db
 ```
 
 ## Files
 
-- [src/index.ts](/Users/ffo/git/hodor/zitadel/deploy/cloudflare-containers/src/index.ts): Worker proxy, container startup, D1 outbound bridge
-- [wrangler.jsonc](/Users/ffo/git/hodor/zitadel/deploy/cloudflare-containers/wrangler.jsonc): Worker, container, and D1 binding config
+- [src/index.ts](/Users/ffo/git/hodor/zitadel/deploy/cloudflare-containers/src/index.ts): Worker proxy and minimal container startup wiring
+- [wrangler.jsonc](/Users/ffo/git/hodor/zitadel/deploy/cloudflare-containers/wrangler.jsonc): Worker and container config
 - [Dockerfile.cloudflare](/Users/ffo/git/hodor/zitadel/Dockerfile.cloudflare): container image build
 - [prod-seed.yaml](/Users/ffo/git/hodor/zitadel/fixtures/prod-seed.yaml): deterministic admin bootstrap
 
 ## Current Limits
 
 - This example is single-container by design. It is meant to be correct and easy to share, not a horizontal scaling recipe.
-- D1 support currently relies on HTTP outbound interception, which Cloudflare announced for Containers on March 26, 2026.
+- Turso commit latency depends on your Turso plan and region placement.
 - If you want a custom domain or multiple public hostnames, set `ZITADEL_EXTERNAL_DOMAIN` explicitly so issuer URLs stay stable.
+
+## Troubleshooting
+
+- If Cloudflare tail shows `The container is not listening` and then `The container is not running`, the container process usually exited before Zitadel bound `:8080`.
+- For Turso, the most common cause is a missing or invalid `ZITADEL_DATABASE_AUTH_TOKEN`.
+- A missing token fails with Turso `401 Unauthorized: empty JWT token`.
+- A bad token fails with Turso `400 JWT error: InvalidToken`.
 
 ## References
 
-- [Cloudflare Containers outbound traffic](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
-- [Cloudflare changelog: outbound Workers support for Containers](https://developers.cloudflare.com/changelog/post/2026-03-26-outbound-workers/)
-- [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/)
+- [Turso Quickstart (Go)](https://docs.turso.tech/sdk/go/quickstart)
+- [Turso durability guarantees](https://docs.turso.tech/cloud/durability)
 - [Developer Experience Philosophy](/Users/ffo/git/hodor/zitadel/docs/design/developer-experience.md)

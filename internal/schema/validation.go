@@ -94,6 +94,56 @@ func ResolveSchemaForType(ctx context.Context, db rowQueryer, schemaType, schema
 	return rec, nil
 }
 
+// LoadSchemaRecordCached checks the cache first, falling back to DB on miss.
+func LoadSchemaRecordCached(ctx context.Context, db rowQueryer, schemaID string, cache *SchemaCache, dialect ...string) (*SchemaRecord, error) {
+	if cache != nil {
+		if rec, ok := cache.GetByID(schemaID); ok {
+			return rec, nil
+		}
+	}
+	rec, err := LoadSchemaRecord(ctx, db, schemaID, dialect...)
+	if err != nil {
+		return nil, err
+	}
+	if cache != nil {
+		cache.PutByID(rec.ID, rec)
+	}
+	return rec, nil
+}
+
+// ResolveSchemaForTypeCached is the cache-aware variant of ResolveSchemaForType.
+func ResolveSchemaForTypeCached(ctx context.Context, db rowQueryer, schemaType, schemaID string, cache *SchemaCache, dialect ...string) (*SchemaRecord, error) {
+	if strings.TrimSpace(schemaID) == "" {
+		return resolveDefaultSchemaByTypeCached(ctx, db, schemaType, cache, dialect...)
+	}
+
+	rec, err := LoadSchemaRecordCached(ctx, db, schemaID, cache, dialect...)
+	if err != nil {
+		return nil, err
+	}
+	if rec.Type != schemaType {
+		return nil, fmt.Errorf("schema %q is type %q, not %q", rec.ID, rec.Type, schemaType)
+	}
+	return rec, nil
+}
+
+func resolveDefaultSchemaByTypeCached(ctx context.Context, db rowQueryer, schemaType string, cache *SchemaCache, dialect ...string) (*SchemaRecord, error) {
+	if cache != nil {
+		if rec, ok := cache.GetDefault(schemaType); ok {
+			return rec, nil
+		}
+	}
+	rec, err := resolveDefaultSchemaByType(ctx, db, schemaType, dialect...)
+	if err != nil {
+		return nil, err
+	}
+	if cache != nil {
+		cache.PutDefault(schemaType, rec)
+		cache.PutByID(rec.ID, rec)
+	}
+	return rec, nil
+}
+
 func ResolveUserSchemaForWrite(ctx context.Context, db rowQueryer, schemaID string, dialect ...string) (*SchemaRecord, error) {
 	if strings.TrimSpace(schemaID) == "" {
 		return ResolveDefaultHumanUserSchema(ctx, db, dialect...)

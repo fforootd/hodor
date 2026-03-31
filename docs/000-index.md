@@ -35,6 +35,7 @@
 | [022](adr/022-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
 | [023](adr/023-wide-events.md) | Wide Events as Internal Observability Primitive | Accepted | 2026-03-29 |
 | [024](adr/024-risk-evaluation-policy-consumers.md) | Risk Evaluation and Policy Consumers | Accepted | 2026-03-30 |
+| [025](adr/025-explicit-bootstrap-and-local-recovery.md) | Explicit Bootstrap and Local Break-Glass Recovery | Proposed | 2026-03-31 |
 
 ## Architecture
 
@@ -56,6 +57,7 @@
 | Document | Summary |
 |---|---|
 | [Local Development](guides/local-development.md) | Canonical `make dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
+| [Bootstrap and Recovery](guides/bootstrap-recovery.md) | Recommended self-hosted bootstrap flow and local break-glass recovery commands |
 | [Zitadel Login Web Component](guides/zitadel-login-wc.md) | Embed and customize the server-driven login web component |
 
 ## Vision
@@ -103,4 +105,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 025
+- **Next ADR number**: 026

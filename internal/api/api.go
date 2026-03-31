@@ -31,13 +31,14 @@ import (
 
 // API holds the REST handlers and their dependencies.
 type API struct {
-	db       *database.DB
-	bus      *eventbus.Bus
-	cookies  *session.CookieConfig
-	spec     *OpenAPIRegistry
-	catalog  *catalog.Service
-	risk     risk.Evaluator
-	notifier *notify.Service
+	db          *database.DB
+	bus         *eventbus.Bus
+	cookies     *session.CookieConfig
+	spec        *OpenAPIRegistry
+	catalog     *catalog.Service
+	risk        risk.Evaluator
+	notifier    *notify.Service
+	schemaCache *schema.SchemaCache
 }
 
 // New creates a new API handler.
@@ -48,11 +49,12 @@ func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API
 	}
 
 	return &API{
-		db:      db,
-		bus:     bus,
-		cookies: cookies,
-		spec:    &OpenAPIRegistry{},
-		risk:    riskEvaluator,
+		db:          db,
+		bus:         bus,
+		cookies:     cookies,
+		spec:        &OpenAPIRegistry{},
+		risk:        riskEvaluator,
+		schemaCache: schema.NewSchemaCache(5 * time.Minute),
 	}
 }
 
@@ -97,6 +99,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Self-service account
 	a.RegisterAccountRoutes(mux)
+
+	// Console shell bootstrap
+	mux.HandleFunc("GET /v1/console/bootstrap", a.requireSession(a.consoleBootstrap))
 
 	// Provider federation
 	a.RegisterProviderRoutes(mux)
@@ -241,7 +246,21 @@ func (a *API) buildOrgResponse(ctx context.Context, row OrgResponse, metadataStr
 func (a *API) listOrgs(w http.ResponseWriter, r *http.Request) {
 	limit, cursor := parsePagination(r)
 
-	rows, err := a.db.SQL().QueryContext(r.Context(),
+	items, nextCursor, err := a.listOrgsPage(r.Context(), limit, cursor)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
+}
+
+func (a *API) listOrgsPage(ctx context.Context, limit int, cursor string) ([]OrgResponse, string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := a.db.SQL().QueryContext(ctx,
 		a.bindQuery(`SELECT id, name, state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
 		 FROM orgs
 		 WHERE id > ?
@@ -250,8 +269,7 @@ func (a *API) listOrgs(w http.ResponseWriter, r *http.Request) {
 		cursor, limit+1,
 	)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
-		return
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -262,11 +280,10 @@ func (a *API) listOrgs(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&row.ID, &row.Name, &row.State, &row.SchemaID, &metadataStr, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			continue
 		}
-		items = append(items, a.buildOrgResponse(r.Context(), row, metadataStr))
+		items = append(items, a.buildOrgResponse(ctx, row, metadataStr))
 	}
 	if err := rows.Err(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
-		return
+		return nil, "", err
 	}
 
 	var nextCursor string
@@ -275,7 +292,7 @@ func (a *API) listOrgs(w http.ResponseWriter, r *http.Request) {
 		nextCursor = items[len(items)-1].ID
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
+	return items, nextCursor, nil
 }
 
 func (a *API) getOrg(w http.ResponseWriter, r *http.Request) {
@@ -1696,6 +1713,8 @@ func (a *API) createSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.schemaCache.InvalidateType(req.Type)
+
 	httputil.WriteJSON(w, http.StatusCreated, SchemaResponse{
 		ID:        schemaID,
 		Type:      req.Type,
@@ -1824,6 +1843,9 @@ func (a *API) updateSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.schemaCache.Invalidate(schemaID)
+	a.schemaCache.InvalidateType(schemaType)
+
 	a.EmitAuthEvent(r.Context(), "schema.version_created", "", map[string]any{
 		"schema_id":    newID,
 		"type":         schemaType,
@@ -1877,6 +1899,9 @@ func (a *API) promoteSchema(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, "promote failed")
 		return
 	}
+
+	a.schemaCache.Invalidate(schemaID)
+	a.schemaCache.InvalidateType(schemaType)
 
 	a.EmitAuthEvent(r.Context(), "schema.promoted", "", map[string]any{
 		"schema_id": schemaID, "type": schemaType, "version": version,
@@ -2112,10 +2137,20 @@ func (a *API) previewSchema(w http.ResponseWriter, r *http.Request) {
 // entityCounts returns entity counts per schema type for sidebar badges.
 // GET /v1/counts → { "human_user": 8, "service_user": 3, ... }
 func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
-	counts := make(map[string]int)
+	counts, err := a.getEntityCounts(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, counts)
+}
+
+func (a *API) getEntityCounts(ctx context.Context) (CountsResponse, error) {
+	counts := make(CountsResponse)
 
 	// Count entities by schema type.
-	rows, err := a.db.SQL().QueryContext(r.Context(),
+	rows, err := a.db.SQL().QueryContext(ctx,
 		`SELECT s.type, COUNT(*) FROM users i
 		 JOIN schemas s ON i.schema_id = s.id
 		 GROUP BY s.type`)
@@ -2136,26 +2171,74 @@ func (a *API) entityCounts(w http.ResponseWriter, r *http.Request) {
 
 	// Count orgs from the dedicated orgs table.
 	var orgCount int
-	if err := a.db.SQL().QueryRowContext(r.Context(),
+	if err := a.db.SQL().QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM orgs `).Scan(&orgCount); err == nil {
 		counts["org"] = orgCount
 	}
 
 	// Count apps from the apps table.
 	var appCount int
-	if err := a.db.SQL().QueryRowContext(r.Context(),
+	if err := a.db.SQL().QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM apps `).Scan(&appCount); err == nil {
 		counts["apps"] = appCount
 	}
 
 	// Total user count (all types).
 	var userCount int
-	if err := a.db.SQL().QueryRowContext(r.Context(),
+	if err := a.db.SQL().QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM users `).Scan(&userCount); err == nil {
 		counts["users"] = userCount
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, counts)
+	return counts, nil
+}
+
+func (a *API) consoleBootstrap(w http.ResponseWriter, r *http.Request) {
+	userID, err := a.resolveCallerIdentity(r)
+	if err != nil {
+		httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	if FGAService != nil {
+		allowed, checkErr := FGAService.Check(r.Context(), "user:"+userID, "can_manage_orgs", "instance:self")
+		if checkErr != nil {
+			logging.Printf("[api] console bootstrap authz error: user=%s err=%v", userID, checkErr)
+			httputil.WriteError(w, http.StatusForbidden, "authorization check failed")
+			return
+		}
+		if !allowed {
+			httputil.WriteError(w, http.StatusForbidden, "insufficient permissions")
+			return
+		}
+	}
+
+	counts, err := a.getEntityCounts(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to load counts")
+		return
+	}
+
+	orgs, nextCursor, err := a.listOrgsPage(r.Context(), 50, "")
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to load organizations")
+		return
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(schema.MetaSchema), &meta); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to load schema metadata")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, ConsoleBootstrapResponse{
+		Meta:   meta,
+		Counts: counts,
+		Orgs: ListResponse{
+			Items:      orgs,
+			NextCursor: nextCursor,
+		},
+	})
 }
 
 // getMetaSchema returns the canonical Zitadel identity schema meta-schema.

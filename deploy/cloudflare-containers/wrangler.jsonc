@@ -3,6 +3,9 @@
   "name": "zitadel",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-27",
+  "build": {
+    "command": "npm --prefix ../.. run build"
+  },
 
   // ── Observability ────────────────────────────────────────────────────────
   "observability": {
@@ -13,6 +16,49 @@
       "invocation_logs": true,
       "head_sampling_rate": 1
     }
+  },
+
+  // ── Placement ─────────────────────────────────────────────────────────────
+  //
+  // Pin the Worker near the Turso database region (aws-us-west-2) so the
+  // container is co-located with the database and avoids cross-continent RTT.
+  "placement": {
+    "region": "aws:us-west-2"
+  },
+
+  // ── Static Assets ────────────────────────────────────────────────────────
+  //
+  // Serve the built frontend bundles from Workers Assets so the container
+  // only handles HTML shells, API traffic, OIDC, and dynamic login assets.
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "../../web/dist",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    "run_worker_first": [
+      "/",
+      "/src/*",
+      "/assets/login/*",
+      "/healthz",
+      "/readyz",
+      "/openapi.json",
+      "/.well-known/*",
+      "/authorize",
+      "/authorize/*",
+      "/oauth/*",
+      "/userinfo",
+      "/end_session",
+      "/keys",
+      "/revoke",
+      "/devicecode",
+      "/v1/*",
+      "/login",
+      "/login/*",
+      "/account",
+      "/account/*",
+      "/console",
+      "/console/*"
+    ]
   },
 
   // ── Container Definition ─────────────────────────────────────────────────
@@ -30,20 +76,22 @@
     {
       "class_name": "ZitadelContainer",
       "image": "../../Dockerfile.cloudflare",
+      // For production deploys where image provenance matters, use:
+      //   npm run deploy:immutable
+      // That flow uses Wrangler's explicit build/push path, then deploys
+      // against the exact registry image reference it just produced.
+      // Keep this single-instance for now because Zitadel starts schedulers
+      // and other background work inside the Go process.
       "max_instances": 1,
       "instance_type": "standard-1"
     }
   ],
-  // ── D1 Database Binding ──────────────────────────────────────────────────
-  // Create with:  npx wrangler d1 create zitadel-db
-  // Then paste the database_id below.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "zitadel-db",
-      "database_id": "4f00073b-41d1-4084-86b1-de304d8d0a8c"
-    }
-  ],
+  // ── Database Wiring ──────────────────────────────────────────────────────
+  //
+  // This example expects an external database URL via Worker secrets:
+  //   ZITADEL_DATABASE_URL=libsql://<db>.turso.io
+  //   ZITADEL_DATABASE_AUTH_TOKEN=<token>
+
   // ── Durable Object Binding ───────────────────────────────────────────────
   "durable_objects": {
     "bindings": [

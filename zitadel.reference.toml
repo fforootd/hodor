@@ -110,6 +110,9 @@ cross_origin_opener = "same-origin"
 [database]
 # SQLite (default, good for dev/single-node/edge/homelab). Prefix with "sqlite://".
 # PostgreSQL (scale-out): "postgres://user:pass@host:5432/zitadel?sslmode=require"
+# libSQL / Turso (remote SQLite): "libsql://my-db.turso.io"
+#   Preferred auth: set ZITADEL_DATABASE_AUTH_TOKEN or TURSO_AUTH_TOKEN in env.
+#   URL query authToken is also supported but less safe for logs and config files.
 # Cloudflare D1 (edge, via HTTP proxy): "d1://d1.local"
 #   D1 requires deploying on Cloudflare Workers + Containers with the
 #   outboundByHost proxy pattern. See deploy/cloudflare-containers/README.md.
@@ -133,7 +136,7 @@ url = "sqlite://./data/zitadel.db"
 # bootstrap = "auto"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Connection Pool (Postgres only, ignored for SQLite)
+# Connection Pool (Postgres and libSQL, ignored for SQLite and D1)
 # ─────────────────────────────────────────────────────────────────────────────
 # max_open_conns = 25          # max simultaneous connections
 # max_idle_conns = 5           # idle connections kept warm

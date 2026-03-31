@@ -303,7 +303,7 @@ func buildRealIPConfig(cfg *config.Config) *RealIPConfig {
 }
 
 func initFGAService(ctx context.Context, cfg *config.Config) *fga.Service {
-	fgaDB, err := database.Open(cfg.Database.URL)
+	fgaDB, err := database.OpenForFGA(cfg.Database.URL)
 	if err != nil {
 		logging.Fatalf("fga: open dedicated db connection: %v", err)
 	}

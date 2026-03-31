@@ -139,7 +139,34 @@ func TestRebindPlaceholders(t *testing.T) {
 		t.Fatalf("sqlite rebind = %q, want unchanged %q", got, query)
 	}
 
+	if got := RebindPlaceholders(query, "libsql"); got != query {
+		t.Fatalf("libsql rebind = %q, want unchanged %q", got, query)
+	}
+
 	if got := RebindPlaceholders(query, "postgres"); got != "SELECT * FROM users WHERE id = $1 AND org_id = $2 LIMIT $3" {
 		t.Fatalf("postgres rebind = %q", got)
+	}
+}
+
+func TestIsSQLiteCompat(t *testing.T) {
+	db := &DB{dialect: "libsql"}
+	if !db.IsSQLiteCompat() {
+		t.Fatal("expected libsql to be SQLite compatible")
+	}
+}
+
+func TestIsLibSQLURL(t *testing.T) {
+	tests := map[string]bool{
+		"libsql://db.turso.io": true,
+		"https://db.turso.io":  true,
+		"wss://db.turso.io":    true,
+		"d1://d1.local":        false,
+		"sqlite://./test.db":   false,
+	}
+
+	for connStr, want := range tests {
+		if got := isLibSQLURL(connStr); got != want {
+			t.Fatalf("isLibSQLURL(%q) = %v, want %v", connStr, got, want)
+		}
 	}
 }

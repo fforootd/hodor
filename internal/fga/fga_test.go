@@ -373,6 +373,45 @@ func TestOnResourceCreatedAndDeleted(t *testing.T) {
 	}
 }
 
+func TestEnsureInstanceOwner_IdempotentAndAdditive(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	if err := svc.OnBootstrap(ctx, "admin"); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if err := svc.EnsureInstanceOwner(ctx, "breakglass"); err != nil {
+		t.Fatalf("EnsureInstanceOwner(first): %v", err)
+	}
+	if err := svc.EnsureInstanceOwner(ctx, "breakglass"); err != nil {
+		t.Fatalf("EnsureInstanceOwner(second): %v", err)
+	}
+
+	owners, err := svc.ReadTuples(ctx, "", "owner", "instance:self")
+	if err != nil {
+		t.Fatalf("ReadTuples(instance owners): %v", err)
+	}
+	if len(owners) != 3 {
+		t.Fatalf("expected admin, breakglass, and _mgmt owners, got %d", len(owners))
+	}
+
+	globalParent, err := svc.ReadTuples(ctx, "instance:self", "parent", "org:_global")
+	if err != nil {
+		t.Fatalf("ReadTuples(global parent): %v", err)
+	}
+	if len(globalParent) != 1 {
+		t.Fatalf("expected exactly 1 global parent tuple, got %d", len(globalParent))
+	}
+
+	breakglassOrgOwner, err := svc.ReadTuples(ctx, "user:breakglass", "owner", "org:_global")
+	if err != nil {
+		t.Fatalf("ReadTuples(breakglass org owner): %v", err)
+	}
+	if len(breakglassOrgOwner) != 1 {
+		t.Fatalf("expected breakglass global org owner tuple, got %d", len(breakglassOrgOwner))
+	}
+}
+
 func TestEnableModule_RBAC(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

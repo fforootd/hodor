@@ -87,7 +87,20 @@ go run ./cmd/zitadel start
 
 That uses SQLite at `./data/zitadel.db` with no required config file.
 
+For self-hosted operator flows, prefer the explicit bootstrap and recovery commands:
+
+```bash
+printf '%s\n' 'super-secret-password' | \
+  go run ./cmd/zitadel bootstrap admin --password-stdin
+
+printf '%s\n' 'new-secret-password' | \
+  go run ./cmd/zitadel recover admin --identifier admin --password-stdin
+```
+
+The interactive `start` bootstrap path remains available for local DX, but the explicit commands are the recommended operator workflow.
+
 More contributor detail lives in [docs/guides/local-development.md](docs/guides/local-development.md).
+Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guides/bootstrap-recovery.md).
 
 ## Architecture
 

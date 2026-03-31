@@ -96,15 +96,40 @@ func (s *Service) OnBootstrap(ctx context.Context, adminID string) error {
 	}
 
 	logging.Printf("[fga] bootstrapping tuples: admin=%s", adminID)
-	err = s.WriteTuples(ctx,
-		[3]string{"user:" + adminID, "owner", "instance:self"},
-		// Global org — grants access when org_id is unknown/nullable.
-		[3]string{"instance:self", "parent", "org:_global"},
-		[3]string{"user:" + adminID, "owner", "org:_global"},
-		// Management secret user gets owner access.
-		[3]string{"user:_mgmt", "owner", "instance:self"},
-	)
-	return err
+	return s.EnsureInstanceOwner(ctx, adminID)
+}
+
+// EnsureInstanceOwner writes the instance owner invariants for a specific user.
+// Unlike OnBootstrap, it does not assume the instance is unclaimed and it only
+// writes missing tuples, making it safe for break-glass recovery flows.
+func (s *Service) EnsureInstanceOwner(ctx context.Context, userID string) error {
+	required := [][3]string{
+		{"user:" + userID, "owner", "instance:self"},
+		{"instance:self", "parent", "org:_global"},
+		{"user:" + userID, "owner", "org:_global"},
+		{"user:_mgmt", "owner", "instance:self"},
+	}
+
+	missing := make([][3]string, 0, len(required))
+	for _, tuple := range required {
+		existing, err := s.ReadTuples(ctx, tuple[0], tuple[1], tuple[2])
+		if err != nil {
+			return fmt.Errorf("fga: ensure instance owner read %v: %w", tuple, err)
+		}
+		if len(existing) == 0 {
+			missing = append(missing, tuple)
+		}
+	}
+	if len(missing) == 0 {
+		logging.Printf("[fga] instance owner already ensured: user=%s", userID)
+		return nil
+	}
+
+	if err := s.WriteTuples(ctx, missing...); err != nil {
+		return fmt.Errorf("fga: ensure instance owner write: %w", err)
+	}
+	logging.Printf("[fga] ensured instance owner: user=%s tuples=%d", userID, len(missing))
+	return nil
 }
 
 // OnResourceCreated writes tuples when a new resource (identity) is created:

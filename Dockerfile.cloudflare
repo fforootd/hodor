@@ -16,31 +16,23 @@
 # Alternative: use the GHCR image published by goreleaser. See wrangler.jsonc.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Stage 1: Build Vue frontend ──────────────────────────────────────────────
-FROM --platform=linux/amd64 node:22-slim AS web
-
-WORKDIR /build
-COPY package.json package-lock.json ./
-COPY web/package.json web/
-COPY packages/client-js/package.json packages/client-js/
-COPY e2e/package.json e2e/
-RUN npm ci --prefer-offline
-COPY web/ web/
-COPY packages/ packages/
-RUN npm run build -w web
-
-# ── Stage 2: Build Go binary ────────────────────────────────────────────────
+# ── Stage 1: Build Go binary ────────────────────────────────────────────────
+#
+# The Cloudflare Wrangler config runs `npm --prefix ../.. run build` before
+# deploy and points Workers Assets at `web/dist`. We copy that exact prebuilt
+# frontend into the Go embed directory here so the container-served HTML and
+# the Worker-served asset bundle always share the same hashed filenames.
 FROM --platform=linux/amd64 golang:1.26-bookworm AS go
 
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=web /build/web/dist internal/server/webdist/
+COPY web/dist/ internal/server/webdist/
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w" -o /zitadel ./cmd/zitadel
 
-# ── Stage 3: Minimal runtime ────────────────────────────────────────────────
+# ── Stage 2: Minimal runtime ────────────────────────────────────────────────
 FROM --platform=linux/amd64 debian:bookworm-slim
 
 RUN apt-get update && \

@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:immutable": "node ./scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
     "tail": "wrangler tail",
     "containers:list": "wrangler containers list",
