@@ -4,14 +4,16 @@
  * Handles schema loading, form state, payload building,
  * cURL snippet generation, and submit with notifications.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import {
   buildCurlSnippets,
   buildResourceWriteBody,
+  collectSummaryFacts,
   loadResourceSchemaContext,
   normalizeResourceData,
+  stringifyResourceData,
   type ResourceSchemaContext,
   type SchemaResourceType,
 } from '@/console/utils/schema-resource'
@@ -43,6 +45,8 @@ export function useResourceCreate(options: UseResourceCreateOptions) {
   const submitting = ref(false)
   const error = ref('')
   const jsonValid = ref(true)
+  const jsonContent = ref('{}')
+  const jsonError = ref('')
   const formData = ref<Record<string, any>>({ ...options.defaultFormData })
   const schemaContext = ref<ResourceSchemaContext>({
     display: {},
@@ -70,8 +74,33 @@ export function useResourceCreate(options: UseResourceCreateOptions) {
     }),
   )
 
+  const summaryFacts = computed(() =>
+    collectSummaryFacts(formData.value, schemaContext.value.schema, { limit: 6 }),
+  )
+  const reviewFacts = computed(() =>
+    collectSummaryFacts(formData.value, schemaContext.value.schema),
+  )
+
+  watch(formData, (value) => {
+    const next = stringifyResourceData(normalizeResourceData(value))
+    if (next !== jsonContent.value) {
+      jsonContent.value = next
+    }
+  }, { deep: true, immediate: true })
+
   async function loadSchema() {
     schemaContext.value = await loadResourceSchemaContext(options.schemaType)
+  }
+
+  function onJsonValid(parsed: Record<string, any>) {
+    jsonError.value = ''
+    jsonValid.value = true
+    formData.value = normalizeResourceData(parsed)
+  }
+
+  function onJsonError(message: string) {
+    jsonError.value = message
+    jsonValid.value = false
   }
 
   async function submit() {
@@ -98,11 +127,17 @@ export function useResourceCreate(options: UseResourceCreateOptions) {
     schemaContext,
     formData,
     jsonValid,
+    jsonContent,
+    jsonError,
     submitting,
     error,
     payload,
     curlSnippets,
+    summaryFacts,
+    reviewFacts,
     submit,
     loadSchema,
+    onJsonValid,
+    onJsonError,
   }
 }

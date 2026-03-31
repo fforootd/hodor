@@ -1,115 +1,109 @@
 <template>
-  <ResourceDetailView
-    v-model:form-data="formData"
-    :resource="org"
-    resource-type="org"
-    singular-title="Organization"
+  <ResourceDetailCockpit
+    v-model:active-tab="activeTab"
+    v-model:json-content="jsonContent"
     back-route="/orgs"
-    :display-title="orgTitle"
-    :schema-context="schemaContext"
+    :badges="badges"
     :curl-snippets="curlSnippets"
-    :saving="saving"
     :deleting="deleting"
-    :load-error="loadError"
+    :display-title="orgTitle"
+    eyebrow="Organization cockpit"
+    :extra-tabs="[{ label: 'Members', value: 'members' }]"
+    :json-error="jsonError"
     :json-valid="jsonValid"
-    :show-members="true"
-    :members="members"
+    :load-error="loadError"
+    :loading="loading"
+    :overview-facts="overviewFacts"
+    :resource="item"
+    :saving="saving"
+    :schema="schemaContext.schema"
+    singular-title="Organization"
+    :state-rows="stateRows"
+    :subtitle="item?.id || ''"
     @save="save"
-    @delete="deleteOrg"
-    @add-member="addMember"
-    @remove-member="removeMember"
-    @update:json-valid="(v) => jsonValid = v"
-  />
+    @delete="deleteResource"
+    @json-valid="onJsonValid"
+    @json-error="onJsonError"
+  >
+    <template #tab-members>
+      <ResourceMembersSection
+        resource-label="Organization"
+        resource-type="org"
+        :members="members"
+        @add="addMember"
+        @remove="removeMember"
+      />
+    </template>
+
+    <template #edit-form>
+      <SchemaFieldEditor
+        v-if="schemaContext.schema"
+        v-model="formData"
+        :fields="schemaFields"
+      />
+      <div v-else class="text-sm text-muted-foreground">Loading schema…</div>
+    </template>
+  </ResourceDetailCockpit>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { orgApi, orgMembersApi, type Org, type OrgMember } from '@/api/resources'
-import ResourceDetailView from '@/console/components/ResourceDetailView.vue'
-import {
-  buildCurlSnippets, buildResourceWriteBody,
-  loadResourceSchemaContext, normalizeResourceData,
-  type ResourceSchemaContext,
-} from '@/console/utils/schema-resource'
-import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
+import { computed, ref } from 'vue'
+import { orgApi, orgMembersApi } from '@/api/resources'
+import ResourceDetailCockpit from '@/console/components/ResourceDetailCockpit.vue'
+import ResourceMembersSection from '@/console/components/ResourceMembersSection.vue'
+import SchemaFieldEditor from '@/console/components/SchemaFieldEditor.vue'
+import { useResourceDetail } from '@/console/composables/useResourceDetail'
+import { formatDateTime } from '@/console/utils/format'
+import { extractSchemaFields, type SummaryFact } from '@/console/utils/schema-resource'
 
-const route = useRoute()
-const router = useRouter()
+const activeTab = ref('overview')
 
-const org = ref<Org | null>(null)
-const members = ref<OrgMember[]>([])
-const formData = ref<Record<string, any>>({})
-const schemaContext = ref<ResourceSchemaContext>({
-  display: {}, schema: null, schemaId: '', schemaType: 'org', versions: [],
+const {
+  item,
+  members,
+  formData,
+  schemaContext,
+  loading,
+  saving,
+  deleting,
+  jsonValid,
+  jsonContent,
+  jsonError,
+  loadError,
+  curlSnippets,
+  overviewFacts,
+  save,
+  deleteResource,
+  addMember,
+  removeMember,
+  onJsonValid,
+  onJsonError,
+} = useResourceDetail({
+  resourceType: 'org',
+  resourceName: 'Organization',
+  listRoute: '/orgs',
+  apiPath: '/v1/orgs',
+  fetchFn: orgApi.get,
+  updateFn: orgApi.update,
+  deleteFn: orgApi.delete,
+  members: {
+    list: orgMembersApi.list,
+    add: orgMembersApi.add,
+    remove: orgMembersApi.remove,
+    label: 'Organization member',
+  },
 })
-const jsonValid = ref(true)
-const saving = ref(false)
-const deleting = ref(false)
-const loadError = ref('')
 
-const orgId = computed(() => String(route.params.id || ''))
-const orgTitle = computed(() => String(formData.value.name || org.value?.name || 'Organization'))
-const payload = computed(() => buildResourceWriteBody('org', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
-const curlSnippets = computed(() => buildCurlSnippets({
-  path: `/v1/orgs/${encodeURIComponent(orgId.value)}`, body: payload.value,
-  includeOrgHeader: false, methods: ['GET', 'PATCH'],
-}))
-
-async function load() {
-  if (!orgId.value) return
-  loadError.value = ''
-  try {
-    const [loadedOrg, loadedMembers] = await Promise.all([
-      orgApi.get(orgId.value), orgMembersApi.list(orgId.value),
-    ])
-    org.value = loadedOrg
-    members.value = loadedMembers
-    formData.value = normalizeResourceData(loadedOrg.data || {})
-    schemaContext.value = await loadResourceSchemaContext(loadedOrg.schema_type || 'org', loadedOrg.schema_id || '')
-  } catch (err: any) { loadError.value = err?.message || 'Failed to load organization' }
-}
-
-async function save() {
-  if (!org.value) return
-  saving.value = true
-  try {
-    org.value = await orgApi.update(org.value.id, payload.value)
-    formData.value = normalizeResourceData(org.value.data || {})
-    notifyMutationSuccess('Organization', 'update')
-  } catch (err: any) { notifyMutationError('Organization', 'update', err) }
-  finally { saving.value = false }
-}
-
-async function deleteOrg() {
-  if (!org.value) return
-  deleting.value = true
-  try {
-    await orgApi.delete(org.value.id)
-    notifyMutationSuccess('Organization', 'delete')
-    router.push('/orgs')
-  } catch (err: any) { notifyMutationError('Organization', 'delete', err) }
-  finally { deleting.value = false }
-}
-
-async function addMember(userId: string) {
-  if (!org.value) return
-  try {
-    await orgMembersApi.add(org.value.id, userId)
-    members.value = await orgMembersApi.list(org.value.id)
-    notifyMutationSuccess('Organization member', 'add')
-  } catch (err: any) { notifyMutationError('Organization member', 'add', err) }
-}
-
-async function removeMember(userId: string) {
-  if (!org.value) return
-  try {
-    await orgMembersApi.remove(org.value.id, userId)
-    members.value = await orgMembersApi.list(org.value.id)
-    notifyMutationSuccess('Organization member', 'remove')
-  } catch (err: any) { notifyMutationError('Organization member', 'remove', err) }
-}
-
-onMounted(load)
-watch(orgId, load)
+const schemaFields = computed(() => extractSchemaFields(schemaContext.value.schema))
+const orgTitle = computed(() => String(formData.value.display_name || item.value?.name || 'Organization'))
+const badges = computed(() => ([
+  { label: item.value?.state || 'active', variant: 'outline' as const },
+  { label: schemaContext.value.schemaType || item.value?.schema_type || 'org', variant: 'secondary' as const },
+  { label: `${members.value.length} members`, variant: 'secondary' as const },
+]))
+const stateRows = computed<SummaryFact[]>(() => ([
+  { label: 'Created', value: formatDateTime(item.value?.created_at || '') },
+  { label: 'Updated', value: formatDateTime(item.value?.updated_at || '') },
+  { label: 'Members', value: `${members.value.length}` },
+]))
 </script>

@@ -13,7 +13,9 @@ import { metaSchemaApi, schemaApi } from '@/api/resources'
 import {
   buildCurlSnippets,
   buildResourceWriteBody,
+  collectSummaryFacts,
   extractSchemaFields,
+  getValueAtPath,
   loadResourceSchemaContext,
   normalizeResourceData,
   stringifyResourceData,
@@ -132,5 +134,37 @@ describe('schema-resource utilities', () => {
     expect(value).toEqual({ nested: { enabled: true } })
     expect(stringifyResourceData(value)).toContain('"enabled": true')
     expect(normalizeResourceData(null)).toEqual({})
+  })
+
+  it('collects summary facts while skipping hidden or sensitive values', () => {
+    const facts = collectSummaryFacts({
+      name: 'Console',
+      metadata: { tier: 'pro' },
+      profile: { locale: 'de-CH' },
+      secret: 'hidden',
+    }, {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        metadata: { type: 'object' },
+        profile: {
+          type: 'object',
+          properties: {
+            locale: { type: 'string' },
+          },
+        },
+        secret: { type: 'string', 'x-sensitive': true },
+      },
+    })
+
+    expect(facts).toEqual([
+      { label: 'Name', value: 'Console' },
+      { label: 'Locale', value: 'de-CH' },
+    ])
+  })
+
+  it('reads nested values defensively', () => {
+    expect(getValueAtPath({ profile: { locale: 'en' } }, 'profile.locale')).toBe('en')
+    expect(getValueAtPath({ profile: null }, 'profile.locale')).toBeUndefined()
   })
 })

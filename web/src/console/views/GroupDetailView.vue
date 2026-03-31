@@ -1,121 +1,112 @@
 <template>
-  <ResourceDetailView
-    v-model:form-data="formData"
-    :resource="group"
-    resource-type="group"
-    singular-title="Group"
+  <ResourceDetailCockpit
+    v-model:active-tab="activeTab"
+    v-model:json-content="jsonContent"
     back-route="/groups"
-    :display-title="groupTitle"
-    :schema-context="schemaContext"
+    :badges="badges"
     :curl-snippets="curlSnippets"
-    :saving="saving"
     :deleting="deleting"
-    :load-error="loadError"
+    :display-title="groupTitle"
+    eyebrow="Group cockpit"
+    :extra-tabs="[{ label: 'Members', value: 'members' }]"
+    :json-error="jsonError"
     :json-valid="jsonValid"
-    :show-members="true"
-    :members="members"
+    :load-error="loadError"
+    :loading="loading"
+    :overview-facts="overviewFacts"
+    :resource="item"
+    :saving="saving"
+    :schema="schemaContext.schema"
+    singular-title="Group"
+    :state-rows="stateRows"
+    :subtitle="item?.id || ''"
     @save="save"
-    @delete="deleteGroup"
-    @add-member="addMember"
-    @remove-member="removeMember"
-    @update:json-valid="(v) => jsonValid = v"
+    @delete="deleteResource"
+    @json-valid="onJsonValid"
+    @json-error="onJsonError"
   >
-    <template #header-badges>
-      <StateBadge :state="group?.state" />
-      <Badge variant="secondary" class="text-xs">{{ members.length }} members</Badge>
+    <template #tab-members>
+      <ResourceMembersSection
+        resource-label="Group"
+        resource-type="group"
+        :members="members"
+        @add="addMember"
+        @remove="removeMember"
+      />
     </template>
-  </ResourceDetailView>
+
+    <template #edit-form>
+      <SchemaFieldEditor
+        v-if="schemaContext.schema"
+        v-model="formData"
+        :fields="schemaFields"
+      />
+      <div v-else class="text-sm text-muted-foreground">Loading schema…</div>
+    </template>
+  </ResourceDetailCockpit>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { groupApi, type Group, type Member } from '@/api/resources'
-import ResourceDetailView from '@/console/components/ResourceDetailView.vue'
-import { StateBadge } from '@/components/ui/state-badge'
-import { Badge } from '@/components/ui/badge'
+import { computed, ref } from 'vue'
+import { groupApi } from '@/api/resources'
+import ResourceDetailCockpit from '@/console/components/ResourceDetailCockpit.vue'
+import ResourceMembersSection from '@/console/components/ResourceMembersSection.vue'
+import SchemaFieldEditor from '@/console/components/SchemaFieldEditor.vue'
+import { useResourceDetail } from '@/console/composables/useResourceDetail'
 import { useOrgContext } from '@/console/composables/useOrgContext'
-import {
-  buildCurlSnippets, buildResourceWriteBody,
-  loadResourceSchemaContext, normalizeResourceData,
-  type ResourceSchemaContext,
-} from '@/console/utils/schema-resource'
-import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
+import { formatDateTime } from '@/console/utils/format'
+import { extractSchemaFields, type SummaryFact } from '@/console/utils/schema-resource'
 
-const route = useRoute()
-const router = useRouter()
+const activeTab = ref('overview')
 const { currentOrgId } = useOrgContext()
 
-const group = ref<Group | null>(null)
-const members = ref<Member[]>([])
-const formData = ref<Record<string, any>>({})
-const schemaContext = ref<ResourceSchemaContext>({
-  display: {}, schema: null, schemaId: '', schemaType: 'group', versions: [],
+const {
+  item,
+  members,
+  formData,
+  schemaContext,
+  loading,
+  saving,
+  deleting,
+  jsonValid,
+  jsonContent,
+  jsonError,
+  loadError,
+  curlSnippets,
+  overviewFacts,
+  save,
+  deleteResource,
+  addMember,
+  removeMember,
+  onJsonValid,
+  onJsonError,
+} = useResourceDetail({
+  resourceType: 'group',
+  resourceName: 'Group',
+  listRoute: '/groups',
+  apiPath: '/v1/groups',
+  includeOrgHeader: true,
+  fetchFn: groupApi.get,
+  updateFn: groupApi.update,
+  deleteFn: groupApi.delete,
+  members: {
+    list: groupApi.listMembers,
+    add: groupApi.addMember,
+    remove: groupApi.removeMember,
+    label: 'Group member',
+  },
 })
-const jsonValid = ref(true)
-const saving = ref(false)
-const deleting = ref(false)
-const loadError = ref('')
 
-const groupId = computed(() => String(route.params.id || ''))
-const groupTitle = computed(() => String(formData.value.name || group.value?.name || 'Group'))
-const payload = computed(() => buildResourceWriteBody('group', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
-const curlSnippets = computed(() => buildCurlSnippets({
-  path: `/v1/groups/${encodeURIComponent(groupId.value)}`, body: payload.value,
-  includeOrgHeader: true, orgId: currentOrgId.value, methods: ['GET', 'PATCH'],
-}))
-
-async function load() {
-  if (!groupId.value) return
-  loadError.value = ''
-  try {
-    const [g, m] = await Promise.all([groupApi.get(groupId.value), groupApi.listMembers(groupId.value)])
-    group.value = g; members.value = m
-    formData.value = normalizeResourceData(g.data || {})
-    schemaContext.value = await loadResourceSchemaContext(g.schema_type || 'group', g.schema_id || '')
-  } catch (err: any) { loadError.value = err?.message || 'Failed to load group' }
-}
-
-async function save() {
-  if (!group.value) return
-  saving.value = true
-  try {
-    group.value = await groupApi.update(group.value.id, payload.value)
-    formData.value = normalizeResourceData(group.value.data || {})
-    notifyMutationSuccess('Group', 'update')
-  } catch (err: any) { notifyMutationError('Group', 'update', err) }
-  finally { saving.value = false }
-}
-
-async function deleteGroup() {
-  if (!group.value) return
-  deleting.value = true
-  try {
-    await groupApi.delete(group.value.id)
-    notifyMutationSuccess('Group', 'delete')
-    router.push('/groups')
-  } catch (err: any) { notifyMutationError('Group', 'delete', err) }
-  finally { deleting.value = false }
-}
-
-async function addMember(userId: string) {
-  if (!group.value) return
-  try {
-    await groupApi.addMember(group.value.id, userId)
-    members.value = await groupApi.listMembers(group.value.id)
-    notifyMutationSuccess('Group member', 'add')
-  } catch (err: any) { notifyMutationError('Group member', 'add', err) }
-}
-
-async function removeMember(userId: string) {
-  if (!group.value) return
-  try {
-    await groupApi.removeMember(group.value.id, userId)
-    members.value = await groupApi.listMembers(group.value.id)
-    notifyMutationSuccess('Group member', 'remove')
-  } catch (err: any) { notifyMutationError('Group member', 'remove', err) }
-}
-
-onMounted(load)
-watch(groupId, load)
+const schemaFields = computed(() => extractSchemaFields(schemaContext.value.schema))
+const groupTitle = computed(() => String(formData.value.name || item.value?.name || 'Group'))
+const badges = computed(() => ([
+  { label: item.value?.state || 'active', variant: 'outline' as const },
+  { label: schemaContext.value.schemaType || item.value?.schema_type || 'group', variant: 'secondary' as const },
+  ...(currentOrgId.value ? [{ label: currentOrgId.value, variant: 'secondary' as const }] : []),
+]))
+const stateRows = computed<SummaryFact[]>(() => ([
+  { label: 'Created', value: formatDateTime(item.value?.created_at || '') },
+  { label: 'Updated', value: formatDateTime(item.value?.updated_at || '') },
+  { label: 'Members', value: `${members.value.length}` },
+]))
 </script>

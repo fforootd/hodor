@@ -1,121 +1,112 @@
 <template>
-  <ResourceDetailView
-    v-model:form-data="formData"
-    :resource="project"
-    resource-type="project"
-    singular-title="Project"
+  <ResourceDetailCockpit
+    v-model:active-tab="activeTab"
+    v-model:json-content="jsonContent"
     back-route="/projects"
-    :display-title="projectTitle"
-    :schema-context="schemaContext"
+    :badges="badges"
     :curl-snippets="curlSnippets"
-    :saving="saving"
     :deleting="deleting"
-    :load-error="loadError"
+    :display-title="projectTitle"
+    eyebrow="Project cockpit"
+    :extra-tabs="[{ label: 'Members', value: 'members' }]"
+    :json-error="jsonError"
     :json-valid="jsonValid"
-    :show-members="true"
-    :members="members"
+    :load-error="loadError"
+    :loading="loading"
+    :overview-facts="overviewFacts"
+    :resource="item"
+    :saving="saving"
+    :schema="schemaContext.schema"
+    singular-title="Project"
+    :state-rows="stateRows"
+    :subtitle="item?.id || ''"
     @save="save"
-    @delete="deleteProject"
-    @add-member="addMember"
-    @remove-member="removeMember"
-    @update:json-valid="(v) => jsonValid = v"
+    @delete="deleteResource"
+    @json-valid="onJsonValid"
+    @json-error="onJsonError"
   >
-    <template #header-badges>
-      <StateBadge :state="project?.state" />
-      <Badge variant="secondary" class="text-xs">{{ members.length }} members</Badge>
+    <template #tab-members>
+      <ResourceMembersSection
+        resource-label="Project"
+        resource-type="project"
+        :members="members"
+        @add="addMember"
+        @remove="removeMember"
+      />
     </template>
-  </ResourceDetailView>
+
+    <template #edit-form>
+      <SchemaFieldEditor
+        v-if="schemaContext.schema"
+        v-model="formData"
+        :fields="schemaFields"
+      />
+      <div v-else class="text-sm text-muted-foreground">Loading schema…</div>
+    </template>
+  </ResourceDetailCockpit>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { projectApi, type Project, type Member } from '@/api/resources'
-import ResourceDetailView from '@/console/components/ResourceDetailView.vue'
-import { StateBadge } from '@/components/ui/state-badge'
-import { Badge } from '@/components/ui/badge'
+import { computed, ref } from 'vue'
+import { projectApi } from '@/api/resources'
+import ResourceDetailCockpit from '@/console/components/ResourceDetailCockpit.vue'
+import ResourceMembersSection from '@/console/components/ResourceMembersSection.vue'
+import SchemaFieldEditor from '@/console/components/SchemaFieldEditor.vue'
+import { useResourceDetail } from '@/console/composables/useResourceDetail'
 import { useOrgContext } from '@/console/composables/useOrgContext'
-import {
-  buildCurlSnippets, buildResourceWriteBody,
-  loadResourceSchemaContext, normalizeResourceData,
-  type ResourceSchemaContext,
-} from '@/console/utils/schema-resource'
-import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
+import { formatDateTime } from '@/console/utils/format'
+import { extractSchemaFields, type SummaryFact } from '@/console/utils/schema-resource'
 
-const route = useRoute()
-const router = useRouter()
+const activeTab = ref('overview')
 const { currentOrgId } = useOrgContext()
 
-const project = ref<Project | null>(null)
-const members = ref<Member[]>([])
-const formData = ref<Record<string, any>>({})
-const schemaContext = ref<ResourceSchemaContext>({
-  display: {}, schema: null, schemaId: '', schemaType: 'project', versions: [],
+const {
+  item,
+  members,
+  formData,
+  schemaContext,
+  loading,
+  saving,
+  deleting,
+  jsonValid,
+  jsonContent,
+  jsonError,
+  loadError,
+  curlSnippets,
+  overviewFacts,
+  save,
+  deleteResource,
+  addMember,
+  removeMember,
+  onJsonValid,
+  onJsonError,
+} = useResourceDetail({
+  resourceType: 'project',
+  resourceName: 'Project',
+  listRoute: '/projects',
+  apiPath: '/v1/projects',
+  includeOrgHeader: true,
+  fetchFn: projectApi.get,
+  updateFn: projectApi.update,
+  deleteFn: projectApi.delete,
+  members: {
+    list: projectApi.listMembers,
+    add: projectApi.addMember,
+    remove: projectApi.removeMember,
+    label: 'Project member',
+  },
 })
-const jsonValid = ref(true)
-const saving = ref(false)
-const deleting = ref(false)
-const loadError = ref('')
 
-const projectId = computed(() => String(route.params.id || ''))
-const projectTitle = computed(() => String(formData.value.name || project.value?.name || 'Project'))
-const payload = computed(() => buildResourceWriteBody('project', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
-const curlSnippets = computed(() => buildCurlSnippets({
-  path: `/v1/projects/${encodeURIComponent(projectId.value)}`, body: payload.value,
-  includeOrgHeader: true, orgId: currentOrgId.value, methods: ['GET', 'PATCH'],
-}))
-
-async function load() {
-  if (!projectId.value) return
-  loadError.value = ''
-  try {
-    const [p, m] = await Promise.all([projectApi.get(projectId.value), projectApi.listMembers(projectId.value)])
-    project.value = p; members.value = m
-    formData.value = normalizeResourceData(p.data || {})
-    schemaContext.value = await loadResourceSchemaContext(p.schema_type || 'project', p.schema_id || '')
-  } catch (err: any) { loadError.value = err?.message || 'Failed to load project' }
-}
-
-async function save() {
-  if (!project.value) return
-  saving.value = true
-  try {
-    project.value = await projectApi.update(project.value.id, payload.value)
-    formData.value = normalizeResourceData(project.value.data || {})
-    notifyMutationSuccess('Project', 'update')
-  } catch (err: any) { notifyMutationError('Project', 'update', err) }
-  finally { saving.value = false }
-}
-
-async function deleteProject() {
-  if (!project.value) return
-  deleting.value = true
-  try {
-    await projectApi.delete(project.value.id)
-    notifyMutationSuccess('Project', 'delete')
-    router.push('/projects')
-  } catch (err: any) { notifyMutationError('Project', 'delete', err) }
-  finally { deleting.value = false }
-}
-
-async function addMember(userId: string) {
-  if (!project.value) return
-  try {
-    await projectApi.addMember(project.value.id, userId)
-    members.value = await projectApi.listMembers(project.value.id)
-    notifyMutationSuccess('Project member', 'add')
-  } catch (err: any) { notifyMutationError('Project member', 'add', err) }
-}
-
-async function removeMember(userId: string) {
-  if (!project.value) return
-  try {
-    await projectApi.removeMember(project.value.id, userId)
-    members.value = await projectApi.listMembers(project.value.id)
-    notifyMutationSuccess('Project member', 'remove')
-  } catch (err: any) { notifyMutationError('Project member', 'remove', err) }
-}
-
-onMounted(load)
-watch(projectId, load)
+const schemaFields = computed(() => extractSchemaFields(schemaContext.value.schema))
+const projectTitle = computed(() => String(formData.value.name || item.value?.name || 'Project'))
+const badges = computed(() => ([
+  { label: item.value?.state || 'active', variant: 'outline' as const },
+  { label: schemaContext.value.schemaType || item.value?.schema_type || 'project', variant: 'secondary' as const },
+  ...(currentOrgId.value ? [{ label: currentOrgId.value, variant: 'secondary' as const }] : []),
+]))
+const stateRows = computed<SummaryFact[]>(() => ([
+  { label: 'Created', value: formatDateTime(item.value?.created_at || '') },
+  { label: 'Updated', value: formatDateTime(item.value?.updated_at || '') },
+  { label: 'Members', value: `${members.value.length}` },
+]))
 </script>

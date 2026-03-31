@@ -38,6 +38,11 @@ export interface CurlSnippet {
   command: string
 }
 
+export interface SummaryFact {
+  label: string
+  value: string
+}
+
 export type SchemaResourceType = 'user' | 'app' | 'org' | 'group' | 'project'
 
 export async function loadResourceSchemaContext(
@@ -126,6 +131,63 @@ export function normalizeResourceData(value: unknown): Record<string, any> {
 
 export function stringifyResourceData(value: Record<string, any>): string {
   return JSON.stringify(normalizeResourceData(value), null, 2)
+}
+
+export function collectSummaryFacts(
+  data: Record<string, any>,
+  schema: Record<string, any> | null,
+  options?: {
+    limit?: number
+    skipFields?: string[]
+  },
+): SummaryFact[] {
+  const fields = extractSchemaFields(schema)
+  const facts: SummaryFact[] = []
+  const limit = options?.limit ?? 12
+  const skipFields = new Set(options?.skipFields || ['avatar_url', 'display_name', 'metadata'])
+
+  const visitField = (field: ReturnType<typeof extractSchemaFields>[number]) => {
+    if (facts.length >= limit || field.hidden || field.sensitive) return
+    if (skipFields.has(field.name)) return
+
+    const value = getValueAtPath(data, field.path)
+    if (value == null || value === '') {
+      if (field.properties?.length) field.properties.forEach(visitField)
+      return
+    }
+
+    if (field.type === 'object') {
+      field.properties?.forEach(visitField)
+      return
+    }
+
+    const displayValue = formatSummaryFactValue(value)
+    if (!displayValue) return
+    facts.push({ label: field.label, value: displayValue })
+  }
+
+  fields.forEach(visitField)
+  return facts
+}
+
+export function formatSummaryFactValue(value: unknown): string {
+  if (value == null || value === '') return ''
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'object' ? '' : String(item)))
+      .filter(Boolean)
+      .join(', ')
+  }
+  if (typeof value === 'object') return ''
+  return String(value)
+}
+
+export function getValueAtPath(source: Record<string, any>, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== 'object') return undefined
+    return (current as Record<string, any>)[segment]
+  }, source)
 }
 
 export function buildCurlSnippets(options: {
