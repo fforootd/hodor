@@ -8,7 +8,7 @@ package api
 //   - SchemaRequest, SchemaResponse                                    → api.go
 //   - SearchResult                                                     → api.go
 //   - EventResponse, AggregateRow                                      → event.go
-//   - SessionResponse, CreateSessionRequest, CreateSessionResponse     → session.go
+//   - SessionResponse, CreateSessionRequest, CreateSessionResponse     → session_types.go
 //   - CreatePATRequest, CreatePATResponse, PATResponse                 → pat.go
 //   - ProviderTemplate                                                 → provider.go
 //   - ImportRequest, ImportEntity, ImportProvider, ImportResult, etc.   → bulk.go
