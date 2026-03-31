@@ -9,6 +9,7 @@ import (
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	providers "github.com/zitadel/zitadel/internal/provider"
+	"github.com/zitadel/zitadel/internal/schema"
 )
 
 // RegisterProviderRoutes mounts provider CRUD endpoints.
@@ -42,8 +43,14 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.OrgID = r.Header.Get("X-Org-Id")
-	repo := providers.NewRepository(a.db.SQL())
+	req.OrgID = firstNonEmptyString(r.Header.Get("X-Org-Id"), "1")
+	req, err = a.prepareProviderWrite(r, req)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	repo := providers.NewRepository(a.db.SQL(), a.db.Dialect())
 	providerID, err := repo.Create(r.Context(), id.New(), req)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "create provider failed: "+err.Error())
@@ -71,7 +78,7 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
-	repo := providers.NewRepository(a.db.SQL())
+	repo := providers.NewRepository(a.db.SQL(), a.db.Dialect())
 	items, err := repo.List(r.Context())
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
@@ -86,7 +93,7 @@ func (a *API) listProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
-	repo := providers.NewRepository(a.db.SQL())
+	repo := providers.NewRepository(a.db.SQL(), a.db.Dialect())
 	prov, err := repo.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
@@ -96,7 +103,7 @@ func (a *API) getProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
-	repo := providers.NewRepository(a.db.SQL())
+	repo := providers.NewRepository(a.db.SQL(), a.db.Dialect())
 	current, err := repo.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "provider not found")
@@ -110,6 +117,12 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	next, err := mergeProviderPatch(*current, raw)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	next.OrgID = current.OrgID
+	next, err = a.prepareProviderWrite(r, next)
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -128,7 +141,7 @@ func (a *API) updateProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
-	repo := providers.NewRepository(a.db.SQL())
+	repo := providers.NewRepository(a.db.SQL(), a.db.Dialect())
 	rows, err := repo.Delete(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
@@ -214,7 +227,7 @@ func providerFromMap(raw map[string]any) (providers.Provider, error) {
 			prov.Target.SchemaID = strings.TrimSpace(schemaID)
 		}
 	} else if v, ok := raw["schema_id"].(string); ok {
-		prov.Target.SchemaID = strings.TrimSpace(v)
+		prov.SchemaID = strings.TrimSpace(v)
 	}
 	if v, ok := raw["linking"].(map[string]any); ok {
 		if mode, ok := v["mode"].(string); ok {
@@ -311,7 +324,7 @@ func mergeProviderPatch(current providers.Provider, raw map[string]any) (provide
 			next.Target.SchemaID = strings.TrimSpace(schemaID)
 		}
 	} else if value, ok := raw["schema_id"].(string); ok {
-		next.Target.SchemaID = strings.TrimSpace(value)
+		next.SchemaID = strings.TrimSpace(value)
 	}
 	if value, ok := raw["linking"].(map[string]any); ok {
 		if mode, ok := value["mode"].(string); ok {
@@ -416,4 +429,32 @@ func providerStringSliceFromAny(value any) ([]string, bool) {
 
 func generateShortID() string {
 	return id.New()[:12]
+}
+
+func (a *API) prepareProviderWrite(r *http.Request, prov providers.Provider) (providers.Provider, error) {
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "provider", prov.SchemaID)
+	if err != nil {
+		return providers.Provider{}, err
+	}
+	targetSchemaID, targetSchemaType, err := providers.ResolveTargetSchema(r.Context(), a.db.SQL(), prov.Target, a.db.Dialect())
+	if err != nil {
+		return providers.Provider{}, err
+	}
+	prov.Target.SchemaID = targetSchemaID
+	prov.Target.SchemaType = targetSchemaType
+
+	data, err := providerSchemaData(prov)
+	if err != nil {
+		return providers.Provider{}, err
+	}
+	if err := schema.ValidateData(schemaRec.Schema, data); err != nil {
+		return providers.Provider{}, err
+	}
+
+	prov.SchemaID = schemaRec.ID
+	return providers.Normalize(prov), nil
+}
+
+func providerSchemaData(prov providers.Provider) (map[string]any, error) {
+	return providers.SchemaData(prov)
 }

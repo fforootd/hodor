@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +20,7 @@ func (a *API) promoteLoginFlow(w http.ResponseWriter, r *http.Request) {
 
 	var currentState string
 	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT state FROM login_flows WHERE id = ?`, flowID,
+		a.bindQuery(`SELECT state FROM login_flows WHERE id = ?`), flowID,
 	).Scan(&currentState)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "login flow not found")
@@ -45,7 +46,7 @@ func (a *API) promoteLoginFlow(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = a.db.SQL().ExecContext(r.Context(),
-		`UPDATE login_flows SET state = ?, updated_at = ? WHERE id = ?`,
+		a.bindQuery(`UPDATE login_flows SET state = ?, updated_at = ? WHERE id = ?`),
 		nextState, now, flowID,
 	)
 	if err != nil {
@@ -71,7 +72,7 @@ func (a *API) archiveLoginFlow(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := a.db.SQL().ExecContext(r.Context(),
-		`UPDATE login_flows SET state = 'archived', updated_at = ? WHERE id = ?`,
+		a.bindQuery(`UPDATE login_flows SET state = 'archived', updated_at = ? WHERE id = ?`),
 		now, flowID,
 	)
 	if err != nil {
@@ -173,17 +174,19 @@ func (a *API) resolveLoginFlow(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, flow)
 }
 
-func (a *API) loadLoginFlow(ctx interface{ Value(any) any }, flowID string) (LoginFlowResponse, error) {
+func (a *API) loadLoginFlow(ctx context.Context, flowID string) (LoginFlowResponse, error) {
 	var resp LoginFlowResponse
 	var configStr, audienceStr, authMethodsStr, metadataStr string
 	var isDefault, enabled int
 
-	err := a.db.SQL().QueryRow(
-		`SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
+	err := a.db.SQL().QueryRowContext(ctx,
+		a.bindQuery(`SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), name, strategy, config,
+		        CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END,
+		        CASE WHEN COALESCE(enabled, true) THEN 1 ELSE 0 END, state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 		        COALESCE(metadata,'{}'), created_at, updated_at
-		 FROM login_flows WHERE id = ?`, flowID,
-	).Scan(&resp.ID, &resp.OrgID, &resp.Name, &resp.Strategy, &configStr,
+		 FROM login_flows WHERE id = ?`), flowID,
+	).Scan(&resp.ID, &resp.OrgID, &resp.SchemaID, &resp.Name, &resp.Strategy, &configStr,
 		&isDefault, &enabled, &resp.State, &resp.Priority,
 		&audienceStr, &authMethodsStr, &metadataStr,
 		&resp.CreatedAt, &resp.UpdatedAt)

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
@@ -9,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/zitadel/zitadel/internal/catalog"
+	"github.com/zitadel/zitadel/internal/database"
 )
 
 // RegisterCatalogRoutes registers the catalog API endpoints.
-func RegisterCatalogRoutes(mux *http.ServeMux, svc *catalog.Service, db *sql.DB) {
+func RegisterCatalogRoutes(mux *http.ServeMux, svc *catalog.Service, db *database.DB) {
 	mux.HandleFunc("GET /v1/catalog", listCatalog(svc))
 	mux.HandleFunc("GET /v1/catalog/{id}", getCatalogEntry(svc))
 	mux.HandleFunc("POST /v1/catalog/{id}/install", installFromCatalog(svc))
@@ -115,7 +115,7 @@ func refreshCatalog(svc *catalog.Service) http.HandlerFunc {
 
 // previewSchemaUpgrade shows the impact of a schema change on existing entities.
 // POST /v1/schemas/{type}/preview-upgrade
-func previewSchemaUpgrade(db *sql.DB) http.HandlerFunc {
+func previewSchemaUpgrade(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		schemaType := r.PathValue("type")
 
@@ -136,7 +136,7 @@ func previewSchemaUpgrade(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		report, err := catalog.PreviewUpgrade(r.Context(), db, schemaType, req.NewSchema, sampleSize)
+		report, err := catalog.PreviewUpgrade(r.Context(), db.SQL(), schemaType, req.NewSchema, sampleSize, db.Dialect())
 		if err != nil {
 			logging.Printf("[catalog] preview-upgrade %s failed: %v", schemaType, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)

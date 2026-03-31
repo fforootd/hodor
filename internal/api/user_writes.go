@@ -21,7 +21,7 @@ type validatedUserWrite struct {
 }
 
 func (a *API) prepareUserWrite(ctx context.Context, requestedSchemaID, identifier, displayName string, metadataValue, profileValue any) (*validatedUserWrite, error) {
-	schemaRec, err := schema.ResolveUserSchemaForWrite(ctx, a.db.SQL(), requestedSchemaID)
+	schemaRec, err := schema.ResolveUserSchemaForWrite(ctx, a.db.SQL(), requestedSchemaID, a.db.Dialect())
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (a *API) prepareUserWrite(ctx context.Context, requestedSchemaID, identifie
 }
 
 func (a *API) prepareExistingUserWrite(ctx context.Context, schemaID, identifier, displayName string, metadata map[string]any) (*validatedUserWrite, error) {
-	schemaRec, err := schema.ResolveUserSchemaForWrite(ctx, a.db.SQL(), schemaID)
+	schemaRec, err := schema.ResolveUserSchemaForWrite(ctx, a.db.SQL(), schemaID, a.db.Dialect())
 	if err != nil {
 		return nil, err
 	}

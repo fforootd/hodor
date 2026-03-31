@@ -44,9 +44,21 @@ func NewTestServer(t *testing.T) *TestServer {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	t.Logf("TestServer dbPath: %s", dbPath)
+	return newTestServer(t, "sqlite://"+dbPath)
+}
+
+// NewTestServerWithDatabaseURL creates a full Zitadel server for the provided
+// database URL. This is primarily used by opt-in Postgres integration tests.
+func NewTestServerWithDatabaseURL(t *testing.T, databaseURL string) *TestServer {
+	t.Helper()
+	return newTestServer(t, databaseURL)
+}
+
+func newTestServer(t *testing.T, databaseURL string) *TestServer {
+	t.Helper()
 
 	cfg := config.Defaults()
-	cfg.Database.URL = "sqlite://" + dbPath
+	cfg.Database.URL = databaseURL
 
 	db, err := database.Open(cfg.Database.URL)
 	if err != nil {
@@ -74,9 +86,11 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	t.Cleanup(func() {
 		ts.Close()
-		// Checkpoint WAL before closing to prevent dangling -wal/-shm files
-		// that cause t.TempDir() cleanup failures.
-		db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		if db.IsSQLiteCompat() {
+			// Checkpoint WAL before closing to prevent dangling -wal/-shm files
+			// that cause t.TempDir() cleanup failures.
+			db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		}
 		db.Close()
 	})
 

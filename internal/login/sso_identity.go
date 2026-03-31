@@ -45,11 +45,11 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 		return "", fmt.Errorf("no linked account found and provider is configured for link_only")
 	}
 
-	targetSchemaID, _, err := providers.ResolveTargetSchema(ctx, h.db.SQL(), prov.Target)
+	targetSchemaID, _, err := providers.ResolveTargetSchema(ctx, h.db.SQL(), prov.Target, h.db.Dialect())
 	if err != nil {
 		return "", err
 	}
-	schemaRec, err := schema.LoadSchemaRecord(ctx, h.db.SQL(), targetSchemaID)
+	schemaRec, err := schema.LoadSchemaRecord(ctx, h.db.SQL(), targetSchemaID, h.db.Dialect())
 	if err != nil {
 		return "", fmt.Errorf("resolve target schema %s: %w", targetSchemaID, err)
 	}

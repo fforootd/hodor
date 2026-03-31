@@ -30,6 +30,15 @@ type SchemaRecord struct {
 	Schema string
 }
 
+type rowQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type TableBinding struct {
+	Table  string
+	Filter map[string]string
+}
+
 type userPropertySpec struct {
 	Format     string `json:"format"`
 	Identifier bool   `json:"x-identifier"`
@@ -47,14 +56,14 @@ func IsUserSchemaType(typeName string) bool {
 	return ok
 }
 
-func LoadSchemaRecord(ctx context.Context, db *sql.DB, schemaID string) (*SchemaRecord, error) {
+func LoadSchemaRecord(ctx context.Context, db rowQueryer, schemaID string, dialect ...string) (*SchemaRecord, error) {
 	if strings.TrimSpace(schemaID) == "" {
 		return nil, errors.New("schema id is required")
 	}
 
 	var rec SchemaRecord
 	err := db.QueryRowContext(ctx,
-		`SELECT id, type, schema FROM schemas WHERE id = ?`,
+		fmt.Sprintf(`SELECT id, type, schema FROM schemas WHERE id = %s`, placeholder(dialectValue(dialect), 1)),
 		schemaID,
 	).Scan(&rec.ID, &rec.Type, &rec.Schema)
 	if err != nil {
@@ -66,16 +75,31 @@ func LoadSchemaRecord(ctx context.Context, db *sql.DB, schemaID string) (*Schema
 	return &rec, nil
 }
 
-func ResolveDefaultHumanUserSchema(ctx context.Context, db *sql.DB) (*SchemaRecord, error) {
-	return resolveDefaultSchemaByType(ctx, db, "human_user")
+func ResolveDefaultHumanUserSchema(ctx context.Context, db rowQueryer, dialect ...string) (*SchemaRecord, error) {
+	return resolveDefaultSchemaByType(ctx, db, "human_user", dialect...)
 }
 
-func ResolveUserSchemaForWrite(ctx context.Context, db *sql.DB, schemaID string) (*SchemaRecord, error) {
+func ResolveSchemaForType(ctx context.Context, db rowQueryer, schemaType, schemaID string, dialect ...string) (*SchemaRecord, error) {
 	if strings.TrimSpace(schemaID) == "" {
-		return ResolveDefaultHumanUserSchema(ctx, db)
+		return resolveDefaultSchemaByType(ctx, db, schemaType, dialect...)
 	}
 
-	rec, err := LoadSchemaRecord(ctx, db, schemaID)
+	rec, err := LoadSchemaRecord(ctx, db, schemaID, dialect...)
+	if err != nil {
+		return nil, err
+	}
+	if rec.Type != schemaType {
+		return nil, fmt.Errorf("schema %q is type %q, not %q", rec.ID, rec.Type, schemaType)
+	}
+	return rec, nil
+}
+
+func ResolveUserSchemaForWrite(ctx context.Context, db rowQueryer, schemaID string, dialect ...string) (*SchemaRecord, error) {
+	if strings.TrimSpace(schemaID) == "" {
+		return ResolveDefaultHumanUserSchema(ctx, db, dialect...)
+	}
+
+	rec, err := LoadSchemaRecord(ctx, db, schemaID, dialect...)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +107,83 @@ func ResolveUserSchemaForWrite(ctx context.Context, db *sql.DB, schemaID string)
 		return nil, fmt.Errorf("schema %q is type %q, not a user schema", rec.ID, rec.Type)
 	}
 	return rec, nil
+}
+
+func TableBindingFromSchema(schemaJSON string) (TableBinding, error) {
+	var raw struct {
+		Table  string         `json:"x-table"`
+		Filter map[string]any `json:"x-table-filter"`
+	}
+	if err := json.Unmarshal([]byte(schemaJSON), &raw); err != nil {
+		return TableBinding{}, fmt.Errorf("decode schema table binding: %w", err)
+	}
+
+	binding := TableBinding{
+		Table:  strings.TrimSpace(raw.Table),
+		Filter: map[string]string{},
+	}
+	for key, value := range raw.Filter {
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "" {
+			continue
+		}
+		binding.Filter[key] = text
+	}
+	return binding, nil
+}
+
+func ResolveTableBinding(ctx context.Context, db rowQueryer, schemaType string, dialect ...string) (TableBinding, *SchemaRecord, error) {
+	rec, err := resolveDefaultSchemaByType(ctx, db, schemaType, dialect...)
+	if err != nil {
+		return TableBinding{}, nil, err
+	}
+
+	binding, err := TableBindingFromSchema(rec.Schema)
+	if err != nil {
+		return TableBinding{}, nil, err
+	}
+	if binding.Table != "" {
+		return binding, rec, nil
+	}
+
+	catalog, err := Catalog()
+	if err != nil {
+		return TableBinding{}, nil, err
+	}
+	entry, ok := catalog[schemaType]
+	if !ok {
+		return TableBinding{}, nil, fmt.Errorf("schema type %q not found in catalog", schemaType)
+	}
+	if entry.Ref != "" {
+		embeddedSchema, loadErr := LoadSchemaFile(entry.Ref)
+		if loadErr == nil {
+			binding, bindErr := TableBindingFromSchema(embeddedSchema)
+			if bindErr == nil && binding.Table != "" {
+				return binding, rec, nil
+			}
+		}
+	}
+
+	return TableBinding{}, nil, fmt.Errorf("schema type %q does not declare x-table", schemaType)
+}
+
+func dialectValue(dialect []string) string {
+	if len(dialect) == 0 {
+		return "sqlite"
+	}
+	switch strings.TrimSpace(dialect[0]) {
+	case "postgres":
+		return "postgres"
+	default:
+		return "sqlite"
+	}
+}
+
+func placeholder(dialect string, index int) string {
+	if dialect == "postgres" {
+		return fmt.Sprintf("$%d", index)
+	}
+	return "?"
 }
 
 func ValidateSchemaDocument(schemaJSON []byte) error {
@@ -265,14 +366,15 @@ func newCompilerWithoutMeta() (*jsonschema.Compiler, error) {
 	return compiler, nil
 }
 
-func resolveDefaultSchemaByType(ctx context.Context, db *sql.DB, schemaType string) (*SchemaRecord, error) {
+func resolveDefaultSchemaByType(ctx context.Context, db rowQueryer, schemaType string, dialect ...string) (*SchemaRecord, error) {
+	defaultPlaceholder := placeholder(dialectValue(dialect), 1)
 	var rec SchemaRecord
 	err := db.QueryRowContext(ctx,
-		`SELECT id, type, schema
+		fmt.Sprintf(`SELECT id, type, schema
 		 FROM schemas
-		 WHERE type = ? AND is_default = true
+		 WHERE type = %s AND is_default = true
 		 ORDER BY created_at ASC
-		 LIMIT 1`,
+		 LIMIT 1`, defaultPlaceholder),
 		schemaType,
 	).Scan(&rec.ID, &rec.Type, &rec.Schema)
 	if err == nil {
@@ -283,11 +385,11 @@ func resolveDefaultSchemaByType(ctx context.Context, db *sql.DB, schemaType stri
 	}
 
 	err = db.QueryRowContext(ctx,
-		`SELECT id, type, schema
+		fmt.Sprintf(`SELECT id, type, schema
 		 FROM schemas
-		 WHERE type = ?
+		 WHERE type = %s
 		 ORDER BY version DESC, created_at ASC
-		 LIMIT 1`,
+		 LIMIT 1`, defaultPlaceholder),
 		schemaType,
 	).Scan(&rec.ID, &rec.Type, &rec.Schema)
 	if err != nil {

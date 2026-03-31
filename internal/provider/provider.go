@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/schema"
 )
 
 const (
@@ -44,6 +46,7 @@ type CatalogRef struct {
 type Provider struct {
 	ID          string         `json:"id,omitempty"`
 	OrgID       string         `json:"org_id,omitempty"`
+	SchemaID    string         `json:"schema_id,omitempty"`
 	DisplayName string         `json:"display_name"`
 	Kind        string         `json:"kind,omitempty"`
 	Protocol    string         `json:"protocol"`
@@ -61,35 +64,46 @@ type Provider struct {
 }
 
 type Repository struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect string
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+type rowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func NewRepository(db *sql.DB, dialect ...string) *Repository {
+	repoDialect := "sqlite"
+	if len(dialect) > 0 && strings.TrimSpace(dialect[0]) != "" {
+		repoDialect = strings.TrimSpace(dialect[0])
+	}
+	return &Repository{db: db, dialect: repoDialect}
 }
 
 type persistenceRecord struct {
-	ID            string
-	OrgID         string
-	Name          string
-	Protocol      string
-	Template      string
-	ConfigJSON    string
-	OverridesJSON string
-	AutoRegister  bool
-	Enabled       bool
-	DisplayOrder  int
-	SchemaID      string
-	MetadataJSON  string
-	CreatedAt     string
-	UpdatedAt     string
+	ID               string
+	OrgID            string
+	Name             string
+	Protocol         string
+	Template         string
+	ConfigJSON       string
+	OverridesJSON    string
+	AutoRegister     bool
+	Enabled          bool
+	DisplayOrder     int
+	ResourceSchemaID string
+	TargetSchemaID   string
+	TargetSchemaType string
+	MetadataJSON     string
+	CreatedAt        string
+	UpdatedAt        string
 }
 
 func (r *Repository) List(ctx context.Context) ([]Provider, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
 		        COALESCE(claim_overrides,'{}'), COALESCE(auto_register,1), COALESCE(enabled,1),
-		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(metadata,'{}'),
+		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(target_schema_id,''), COALESCE(target_schema_type,''), COALESCE(metadata,'{}'),
 		        created_at, updated_at
 		 FROM providers
 		 ORDER BY display_order, name`)
@@ -113,7 +127,7 @@ func (r *Repository) ListEnabled(ctx context.Context) ([]Provider, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
 		        COALESCE(claim_overrides,'{}'), COALESCE(auto_register,1), COALESCE(enabled,1),
-		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(metadata,'{}'),
+		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(target_schema_id,''), COALESCE(target_schema_type,''), COALESCE(metadata,'{}'),
 		        created_at, updated_at
 		 FROM providers
 		 WHERE enabled = 1 OR enabled = true
@@ -150,10 +164,14 @@ func (r *Repository) Create(ctx context.Context, id string, prov Provider) (stri
 		return "", err
 	}
 	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		fmt.Sprintf(`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, target_schema_id, target_schema_type, metadata, created_at, updated_at)
+		 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)`,
+			r.placeholder(1), r.placeholder(2), r.placeholder(3), r.placeholder(4),
+			r.placeholder(5), r.placeholder(6), r.placeholder(7), r.placeholder(8),
+			r.placeholder(9), r.placeholder(10), r.placeholder(11), r.placeholder(12),
+			r.placeholder(13), r.placeholder(14), r.timeExpr(), r.timeExpr()),
 		rec.ID, rec.OrgID, rec.Name, rec.Protocol, rec.Template, rec.ConfigJSON,
-		rec.OverridesJSON, rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.SchemaID, rec.MetadataJSON,
+		rec.OverridesJSON, rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.ResourceSchemaID, rec.TargetSchemaID, rec.TargetSchemaType, rec.MetadataJSON,
 	)
 	if err != nil {
 		return "", err
@@ -171,18 +189,22 @@ func (r *Repository) Save(ctx context.Context, prov Provider) error {
 		return err
 	}
 	_, err = r.db.ExecContext(ctx,
-		`UPDATE providers
-		 SET org_id = ?, name = ?, protocol = ?, template = ?, config = ?, claim_overrides = ?,
-		     auto_register = ?, enabled = ?, display_order = ?, schema_id = ?, metadata = ?, updated_at = datetime('now')
-		 WHERE id = ?`,
+		fmt.Sprintf(`UPDATE providers
+		 SET org_id = %s, name = %s, protocol = %s, template = %s, config = %s, claim_overrides = %s,
+		     auto_register = %s, enabled = %s, display_order = %s, schema_id = %s, target_schema_id = %s, target_schema_type = %s, metadata = %s, updated_at = %s
+		 WHERE id = %s`,
+			r.placeholder(1), r.placeholder(2), r.placeholder(3), r.placeholder(4),
+			r.placeholder(5), r.placeholder(6), r.placeholder(7), r.placeholder(8),
+			r.placeholder(9), r.placeholder(10), r.placeholder(11), r.placeholder(12),
+			r.placeholder(13), r.timeExpr(), r.placeholder(14)),
 		rec.OrgID, rec.Name, rec.Protocol, rec.Template, rec.ConfigJSON, rec.OverridesJSON,
-		rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.SchemaID, rec.MetadataJSON, rec.ID,
+		rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.ResourceSchemaID, rec.TargetSchemaID, rec.TargetSchemaType, rec.MetadataJSON, rec.ID,
 	)
 	return err
 }
 
 func (r *Repository) Delete(ctx context.Context, id string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM providers WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM providers WHERE id = %s`, r.placeholder(1)), id)
 	if err != nil {
 		return 0, err
 	}
@@ -192,14 +214,14 @@ func (r *Repository) Delete(ctx context.Context, id string) (int64, error) {
 func (r *Repository) getRecord(ctx context.Context, id string) (persistenceRecord, error) {
 	var rec persistenceRecord
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
+		fmt.Sprintf(`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
 		        COALESCE(claim_overrides,'{}'), COALESCE(auto_register,1), COALESCE(enabled,1),
-		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(metadata,'{}'),
+		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(target_schema_id,''), COALESCE(target_schema_type,''), COALESCE(metadata,'{}'),
 		        created_at, updated_at
-		 FROM providers WHERE id = ?`,
+		 FROM providers WHERE id = %s`, r.placeholder(1)),
 		id,
 	).Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Protocol, &rec.Template, &rec.ConfigJSON,
-		&rec.OverridesJSON, &rec.AutoRegister, &rec.Enabled, &rec.DisplayOrder, &rec.SchemaID,
+		&rec.OverridesJSON, &rec.AutoRegister, &rec.Enabled, &rec.DisplayOrder, &rec.ResourceSchemaID, &rec.TargetSchemaID, &rec.TargetSchemaType,
 		&rec.MetadataJSON, &rec.CreatedAt, &rec.UpdatedAt)
 	if err != nil {
 		return persistenceRecord{}, err
@@ -210,7 +232,7 @@ func (r *Repository) getRecord(ctx context.Context, id string) (persistenceRecor
 func scanPersistenceRecord(scanner interface{ Scan(dest ...any) error }) (persistenceRecord, error) {
 	var rec persistenceRecord
 	err := scanner.Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Protocol, &rec.Template, &rec.ConfigJSON,
-		&rec.OverridesJSON, &rec.AutoRegister, &rec.Enabled, &rec.DisplayOrder, &rec.SchemaID,
+		&rec.OverridesJSON, &rec.AutoRegister, &rec.Enabled, &rec.DisplayOrder, &rec.ResourceSchemaID, &rec.TargetSchemaID, &rec.TargetSchemaType,
 		&rec.MetadataJSON, &rec.CreatedAt, &rec.UpdatedAt)
 	if err != nil {
 		return persistenceRecord{}, err
@@ -232,6 +254,7 @@ func Normalize(prov Provider) Provider {
 		prov.UI = map[string]any{}
 	}
 	prov.DisplayName = strings.TrimSpace(prov.DisplayName)
+	prov.SchemaID = strings.TrimSpace(prov.SchemaID)
 	prov.Kind = strings.TrimSpace(prov.Kind)
 	prov.Protocol = strings.TrimSpace(prov.Protocol)
 	prov.Target.SchemaType = strings.TrimSpace(prov.Target.SchemaType)
@@ -315,10 +338,58 @@ func DisplayOrder(prov Provider) int {
 	}
 }
 
+func SchemaData(prov Provider) (map[string]any, error) {
+	prov = Normalize(prov)
+
+	data := map[string]any{
+		"display_name": prov.DisplayName,
+		"kind":         prov.Kind,
+		"protocol":     prov.Protocol,
+		"connection":   cloneMap(prov.Connection),
+		"mapping": map[string]any{
+			"claims": cloneClaimMap(prov.Mapping.Claims),
+		},
+		"linking": map[string]any{
+			"mode":     prov.Linking.Mode,
+			"match_by": prov.Linking.MatchBy,
+		},
+		"session": cloneMap(prov.Session),
+		"ui":      cloneMap(prov.UI),
+		"enabled": prov.Enabled,
+	}
+	if prov.Target.SchemaID != "" || prov.Target.SchemaType != "" {
+		data["target"] = map[string]any{
+			"schema_id":   prov.Target.SchemaID,
+			"schema_type": prov.Target.SchemaType,
+		}
+	}
+	if prov.CatalogRef.TemplateID != "" || prov.CatalogRef.TemplateVersion != "" || prov.CatalogRef.Official || len(prov.CatalogRef.Capabilities) > 0 || prov.CatalogRef.LogoURL != "" || prov.CatalogRef.DocsURL != "" {
+		catalogRef := map[string]any{
+			"template_id":      prov.CatalogRef.TemplateID,
+			"template_version": prov.CatalogRef.TemplateVersion,
+		}
+		if prov.CatalogRef.Official {
+			catalogRef["official"] = true
+		}
+		if len(prov.CatalogRef.Capabilities) > 0 {
+			catalogRef["capabilities"] = append([]string(nil), prov.CatalogRef.Capabilities...)
+		}
+		if prov.CatalogRef.LogoURL != "" {
+			catalogRef["logo_url"] = prov.CatalogRef.LogoURL
+		}
+		if prov.CatalogRef.DocsURL != "" {
+			catalogRef["docs_url"] = prov.CatalogRef.DocsURL
+		}
+		data["catalog_ref"] = catalogRef
+	}
+	return schema.ObjectMap(data)
+}
+
 func fromPersistenceRecord(rec persistenceRecord) Provider {
 	prov := Provider{
 		ID:        rec.ID,
 		OrgID:     rec.OrgID,
+		SchemaID:  rec.ResourceSchemaID,
 		CreatedAt: rec.CreatedAt,
 		UpdatedAt: rec.UpdatedAt,
 	}
@@ -343,7 +414,10 @@ func fromPersistenceRecord(rec persistenceRecord) Provider {
 		_ = json.Unmarshal([]byte(rec.OverridesJSON), &prov.Mapping.Claims)
 	}
 	if prov.Target.SchemaID == "" {
-		prov.Target.SchemaID = rec.SchemaID
+		prov.Target.SchemaID = rec.TargetSchemaID
+	}
+	if prov.Target.SchemaType == "" {
+		prov.Target.SchemaType = rec.TargetSchemaType
 	}
 	if prov.Linking.Mode == "" && !rec.AutoRegister {
 		prov.Linking.Mode = LinkModeLinkOnly
@@ -378,63 +452,55 @@ func toPersistenceRecord(id string, prov Provider) (persistenceRecord, error) {
 		return persistenceRecord{}, fmt.Errorf("marshal provider metadata: %w", err)
 	}
 	return persistenceRecord{
-		ID:            id,
-		OrgID:         prov.OrgID,
-		Name:          prov.DisplayName,
-		Protocol:      prov.Protocol,
-		Template:      LegacyTemplateID(prov),
-		ConfigJSON:    string(configJSON),
-		OverridesJSON: string(overridesJSON),
-		AutoRegister:  LegacyAutoRegister(prov),
-		Enabled:       prov.Enabled,
-		DisplayOrder:  DisplayOrder(prov),
-		SchemaID:      prov.Target.SchemaID,
-		MetadataJSON:  string(metadataJSON),
+		ID:               id,
+		OrgID:            prov.OrgID,
+		Name:             prov.DisplayName,
+		Protocol:         prov.Protocol,
+		Template:         LegacyTemplateID(prov),
+		ConfigJSON:       string(configJSON),
+		OverridesJSON:    string(overridesJSON),
+		AutoRegister:     LegacyAutoRegister(prov),
+		Enabled:          prov.Enabled,
+		DisplayOrder:     DisplayOrder(prov),
+		ResourceSchemaID: prov.SchemaID,
+		TargetSchemaID:   prov.Target.SchemaID,
+		TargetSchemaType: prov.Target.SchemaType,
+		MetadataJSON:     string(metadataJSON),
 	}, nil
 }
 
-func ResolveTargetSchema(ctx context.Context, db *sql.DB, target Target) (string, string, error) {
+func (r *Repository) placeholder(n int) string {
+	if r.dialect == "postgres" {
+		return fmt.Sprintf("$%d", n)
+	}
+	return "?"
+}
+
+func (r *Repository) timeExpr() string {
+	if r.dialect == "postgres" {
+		return "NOW()"
+	}
+	return "datetime('now')"
+}
+
+func ResolveTargetSchema(ctx context.Context, db rowQueryer, target Target, dialect ...string) (string, string, error) {
 	if strings.TrimSpace(target.SchemaID) != "" {
-		var schemaType string
-		err := db.QueryRowContext(ctx, `SELECT type FROM schemas WHERE id = ?`, target.SchemaID).Scan(&schemaType)
+		rec, err := schema.LoadSchemaRecord(ctx, db, target.SchemaID, dialect...)
 		if err != nil {
 			return "", "", fmt.Errorf("load provider target schema %q: %w", target.SchemaID, err)
 		}
-		return target.SchemaID, schemaType, nil
+		return rec.ID, rec.Type, nil
 	}
 
 	schemaType := strings.TrimSpace(target.SchemaType)
 	if schemaType == "" {
 		schemaType = "human_user"
 	}
-
-	var schemaID string
-	err := db.QueryRowContext(ctx,
-		`SELECT id
-		 FROM schemas
-		 WHERE type = ? AND is_default = true
-		 ORDER BY created_at ASC
-		 LIMIT 1`,
-		schemaType,
-	).Scan(&schemaID)
-	if err == nil {
-		return schemaID, schemaType, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", "", fmt.Errorf("load default %s schema: %w", schemaType, err)
-	}
-	err = db.QueryRowContext(ctx,
-		`SELECT id
-		 FROM schemas
-		 WHERE type = ?
-		 ORDER BY version DESC, created_at ASC
-		 LIMIT 1`,
-		schemaType,
-	).Scan(&schemaID)
+	rec, err := schema.ResolveSchemaForType(ctx, db, schemaType, "", dialect...)
 	if err != nil {
-		return "", "", fmt.Errorf("load fallback %s schema: %w", schemaType, err)
+		return "", "", err
 	}
-	return schemaID, schemaType, nil
+	return rec.ID, rec.Type, nil
 }
 
 func defaultDisplayName(kind string) string {
@@ -466,6 +532,17 @@ func legacyKindFromTemplate(templateID string) string {
 func cloneMap(input map[string]any) map[string]any {
 	if input == nil {
 		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneClaimMap(input map[string]string) map[string]any {
+	if input == nil {
+		return map[string]any{}
 	}
 	out := make(map[string]any, len(input))
 	for key, value := range input {

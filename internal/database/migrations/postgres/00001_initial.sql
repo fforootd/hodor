@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS orgs (
 CREATE TABLE IF NOT EXISTS schemas (
     id          TEXT PRIMARY KEY,
     type        TEXT NOT NULL,
-    org_id      TEXT NOT NULL DEFAULT '1',
     schema      JSONB NOT NULL,
     version     INTEGER DEFAULT 1,
     is_default  BOOLEAN DEFAULT FALSE,
@@ -30,9 +29,9 @@ CREATE TABLE IF NOT EXISTS schemas (
     created_by  TEXT DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_schema_type_org ON schemas(type, org_id);
-CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, org_id, is_default);
-CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, org_id, version);
+CREATE INDEX IF NOT EXISTS idx_schema_type ON schemas(type);
+CREATE INDEX IF NOT EXISTS idx_schema_default ON schemas(type, is_default);
+CREATE INDEX IF NOT EXISTS idx_schema_version ON schemas(type, version);
 
 -- ============================================================================
 -- USERS — human users, service accounts, AI agents (discriminated by user_type)
@@ -83,6 +82,8 @@ CREATE TABLE IF NOT EXISTS providers (
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     display_order   INTEGER NOT NULL DEFAULT 0,
     schema_id       TEXT DEFAULT '',
+    target_schema_id TEXT DEFAULT '',
+    target_schema_type TEXT DEFAULT '',
     metadata        JSONB DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -445,6 +446,7 @@ CREATE TABLE IF NOT EXISTS groups (
     name        TEXT NOT NULL,
     description TEXT DEFAULT '',
     state       TEXT NOT NULL DEFAULT 'active',
+    schema_id   TEXT DEFAULT '',
     metadata    JSONB DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -473,6 +475,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name        TEXT NOT NULL,
     description TEXT DEFAULT '',
     state       TEXT NOT NULL DEFAULT 'active',
+    schema_id   TEXT DEFAULT '',
     metadata    JSONB DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

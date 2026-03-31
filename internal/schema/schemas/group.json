@@ -1,7 +1,8 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "https://zitadel.com/schemas/v1/entity",
   "$version": "1.0",
   "type": "object",
+  "x-table": "groups",
   "x-display": {
     "alias": "Groups",
     "singular": "Group",

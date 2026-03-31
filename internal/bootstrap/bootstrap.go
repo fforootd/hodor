@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/term"
 
@@ -281,20 +282,19 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 
 		schemaID := typeName + "_v1"
 
-		// Try with visibility column first; fall back without it for older schemas.
 		_, err = db.SQL().ExecContext(ctx,
-			`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, visibility, created_at)
-			 VALUES (?, ?, 0, ?, 1, true, 'public', datetime('now'))`,
-			schemaID, typeName, schemaJSON,
+			fmt.Sprintf(`INSERT INTO schemas (id, type, schema, version, is_default, visibility, created_at)
+			 VALUES (%s, %s, %s, 1, true, 'public', %s)
+			 ON CONFLICT(id) DO UPDATE SET
+			 	type = excluded.type,
+			 	schema = excluded.schema,
+			 	version = excluded.version,
+			 	is_default = excluded.is_default,
+			 	visibility = excluded.visibility,
+			 	created_at = excluded.created_at`,
+				db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.Placeholder(4)),
+			schemaID, typeName, schemaJSON, time.Now().UTC().Format(time.RFC3339),
 		)
-		if err != nil {
-			// Column may not exist in fuzz worker subprocess or old DB.
-			_, err = db.SQL().ExecContext(ctx,
-				`INSERT OR REPLACE INTO schemas (id, type, org_id, schema, version, is_default, created_at)
-				 VALUES (?, ?, 0, ?, 1, true, datetime('now'))`,
-				schemaID, typeName, schemaJSON,
-			)
-		}
 		if err != nil {
 			return fmt.Errorf("seed schema %s: %w", schemaID, err)
 		}
@@ -322,9 +322,10 @@ func seedDefaultLoginFlow(ctx context.Context, db *database.DB) error {
 	defaultConfig := `{"captcha":{"provider":"altcha","mode":"never","difficulty":3},"fingerprint":{"enabled":true,"provider":"thumbmarkjs"},"rate_limit":{"max_attempts":5,"window_seconds":300,"scope":"ip"},"telemetry":{"enabled":true,"sample_rate":1.0}}`
 
 	_, err = db.SQL().ExecContext(ctx,
-		`INSERT INTO login_flows (id, name, strategy, is_default, enabled, state, priority, config, audience, auth_methods, created_at, updated_at)
-		 VALUES (?, 'Default Login', 'identifier_first', 1, 1, 'active', 0, ?, '{}', '{}', datetime('now'), datetime('now'))`,
-		flowID, defaultConfig,
+		fmt.Sprintf(`INSERT INTO login_flows (id, name, strategy, is_default, enabled, state, priority, config, audience, auth_methods, schema_id, created_at, updated_at)
+		 VALUES (%s, 'Default Login', 'identifier_first', true, true, 'active', 0, %s, '{}', '{}', 'login_flow_v1', %s, %s)`,
+			db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.Placeholder(4)),
+		flowID, defaultConfig, time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("insert default login flow: %w", err)

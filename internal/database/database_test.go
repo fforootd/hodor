@@ -131,3 +131,15 @@ func TestDialectHelpers(t *testing.T) {
 		t.Errorf("TimestampNow = %q, want datetime('now')", ts)
 	}
 }
+
+func TestRebindPlaceholders(t *testing.T) {
+	query := "SELECT * FROM users WHERE id = ? AND org_id = ? LIMIT ?"
+
+	if got := RebindPlaceholders(query, "sqlite"); got != query {
+		t.Fatalf("sqlite rebind = %q, want unchanged %q", got, query)
+	}
+
+	if got := RebindPlaceholders(query, "postgres"); got != "SELECT * FROM users WHERE id = $1 AND org_id = $2 LIMIT $3" {
+		t.Fatalf("postgres rebind = %q", got)
+	}
+}

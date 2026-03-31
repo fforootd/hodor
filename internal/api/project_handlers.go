@@ -40,13 +40,13 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := fmt.Sprintf(`SELECT p.id, p.org_id, p.name, p.description, p.state,
-		COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
+		COALESCE(p.schema_id,''), COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
 		(SELECT COUNT(*) FROM memberships m WHERE m.resource_type='project' AND m.resource_id = p.id) as member_count
 		FROM projects p WHERE %s ORDER BY p.id ASC LIMIT ?`,
 		strings.Join(where, " AND "))
 	args = append(args, limit+1)
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	rows, err := a.db.SQL().QueryContext(r.Context(), a.bindQuery(query), args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -57,7 +57,7 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p ProjectResponse
 		var metaStr string
-		if err := rows.Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.State,
+		if err := rows.Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.State, &p.SchemaID,
 			&metaStr, &p.CreatedAt, &p.UpdatedAt, &p.MemberCount); err != nil {
 			continue
 		}
@@ -130,9 +130,9 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO projects (id, org_id, name, description, state, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
-		projectID, orgID, name, description, metadataJSON, now, now,
+		a.bindQuery(`INSERT INTO projects (id, org_id, name, description, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`),
+		projectID, orgID, name, description, schemaRec.ID, metadataJSON, now, now,
 	)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -188,11 +188,11 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 	var p ProjectResponse
 	var metaStr string
 	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT p.id, p.org_id, p.name, p.description, p.state,
-		 COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
+		a.bindQuery(`SELECT p.id, p.org_id, p.name, p.description, p.state,
+		 COALESCE(p.schema_id,''), COALESCE(p.metadata,'{}'), p.created_at, p.updated_at,
 		 (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='project' AND m.resource_id = p.id) as member_count
-		 FROM projects p WHERE p.id = ?`, projectID,
-	).Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.State,
+		 FROM projects p WHERE p.id = ?`), projectID,
+	).Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.State, &p.SchemaID,
 		&metaStr, &p.CreatedAt, &p.UpdatedAt, &p.MemberCount)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "project not found")
@@ -216,20 +216,22 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var current ProjectResponse
+	var currentSchemaID string
 	var metadataStr string
 	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id, org_id, name, description, state, COALESCE(metadata,'{}'), created_at, updated_at,
+		a.bindQuery(`SELECT id, org_id, name, description, state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at,
 		        (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='project' AND m.resource_id = projects.id) as member_count
 		 FROM projects
-		 WHERE id = ?`,
+		 WHERE id = ?`),
 		projectID,
-	).Scan(&current.ID, &current.OrgID, &current.Name, &current.Description, &current.State, &metadataStr, &current.CreatedAt, &current.UpdatedAt, &current.MemberCount)
+	).Scan(&current.ID, &current.OrgID, &current.Name, &current.Description, &current.State, &currentSchemaID, &metadataStr, &current.CreatedAt, &current.UpdatedAt, &current.MemberCount)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	current.SchemaID = currentSchemaID
 
-	schemaRec, err := a.resolveResourceSchema(r.Context(), "project", "")
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "project", firstNonEmptyString(strings.TrimSpace(req.SchemaID), currentSchemaID))
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -266,12 +268,13 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := a.db.SQL().ExecContext(r.Context(),
-		`UPDATE projects
-		 SET name = ?, description = ?, state = ?, metadata = ?, updated_at = ?
-		 WHERE id = ?`,
+		a.bindQuery(`UPDATE projects
+		 SET name = ?, description = ?, state = ?, schema_id = ?, metadata = ?, updated_at = ?
+		 WHERE id = ?`),
 		stringFromAny(data["name"]),
 		stringFromAny(data["description"]),
 		nextState,
+		schemaRec.ID,
 		encodeObjectString(stripKeys(data, "name", "description")),
 		timeNow(),
 		projectID,
@@ -297,7 +300,7 @@ func (a *API) deleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM projects WHERE id = ?`, projectID)
+	result, err := a.db.SQL().ExecContext(r.Context(), a.bindQuery(`DELETE FROM projects WHERE id = ?`), projectID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

@@ -72,10 +72,9 @@ func (s *Service) FetchTemplate(ctx context.Context, tpl *Template) (*TemplatePa
 	}
 
 	// Cache in DB.
-	s.db.Exec(
-		`INSERT OR REPLACE INTO cache (namespace, key, data, fetched_at) VALUES ('catalog', (?, ?, datetime('now'))`,
-		"template:"+tpl.ID, string(data),
-	)
+	if err := s.upsertCache(ctx, "template:"+tpl.ID, string(data)); err != nil {
+		logging.Printf("[catalog] failed to cache template %s: %v", tpl.ID, err)
+	}
 
 	var payload TemplatePayload
 	if err := json.Unmarshal(data, &payload); err != nil {

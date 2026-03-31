@@ -27,6 +27,7 @@ func (a *API) RegisterLoginFlowRoutes(mux *http.ServeMux) {
 }
 
 type LoginFlowRequest struct {
+	SchemaID    string `json:"schema_id,omitempty"`
 	Name        string `json:"name"`
 	Strategy    string `json:"strategy,omitempty"`
 	IsDefault   bool   `json:"is_default,omitempty"`
@@ -42,6 +43,7 @@ type LoginFlowRequest struct {
 type LoginFlowResponse struct {
 	ID          string `json:"id"`
 	OrgID       string `json:"org_id"`
+	SchemaID    string `json:"schema_id,omitempty"`
 	Name        string `json:"name"`
 	Strategy    string `json:"strategy"`
 	IsDefault   bool   `json:"is_default"`
@@ -65,7 +67,7 @@ func scanLoginFlowRow(s loginFlowScanner) (LoginFlowResponse, error) {
 	var configStr, audienceStr, authMethodsStr, metadataStr string
 	var isDefault, enabled int
 
-	err := s.Scan(&resp.ID, &resp.OrgID, &resp.Name, &resp.Strategy, &configStr,
+	err := s.Scan(&resp.ID, &resp.OrgID, &resp.SchemaID, &resp.Name, &resp.Strategy, &configStr,
 		&isDefault, &enabled, &resp.State, &resp.Priority,
 		&audienceStr, &authMethodsStr, &metadataStr,
 		&resp.CreatedAt, &resp.UpdatedAt)

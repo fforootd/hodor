@@ -33,9 +33,18 @@ type UpdateSchemaRequest struct {
 
 // PromoteSchemaResponse is returned from POST /v1/schemas/{id}/promote.
 type PromoteSchemaResponse struct {
-	Status           string `json:"status"`
-	Version          int    `json:"version"`
-	AffectedEntities int    `json:"affected_entities"`
+	Status              string                    `json:"status"`
+	SchemaID            string                    `json:"schema_id"`
+	Type                string                    `json:"type"`
+	Version             int                       `json:"version"`
+	FutureDefaultWrites PromoteSchemaWritesTarget `json:"future_default_writes"`
+}
+
+type PromoteSchemaWritesTarget struct {
+	SchemaID              string `json:"schema_id"`
+	Type                  string `json:"type"`
+	Scope                 string `json:"scope"`
+	AppliesToExistingRows bool   `json:"applies_to_existing_rows"`
 }
 
 // DiffSchemaResponse is returned from GET /v1/schemas/{id}/diff.

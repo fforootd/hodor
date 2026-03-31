@@ -164,7 +164,7 @@ func resolveFlowRegistrationIdentifier(fields []SchemaFieldDef, values map[strin
 func (h *Handler) resolveFlowRegistrationSchema(w http.ResponseWriter, r *http.Request, flow *Flow) (*schema.SchemaRecord, bool) {
 	schemaID := flow.SchemaConfig.SchemaID
 	if schemaID == "" {
-		schemaRec, err := schema.ResolveDefaultHumanUserSchema(r.Context(), h.db.SQL())
+		schemaRec, err := schema.ResolveDefaultHumanUserSchema(r.Context(), h.db.SQL(), h.db.Dialect())
 		if err != nil {
 			logging.Printf("[flow] %s default human user schema unavailable: %v", flow.ID, err)
 			h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration is not available right now."}})
@@ -173,7 +173,7 @@ func (h *Handler) resolveFlowRegistrationSchema(w http.ResponseWriter, r *http.R
 		return schemaRec, true
 	}
 
-	schemaRec, err := schema.LoadSchemaRecord(r.Context(), h.db.SQL(), schemaID)
+	schemaRec, err := schema.LoadSchemaRecord(r.Context(), h.db.SQL(), schemaID, h.db.Dialect())
 	if err != nil {
 		logging.Printf("[flow] %s failed to load schema %s: %v", flow.ID, schemaID, err)
 		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration is not available right now."}})

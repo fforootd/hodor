@@ -82,9 +82,9 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	restAPI.RegisterRoutes(mux)
 
 	// Mount template catalog API (ADR-015).
-	catalogSvc := catalog.New(cfg.Catalog, db.SQL())
+	catalogSvc := catalog.New(cfg.Catalog, db.SQL(), db.Dialect())
 	restAPI.SetCatalogService(catalogSvc)
-	api.RegisterCatalogRoutes(mux, catalogSvc, db.SQL())
+	api.RegisterCatalogRoutes(mux, catalogSvc, db)
 	logging.Printf("Catalog ready (%d embedded templates)", catalogSvc.EmbeddedCount())
 
 	// Mount analytics engine (queries OLTP database directly — pure Go, no DuckDB).

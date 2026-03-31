@@ -3,11 +3,14 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/resourcedata"
+	"github.com/zitadel/zitadel/internal/schema"
 )
 
 func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
@@ -26,8 +29,11 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flowID := id.New()
-	now := time.Now().UTC().Format(time.RFC3339)
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "login_flow", req.SchemaID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	strategy := req.Strategy
 	if strategy == "" {
@@ -43,16 +49,18 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	configJSON := "{}"
-	if req.Config != nil {
-		if b, err := json.Marshal(req.Config); err == nil {
-			configJSON = string(b)
-		}
-	} else if req.Profile != nil {
-		if b, err := json.Marshal(req.Profile); err == nil {
-			configJSON = string(b)
-		}
+	flowData, configJSON, err := buildLoginFlowWrite(req, name, strategy, state)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	if err := schema.ValidateData(schemaRec.Schema, flowData); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	flowID := id.New()
+	now := time.Now().UTC().Format(time.RFC3339)
 
 	audienceJSON := "{}"
 	if req.Audience != nil {
@@ -73,12 +81,12 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 		orgID = "1"
 	}
 
-	_, err := a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO login_flows (id, org_id, name, strategy, config, is_default, enabled, state, priority, audience, auth_methods, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+	_, err = a.db.SQL().ExecContext(r.Context(),
+		a.bindQuery(`INSERT INTO login_flows (id, org_id, name, strategy, config, is_default, enabled, state, priority, audience, auth_methods, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`),
 		flowID, orgID, name, strategy, configJSON,
-		boolToInt(req.IsDefault), state, req.Priority,
-		audienceJSON, authMethodsJSON, now, now,
+		req.IsDefault, true, state, req.Priority,
+		audienceJSON, authMethodsJSON, schemaRec.ID, now, now,
 	)
 	if err != nil {
 		logging.Printf("[createLoginFlow] DB insert failed: %v", err)
@@ -91,6 +99,7 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusCreated, LoginFlowResponse{
 		ID:          flowID,
 		OrgID:       orgID,
+		SchemaID:    schemaRec.ID,
 		Name:        name,
 		Strategy:    strategy,
 		IsDefault:   req.IsDefault,
@@ -125,7 +134,9 @@ func (a *API) listLoginFlows(w http.ResponseWriter, r *http.Request) {
 
 	var args []any
 
-	query := `SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
+	query := `SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), name, strategy, config,
+	                  CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END,
+	                  CASE WHEN COALESCE(enabled, true) THEN 1 ELSE 0 END, state, priority,
 	                  COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 	                  COALESCE(metadata,'{}'), created_at, updated_at
 	           FROM login_flows `
@@ -134,9 +145,9 @@ func (a *API) listLoginFlows(w http.ResponseWriter, r *http.Request) {
 		query += ` WHERE state = ?`
 		args = append(args, stateFilter)
 	}
-	query += ` ORDER BY COALESCE(is_default,0) DESC, priority DESC, created_at DESC`
+	query += ` ORDER BY CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END DESC, priority DESC, created_at DESC`
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	rows, err := a.db.SQL().QueryContext(r.Context(), a.bindQuery(query), args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -184,25 +195,68 @@ func (a *API) updateLoginFlow(w http.ResponseWriter, r *http.Request) {
 		name = req.DisplayName
 	}
 
-	config := req.Config
-	if config == nil {
-		config = req.Profile
+	current, err := a.loadLoginFlow(r.Context(), flowID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "login flow not found")
+		return
 	}
 
-	p := newPatch()
-	p.Set("name", name)
-	p.Set("strategy", req.Strategy)
-	p.Set("state", req.State)
+	strategy := current.Strategy
+	if req.Strategy != "" {
+		strategy = req.Strategy
+	}
+	state := current.State
+	if req.State != "" {
+		state = req.State
+	}
+	priority := current.Priority
 	if req.Priority != 0 {
-		p.SetInt("priority", req.Priority)
+		priority = req.Priority
 	}
-	p.SetJSON("config", config)
-	p.SetJSON("audience", req.Audience)
-	p.SetJSON("auth_methods", req.AuthMethods)
-	p.SetInt("is_default", boolToInt(req.IsDefault))
+	isDefault := current.IsDefault
+	if req.IsDefault {
+		isDefault = true
+	}
+	configValue := current.Config
+	if req.Config != nil {
+		configValue = req.Config
+	} else if req.Profile != nil {
+		configValue = req.Profile
+	}
+	audienceValue := current.Audience
+	if req.Audience != nil {
+		audienceValue = req.Audience
+	}
+	authMethodsValue := current.AuthMethods
+	if req.AuthMethods != nil {
+		authMethodsValue = req.AuthMethods
+	}
+	if name == "" {
+		name = current.Name
+	}
 
-	query, args := p.Build("login_flows", flowID)
-	result, err := a.db.SQL().ExecContext(r.Context(), query, args...)
+	schemaRec, err := a.resolveResourceSchema(r.Context(), "login_flow", firstNonEmptyString(strings.TrimSpace(req.SchemaID), current.SchemaID))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	flowData, configJSON, err := buildLoginFlowCanonicalData(name, strategy, isDefault, state, priority, audienceValue, authMethodsValue, configValue)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := schema.ValidateData(schemaRec.Schema, flowData); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	audienceJSON := marshalJSON(audienceValue)
+	authMethodsJSON := marshalJSON(authMethodsValue)
+	query := `UPDATE login_flows
+		SET name = ?, strategy = ?, config = ?, is_default = ?, state = ?, priority = ?, audience = ?, auth_methods = ?, schema_id = ?, updated_at = ?
+		WHERE id = ?`
+	result, err := a.db.SQL().ExecContext(r.Context(), a.bindQuery(query),
+		name, strategy, configJSON, isDefault, state, priority, audienceJSON, authMethodsJSON, schemaRec.ID, timeNow(), flowID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed: "+err.Error())
 		return
@@ -219,6 +273,31 @@ func (a *API) updateLoginFlow(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
+func buildLoginFlowWrite(req LoginFlowRequest, name, strategy, state string) (map[string]any, string, error) {
+	configValue := req.Config
+	if configValue == nil {
+		configValue = req.Profile
+	}
+	return buildLoginFlowCanonicalData(name, strategy, req.IsDefault, state, req.Priority, req.Audience, req.AuthMethods, configValue)
+}
+
+func buildLoginFlowCanonicalData(name, strategy string, isDefault bool, state string, priority int, audience, authMethods, configValue any) (map[string]any, string, error) {
+	data, configMap, err := resourcedata.BuildLoginFlowSchemaData(name, strategy, isDefault, state, priority, audience, authMethods, configValue, nil)
+	if err != nil {
+		return nil, "", err
+	}
+
+	configJSON := "{}"
+	if len(configMap) > 0 {
+		raw, marshalErr := json.Marshal(configMap)
+		if marshalErr != nil {
+			return nil, "", marshalErr
+		}
+		configJSON = string(raw)
+	}
+	return data, configJSON, nil
+}
+
 func (a *API) deleteLoginFlow(w http.ResponseWriter, r *http.Request) {
 	flowID := r.PathValue("id")
 	if flowID == "" {
@@ -228,14 +307,14 @@ func (a *API) deleteLoginFlow(w http.ResponseWriter, r *http.Request) {
 
 	var isDefault int
 	_ = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(is_default,0) FROM login_flows WHERE id = ?`, flowID,
+		a.bindQuery(`SELECT CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END FROM login_flows WHERE id = ?`), flowID,
 	).Scan(&isDefault)
 	if isDefault != 0 {
 		httputil.WriteError(w, http.StatusBadRequest, "cannot delete the default login flow — edit it instead")
 		return
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(), `DELETE FROM login_flows WHERE id = ?`, flowID)
+	result, err := a.db.SQL().ExecContext(r.Context(), a.bindQuery(`DELETE FROM login_flows WHERE id = ?`), flowID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

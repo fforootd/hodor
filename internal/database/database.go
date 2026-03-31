@@ -132,3 +132,29 @@ func (d *DB) TimestampNow() string {
 		return "datetime('now')"
 	}
 }
+
+// Rebind rewrites generic "?" placeholders into the current dialect's format.
+// SQLite-compatible dialects keep "?" while Postgres uses numbered placeholders.
+func (d *DB) Rebind(query string) string {
+	return RebindPlaceholders(query, d.dialect)
+}
+
+// RebindPlaceholders rewrites generic "?" placeholders into the given dialect's
+// placeholder syntax.
+func RebindPlaceholders(query, dialect string) string {
+	if dialect != "postgres" {
+		return query
+	}
+	var out strings.Builder
+	out.Grow(len(query) + 8)
+	index := 1
+	for _, ch := range query {
+		if ch == '?' {
+			out.WriteString(fmt.Sprintf("$%d", index))
+			index++
+			continue
+		}
+		out.WriteRune(ch)
+	}
+	return out.String()
+}

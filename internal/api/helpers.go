@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/fga"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/logging"
@@ -151,6 +152,10 @@ func marshalJSON(v any) string {
 	return string(b)
 }
 
+func (a *API) bindQuery(query string) string {
+	return a.db.Rebind(query)
+}
+
 // ── Patch builder (dynamic UPDATE) ──────────────────────────────────────────
 
 // patchBuilder accumulates SET clauses for a partial UPDATE statement.
@@ -165,14 +170,20 @@ type patchBuilder struct {
 	clauses []string
 	args    []any
 	now     string
+	dialect string
 }
 
-func newPatch() *patchBuilder {
+func newPatch(dialect ...string) *patchBuilder {
 	now := timeNow()
+	patchDialect := "sqlite"
+	if len(dialect) > 0 && strings.TrimSpace(dialect[0]) != "" {
+		patchDialect = strings.TrimSpace(dialect[0])
+	}
 	return &patchBuilder{
 		clauses: []string{"updated_at = ?"},
 		args:    []any{now},
 		now:     now,
+		dialect: patchDialect,
 	}
 }
 
@@ -210,5 +221,9 @@ func (p *patchBuilder) SetInt(col string, val int) {
 func (p *patchBuilder) Build(table, id string) (string, []any) {
 	p.args = append(p.args, id)
 	query := "UPDATE " + table + " SET " + strings.Join(p.clauses, ", ") + " WHERE id = ?"
-	return query, p.args
+	return bindQueryForDialect(query, p.dialect), p.args
+}
+
+func bindQueryForDialect(query, dialect string) string {
+	return database.RebindPlaceholders(query, dialect)
 }

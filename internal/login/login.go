@@ -195,7 +195,7 @@ func (h *Handler) getDefaultSchemaConfig(r *http.Request) *SchemaAuthConfig {
 }
 
 func (h *Handler) getDefaultSchemaConfigStrict(ctx context.Context) (*SchemaAuthConfig, error) {
-	schemaRec, err := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL())
+	schemaRec, err := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL(), h.db.Dialect())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("no default schema configured")
@@ -436,7 +436,7 @@ func (h *Handler) queueMagicLink(ctx context.Context, email, requestedPurpose st
 
 	if err == sql.ErrNoRows {
 		newID := id.New()
-		schemaRec, schemaErr := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL())
+		schemaRec, schemaErr := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL(), h.db.Dialect())
 		if schemaErr != nil {
 			logging.Printf("[magic-link] default human user schema unavailable: %v", schemaErr)
 			return "", "", errors.New("registration is not available")

@@ -15,10 +15,11 @@ func TestLoginFlow_ManagementRoutes(t *testing.T) {
 	adminToken := srv.LoginAdmin()
 
 	createCode, created := srv.PostJSONWithBearer("/v1/login-flows", map[string]any{
-		"name":     "Beta Flow",
-		"strategy": "identifier_first",
-		"state":    "draft",
-		"priority": 42,
+		"schema_id": "login_flow_v1",
+		"name":      "Beta Flow",
+		"strategy":  "identifier_first",
+		"state":     "draft",
+		"priority":  42,
 		"config": map[string]any{
 			"branding": map[string]any{
 				"heading": "Beta",
@@ -40,6 +41,9 @@ func TestLoginFlow_ManagementRoutes(t *testing.T) {
 	if flowOrgID == "" {
 		t.Fatal("created login flow org_id is empty")
 	}
+	if created["schema_id"] != "login_flow_v1" {
+		t.Fatalf("created schema_id = %v, want login_flow_v1", created["schema_id"])
+	}
 
 	listCode, listBody := srv.GetWithBearer("/v1/login-flows?state=draft", adminToken)
 	if listCode != http.StatusOK {
@@ -49,17 +53,50 @@ func TestLoginFlow_ManagementRoutes(t *testing.T) {
 	if len(items) == 0 {
 		t.Fatal("expected draft login flows")
 	}
+	foundListed := false
+	for _, item := range items {
+		entry, _ := item.(map[string]any)
+		if fmt.Sprintf("%v", entry["id"]) == flowID {
+			foundListed = true
+			if entry["schema_id"] != "login_flow_v1" {
+				t.Fatalf("listed schema_id = %v, want login_flow_v1", entry["schema_id"])
+			}
+		}
+	}
+	if !foundListed {
+		t.Fatalf("created flow %s missing from list response", flowID)
+	}
+
+	getCode, fetched := srv.GetWithBearer("/v1/login-flows/"+flowID, adminToken)
+	if getCode != http.StatusOK {
+		t.Fatalf("get login flow status = %d body=%#v", getCode, fetched)
+	}
+	if fetched["schema_id"] != "login_flow_v1" {
+		t.Fatalf("fetched schema_id = %v, want login_flow_v1", fetched["schema_id"])
+	}
 
 	updateCode, updated := srv.PatchJSONWithBearer("/v1/login-flows/"+flowID, map[string]any{
 		"display_name": "Beta Flow Updated",
 		"state":        "testing",
 		"priority":     99,
+		"schema_id":    "login_flow_v1",
 	}, adminToken)
 	if updateCode != http.StatusOK {
 		t.Fatalf("update login flow status = %d body=%#v", updateCode, updated)
 	}
 	if updated["name"] != "Beta Flow Updated" {
 		t.Fatalf("updated name = %v", updated["name"])
+	}
+	if updated["schema_id"] != "login_flow_v1" {
+		t.Fatalf("updated schema_id = %v, want login_flow_v1", updated["schema_id"])
+	}
+
+	var storedSchemaID string
+	if err := srv.DB.SQL().QueryRow(`SELECT schema_id FROM login_flows WHERE id = ?`, flowID).Scan(&storedSchemaID); err != nil {
+		t.Fatalf("load login flow row: %v", err)
+	}
+	if storedSchemaID != "login_flow_v1" {
+		t.Fatalf("stored schema_id = %q, want login_flow_v1", storedSchemaID)
 	}
 
 	promoteCode, promoted := srv.RequestWithHeaders("POST", "/v1/login-flows/"+flowID+"/promote", map[string]string{

@@ -212,7 +212,7 @@ func startCmd() *cobra.Command {
 
 			// Apply seed file if configured.
 			if resolvedSeedFile != "" {
-				if err := seed.LoadAndApply(context.Background(), db.SQL(), resolvedSeedFile); err != nil {
+				if err := seed.LoadAndApply(context.Background(), db.SQL(), resolvedSeedFile, db.Dialect()); err != nil {
 					return fmt.Errorf("apply seed: %w", err)
 				}
 			}
@@ -375,7 +375,7 @@ func seedApplyCmd() *cobra.Command {
 			if err := bootstrap.EnsureAdmin(context.Background(), db, targetSeed); err != nil {
 				return fmt.Errorf("bootstrap: %w", err)
 			}
-			if err := seed.LoadAndApply(context.Background(), db.SQL(), targetSeed); err != nil {
+			if err := seed.LoadAndApply(context.Background(), db.SQL(), targetSeed, db.Dialect()); err != nil {
 				return fmt.Errorf("apply seed: %w", err)
 			}
 

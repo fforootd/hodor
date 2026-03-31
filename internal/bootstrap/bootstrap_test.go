@@ -63,7 +63,7 @@ func TestEnsureAdmin_SeedsSchemas(t *testing.T) {
 
 	// Verify built-in schemas were seeded.
 	var schemaCount int
-	db.SQL().QueryRow("SELECT COUNT(*) FROM schemas WHERE org_id = 0").Scan(&schemaCount)
+	db.SQL().QueryRow("SELECT COUNT(*) FROM schemas WHERE visibility = 'public'").Scan(&schemaCount)
 	if schemaCount < 5 {
 		t.Errorf("expected at least 5 built-in schemas, got %d", schemaCount)
 	}

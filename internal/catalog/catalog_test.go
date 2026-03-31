@@ -26,7 +26,6 @@ func setupTestDB(t *testing.T) *sql.DB {
 	db.Exec(`CREATE TABLE schemas (
 		id TEXT PRIMARY KEY,
 		type TEXT NOT NULL,
-		org_id TEXT NOT NULL DEFAULT '1',
 		schema TEXT NOT NULL DEFAULT '{}',
 		version INTEGER DEFAULT 1,
 		is_default BOOLEAN DEFAULT false,
@@ -48,6 +47,31 @@ func setupTestDB(t *testing.T) *sql.DB {
 		updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
 		UNIQUE(org_id, identifier)
 	)`)
+	db.Exec(`CREATE TABLE orgs (
+		id           TEXT PRIMARY KEY,
+		name         TEXT NOT NULL DEFAULT '',
+		state        TEXT NOT NULL DEFAULT 'active',
+		schema_id    TEXT DEFAULT '',
+		metadata     TEXT DEFAULT '{}',
+		created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	db.Exec(`CREATE TABLE apps (
+		id             TEXT PRIMARY KEY,
+		org_id         TEXT NOT NULL DEFAULT '1',
+		name           TEXT NOT NULL DEFAULT '',
+		app_type       TEXT NOT NULL DEFAULT 'web',
+		client_id      TEXT NOT NULL DEFAULT '',
+		client_secret  TEXT DEFAULT '',
+		redirect_uris  TEXT NOT NULL DEFAULT '[]',
+		grant_types    TEXT NOT NULL DEFAULT '[]',
+		response_types TEXT NOT NULL DEFAULT '[]',
+		state          TEXT NOT NULL DEFAULT 'active',
+		schema_id      TEXT DEFAULT '',
+		metadata       TEXT DEFAULT '{}',
+		created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
 	db.Exec(`CREATE TABLE actions (
 		id           TEXT PRIMARY KEY,
 		org_id       TEXT NOT NULL DEFAULT '1',
@@ -64,6 +88,28 @@ func setupTestDB(t *testing.T) *sql.DB {
 		metadata     TEXT DEFAULT '{}',
 		created_at   TEXT NOT NULL DEFAULT (datetime('now')),
 		updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	db.Exec(`CREATE TABLE groups (
+		id          TEXT PRIMARY KEY,
+		org_id      TEXT NOT NULL DEFAULT '1',
+		name        TEXT NOT NULL DEFAULT '',
+		description TEXT DEFAULT '',
+		state       TEXT NOT NULL DEFAULT 'active',
+		schema_id   TEXT DEFAULT '',
+		metadata    TEXT DEFAULT '{}',
+		created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	db.Exec(`CREATE TABLE projects (
+		id          TEXT PRIMARY KEY,
+		org_id      TEXT NOT NULL DEFAULT '1',
+		name        TEXT NOT NULL DEFAULT '',
+		description TEXT DEFAULT '',
+		state       TEXT NOT NULL DEFAULT 'active',
+		schema_id   TEXT DEFAULT '',
+		metadata    TEXT DEFAULT '{}',
+		created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+		updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 	)`)
 	db.Exec(`CREATE TABLE login_flows (
 		id          TEXT PRIMARY KEY,
@@ -95,6 +141,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 		enabled         BOOLEAN NOT NULL DEFAULT 1,
 		display_order   INTEGER NOT NULL DEFAULT 0,
 		schema_id       TEXT DEFAULT '',
+		target_schema_id TEXT DEFAULT '',
+		target_schema_type TEXT DEFAULT '',
 		metadata        TEXT DEFAULT '{}',
 		created_at      TEXT NOT NULL DEFAULT (datetime('now')),
 		updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -110,7 +158,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 
 	// Seed schemas for common types.
-	for _, st := range []string{"action", "provider", "authorization", "login_flow", "fga_model", "human_user"} {
+	for _, st := range []string{"action", "app", "group", "login_flow", "org", "project", "provider", "authorization", "fga_model", "human_user"} {
 		db.Exec(`INSERT INTO schemas (id, type, is_default) VALUES (?, ?, true)`, st+"_v1", st)
 	}
 
@@ -1071,6 +1119,76 @@ func TestPreviewUpgrade_SampleSizeLimits(t *testing.T) {
 	}
 }
 
+func TestPreviewUpgrade_AppEntities(t *testing.T) {
+	db := setupTestDB(t)
+
+	_, _ = db.Exec(`INSERT INTO apps (id, org_id, name, app_type, client_id, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
+		VALUES
+		('app_ok', '1', 'Console', 'web', 'console', '["https://example.com/callback"]', '["authorization_code"]', '["code"]', 'active', 'app_v1', '{"logo_uri":"https://example.com/logo.svg"}', datetime('now'), datetime('now')),
+		('app_break', '1', 'CLI', 'web', 'cli', '[]', '["authorization_code"]', '["code"]', 'active', 'app_v1', '{}', datetime('now'), datetime('now'))`)
+
+	newSchema := map[string]any{
+		"properties": map[string]any{
+			"client_name": map[string]any{"type": "string"},
+			"redirect_uris": map[string]any{
+				"type":     "array",
+				"items":    map[string]any{"type": "string"},
+				"minItems": 1,
+			},
+			"logo_uri": map[string]any{"type": "string"},
+		},
+		"required": []any{"client_name", "redirect_uris", "logo_uri"},
+	}
+
+	report, err := PreviewUpgrade(context.Background(), db, "app", newSchema, 10)
+	if err != nil {
+		t.Fatalf("PreviewUpgrade(app): %v", err)
+	}
+	if report.TotalEntities != 2 {
+		t.Fatalf("total = %d, want 2", report.TotalEntities)
+	}
+	if report.Impact.Breaking < 1 {
+		t.Fatalf("breaking = %d, want >= 1", report.Impact.Breaking)
+	}
+	if len(report.SampleResults) == 0 {
+		t.Fatal("expected sampled app entities in preview report")
+	}
+}
+
+func TestPreviewUpgrade_LoginFlowEntities(t *testing.T) {
+	db := setupTestDB(t)
+
+	_, _ = db.Exec(`INSERT INTO login_flows (id, org_id, name, strategy, config, auth_methods, is_default, enabled, state, priority, audience, schema_id, metadata, created_at, updated_at)
+		VALUES
+		('flow_ok', '1', 'Flow OK', 'identifier_first', '{"branding":{"heading":"Welcome"}}', '{"password":{"enabled":true}}', 0, 1, 'active', 10, '{}', 'login_flow_v1', '{}', datetime('now'), datetime('now')),
+		('flow_break', '1', 'Flow Break', 'identifier_first', '{}', '{"password":{"enabled":true}}', 0, 1, 'draft', 5, '{}', 'login_flow_v1', '{}', datetime('now'), datetime('now'))`)
+
+	newSchema := map[string]any{
+		"properties": map[string]any{
+			"display_name": map[string]any{"type": "string"},
+			"strategy":     map[string]any{"type": "string"},
+			"branding": map[string]any{
+				"type": "object",
+			},
+		},
+		"required": []any{"display_name", "strategy", "branding"},
+	}
+
+	report, err := PreviewUpgrade(context.Background(), db, "login_flow", newSchema, 10)
+	if err != nil {
+		t.Fatalf("PreviewUpgrade(login_flow): %v", err)
+	}
+	if report.TotalEntities != 2 {
+		t.Fatalf("total = %d, want 2", report.TotalEntities)
+	}
+	if report.Impact.Breaking < 1 {
+		t.Fatalf("breaking = %d, want >= 1", report.Impact.Breaking)
+	}
+	if len(report.SampleResults) == 0 {
+		t.Fatal("expected sampled login flow entities in preview report")
+	}
+}
+
 func TestValidateEntity_TypeMismatch(t *testing.T) {
 	schema := map[string]any{
 		"properties": map[string]any{
@@ -1189,7 +1307,7 @@ func BenchmarkCatalogState(b *testing.B) {
 	db := setupBenchDB(b)
 	svc := New(config.CatalogConfig{}, db)
 
-	db.Exec(`CREATE TABLE IF NOT EXISTS schemas (id TEXT PRIMARY KEY, type TEXT NOT NULL, org_id TEXT DEFAULT '1', schema TEXT DEFAULT '{}', version INTEGER DEFAULT 1, is_default BOOLEAN DEFAULT false, visibility TEXT DEFAULT 'private', message TEXT DEFAULT '', created_by TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS schemas (id TEXT PRIMARY KEY, type TEXT NOT NULL, schema TEXT DEFAULT '{}', version INTEGER DEFAULT 1, is_default BOOLEAN DEFAULT false, visibility TEXT DEFAULT 'private', message TEXT DEFAULT '', created_by TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`)
 	for _, st := range []string{"action", "provider", "authorization", "login_flow", "fga_model"} {
 		db.Exec(`INSERT OR IGNORE INTO schemas (id, type, is_default) VALUES (?, ?, true)`, st+"_v1", st)
 	}
