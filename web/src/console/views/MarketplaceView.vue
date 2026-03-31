@@ -12,8 +12,8 @@
         variant="ghost"
         size="sm"
         class="gap-1.5 text-xs"
-        @click="refreshCatalog"
         :disabled="refreshing || !canRefresh"
+        @click="refreshCatalog"
       >
         <RefreshCw class="size-3.5" :class="refreshing ? 'animate-spin' : ''" />
         Refresh
@@ -123,8 +123,8 @@
         variant="outline"
         size="sm"
         class="gap-1.5"
-        @click="refreshCatalog"
         :disabled="!canRefresh"
+        @click="refreshCatalog"
       >
         <RefreshCw class="size-3.5" />
         Refresh Catalog

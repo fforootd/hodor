@@ -120,7 +120,8 @@
             </div>
             <!-- Simple horizontal stacked bar -->
             <div class="w-full h-8 rounded-md overflow-hidden flex">
-              <div v-for="item in delegationData" :key="item.name"
+              <div
+v-for="item in delegationData" :key="item.name"
                    class="h-full transition-all flex items-center justify-center text-[9px] font-semibold text-white"
                    :style="{ width: `${(item.count / totalDelegation) * 100}%`, background: delegationColor(item.name) }">
                 {{ Math.round((item.count / totalDelegation) * 100) }}%

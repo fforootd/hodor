@@ -48,8 +48,8 @@
             <div v-if="editable">
               <input
                 :value="editValues.name ?? org.name"
-                @input="editValues.name = ($event.target as HTMLInputElement).value"
                 class="input-field"
+                @input="editValues.name = ($event.target as HTMLInputElement).value"
               />
             </div>
             <div v-else class="field-value">{{ org.name }}</div>
@@ -60,8 +60,8 @@
             <div v-if="editable">
               <select
                 :value="editValues.state ?? org.state ?? 'active'"
-                @change="editValues.state = ($event.target as HTMLSelectElement).value"
                 class="input-field"
+                @change="editValues.state = ($event.target as HTMLSelectElement).value"
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -82,9 +82,9 @@
         <div v-if="editable">
           <textarea
             :value="editValues.metadata ?? JSON.stringify(org.metadata || {}, null, 2)"
-            @input="editValues.metadata = ($event.target as HTMLTextAreaElement).value"
             rows="5"
             class="input-field textarea font-mono text-xs"
+            @input="editValues.metadata = ($event.target as HTMLTextAreaElement).value"
           />
         </div>
         <div v-else-if="org.metadata && Object.keys(org.metadata).length > 0">

@@ -4,21 +4,31 @@ This document defines the core vocabulary and terminology mappings for the Zitad
 
 | Term | Meaning | Legacy / Standard Equivalent |
 |---|---|---|
-| **Entity** | An instance of a schema. The universal noun for all domain objects (human users, service accounts, apps, organizations). | Identity, Client, Project |
+| **Entity** | An instance of a schema. This is an internal architecture/model term for schema-backed domain objects such as users, apps, organizations, and groups. | Identity, Client, Project |
 | **Schema** | A versioned JSON Schema that defines the shape, behavior, and display of an entity type. | Fixed database columns |
 | **Type** | The machine identifier for a schema (e.g., `human_user`, `app`). Immutable. | Hardcoded class/model |
 | **Alias** | The human-readable name for a type (e.g., "Users"). Defined via `x-display`. | - |
 | **Group** | A first-class collaborative resource plus a navigation/category concept depending on context. In the current prototype, Groups and Projects both exist as distinct resources. | Group / Team |
-| **Path** | An API route alias (e.g., "users" → `/v1/users`). Defined via `x-display`. | - |
+| **Path** | The canonical public API family path for a schema-backed resource (e.g., "users" → `/v1/users`). Defined via `x-display`. | - |
 | **App** | An OIDC/SAML Client. It is simply an entity with a specific schema (`app` or `app_saml`). | OIDC Client, OAuth App |
 | **Provider Kind** | The marketplace/provider family identifier, such as `google`, `github`, `gitlab`, `entra`, or `custom`. | Template family / vendor preset |
 | **Protocol** | The runtime federation adapter used by a provider, such as `oidc`, `oauth2`, or `saml`. | Federation protocol |
 | **Catalog Ref** | Metadata linking an installed resource back to a catalog template and version. | Template origin |
 | **Org** | Organization. The top-level scope/context for filtering entities. | Tenant |
 
+## Public Naming Model
+
+- **Public API families** use concrete nouns such as `users`, `apps`, `orgs`, `groups`, and `providers`.
+- **Users** is a typed family that currently covers `human_user`, `service_user`, and `ai_agent`.
+- **Apps** is a typed family for application schemas.
+- **`schema_id`** is the canonical write-time discriminator in request bodies.
+- **`schema_type`** is the canonical read/filter discriminator on family list endpoints.
+- **`identity`** is reserved for industry phrases such as identity provider and identity management, rather than being the default CRUD noun.
+- **`entity`** remains useful for internal architecture, storage, and schema-engine discussions, but it is not the default public API noun.
+
 ## Key Paradigms
 
-1. **Apps are Identities**: Non-human identities (Service Accounts) and Applications (OIDC Clients) use exactly the same underpinnings as human users.
+1. **Apps and users share the same schema-driven model**: Service accounts, AI agents, and applications are all backed by schemas even when they live behind different public API families.
 2. **If it doesn't have a schema, it doesn't exist**: All persistent domain objects must be entities defined by a JSON Schema.
 3. **Relationships via FGA**: Relationships between entities (e.g., membership in a group, ownership of an org) are represented as graph edges in OpenFGA, not relational tables.
 

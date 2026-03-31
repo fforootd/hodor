@@ -42,11 +42,11 @@
         </div>
 
         <div class="flex gap-2">
-          <Button @click="runCheck" :disabled="checkRunning || !checkFormValid" class="flex-1">
+          <Button :disabled="checkRunning || !checkFormValid" class="flex-1" @click="runCheck">
             <Play class="size-3.5 mr-1" />
             Check
           </Button>
-          <Button variant="outline" @click="runExpand" :disabled="checkRunning || !checkForm.relation || !checkForm.object">
+          <Button variant="outline" :disabled="checkRunning || !checkForm.relation || !checkForm.object" @click="runExpand">
             <GitBranch class="size-3.5 mr-1" />
             Expand
           </Button>

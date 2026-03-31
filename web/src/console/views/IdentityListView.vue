@@ -63,14 +63,14 @@
 
     <DataTable
       v-if="identities.length > 0"
+      v-model:row-selection="selectedRows"
       :columns="columns as any"
       :data="identities"
-      v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
         <div class="flex items-center justify-between w-full mb-4">
           <!-- Unified Search Bar with Autocomplete Chips -->
-          <div class="w-full max-w-lg relative" ref="searchContainerRef">
+          <div ref="searchContainerRef" class="w-full max-w-lg relative">
             <div class="relative w-full">
               <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
               <Input
@@ -145,7 +145,7 @@
 
           <!-- View Columns Dropdown -->
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>
@@ -334,9 +334,14 @@
   async function loadData() {
     if (!_apiPath) return
     try {
-      let url = `/v1/${_apiPath}`
-      if (currentOrgId.value && _apiPath !== 'orgs' && props.schemaType !== 'org')
-        url += `?org_id=${currentOrgId.value}`
+      const params = new URLSearchParams()
+      if (currentOrgId.value && _apiPath !== 'orgs' && props.schemaType !== 'org') {
+        params.set('org_id', currentOrgId.value)
+      }
+      if (_apiPath === 'users' || _apiPath === 'apps') {
+        params.set('schema_type', props.schemaType)
+      }
+      const url = `/v1/${_apiPath}${params.size ? `?${params.toString()}` : ''}`
       const data = await api.get<any>(url)
       const items = data.items || []
       if (props.schemaType === 'org') {

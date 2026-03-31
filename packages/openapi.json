@@ -20,6 +20,143 @@
         ],
         "type": "object"
       },
+      "AppRequest": {
+        "properties": {
+          "app_type": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          },
+          "data": {},
+          "description": {
+            "type": "string"
+          },
+          "grant_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "logo_uri": {
+            "type": "string"
+          },
+          "metadata": {},
+          "name": {
+            "type": "string"
+          },
+          "post_logout_redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "response_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "AppResponse": {
+        "properties": {
+          "app_type": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {},
+          "description": {
+            "type": "string"
+          },
+          "grant_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "logo_uri": {
+            "type": "string"
+          },
+          "metadata": {},
+          "name": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "post_logout_redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redirect_uris": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "response_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "schema_type": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "org_id",
+          "name",
+          "app_type",
+          "client_id",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "AuthSettingsResponse": {
         "properties": {
           "external_providers": {
@@ -825,6 +962,9 @@
         "properties": {
           "email": {
             "type": "string"
+          },
+          "purpose": {
+            "type": "string"
           }
         },
         "required": [
@@ -848,6 +988,136 @@
           "status",
           "purpose",
           "message"
+        ],
+        "type": "object"
+      },
+      "NotificationPresetsResponse": {
+        "properties": {
+          "presets": {
+            "items": {
+              "properties": {
+                "config": {
+                  "additionalProperties": {},
+                  "type": "object"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "driver": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "medium": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "presets"
+        ],
+        "type": "object"
+      },
+      "NotificationPreviewRequest": {
+        "properties": {
+          "locale": {
+            "type": "string"
+          },
+          "medium": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "template_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "medium",
+          "template_key"
+        ],
+        "type": "object"
+      },
+      "NotificationRenderResponse": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "html_body": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "medium": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "template_key": {
+            "type": "string"
+          },
+          "text_body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "medium",
+          "template_key",
+          "locale",
+          "text_body"
+        ],
+        "type": "object"
+      },
+      "NotificationTestRequest": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "medium": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "template_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "medium",
+          "recipient",
+          "template_key"
         ],
         "type": "object"
       },
@@ -1711,6 +1981,238 @@
         "summary": "Bulk create entities (admin)",
         "tags": [
           "Admin"
+        ]
+      }
+    },
+    "/v1/apps": {
+      "get": {
+        "description": "Returns the typed applications family. Use schema_type to filter a specific application schema.",
+        "operationId": "listApps",
+        "parameters": [
+          {
+            "description": "Pagination cursor",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max results (default 50)",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter by org",
+            "in": "query",
+            "name": "org_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by state",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter the applications family by schema type such as app",
+            "in": "query",
+            "name": "schema_type",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            },
+            "description": "List applications"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List applications",
+        "tags": [
+          "Applications"
+        ]
+      },
+      "post": {
+        "description": "Creates an application-family resource. Provide schema_id in the request body to select the schema-backed subtype.",
+        "operationId": "createApp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Create an application"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create an application",
+        "tags": [
+          "Applications"
+        ]
+      }
+    },
+    "/v1/apps/{id}": {
+      "delete": {
+        "description": "Deletes a resource from the canonical applications family endpoint.",
+        "operationId": "deleteApp",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Delete an application"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete an application",
+        "tags": [
+          "Applications"
+        ]
+      },
+      "get": {
+        "description": "Returns a single application-family resource, including schema_id and schema_type.",
+        "operationId": "getApp",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Get an application"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get an application",
+        "tags": [
+          "Applications"
+        ]
+      },
+      "patch": {
+        "description": "Updates an application-family resource. Keep schema_id as the canonical subtype discriminator in write payloads.",
+        "operationId": "updateApp",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Update an application"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update an application",
+        "tags": [
+          "Applications"
         ]
       }
     },
@@ -2619,6 +3121,113 @@
         "summary": "Submit a login flow step",
         "tags": [
           "Auth"
+        ]
+      }
+    },
+    "/v1/notifications/presets": {
+      "get": {
+        "operationId": "listNotificationPresets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPresetsResponse"
+                }
+              }
+            },
+            "description": "List notification presets"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List notification presets",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/v1/notifications/preview": {
+      "post": {
+        "operationId": "previewNotification",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRenderResponse"
+                }
+              }
+            },
+            "description": "Preview a notification template"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Preview a notification template",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/v1/notifications/test": {
+      "post": {
+        "operationId": "testNotification",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRenderResponse"
+                }
+              }
+            },
+            "description": "Send a test notification"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send a test notification",
+        "tags": [
+          "Notifications"
         ]
       }
     },
@@ -3790,6 +4399,7 @@
     },
     "/v1/users": {
       "get": {
+        "description": "Returns the typed users family. Use schema_type to filter human users, service accounts, or AI agents.",
         "operationId": "listUsers",
         "parameters": [
           {
@@ -3823,6 +4433,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Filter the users family by schema type such as human_user, service_user, or ai_agent",
+            "in": "query",
+            "name": "schema_type",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3851,6 +4469,7 @@
         ]
       },
       "post": {
+        "description": "Creates a human user, service account, or AI agent. Provide schema_id in the request body to select the schema-backed subtype.",
         "operationId": "createUser",
         "requestBody": {
           "content": {
@@ -3871,7 +4490,7 @@
                 }
               }
             },
-            "description": "Create a user"
+            "description": "Create a users-family resource"
           }
         },
         "security": [
@@ -3882,7 +4501,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a user",
+        "summary": "Create a users-family resource",
         "tags": [
           "Users"
         ]
@@ -3890,6 +4509,7 @@
     },
     "/v1/users/{id}": {
       "delete": {
+        "description": "Deletes a resource from the canonical users family endpoint.",
         "operationId": "deleteUser",
         "parameters": [
           {
@@ -3904,7 +4524,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Delete a user"
+            "description": "Delete a users-family resource"
           }
         },
         "security": [
@@ -3915,12 +4535,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delete a user",
+        "summary": "Delete a users-family resource",
         "tags": [
           "Users"
         ]
       },
       "get": {
+        "description": "Returns a single resource from the users family, including schema_id and schema_type.",
         "operationId": "getUser",
         "parameters": [
           {
@@ -3942,7 +4563,7 @@
                 }
               }
             },
-            "description": "Get a user"
+            "description": "Get a users-family resource"
           }
         },
         "security": [
@@ -3953,12 +4574,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Get a user",
+        "summary": "Get a users-family resource",
         "tags": [
           "Users"
         ]
       },
       "patch": {
+        "description": "Updates a resource from the users family. Keep schema_id as the canonical subtype discriminator in write payloads.",
         "operationId": "updateUser",
         "parameters": [
           {
@@ -3990,7 +4612,7 @@
                 }
               }
             },
-            "description": "Update a user"
+            "description": "Update a users-family resource"
           }
         },
         "security": [
@@ -4001,7 +4623,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update a user",
+        "summary": "Update a users-family resource",
         "tags": [
           "Users"
         ]
@@ -4009,6 +4631,7 @@
     },
     "/v1/users/{id}/password": {
       "post": {
+        "description": "Sets a password when the selected users-family schema supports password authentication.",
         "operationId": "setUserPassword",
         "parameters": [
           {
@@ -4033,7 +4656,7 @@
         },
         "responses": {
           "204": {
-            "description": "Set a user password"
+            "description": "Set a password for a users-family resource"
           }
         },
         "security": [
@@ -4044,7 +4667,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Set a user password",
+        "summary": "Set a password for a users-family resource",
         "tags": [
           "Users"
         ]
@@ -4065,6 +4688,9 @@
       "name": "Admin"
     },
     {
+      "name": "Applications"
+    },
+    {
       "name": "Auth"
     },
     {
@@ -4081,6 +4707,9 @@
     },
     {
       "name": "Import"
+    },
+    {
+      "name": "Notifications"
     },
     {
       "name": "Organizations"

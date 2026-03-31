@@ -101,7 +101,8 @@
                   <div v-if="!entity.changes?.length" class="text-xs text-muted-foreground py-1">
                     No issues detected
                   </div>
-                  <div v-for="(c, i) in entity.changes" :key="i"
+                  <div
+v-for="(c, i) in entity.changes" :key="i"
                     class="flex items-start gap-2 rounded-sm border-l-2 px-2 py-1.5 text-xs"
                     :class="{
                       'border-l-red-400 bg-red-50/50': c.issue.includes('required') || c.issue.includes('missing'),
@@ -132,7 +133,7 @@
         <Button variant="outline" @click="$emit('update:open', false)">
           Cancel
         </Button>
-        <Button @click="$emit('confirm')" :variant="hasBreaking ? 'destructive' : 'default'">
+        <Button :variant="hasBreaking ? 'destructive' : 'default'" @click="$emit('confirm')">
           {{ hasBreaking ? 'Save Anyway' : 'Confirm Save' }}
         </Button>
       </div>

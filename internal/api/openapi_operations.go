@@ -14,40 +14,89 @@ func (a *API) registerOpenAPIOperations() {
 		{Name: "limit", Type: "integer", Description: "Max results (default 50)"},
 		{Name: "org_id", Type: "string", Description: "Filter by org"},
 		{Name: "state", Type: "string", Description: "Filter by state"},
+		{Name: "schema_type", Type: "string", Description: "Filter the users family by schema type such as human_user, service_user, or ai_agent"},
 	}
 	a.spec.Add(OpenAPIOperation{
 		Method: "GET", Path: "/v1/users", ID: "listUsers",
 		Summary: "List users", Tags: []string{"Users"},
-		Response: ListResponse{}, QueryParams: listParams, Security: true,
+		Description: "Returns the typed users family. Use schema_type to filter human users, service accounts, or AI agents.",
+		Response:    ListResponse{}, QueryParams: listParams, Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "POST", Path: "/v1/users", ID: "createUser",
-		Summary: "Create a user", Tags: []string{"Users"},
-		Request: UserRequest{}, Response: UserResponse{},
+		Summary: "Create a users-family resource", Tags: []string{"Users"},
+		Description: "Creates a human user, service account, or AI agent. Provide schema_id in the request body to select the schema-backed subtype.",
+		Request:     UserRequest{}, Response: UserResponse{},
 		StatusCode: 201, Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "GET", Path: "/v1/users/{id}", ID: "getUser",
-		Summary: "Get a user", Tags: []string{"Users"},
-		Response: UserResponse{}, PathParams: []OpenAPIParam{idParam},
+		Summary: "Get a users-family resource", Tags: []string{"Users"},
+		Description: "Returns a single resource from the users family, including schema_id and schema_type.",
+		Response:    UserResponse{}, PathParams: []OpenAPIParam{idParam},
 		Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "PATCH", Path: "/v1/users/{id}", ID: "updateUser",
-		Summary: "Update a user", Tags: []string{"Users"},
-		Request: UpdateUserRequest{}, Response: UserResponse{},
+		Summary: "Update a users-family resource", Tags: []string{"Users"},
+		Description: "Updates a resource from the users family. Keep schema_id as the canonical subtype discriminator in write payloads.",
+		Request:     UpdateUserRequest{}, Response: UserResponse{},
 		PathParams: []OpenAPIParam{idParam}, Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "DELETE", Path: "/v1/users/{id}", ID: "deleteUser",
-		Summary: "Delete a user", Tags: []string{"Users"},
-		PathParams: []OpenAPIParam{idParam}, StatusCode: 204, Security: true,
+		Summary: "Delete a users-family resource", Tags: []string{"Users"},
+		Description: "Deletes a resource from the canonical users family endpoint.",
+		PathParams:  []OpenAPIParam{idParam}, StatusCode: 204, Security: true,
 	})
 	a.spec.Add(OpenAPIOperation{
 		Method: "POST", Path: "/v1/users/{id}/password", ID: "setUserPassword",
-		Summary: "Set a user password", Tags: []string{"Users"},
-		Request: SetUserPasswordRequest{}, PathParams: []OpenAPIParam{idParam},
+		Summary: "Set a password for a users-family resource", Tags: []string{"Users"},
+		Description: "Sets a password when the selected users-family schema supports password authentication.",
+		Request:     SetUserPasswordRequest{}, PathParams: []OpenAPIParam{idParam},
 		StatusCode: 204, Security: true,
+	})
+
+	// ─── Applications ──────────────────────────────────────────
+	appListParams := []OpenAPIParam{
+		{Name: "cursor", Type: "string", Description: "Pagination cursor"},
+		{Name: "limit", Type: "integer", Description: "Max results (default 50)"},
+		{Name: "org_id", Type: "string", Description: "Filter by org"},
+		{Name: "state", Type: "string", Description: "Filter by state"},
+		{Name: "schema_type", Type: "string", Description: "Filter the applications family by schema type such as app"},
+	}
+	a.spec.Add(OpenAPIOperation{
+		Method: "GET", Path: "/v1/apps", ID: "listApps",
+		Summary: "List applications", Tags: []string{"Applications"},
+		Description: "Returns the typed applications family. Use schema_type to filter a specific application schema.",
+		Response:    ListResponse{}, QueryParams: appListParams, Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "POST", Path: "/v1/apps", ID: "createApp",
+		Summary: "Create an application", Tags: []string{"Applications"},
+		Description: "Creates an application-family resource. Provide schema_id in the request body to select the schema-backed subtype.",
+		Request:     AppRequest{}, Response: AppResponse{},
+		StatusCode: 201, Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "GET", Path: "/v1/apps/{id}", ID: "getApp",
+		Summary: "Get an application", Tags: []string{"Applications"},
+		Description: "Returns a single application-family resource, including schema_id and schema_type.",
+		Response:    AppResponse{}, PathParams: []OpenAPIParam{idParam},
+		Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "PATCH", Path: "/v1/apps/{id}", ID: "updateApp",
+		Summary: "Update an application", Tags: []string{"Applications"},
+		Description: "Updates an application-family resource. Keep schema_id as the canonical subtype discriminator in write payloads.",
+		Request:     AppRequest{}, Response: AppResponse{},
+		PathParams: []OpenAPIParam{idParam}, Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "DELETE", Path: "/v1/apps/{id}", ID: "deleteApp",
+		Summary: "Delete an application", Tags: []string{"Applications"},
+		Description: "Deletes a resource from the canonical applications family endpoint.",
+		PathParams:  []OpenAPIParam{idParam}, StatusCode: 204, Security: true,
 	})
 
 	// ─── Schemas ───────────────────────────────────────────────

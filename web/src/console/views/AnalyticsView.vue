@@ -20,7 +20,7 @@
               <SelectItem v-for="t in templates" :key="t.name" :value="t.sql">{{ t.name }}</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" @click="runQuery" :disabled="running">
+          <Button size="sm" :disabled="running" @click="runQuery">
             {{ running ? '⏳ Running…' : '▶ Run Query' }}
           </Button>
         </div>
@@ -152,7 +152,7 @@
           <CardContent class="p-4">
             <div class="font-semibold font-mono text-sm">{{ t.name }}</div>
             <div class="text-xs text-muted-foreground mt-1">{{ t.row_count }} rows · {{ t.file_count }} files</div>
-            <div class="flex flex-wrap gap-1 mt-2" v-if="t.columns">
+            <div v-if="t.columns" class="flex flex-wrap gap-1 mt-2">
               <Badge v-for="c in t.columns.slice(0, 6)" :key="c.name" variant="secondary" class="text-[10px] font-mono font-normal">
                 {{ c.name }} <small class="text-muted-foreground/60 ml-0.5">{{ c.type }}</small>
               </Badge>

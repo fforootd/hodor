@@ -1,5 +1,7 @@
 <template>
   <ResourceCreateView
+    v-model:form-data="formData"
+    v-model:json-valid="jsonValid"
     singular-title="Application"
     back-route="/applications"
     :schema-context="schemaContext"
@@ -7,8 +9,6 @@
     :submitting="submitting"
     :error="error"
     description="Fill the schema form, inspect the JSON payload, or copy the API call directly."
-    v-model:form-data="formData"
-    v-model:json-valid="jsonValid"
     @submit="submit"
   />
 </template>

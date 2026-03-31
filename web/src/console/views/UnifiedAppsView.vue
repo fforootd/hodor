@@ -4,7 +4,7 @@
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Applications</h1>
         <p class="text-sm text-muted-foreground">
-          Manage OIDC and SAML applications{{ totalCount > 0 ? ` (${totalCount} total)` : '' }}
+          Manage applications and client settings{{ totalCount > 0 ? ` (${totalCount} total)` : '' }}
         </p>
       </div>
       <div class="flex flex-col gap-2 sm:flex-row">
@@ -34,7 +34,7 @@
         </TabsTrigger>
         <TabsTrigger value="app">
           <AppWindow class="mr-1.5 size-3.5" />
-          OIDC
+          OIDC Clients
           <Badge v-if="typeCounts.app" variant="secondary" class="ml-1.5 text-xs px-1.5 py-0">{{
             typeCounts.app
           }}</Badge>
@@ -65,9 +65,9 @@
 
     <DataTable
       v-if="allApps.length > 0"
+      v-model:row-selection="selectedRows"
       :columns="columns as any"
       :data="filteredApps"
-      v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
         <div class="flex items-center justify-between w-full mb-4">
@@ -84,7 +84,7 @@
           </div>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>
@@ -162,7 +162,7 @@
   const typeCounts = computed(() => {
     const counts: Record<string, number> = {}
     for (const item of allApps.value) {
-      const t = item.app_type || 'oidc'
+      const t = item.schema_type || 'app'
       counts[t] = (counts[t] || 0) + 1
     }
     return counts
@@ -170,7 +170,7 @@
 
   const filteredApps = computed(() => {
     if (activeTab.value === 'all') return allApps.value
-    return allApps.value.filter((a) => a.app_type === activeTab.value)
+    return allApps.value.filter((a) => (a.schema_type || 'app') === activeTab.value)
   })
 
   // Search
@@ -207,7 +207,7 @@
   async function loadApps() {
     loading.value = true
     try {
-      allApps.value = await appApi.list(currentOrgId.value || undefined)
+      allApps.value = await appApi.list({ org_id: currentOrgId.value || undefined })
     } catch {
       /* ignore */
     } finally {
@@ -283,14 +283,14 @@
         ),
       cell: (info) => h('span', { class: 'text-sm' }, info.getValue() || '—'),
     }),
-    columnHelper.accessor('app_type', {
-      id: 'app_type',
-      header: 'Type',
+    columnHelper.accessor((row) => row.schema_type || 'app', {
+      id: 'schema_type',
+      header: 'Schema',
       cell: (info) =>
         h(
           Badge,
           { variant: 'outline', class: 'text-xs uppercase' },
-          () => info.getValue() || 'OIDC',
+          () => info.getValue() === 'app' ? 'OIDC Client' : info.getValue(),
         ),
     }),
     columnHelper.display({

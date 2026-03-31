@@ -54,8 +54,8 @@
           <div v-if="editable" class="flex gap-2">
             <input
               :value="editValues[String(key)] ?? value ?? ''"
-              @input="editValues[String(key)] = ($event.target as HTMLInputElement).value"
               class="flex-1 h-9 rounded-md border border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-ring)]"
+              @input="editValues[String(key)] = ($event.target as HTMLInputElement).value"
             />
           </div>
           <div v-else class="flex-1 rounded-md border bg-[var(--color-muted)] px-3 py-2 text-sm text-[var(--color-muted-foreground)]">

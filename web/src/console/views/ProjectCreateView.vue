@@ -1,5 +1,7 @@
 <template>
   <ResourceCreateView
+    v-model:form-data="formData"
+    v-model:json-valid="jsonValid"
     singular-title="Project"
     back-route="/projects"
     :schema-context="schemaContext"
@@ -7,8 +9,6 @@
     :submitting="submitting"
     :error="error"
     description="Define the project with schema fields, inspect the JSON, or copy the request cURL."
-    v-model:form-data="formData"
-    v-model:json-valid="jsonValid"
     @submit="submit"
   />
 </template>

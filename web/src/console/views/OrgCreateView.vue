@@ -1,5 +1,7 @@
 <template>
   <ResourceCreateView
+    v-model:form-data="formData"
+    v-model:json-valid="jsonValid"
     singular-title="Organization"
     back-route="/orgs"
     :schema-context="schemaContext"
@@ -7,8 +9,6 @@
     :submitting="submitting"
     :error="error"
     description="Use the schema-backed form, inspect the canonical JSON, or copy the API call."
-    v-model:form-data="formData"
-    v-model:json-valid="jsonValid"
     @submit="submit"
   />
 </template>

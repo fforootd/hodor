@@ -4,7 +4,7 @@
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Users</h1>
         <p class="text-sm text-muted-foreground">
-          Manage all users, service accounts, and AI agents{{
+          Manage human users, service accounts, and AI agents from one users workspace{{
             totalCount > 0 ? ` (${totalCount} total)` : ''
           }}
         </p>
@@ -105,13 +105,13 @@
 
     <DataTable
       v-if="allIdentities.length > 0"
+      v-model:row-selection="selectedRows"
       :columns="columns as any"
       :data="filteredIdentities"
-      v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
         <div class="flex items-center justify-between w-full mb-4">
-          <div class="w-full max-w-lg relative" ref="searchContainerRef">
+          <div ref="searchContainerRef" class="w-full max-w-lg relative">
             <div class="relative w-full">
               <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
               <Input
@@ -124,7 +124,7 @@
           </div>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>
@@ -154,8 +154,7 @@
 <script setup lang="ts">
   import { ref, onMounted, computed, h, watch } from 'vue'
   import { RouterLink } from 'vue-router'
-  import { type Identity } from '@/api/resources'
-  import { api } from '@/api/client'
+  import { type Identity, userApi } from '@/api/resources'
   import { useOrgContext } from '@/console/composables/useOrgContext'
   import { buildUserCreateRoute } from '@/console/utils/user-routes'
   import DataTable from '@/components/ui/data-table/DataTable.vue'
@@ -211,8 +210,8 @@
   // Schema type display metadata
   const typeLabels: Record<string, string> = {
     human_user: 'User',
-    service_user: 'Service',
-    ai_agent: 'Agent',
+    service_user: 'Service Account',
+    ai_agent: 'AI Agent',
   }
 
   const typeIcons: Record<string, any> = {
@@ -277,16 +276,15 @@
 
   async function loadUsers() {
     loading.value = true
-    const qs = currentOrgId.value ? `?org_id=${currentOrgId.value}` : ''
 
     try {
-      const data = await api.get<any>(`/v1/users${qs}`)
-      allIdentities.value = (data.items || []).map((item: any) => ({
+      const items = await userApi.list({ org_id: currentOrgId.value || undefined })
+      allIdentities.value = items.map((item: any) => ({
         ...item,
-        _schemaType: userTypeMap[item.user_type] || item.user_type || 'human_user',
+        _schemaType: item.schema_type || userTypeMap[item.user_type] || item.user_type || 'human_user',
       }))
     } catch (e) {
-      console.error('Failed to load users:', e)
+      console.error('Failed to load users family:', e)
       allIdentities.value = []
     }
 

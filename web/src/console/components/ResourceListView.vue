@@ -46,9 +46,9 @@
     <!-- Data Table -->
     <DataTable
       v-if="items.length > 0"
+      v-model:row-selection="selectedRows"
       :columns="columns as any"
       :data="filteredItems"
-      v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
         <div class="flex items-center justify-between w-full mb-4">
@@ -65,7 +65,7 @@
           </div>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>

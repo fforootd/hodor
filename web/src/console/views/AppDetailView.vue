@@ -1,5 +1,6 @@
 <template>
   <ResourceDetailView
+    v-model:form-data="formData"
     :resource="app"
     resource-type="app"
     singular-title="Application"
@@ -12,7 +13,6 @@
     :load-error="loadError"
     :json-valid="jsonValid"
     :show-avatar="true"
-    v-model:form-data="formData"
     @save="save"
     @delete="deleteApp"
     @update:json-valid="(v) => jsonValid = v"

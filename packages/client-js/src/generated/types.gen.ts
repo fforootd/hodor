@@ -5,6 +5,44 @@ export type ActivityResponse = {
   events: Array<{}>;
 };
 
+export type AppRequest = {
+  app_type?: string;
+  client_id?: string;
+  client_secret?: string;
+  data?: unknown;
+  description?: string;
+  grant_types?: Array<string>;
+  logo_uri?: string;
+  metadata?: unknown;
+  name: string;
+  post_logout_redirect_uris?: Array<string>;
+  redirect_uris?: Array<string>;
+  response_types?: Array<string>;
+  schema_id?: string;
+  state?: string;
+};
+
+export type AppResponse = {
+  app_type: string;
+  client_id: string;
+  created_at: string;
+  data?: unknown;
+  description?: string;
+  grant_types?: Array<string>;
+  id: string;
+  logo_uri?: string;
+  metadata?: unknown;
+  name: string;
+  org_id: string;
+  post_logout_redirect_uris?: Array<string>;
+  redirect_uris?: Array<string>;
+  response_types?: Array<string>;
+  schema_id?: string;
+  schema_type?: string;
+  state: string;
+  updated_at: string;
+};
+
 export type AuthSettingsResponse = {
   external_providers: Array<{
     id?: string;
@@ -59,18 +97,18 @@ export type CountsResponse = {
 };
 
 export type CreatePatRequest = {
-  entity_id: string;
   name: string;
   scopes?: Array<string>;
+  user_id: string;
 };
 
 export type CreatePatResponse = {
   created_at: string;
-  entity_id: string;
   id: string;
   name: string;
   scopes: Array<string>;
   token: string;
+  user_id: string;
 };
 
 export type CreateProviderRequest = {
@@ -82,21 +120,26 @@ export type CreateProviderRequest = {
 };
 
 export type CreateSessionRequest = {
-  entity_id: string;
   ip_address?: string;
   user_agent?: string;
+  user_id: string;
 };
 
 export type CreateSessionResponse = {
   session: {
+    auth_method?: string;
     created_at?: string;
-    entity_id?: string;
     expires_at?: string;
     id?: string;
     ip_address?: string;
+    login_flow_id?: string;
+    metadata?: {};
     org_id?: string;
+    provider_id?: string;
+    provider_kind?: string;
     revoked_at?: string;
     user_agent?: string;
+    user_id?: string;
   };
   token: string;
 };
@@ -211,44 +254,12 @@ export type FgaWriteTuplesResponse = {
   written: number;
 };
 
-export type IdentityRequest = {
-  capabilities?: Array<string>;
-  display_name?: string;
-  identifier: string;
-  metadata?: unknown;
-  profile?: unknown;
-  schema_id?: string;
-  state?: string;
-};
-
-export type IdentityResponse = {
-  capabilities?: Array<string>;
-  created_at: string;
-  data?: unknown;
-  display_name?: string;
-  id: string;
-  identifier: string;
-  metadata?: unknown;
-  org_id: string;
-  profile?: unknown;
-  state: string;
-  updated_at: string;
-};
-
 export type ImportRequest = {
-  entities?: Array<{
-    display_name?: string;
-    identifier?: string;
-    password?: string;
-    profile?: {};
-    schema_id?: string;
-    state?: string;
-  }>;
-  linked_accounts?: Array<{
-    entity_identifier?: string;
+  linked_identities?: Array<{
     external_email?: string;
     external_sub?: string;
     provider_name?: string;
+    user_identifier?: string;
   }>;
   on_conflict: string;
   providers?: Array<{
@@ -261,6 +272,14 @@ export type ImportRequest = {
     name?: string;
     protocol?: string;
     template?: string;
+  }>;
+  users?: Array<{
+    display_name?: string;
+    identifier?: string;
+    password?: string;
+    profile?: {};
+    schema_id?: string;
+    state?: string;
   }>;
 };
 
@@ -280,6 +299,7 @@ export type ListResponse = {
 
 export type MagicLinkRequest = {
   email: string;
+  purpose?: string;
 };
 
 export type MagicLinkResponse = {
@@ -288,13 +308,75 @@ export type MagicLinkResponse = {
   status: string;
 };
 
+export type NotificationPresetsResponse = {
+  presets: Array<{
+    config?: {};
+    description?: string;
+    driver?: string;
+    id?: string;
+    label?: string;
+    medium?: string;
+  }>;
+};
+
+export type NotificationPreviewRequest = {
+  locale?: string;
+  medium: string;
+  org_id?: string;
+  payload?: {};
+  template_key: string;
+};
+
+export type NotificationRenderResponse = {
+  channel_id?: string;
+  html_body?: string;
+  locale: string;
+  medium: string;
+  metadata?: {
+    [key: string]: string;
+  };
+  subject?: string;
+  template_key: string;
+  text_body: string;
+};
+
+export type NotificationTestRequest = {
+  channel_id?: string;
+  locale?: string;
+  medium: string;
+  org_id?: string;
+  payload?: {};
+  recipient: string;
+  template_key: string;
+};
+
+export type OrgRequest = {
+  data?: unknown;
+  metadata?: unknown;
+  name: string;
+  schema_id?: string;
+  state?: string;
+};
+
+export type OrgResponse = {
+  created_at: string;
+  data?: unknown;
+  id: string;
+  metadata?: unknown;
+  name: string;
+  schema_id?: string;
+  schema_type?: string;
+  state: string;
+  updated_at: string;
+};
+
 export type OwnSessionsResponse = {
   count: number;
   sessions: Array<{}>;
 };
 
 export type PreviewSchemaRequest = {
-  entity_id: string;
+  user_id: string;
 };
 
 export type PreviewSchemaResponse = {
@@ -364,7 +446,6 @@ export type SearchResponse = {
   query: string;
   results: Array<{
     id?: string;
-    link?: string;
     resource_type?: string;
     subtitle?: string;
     title?: string;
@@ -372,17 +453,22 @@ export type SearchResponse = {
 };
 
 export type SessionResponse = {
+  auth_method?: string;
   created_at: string;
-  entity_id: string;
   expires_at: string;
   id: string;
   ip_address?: string;
+  login_flow_id?: string;
+  metadata?: {};
   org_id: string;
+  provider_id?: string;
+  provider_kind?: string;
   revoked_at?: string;
   user_agent?: string;
+  user_id: string;
 };
 
-export type SetEntityPasswordRequest = {
+export type SetUserPasswordRequest = {
   password: string;
 };
 
@@ -395,16 +481,6 @@ export type SettingsResponse = {
 
 export type StatusResponse = {
   status: string;
-};
-
-export type UpdateIdentityRequest = {
-  capabilities?: Array<string>;
-  data?: {};
-  display_name?: string;
-  identifier?: string;
-  profile?: {};
-  schema_id?: string;
-  state?: string;
 };
 
 export type UpdateProfileRequest = {
@@ -426,6 +502,50 @@ export type UpdateProviderRequest = {
 export type UpdateSchemaRequest = {
   message?: string;
   schema?: unknown;
+};
+
+export type UpdateUserRequest = {
+  capabilities?: Array<string>;
+  data?: {};
+  display_name?: string;
+  identifier?: string;
+  profile?: {};
+  schema_id?: string;
+  state?: string;
+};
+
+export type UserRequest = {
+  capabilities?: Array<string>;
+  data?: unknown;
+  display_name?: string;
+  identifier: string;
+  metadata?: unknown;
+  profile?: unknown;
+  schema_id?: string;
+  state?: string;
+};
+
+export type UserResponse = {
+  capabilities?: Array<string>;
+  created_at: string;
+  data?: unknown;
+  display_name?: string;
+  id: string;
+  identifier: string;
+  metadata?: unknown;
+  org_id: string;
+  orgs?: Array<{
+    added_at?: string;
+    org_id?: string;
+    org_name?: string;
+    role?: string;
+  }>;
+  profile?: unknown;
+  schema_id?: string;
+  schema_type?: string;
+  state: string;
+  updated_at: string;
+  user_type: string;
 };
 
 export type ListOwnActivityData = {
@@ -549,6 +669,122 @@ export type AdminBulkResponses = {
    */
   200: unknown;
 };
+
+export type ListAppsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Pagination cursor
+     */
+    cursor?: string;
+    /**
+     * Max results (default 50)
+     */
+    limit?: number;
+    /**
+     * Filter by org
+     */
+    org_id?: string;
+    /**
+     * Filter by state
+     */
+    state?: string;
+    /**
+     * Filter the applications family by schema type such as app
+     */
+    schema_type?: string;
+  };
+  url: "/v1/apps";
+};
+
+export type ListAppsResponses = {
+  /**
+   * List applications
+   */
+  200: ListResponse;
+};
+
+export type ListAppsResponse = ListAppsResponses[keyof ListAppsResponses];
+
+export type CreateAppData = {
+  body: AppRequest;
+  path?: never;
+  query?: never;
+  url: "/v1/apps";
+};
+
+export type CreateAppResponses = {
+  /**
+   * Create an application
+   */
+  201: AppResponse;
+};
+
+export type CreateAppResponse = CreateAppResponses[keyof CreateAppResponses];
+
+export type DeleteAppData = {
+  body?: never;
+  path: {
+    /**
+     * Resource ID
+     */
+    id: string;
+  };
+  query?: never;
+  url: "/v1/apps/{id}";
+};
+
+export type DeleteAppResponses = {
+  /**
+   * Delete an application
+   */
+  204: void;
+};
+
+export type DeleteAppResponse = DeleteAppResponses[keyof DeleteAppResponses];
+
+export type GetAppData = {
+  body?: never;
+  path: {
+    /**
+     * Resource ID
+     */
+    id: string;
+  };
+  query?: never;
+  url: "/v1/apps/{id}";
+};
+
+export type GetAppResponses = {
+  /**
+   * Get an application
+   */
+  200: AppResponse;
+};
+
+export type GetAppResponse = GetAppResponses[keyof GetAppResponses];
+
+export type UpdateAppData = {
+  body: AppRequest;
+  path: {
+    /**
+     * Resource ID
+     */
+    id: string;
+  };
+  query?: never;
+  url: "/v1/apps/{id}";
+};
+
+export type UpdateAppResponses = {
+  /**
+   * Update an application
+   */
+  200: AppResponse;
+};
+
+export type UpdateAppResponse = UpdateAppResponses[keyof UpdateAppResponses];
 
 export type SendMagicLinkData = {
   body: MagicLinkRequest;
@@ -1035,6 +1271,57 @@ export type SubmitFlowResponses = {
   200: unknown;
 };
 
+export type ListNotificationPresetsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/notifications/presets";
+};
+
+export type ListNotificationPresetsResponses = {
+  /**
+   * List notification presets
+   */
+  200: NotificationPresetsResponse;
+};
+
+export type ListNotificationPresetsResponse =
+  ListNotificationPresetsResponses[keyof ListNotificationPresetsResponses];
+
+export type PreviewNotificationData = {
+  body: NotificationPreviewRequest;
+  path?: never;
+  query?: never;
+  url: "/v1/notifications/preview";
+};
+
+export type PreviewNotificationResponses = {
+  /**
+   * Preview a notification template
+   */
+  200: NotificationRenderResponse;
+};
+
+export type PreviewNotificationResponse =
+  PreviewNotificationResponses[keyof PreviewNotificationResponses];
+
+export type TestNotificationData = {
+  body: NotificationTestRequest;
+  path?: never;
+  query?: never;
+  url: "/v1/notifications/test";
+};
+
+export type TestNotificationResponses = {
+  /**
+   * Send a test notification
+   */
+  200: NotificationRenderResponse;
+};
+
+export type TestNotificationResponse =
+  TestNotificationResponses[keyof TestNotificationResponses];
+
 export type ListOrgsData = {
   body?: never;
   path?: never;
@@ -1050,6 +1337,85 @@ export type ListOrgsResponses = {
 };
 
 export type ListOrgsResponse = ListOrgsResponses[keyof ListOrgsResponses];
+
+export type CreateOrgData = {
+  body: OrgRequest;
+  path?: never;
+  query?: never;
+  url: "/v1/orgs";
+};
+
+export type CreateOrgResponses = {
+  /**
+   * Create an organization
+   */
+  201: OrgResponse;
+};
+
+export type CreateOrgResponse = CreateOrgResponses[keyof CreateOrgResponses];
+
+export type DeleteOrgData = {
+  body?: never;
+  path: {
+    /**
+     * Resource ID
+     */
+    id: string;
+  };
+  query?: never;
+  url: "/v1/orgs/{id}";
+};
+
+export type DeleteOrgResponses = {
+  /**
+   * Delete an organization
+   */
+  204: void;
+};
+
+export type DeleteOrgResponse = DeleteOrgResponses[keyof DeleteOrgResponses];
+
+export type GetOrgData = {
+  body?: never;
+  path: {
+    /**
+     * Resource ID
+     */
+    id: string;
+  };
+  query?: never;
+  url: "/v1/orgs/{id}";
+};
+
+export type GetOrgResponses = {
+  /**
+   * Get an organization
+   */
+  200: OrgResponse;
+};
+
+export type GetOrgResponse = GetOrgResponses[keyof GetOrgResponses];
+
+export type UpdateOrgData = {
+  body: OrgRequest;
+  path: {
+    /**
+     * Resource ID
+     */
+    id: string;
+  };
+  query?: never;
+  url: "/v1/orgs/{id}";
+};
+
+export type UpdateOrgResponses = {
+  /**
+   * Update an organization
+   */
+  200: OrgResponse;
+};
+
+export type UpdateOrgResponse = UpdateOrgResponses[keyof UpdateOrgResponses];
 
 export type ListPatsData = {
   body?: never;
@@ -1429,57 +1795,6 @@ export type SearchResponses = {
 
 export type SearchResponse2 = SearchResponses[keyof SearchResponses];
 
-export type ListServiceAccountsData = {
-  body?: never;
-  path?: never;
-  query?: {
-    /**
-     * Pagination cursor
-     */
-    cursor?: string;
-    /**
-     * Max results (default 50)
-     */
-    limit?: number;
-    /**
-     * Filter by org
-     */
-    org_id?: string;
-    /**
-     * Filter by state
-     */
-    state?: string;
-  };
-  url: "/v1/service-accounts";
-};
-
-export type ListServiceAccountsResponses = {
-  /**
-   * List service accounts
-   */
-  200: ListResponse;
-};
-
-export type ListServiceAccountsResponse =
-  ListServiceAccountsResponses[keyof ListServiceAccountsResponses];
-
-export type CreateServiceAccountData = {
-  body: IdentityRequest;
-  path?: never;
-  query?: never;
-  url: "/v1/service-accounts";
-};
-
-export type CreateServiceAccountResponses = {
-  /**
-   * Create a service account
-   */
-  201: IdentityResponse;
-};
-
-export type CreateServiceAccountResponse =
-  CreateServiceAccountResponses[keyof CreateServiceAccountResponses];
-
 export type ListSessionsData = {
   body?: never;
   path?: never;
@@ -1646,6 +1961,10 @@ export type ListUsersData = {
      * Filter by state
      */
     state?: string;
+    /**
+     * Filter the users family by schema type such as human_user, service_user, or ai_agent
+     */
+    schema_type?: string;
   };
   url: "/v1/users";
 };
@@ -1660,7 +1979,7 @@ export type ListUsersResponses = {
 export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses];
 
 export type CreateUserData = {
-  body: IdentityRequest;
+  body: UserRequest;
   path?: never;
   query?: never;
   url: "/v1/users";
@@ -1668,9 +1987,9 @@ export type CreateUserData = {
 
 export type CreateUserResponses = {
   /**
-   * Create a user
+   * Create a users-family resource
    */
-  201: IdentityResponse;
+  201: UserResponse;
 };
 
 export type CreateUserResponse = CreateUserResponses[keyof CreateUserResponses];
@@ -1689,7 +2008,7 @@ export type DeleteUserData = {
 
 export type DeleteUserResponses = {
   /**
-   * Delete a user
+   * Delete a users-family resource
    */
   204: void;
 };
@@ -1710,15 +2029,15 @@ export type GetUserData = {
 
 export type GetUserResponses = {
   /**
-   * Get a user
+   * Get a users-family resource
    */
-  200: IdentityResponse;
+  200: UserResponse;
 };
 
 export type GetUserResponse = GetUserResponses[keyof GetUserResponses];
 
 export type UpdateUserData = {
-  body: UpdateIdentityRequest;
+  body: UpdateUserRequest;
   path: {
     /**
      * Resource ID
@@ -1731,15 +2050,15 @@ export type UpdateUserData = {
 
 export type UpdateUserResponses = {
   /**
-   * Update a user
+   * Update a users-family resource
    */
-  200: IdentityResponse;
+  200: UserResponse;
 };
 
 export type UpdateUserResponse = UpdateUserResponses[keyof UpdateUserResponses];
 
 export type SetUserPasswordData = {
-  body: SetEntityPasswordRequest;
+  body: SetUserPasswordRequest;
   path: {
     /**
      * Resource ID
@@ -1752,7 +2071,7 @@ export type SetUserPasswordData = {
 
 export type SetUserPasswordResponses = {
   /**
-   * Set a user password
+   * Set a password for a users-family resource
    */
   204: void;
 };

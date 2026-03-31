@@ -17,7 +17,7 @@ type OpenAPIRegistry struct {
 // OpenAPIOperation describes a single API endpoint.
 type OpenAPIOperation struct {
 	Method      string // "GET", "POST", etc.
-	Path        string // "/v1/entities/{id}"
+	Path        string // "/v1/users/{id}"
 	ID          string // operationId
 	Summary     string
 	Description string

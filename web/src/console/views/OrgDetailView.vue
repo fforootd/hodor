@@ -1,5 +1,6 @@
 <template>
   <ResourceDetailView
+    v-model:form-data="formData"
     :resource="org"
     resource-type="org"
     singular-title="Organization"
@@ -13,7 +14,6 @@
     :json-valid="jsonValid"
     :show-members="true"
     :members="members"
-    v-model:form-data="formData"
     @save="save"
     @delete="deleteOrg"
     @add-member="addMember"

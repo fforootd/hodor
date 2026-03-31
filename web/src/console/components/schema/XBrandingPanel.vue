@@ -7,14 +7,14 @@
     <div class="space-y-1.5">
       <Label class="text-xs font-medium text-muted-foreground">Primary Color</Label>
       <Popover>
-        <PopoverTrigger asChild>
+        <PopoverTrigger as-child>
           <Button variant="outline" class="h-8 w-full justify-start gap-2 text-xs font-normal">
             <span class="size-4 rounded border" :style="{ background: primary }" />
             <span class="font-mono text-muted-foreground">{{ primary }}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent class="w-auto p-3" align="start">
-          <input type="color" v-model="primary" class="size-32 cursor-pointer border-0 p-0" @input="emit('change')" />
+          <input v-model="primary" type="color" class="size-32 cursor-pointer border-0 p-0" @input="emit('change')" />
         </PopoverContent>
       </Popover>
     </div>

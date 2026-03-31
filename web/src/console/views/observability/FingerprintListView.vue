@@ -6,7 +6,7 @@
         <p class="text-sm text-muted-foreground mt-1">Raw device fingerprint payloads ingested via telemetry.</p>
       </div>
       <div class="flex items-center gap-3">
-        <Button variant="outline" size="sm" @click="fetch" :disabled="loading">
+        <Button variant="outline" size="sm" :disabled="loading" @click="fetch">
           <RefreshCcw class="w-4 h-4 mr-2" :class="{ 'animate-spin': loading }" /> Refresh
         </Button>
       </div>

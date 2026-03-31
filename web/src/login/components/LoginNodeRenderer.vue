@@ -26,7 +26,7 @@
   </template>
 
   <Transition name="fade" mode="out-in">
-    <form v-if="flowStep" :key="flowStep.step" @submit.prevent="emit('submit')" class="space-y-4">
+    <form v-if="flowStep" :key="flowStep.step" class="space-y-4" @submit.prevent="emit('submit')">
       <template v-for="(node, i) in orderedNodes" :key="i">
         <h1 v-if="node.type === 'heading'" class="text-xl font-semibold text-center">
           {{ node.text }}
@@ -70,7 +70,7 @@
           <Label v-else :for="node.name">{{ node.label }}</Label>
           <Input
             :id="node.name"
-            v-model="formData[node.name!]"
+            :model-value="formData[node.name!]"
             :type="node.input_type || 'text'"
             :placeholder="node.placeholder || ''"
             :autocomplete="node.autocomplete || 'off'"
@@ -80,18 +80,20 @@
             :minlength="node.min_length || undefined"
             :maxlength="node.max_length || undefined"
             :pattern="node.pattern || undefined"
+            @update:model-value="(value) => updateFormField(node.name!, value)"
           />
           <template v-if="node.input_type === 'password' && isRegistrationStep">
             <Label :for="node.name + '_confirm'" class="mt-3">Confirm Password</Label>
             <Input
               :id="node.name + '_confirm'"
-              v-model="confirmPasswords[node.name!]"
+              :model-value="confirmPasswords[node.name!]"
               type="password"
               placeholder="Confirm your password"
               autocomplete="new-password"
               required
               class="mt-1.5"
               :disabled="preview"
+              @update:model-value="(value) => updateConfirmPasswordField(node.name!, value)"
             />
             <p
               v-if="
@@ -129,12 +131,15 @@
         <div v-else-if="node.type === 'consent_checkbox'" class="flex items-start gap-2">
           <input
             :id="node.name"
-            v-model="formData[node.name!]"
+            :checked="Boolean(formData[node.name!])"
             type="checkbox"
             :required="node.required"
             class="mt-0.5 accent-[var(--brand-primary,#6366f1)]"
             :disabled="preview"
+            @change="(event) => updateConsentField(node.name!, event)"
           />
+          <!-- renderConsentLabel only turns trusted markdown-style links into anchors -->
+          <!-- eslint-disable-next-line vue/no-v-html -->
           <label
             :for="node.name"
             class="text-xs text-muted-foreground leading-relaxed"
@@ -278,11 +283,12 @@
               <Label :for="child.name">{{ child.label }}</Label>
               <Input
                 :id="child.name"
-                v-model="formData[child.name!]"
+                :model-value="formData[child.name!]"
                 :type="child.input_type || 'text'"
                 :placeholder="child.placeholder || ''"
                 :required="child.required"
                 :disabled="preview"
+                @update:model-value="(value) => updateFormField(child.name!, value)"
               />
             </div>
           </template>
@@ -293,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, reactive } from 'vue'
+  import { computed } from 'vue'
   import type { FlowStep } from '@/api/branding'
   import { Button } from '@/components/ui/button'
   import { Input } from '@/components/ui/input'
@@ -332,14 +338,16 @@
   const emit = defineEmits<{
     submit: []
     action: [action: string, extra?: Record<string, string>]
+    'update:form-data': [value: Record<string, any>]
+    'update:confirm-passwords': [value: Record<string, string>]
     'solve-captcha': []
     'captcha-token': [token: string]
     'captcha-reset': []
     'captcha-error': [message: string]
   }>()
 
-  const formData = reactive(props.formData)
-  const confirmPasswords = reactive(props.confirmPasswords)
+  const formData = computed(() => props.formData || {})
+  const confirmPasswords = computed(() => props.confirmPasswords || {})
   const orderedNodes = computed(() => {
     const nodes = props.flowStep?.nodes || []
     const captchaNodes = nodes.filter(
@@ -364,8 +372,8 @@
   })
   const passwordsMatch = computed(() => {
     if (!isRegistrationStep.value) return true
-    for (const key of Object.keys(confirmPasswords)) {
-      if (confirmPasswords[key] && formData[key] !== confirmPasswords[key]) {
+    for (const key of Object.keys(confirmPasswords.value)) {
+      if (confirmPasswords.value[key] && formData.value[key] !== confirmPasswords.value[key]) {
         return false
       }
     }
@@ -382,6 +390,28 @@
 
   function ssoIcon(template: string) {
     return ssoIcons[template] || '🔑'
+  }
+
+  function updateFormField(name: string, value: string | number) {
+    emit('update:form-data', {
+      ...formData.value,
+      [name]: value,
+    })
+  }
+
+  function updateConsentField(name: string, event: Event) {
+    const target = event.target as HTMLInputElement | null
+    emit('update:form-data', {
+      ...formData.value,
+      [name]: Boolean(target?.checked),
+    })
+  }
+
+  function updateConfirmPasswordField(name: string, value: string | number) {
+    emit('update:confirm-passwords', {
+      ...confirmPasswords.value,
+      [name]: String(value ?? ''),
+    })
   }
 
   function renderConsentLabel(label: string): string {

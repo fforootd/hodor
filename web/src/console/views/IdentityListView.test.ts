@@ -92,6 +92,12 @@ function mockResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input
+  if (input instanceof Request) return input.url
+  return input.toString()
+}
+
 // Minimal router for tests.
 function makeRouter() {
   return createRouter({
@@ -135,7 +141,7 @@ describe('IdentityListView', () => {
 
   it('renders identity rows from API', async () => {
     const wrapper = await mountView((url: any) => {
-      const urlStr = typeof url === 'string' ? url : url.toString()
+      const urlStr = requestUrl(url)
       if (urlStr.includes('$meta'))
         return Promise.resolve(mockResponse({}))
       return Promise.resolve(
@@ -168,5 +174,34 @@ describe('IdentityListView', () => {
     const btn = wrapper.find('.btn')
     expect(btn.exists()).toBe(true)
     expect(btn.text()).toContain('New')
+  })
+
+  it('loads typed users from the canonical family endpoint', async () => {
+    const requests: string[] = []
+
+    await mountView((url: any) => {
+      const urlStr = requestUrl(url)
+      requests.push(urlStr)
+
+      if (urlStr.includes('/v1/schemas/$meta') || urlStr.includes('/v1/schemas/%24meta')) {
+        return Promise.resolve(
+          mockResponse({
+            'x-catalog': {
+              human_user: {
+                alias: 'Users',
+                singular: 'User',
+                path: 'users',
+              },
+            },
+          }),
+        )
+      }
+
+      return Promise.resolve(mockResponse({ items: [] }))
+    })
+
+    expect(
+      requests.some((request) => request.includes('/v1/users') && request.includes('schema_type=human_user')),
+    ).toBe(true)
   })
 })

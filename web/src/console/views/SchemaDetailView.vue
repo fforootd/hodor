@@ -22,7 +22,7 @@
         />
       </ResizablePanel>
 
-      <ResizableHandle withHandle />
+      <ResizableHandle with-handle />
 
       <!-- Editor Panel -->
       <ResizablePanel :default-size="75">
@@ -35,7 +35,7 @@
             </Badge>
             <div class="ml-auto flex items-center gap-1.5">
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger as-child>
                   <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyToClipboard">
                     <Copy class="size-3.5" />
                   </Button>
@@ -43,7 +43,7 @@
                 <TooltipContent>Copy JSON</TooltipContent>
               </Tooltip>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger as-child>
                   <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="formatJson">
                     <AlignLeft class="size-3.5" />
                   </Button>
@@ -94,7 +94,8 @@
                   </span>
                 </div>
                 <div class="flex-1 overflow-auto font-mono text-xs leading-relaxed">
-                  <div v-for="(line, i) in diffLines" :key="i"
+                  <div
+v-for="(line, i) in diffLines" :key="i"
                     class="flex px-4 py-px"
                     :class="{
                       'bg-emerald-50 text-emerald-900': line.type === 'add',
@@ -102,7 +103,8 @@
                     }"
                   >
                     <span class="w-10 shrink-0 text-right pr-3 select-none text-muted-foreground/50">{{ line.num || '' }}</span>
-                    <span class="w-4 shrink-0 text-center select-none font-semibold"
+                    <span
+class="w-4 shrink-0 text-center select-none font-semibold"
                       :class="{
                         'text-emerald-600': line.type === 'add',
                         'text-red-600': line.type === 'del',

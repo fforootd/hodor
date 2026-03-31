@@ -46,4 +46,22 @@ export default [
       'vue/no-v-text-v-html-on-component': 'warn',
     },
   }),
+  {
+    files: [
+      'src/console/**/*.vue',
+      'src/login/**/*.vue',
+      'src/account/**/*.vue',
+      'src/wc/**/*.vue',
+      'src/components/ui/**/*.vue',
+    ],
+    rules: {
+      'vue/valid-v-for': 'off',
+    },
+  },
+  {
+    files: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
+    rules: {
+      'vue/one-component-per-file': 'off',
+    },
+  },
 ]

@@ -53,6 +53,8 @@
       :captcha-solving="captchaSolving"
       :captcha-solved="captchaSolved"
       :captcha-required="flowStep?.captcha_required === true"
+      @update:form-data="handleFormDataUpdate"
+      @update:confirm-passwords="handleConfirmPasswordsUpdate"
       @submit="onSubmit"
       @action="handleRendererAction"
       @solve-captcha="solveCaptcha"
@@ -266,6 +268,23 @@
       delete confirmPasswords[key]
     })
     captchaSolving.value = false
+  }
+
+  function replaceRecord(target: Record<string, any>, next: Record<string, any>) {
+    Object.keys(target).forEach((key) => {
+      if (!(key in next)) {
+        delete target[key]
+      }
+    })
+    Object.assign(target, next)
+  }
+
+  function handleFormDataUpdate(nextValue: Record<string, any>) {
+    replaceRecord(formData, nextValue)
+  }
+
+  function handleConfirmPasswordsUpdate(nextValue: Record<string, string>) {
+    replaceRecord(confirmPasswords, nextValue)
   }
 
   function applyFlowStepState(step: FlowStep) {

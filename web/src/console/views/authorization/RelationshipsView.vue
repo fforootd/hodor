@@ -12,7 +12,7 @@
           <Plus class="size-3.5 mr-1" />
           Add Tuple
         </Button>
-        <Button variant="outline" size="sm" @click="fetchTuples" :disabled="loadingTuples">
+        <Button variant="outline" size="sm" :disabled="loadingTuples" @click="fetchTuples">
           <RefreshCw class="size-3.5 mr-1" :class="{ 'animate-spin': loadingTuples }" />
           Refresh
         </Button>
@@ -33,7 +33,7 @@
         <label class="text-xs font-medium text-muted-foreground mb-1 block">Object</label>
         <Input v-model="tupleFilter.object" placeholder="e.g. org:1" class="h-8 text-sm" @keyup.enter="fetchTuples" />
       </div>
-      <Button size="sm" @click="fetchTuples" class="h-8">
+      <Button size="sm" class="h-8" @click="fetchTuples">
         <Search class="size-3.5" />
       </Button>
     </div>
@@ -114,7 +114,7 @@
         </div>
         <div class="flex justify-end gap-2 pt-2">
           <Button variant="outline" @click="showAddTuple = false">Cancel</Button>
-          <Button @click="addTuple" :disabled="!newTuple.user || !newTuple.relation || !newTuple.object">
+          <Button :disabled="!newTuple.user || !newTuple.relation || !newTuple.object" @click="addTuple">
             <Plus class="size-3.5 mr-1" />
             Add Tuple
           </Button>

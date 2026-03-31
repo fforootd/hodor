@@ -105,9 +105,9 @@
           </div>
           <div class="flex items-center gap-2 self-end pb-1">
             <input
-              type="checkbox"
               id="wc-prov-auto"
               v-model="createForm.auto_register"
+              type="checkbox"
               class="accent-[var(--color-primary)]"
             />
             <label for="wc-prov-auto" class="text-sm cursor-pointer"

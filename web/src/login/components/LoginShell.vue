@@ -2,11 +2,9 @@
   <div class="login-shell" :style="themeVars">
     <component :is="layoutComponent" :branding="resolvedBranding" :preview="preview">
       <link v-if="resolvedBranding?.font_url" rel="stylesheet" :href="resolvedBranding.font_url" />
-      <component
-        v-if="resolvedBranding?.custom_css"
-        :is="'style'"
-        v-text="resolvedBranding.custom_css"
-      />
+      <component :is="'style'" v-if="resolvedBranding?.custom_css">
+        {{ resolvedBranding.custom_css }}
+      </component>
 
       <Card class="w-full" :class="cardClass">
         <CardHeader v-if="showCardBranding" class="text-center">

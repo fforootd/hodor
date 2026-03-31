@@ -1,5 +1,4 @@
 <template>
-  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6 pb-12">
     <!-- Header -->
     <div class="flex items-center justify-between">
@@ -47,9 +46,9 @@
           @keydown.enter="applySearch"
         />
       </div>
-      <Button @click="applySearch" :disabled="loading" size="lg" class="h-12 px-6">
-        <Loader2 class="w-4 h-4 mr-2 animate-spin" v-if="loading" />
-        <Zap class="w-4 h-4 mr-2" v-else />
+      <Button :disabled="loading" size="lg" class="h-12 px-6" @click="applySearch">
+        <Loader2 v-if="loading" class="w-4 h-4 mr-2 animate-spin" />
+        <Zap v-else class="w-4 h-4 mr-2" />
         {{ loading ? 'Tracing...' : 'Trace' }}
       </Button>
     </div>
@@ -100,19 +99,20 @@
           >
             <!-- Identity -->
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold"
+              <div
+class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold"
                    :class="trace.identity ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'">
                 {{ trace.identity ? initials(trace.identity.display_name || trace.identity.identifier) : '?' }}
               </div>
               <div class="min-w-0">
                 <p class="text-sm font-medium truncate">{{ trace.identity?.display_name || trace.identity?.identifier || 'System' }}</p>
-                <p class="text-xs text-muted-foreground truncate" v-if="trace.identity?.identifier">{{ trace.identity.identifier }}</p>
+                <p v-if="trace.identity?.identifier" class="text-xs text-muted-foreground truncate">{{ trace.identity.identifier }}</p>
               </div>
             </div>
 
             <!-- Root Span -->
             <div class="flex items-center gap-2 min-w-0">
-              <Badge variant="secondary" v-if="trace.method" class="font-mono text-[10px] shrink-0">{{ trace.method }}</Badge>
+              <Badge v-if="trace.method" variant="secondary" class="font-mono text-[10px] shrink-0">{{ trace.method }}</Badge>
               <span class="text-sm font-mono truncate text-foreground/80">{{ trace.path || trace.root_event_type || truncateId(trace.trace_group) }}</span>
             </div>
 
@@ -126,7 +126,8 @@
 
             <!-- Duration -->
             <div class="text-right">
-              <span class="text-sm font-mono px-2 py-0.5 rounded"
+              <span
+class="text-sm font-mono px-2 py-0.5 rounded"
                     :class="durationColor(trace.duration)">
                 {{ trace.duration ? trace.duration + 'ms' : '—' }}
               </span>
@@ -134,12 +135,14 @@
 
             <!-- Delegation -->
             <div class="text-center">
-              <Badge v-if="trace.delegation_type && trace.delegation_type !== 'direct'" 
+              <Badge
+v-if="trace.delegation_type && trace.delegation_type !== 'direct'" 
                      variant="outline"
                      class="font-mono text-xs shadow-none border-dashed text-amber-600 border-amber-200 bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:bg-amber-950">
                 {{ trace.delegation_type }}
               </Badge>
-              <Badge v-else-if="trace.status" 
+              <Badge
+v-else-if="trace.status" 
                      :variant="trace.status >= 400 ? 'destructive' : 'outline'"
                      class="font-mono text-xs shadow-none border-dashed"
                      :class="trace.status < 400 ? 'text-green-600 border-green-200 bg-green-50 dark:text-green-400 dark:border-green-800 dark:bg-green-950' : ''">
@@ -166,7 +169,8 @@
               <!-- Trace Metadata -->
               <div class="flex flex-wrap gap-4">
                 <!-- Identity Card -->
-                <RouterLink v-if="trace.identity" :to="`/users/${trace.identity.id}`" 
+                <RouterLink
+v-if="trace.identity" :to="`/users/${trace.identity.id}`" 
                             class="flex items-center gap-3 bg-card hover:bg-muted/40 transition-colors rounded-lg border hover:border-primary/50 cursor-pointer px-4 py-3 shadow-xs">
                   <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <User class="w-5 h-5 text-primary" />
@@ -182,16 +186,16 @@
 
                 <!-- Request / Session / Client IDs -->
                 <div class="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.request_id">
+                  <Badge v-if="trace.request_id" variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1">
                     request: {{ truncateId(trace.request_id, 16) }}
                   </Badge>
-                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.session_id">
+                  <Badge v-if="trace.session_id" variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1">
                     session: {{ truncateId(trace.session_id, 16) }}
                   </Badge>
-                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.client_id" title="Client/App ID">
+                  <Badge v-if="trace.client_id" variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" title="Client/App ID">
                     client: {{ truncateId(trace.client_id, 16) }}
                   </Badge>
-                  <Badge variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" v-if="trace.fingerprint" title="Device Fingerprint">
+                  <Badge v-if="trace.fingerprint" variant="outline" class="font-mono bg-background shadow-xs text-[10px] py-1" title="Device Fingerprint">
                     <Fingerprint class="w-3 h-3 mr-1 inline-block" /> {{ truncateId(trace.fingerprint, 8) }}
                   </Badge>
                   <Badge variant="secondary" class="text-[10px] py-1">
@@ -227,10 +231,10 @@
                       </div>
                       <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1.5">
-                          <Badge variant="secondary" v-if="span.method" class="font-mono text-[9px] px-1 py-0 h-4 shrink-0">{{ span.method }}</Badge>
+                          <Badge v-if="span.method" variant="secondary" class="font-mono text-[9px] px-1 py-0 h-4 shrink-0">{{ span.method }}</Badge>
                           <span class="text-xs font-medium truncate">{{ span.label }}</span>
                         </div>
-                        <p class="text-[10px] text-muted-foreground font-mono truncate mt-0.5" v-if="span.path">{{ span.path }}</p>
+                        <p v-if="span.path" class="text-[10px] text-muted-foreground font-mono truncate mt-0.5">{{ span.path }}</p>
                       </div>
                     </div>
 
@@ -238,7 +242,8 @@
                     <div class="flex-1 px-3 py-2.5 relative h-10">
                       <div class="absolute inset-y-0 flex items-center w-full px-1">
                         <div class="relative w-full h-5 rounded-sm overflow-hidden bg-muted/20">
-                          <div class="absolute h-full rounded-sm transition-all"
+                          <div
+class="absolute h-full rounded-sm transition-all"
                                :class="span.barColor"
                                :style="{ left: span.offsetPct + '%', width: Math.max(span.widthPct, 0.5) + '%' }">
                           </div>
@@ -280,13 +285,14 @@
                             <span class="truncate">{{ span.sdk_name }} {{ span.sdk_version }}</span>
                           </template>
 
-                          <span class="text-muted-foreground" v-if="span.fingerprint">Fingerprint</span>
+                          <span v-if="span.fingerprint" class="text-muted-foreground">Fingerprint</span>
                           <RouterLink v-if="span.fingerprint" :to="`/console/events?fingerprint=${span.fingerprint}`" class="truncate font-mono text-primary hover:underline" @click.stop>{{ span.fingerprint }}</RouterLink>
 
-                          <span class="text-muted-foreground" v-if="span.actor_id">Actor ID</span>
+                          <span v-if="span.actor_id" class="text-muted-foreground">Actor ID</span>
                           <RouterLink v-if="span.actor_id" :to="`/users/${span.actor_id}`" class="truncate text-primary hover:underline" @click.stop>{{ span.actor_id }}</RouterLink>
                         </div>
-                        <RouterLink :to="`/console/events?id=${span.id}`" 
+                        <RouterLink
+:to="`/console/events?id=${span.id}`" 
                                     class="inline-flex items-center gap-1.5 text-[11px] text-primary hover:underline mt-2"
                                     @click.stop>
                           <ExternalLink class="w-3 h-3" />

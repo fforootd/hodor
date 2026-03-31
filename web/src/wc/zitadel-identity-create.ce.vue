@@ -70,8 +70,8 @@
             <select
               v-if="field.type === 'boolean'"
               :value="profileData[field.name] || ''"
-              @change="profileData[field.name] = ($event.target as HTMLSelectElement).value"
               class="w-full h-9 rounded-md border border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-sm"
+              @change="profileData[field.name] = ($event.target as HTMLSelectElement).value"
             >
               <option value="">—</option>
               <option value="true">true</option>
@@ -83,8 +83,8 @@
               :value="profileData[field.name] || ''"
               :type="field.inputType || 'text'"
               :placeholder="field.description || ''"
-              @input="profileData[field.name] = ($event.target as HTMLInputElement).value"
               class="w-full h-9 rounded-md border border-[var(--color-input)] bg-[var(--color-background)] px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-ring)]"
+              @input="profileData[field.name] = ($event.target as HTMLInputElement).value"
             />
             <p v-if="field.description" class="text-xs text-[var(--color-muted-foreground)]">{{ field.description }}</p>
           </div>

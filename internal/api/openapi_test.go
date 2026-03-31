@@ -41,6 +41,8 @@ func TestOpenAPISpecGeneration(t *testing.T) {
 	criticalPaths := []string{
 		"/v1/users",
 		"/v1/users/{id}",
+		"/v1/apps",
+		"/v1/apps/{id}",
 		"/v1/schemas",
 		"/v1/schemas/{id}",
 		"/v1/sessions",
@@ -118,6 +120,52 @@ func TestOpenAPISpecGeneration(t *testing.T) {
 	}
 	if len(tags) < 10 {
 		t.Errorf("expected at least 10 tags, got %d", len(tags))
+	}
+
+	usersPath, ok := paths["/v1/users"].(map[string]any)
+	if !ok {
+		t.Fatal("missing /v1/users path")
+	}
+	listUsers, ok := usersPath["get"].(map[string]any)
+	if !ok {
+		t.Fatal("missing GET /v1/users operation")
+	}
+	userParams, ok := listUsers["parameters"].([]map[string]any)
+	if !ok {
+		t.Fatal("missing GET /v1/users parameters")
+	}
+	var foundUserSchemaType bool
+	for _, param := range userParams {
+		if param["name"] == "schema_type" {
+			foundUserSchemaType = true
+			break
+		}
+	}
+	if !foundUserSchemaType {
+		t.Error("expected GET /v1/users to document schema_type filter")
+	}
+
+	appsPath, ok := paths["/v1/apps"].(map[string]any)
+	if !ok {
+		t.Fatal("missing /v1/apps path")
+	}
+	listApps, ok := appsPath["get"].(map[string]any)
+	if !ok {
+		t.Fatal("missing GET /v1/apps operation")
+	}
+	appParams, ok := listApps["parameters"].([]map[string]any)
+	if !ok {
+		t.Fatal("missing GET /v1/apps parameters")
+	}
+	var foundAppSchemaType bool
+	for _, param := range appParams {
+		if param["name"] == "schema_type" {
+			foundAppSchemaType = true
+			break
+		}
+	}
+	if !foundAppSchemaType {
+		t.Error("expected GET /v1/apps to document schema_type filter")
 	}
 }
 

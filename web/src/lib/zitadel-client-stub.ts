@@ -64,6 +64,13 @@ export const updateUser = (opts?: Opts) => wrap(api.patch<any>(`/v1/users/${opts
 export const deleteUser = (opts?: Opts) => wrap(api.delete<any>(`/v1/users/${opts?.path?.id}`))
 export const setUserPassword = (opts?: Opts) => wrap(api.post<any>(`/v1/users/${opts?.path?.id}/password`, opts?.body))
 
+// Applications
+export const listApps = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/apps${qs(opts?.query)}`))
+export const createApp = (opts?: Opts) => wrap(api.post<any>('/v1/apps', opts?.body))
+export const getApp = (opts?: Opts) => wrap(api.get<any>(`/v1/apps/${opts?.path?.id}`))
+export const updateApp = (opts?: Opts) => wrap(api.patch<any>(`/v1/apps/${opts?.path?.id}`, opts?.body))
+export const deleteApp = (opts?: Opts) => wrap(api.delete<any>(`/v1/apps/${opts?.path?.id}`))
+
 // Schemas
 export const listSchemas = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/schemas${qs(opts?.query)}`))
 export const getSchema = (opts?: Opts) => wrap(api.get<any>(`/v1/schemas/${opts?.path?.id}`))

@@ -12,7 +12,7 @@
  * client.setConfig({ baseUrl: 'https://your-instance.zitadel.cloud' })
  *
  * // Use generated SDK methods
- * const { data } = await listUsers({ query: { limit: 10 } })
+ * const { data } = await listUsers({ query: { limit: 10, schema_type: 'human_user' } })
  * ```
  */
 

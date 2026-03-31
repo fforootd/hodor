@@ -11,7 +11,7 @@ npm install @zitadel/client-js
 ## Quick Start
 
 ```ts
-import { client, listEntities, createEntity } from '@zitadel/client-js'
+import { client, listUsers, createUser } from '@zitadel/client-js'
 
 // Configure the global client
 client.setConfig({
@@ -21,14 +21,22 @@ client.setConfig({
   },
 })
 
-// List entities
-const { data, error } = await listEntities({ query: { limit: 10 } })
+// List the users family
+const { data, error } = await listUsers({
+  query: {
+    limit: 10,
+    schema_type: 'human_user',
+  },
+})
 
-// Create an entity
-const { data: newEntity } = await createEntity({
+// Create a schema-backed user-family resource
+const { data: newUser } = await createUser({
   body: {
-    identifier: 'user@example.com',
-    display_name: 'Jane Doe',
+    schema_id: 'human_user_v1',
+    data: {
+      email: 'user@example.com',
+      display_name: 'Jane Doe',
+    },
   },
 })
 ```

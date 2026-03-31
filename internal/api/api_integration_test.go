@@ -177,6 +177,53 @@ func TestAdmin_UserDetailIncludesSchemaContextAndCanonicalData(t *testing.T) {
 	}
 }
 
+func TestAdmin_UserListIncludesSchemaContextAndSchemaTypeFiltering(t *testing.T) {
+	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
+
+	createCode, created := srv.RequestWithHeaders("POST", "/v1/users", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"identifier": "svc-robot",
+		"schema_id":  "service_user_v1",
+		"data": map[string]any{
+			"display_name": "Service Robot",
+			"description":  "Background worker",
+		},
+	})
+	if createCode != 200 && createCode != 201 {
+		t.Fatalf("create service account: expected 200/201, got %d: %v", createCode, created)
+	}
+
+	listCode, listed := srv.GetWithBearer("/v1/users?schema_type=service_user", token)
+	if listCode != 200 {
+		t.Fatalf("list users: expected 200, got %d: %v", listCode, listed)
+	}
+
+	items, _ := listed["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("expected at least one service_user item")
+	}
+
+	found := false
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item["identifier"] == "svc-robot" {
+			found = true
+			if item["schema_id"] != "service_user_v1" {
+				t.Fatalf("schema_id = %v, want service_user_v1", item["schema_id"])
+			}
+			if item["schema_type"] != "service_user" {
+				t.Fatalf("schema_type = %v, want service_user", item["schema_type"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected service account in filtered response: %v", items)
+	}
+}
+
 func TestAdmin_AppCanonicalDataRoundTrip(t *testing.T) {
 	srv := testutil.NewTestServer(t)
 	token := srv.LoginAdmin()
@@ -226,6 +273,55 @@ func TestAdmin_AppCanonicalDataRoundTrip(t *testing.T) {
 	data, _ := body["data"].(map[string]any)
 	if data["client_name"] != "Schema App" {
 		t.Fatalf("client_name = %v, want Schema App", data["client_name"])
+	}
+}
+
+func TestAdmin_AppListSupportsSchemaTypeFiltering(t *testing.T) {
+	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
+
+	createCode, created := srv.RequestWithHeaders("POST", "/v1/apps", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"schema_id": "app_v1",
+		"data": map[string]any{
+			"client_name":    "Filtered App",
+			"app_type":       "web",
+			"redirect_uris":  []string{"https://example.com/callback"},
+			"grant_types":    []string{"authorization_code"},
+			"response_types": []string{"code"},
+		},
+	})
+	if createCode != 200 && createCode != 201 {
+		t.Fatalf("create app: expected 200/201, got %d: %v", createCode, created)
+	}
+
+	listCode, listed := srv.GetWithBearer("/v1/apps?schema_type=app", token)
+	if listCode != 200 {
+		t.Fatalf("list apps: expected 200, got %d: %v", listCode, listed)
+	}
+
+	items, _ := listed["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("expected at least one app item")
+	}
+
+	found := false
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item["name"] == "Filtered App" {
+			found = true
+			if item["schema_id"] != "app_v1" {
+				t.Fatalf("schema_id = %v, want app_v1", item["schema_id"])
+			}
+			if item["schema_type"] != "app" {
+				t.Fatalf("schema_type = %v, want app", item["schema_type"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected app in filtered response: %v", items)
 	}
 }
 

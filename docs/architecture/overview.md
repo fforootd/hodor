@@ -1,6 +1,6 @@
 # System Architecture
 
-Zitadel is a single Go binary (~30MB) that bundles authentication, authorization, identity management, and observability into one process.
+Zitadel is a single Go binary (~30MB) that bundles authentication, authorization, user and application management, and observability into one process.
 
 ## High-Level Architecture
 
@@ -135,6 +135,15 @@ Zitadel serves three distinct domains, each with different data requirements:
 | **Intelligence** | Detection, alerting, response | Async | Anomaly detection, automated rate limiting |
 
 See [ADR-010](../adr/010-three-tier-data.md) for the full data flow across these domains.
+
+## Public API Model
+
+- Public APIs use concrete family nouns such as `/v1/users`, `/v1/apps`, and `/v1/orgs`.
+- `users` is a typed family for `human_user`, `service_user`, and `ai_agent`.
+- `apps` is a typed family for application schemas.
+- `schema_id` is the canonical write-time discriminator in request bodies.
+- `schema_type` is the canonical read/filter discriminator on family list endpoints.
+- `entity` remains an internal architecture term used for storage and schema-engine reasoning.
 
 ## Request Pipeline
 

@@ -87,8 +87,8 @@
               :id="`var-${key}`"
               type="number"
               :model-value="formValues[key] ?? detail.variables[key].default ?? 0"
-              @update:model-value="formValues[key] = Number($event)"
               class="h-9"
+              @update:model-value="formValues[key] = Number($event)"
             />
 
             <!-- String (default) -->
@@ -97,9 +97,9 @@
               :id="`var-${key}`"
               :type="detail.variables[key].sensitive ? 'password' : 'text'"
               :model-value="formValues[key] ?? detail.variables[key].default ?? ''"
-              @update:model-value="formValues[key] = $event"
               :placeholder="String(detail.variables[key].default || '')"
               class="h-9"
+              @update:model-value="formValues[key] = $event"
             />
           </div>
         </div>
@@ -135,8 +135,8 @@
               :id="`var-${key}`"
               type="number"
               :model-value="formValues[key] ?? detail.variables[key].default ?? 0"
-              @update:model-value="formValues[key] = Number($event)"
               class="h-9"
+              @update:model-value="formValues[key] = Number($event)"
             />
 
             <Input
@@ -144,9 +144,9 @@
               :id="`var-${key}`"
               :type="detail.variables[key].sensitive ? 'password' : 'text'"
               :model-value="formValues[key] ?? detail.variables[key].default ?? ''"
-              @update:model-value="formValues[key] = $event"
               :placeholder="String(detail.variables[key].default || '')"
               class="h-9"
+              @update:model-value="formValues[key] = $event"
             />
           </div>
         </div>
@@ -184,9 +184,9 @@
                   :id="`var-${key}`"
                   :type="detail.variables[key].sensitive ? 'password' : 'text'"
                   :model-value="formValues[key] ?? detail.variables[key].default ?? ''"
-                  @update:model-value="formValues[key] = $event"
                   :placeholder="String(detail.variables[key].default || '')"
                   class="h-9 bg-background"
+                  @update:model-value="formValues[key] = $event"
                 />
               </div>
             </div>
@@ -237,10 +237,10 @@
       </div>
 
       <DialogFooter>
-        <Button variant="outline" @click="$emit('update:open', false)" :disabled="installing">
+        <Button variant="outline" :disabled="installing" @click="$emit('update:open', false)">
           Cancel
         </Button>
-        <Button @click="install" :disabled="installing || loading || !!error">
+        <Button :disabled="installing || loading || !!error" @click="install">
           <Spinner v-if="installing" class="mr-1.5 size-3.5" />
           {{ actionLabel }}
         </Button>

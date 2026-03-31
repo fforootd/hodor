@@ -32,7 +32,7 @@
         </div>
       </div>
       <div class="flex items-center gap-2 mt-3">
-        <Button size="sm" @click="runCheck" :disabled="!checkFormValid">
+        <Button size="sm" :disabled="!checkFormValid" @click="runCheck">
           <Play class="size-3.5 mr-1" /> Check
         </Button>
         <Button variant="ghost" size="sm" class="text-xs" @click="$router.push('/authorization/permissions')">

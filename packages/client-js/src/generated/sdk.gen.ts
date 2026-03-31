@@ -19,6 +19,16 @@ import type {
   RevokeOwnSessionData,
   RevokeOwnSessionResponse,
   AdminBulkData,
+  ListAppsData,
+  ListAppsResponse,
+  CreateAppData,
+  CreateAppResponse,
+  DeleteAppData,
+  DeleteAppResponse,
+  GetAppData,
+  GetAppResponse,
+  UpdateAppData,
+  UpdateAppResponse,
   SendMagicLinkData,
   SendMagicLinkResponse,
   VerifyMagicLinkData,
@@ -64,8 +74,22 @@ import type {
   CreateFlowData,
   GetFlowData,
   SubmitFlowData,
+  ListNotificationPresetsData,
+  ListNotificationPresetsResponse,
+  PreviewNotificationData,
+  PreviewNotificationResponse,
+  TestNotificationData,
+  TestNotificationResponse,
   ListOrgsData,
   ListOrgsResponse,
+  CreateOrgData,
+  CreateOrgResponse,
+  DeleteOrgData,
+  DeleteOrgResponse,
+  GetOrgData,
+  GetOrgResponse,
+  UpdateOrgData,
+  UpdateOrgResponse,
   ListPatsData,
   ListPatsResponse,
   CreatePatData,
@@ -102,10 +126,6 @@ import type {
   PromoteSchemaResponse2,
   SearchData,
   SearchResponse2,
-  ListServiceAccountsData,
-  ListServiceAccountsResponse,
-  CreateServiceAccountData,
-  CreateServiceAccountResponse,
   ListSessionsData,
   ListSessionsResponse,
   CreateSessionData,
@@ -165,6 +185,11 @@ export const listOwnActivity = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -187,6 +212,11 @@ export const getProfile = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -208,6 +238,11 @@ export const updateProfile = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -235,6 +270,11 @@ export const listOwnSessions = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -256,6 +296,11 @@ export const revokeOtherSessions = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -279,6 +324,11 @@ export const revokeOwnSession = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -301,12 +351,165 @@ export const adminBulk = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
     ],
     url: "/v1/admin/bulk",
     ...options,
+  });
+};
+
+/**
+ * List applications
+ * Returns the typed applications family. Use schema_type to filter a specific application schema.
+ */
+export const listApps = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAppsData, ThrowOnError>,
+) => {
+  return (options?.client ?? _heyApiClient).get<
+    ListAppsResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/apps",
+    ...options,
+  });
+};
+
+/**
+ * Create an application
+ * Creates an application-family resource. Provide schema_id in the request body to select the schema-backed subtype.
+ */
+export const createApp = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAppData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    CreateAppResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/apps",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Delete an application
+ * Deletes a resource from the canonical applications family endpoint.
+ */
+export const deleteApp = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteAppData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).delete<
+    DeleteAppResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/apps/{id}",
+    ...options,
+  });
+};
+
+/**
+ * Get an application
+ * Returns a single application-family resource, including schema_id and schema_type.
+ */
+export const getApp = <ThrowOnError extends boolean = false>(
+  options: Options<GetAppData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    GetAppResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/apps/{id}",
+    ...options,
+  });
+};
+
+/**
+ * Update an application
+ * Updates an application-family resource. Keep schema_id as the canonical subtype discriminator in write payloads.
+ */
+export const updateApp = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAppData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).patch<
+    UpdateAppResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/apps/{id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
   });
 };
 
@@ -427,6 +630,11 @@ export const refreshCatalog = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -465,6 +673,11 @@ export const installFromCatalog = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -491,6 +704,11 @@ export const entityCounts = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -513,6 +731,11 @@ export const listEvents = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -530,6 +753,11 @@ export const aggregateEvents = <ThrowOnError extends boolean = false>(
 ) => {
   return (options.client ?? _heyApiClient).get<unknown, unknown, ThrowOnError>({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -550,6 +778,11 @@ export const streamEvents = <ThrowOnError extends boolean = false>(
   return (options?.client ?? _heyApiClient).get<unknown, unknown, ThrowOnError>(
     {
       security: [
+        {
+          in: "cookie",
+          name: "__Host-zitadel_session",
+          type: "apiKey",
+        },
         {
           scheme: "bearer",
           type: "http",
@@ -573,6 +806,11 @@ export const fgaCheck = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -600,6 +838,11 @@ export const fgaExpand = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -625,6 +868,11 @@ export const fgaListObjects = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -652,6 +900,11 @@ export const fgaGetModel = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -674,6 +927,11 @@ export const fgaModelGraph = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -695,6 +953,11 @@ export const fgaBatchTest = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -722,6 +985,11 @@ export const fgaDeleteTuples = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -748,6 +1016,11 @@ export const fgaReadTuples = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -769,6 +1042,11 @@ export const fgaWriteTuples = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -795,6 +1073,11 @@ export const importData = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -852,6 +1135,95 @@ export const submitFlow = <ThrowOnError extends boolean = false>(
 };
 
 /**
+ * List notification presets
+ */
+export const listNotificationPresets = <ThrowOnError extends boolean = false>(
+  options?: Options<ListNotificationPresetsData, ThrowOnError>,
+) => {
+  return (options?.client ?? _heyApiClient).get<
+    ListNotificationPresetsResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/notifications/presets",
+    ...options,
+  });
+};
+
+/**
+ * Preview a notification template
+ */
+export const previewNotification = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewNotificationData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    PreviewNotificationResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/notifications/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Send a test notification
+ */
+export const testNotification = <ThrowOnError extends boolean = false>(
+  options: Options<TestNotificationData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    TestNotificationResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/notifications/test",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
  * List organizations
  */
 export const listOrgs = <ThrowOnError extends boolean = false>(
@@ -864,12 +1236,133 @@ export const listOrgs = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
     ],
     url: "/v1/orgs",
     ...options,
+  });
+};
+
+/**
+ * Create an organization
+ */
+export const createOrg = <ThrowOnError extends boolean = false>(
+  options: Options<CreateOrgData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    CreateOrgResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/orgs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Delete an organization
+ */
+export const deleteOrg = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteOrgData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).delete<
+    DeleteOrgResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/orgs/{id}",
+    ...options,
+  });
+};
+
+/**
+ * Get an organization
+ */
+export const getOrg = <ThrowOnError extends boolean = false>(
+  options: Options<GetOrgData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    GetOrgResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/orgs/{id}",
+    ...options,
+  });
+};
+
+/**
+ * Update an organization
+ */
+export const updateOrg = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateOrgData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).patch<
+    UpdateOrgResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/orgs/{id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
   });
 };
 
@@ -885,6 +1378,11 @@ export const listPats = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -907,6 +1405,11 @@ export const createPat = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -934,6 +1437,11 @@ export const revokePat = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -956,6 +1464,11 @@ export const listProviders = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -977,6 +1490,11 @@ export const createProvider = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1018,6 +1536,11 @@ export const deleteProvider = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1040,6 +1563,11 @@ export const getProvider = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1061,6 +1589,11 @@ export const updateProvider = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1088,6 +1621,11 @@ export const listSchemas = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1109,6 +1647,11 @@ export const createSchema = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1150,6 +1693,11 @@ export const getSchema = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1171,6 +1719,11 @@ export const updateSchema = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1198,6 +1751,11 @@ export const diffSchema = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1220,6 +1778,11 @@ export const schemaIdentityCount = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1241,6 +1804,11 @@ export const previewSchema = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1268,6 +1836,11 @@ export const promoteSchema = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1290,60 +1863,17 @@ export const search = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
     ],
     url: "/v1/search",
     ...options,
-  });
-};
-
-/**
- * List service accounts
- */
-export const listServiceAccounts = <ThrowOnError extends boolean = false>(
-  options?: Options<ListServiceAccountsData, ThrowOnError>,
-) => {
-  return (options?.client ?? _heyApiClient).get<
-    ListServiceAccountsResponse,
-    unknown,
-    ThrowOnError
-  >({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http",
-      },
-    ],
-    url: "/v1/service-accounts",
-    ...options,
-  });
-};
-
-/**
- * Create a service account
- */
-export const createServiceAccount = <ThrowOnError extends boolean = false>(
-  options: Options<CreateServiceAccountData, ThrowOnError>,
-) => {
-  return (options.client ?? _heyApiClient).post<
-    CreateServiceAccountResponse,
-    unknown,
-    ThrowOnError
-  >({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http",
-      },
-    ],
-    url: "/v1/service-accounts",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
   });
 };
 
@@ -1359,6 +1889,11 @@ export const listSessions = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1381,6 +1916,11 @@ export const createSession = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1408,6 +1948,11 @@ export const getSession = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1429,6 +1974,11 @@ export const revokeSession = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1452,6 +2002,11 @@ export const deleteSettings = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1473,6 +2028,11 @@ export const getSettings = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1496,6 +2056,11 @@ export const putSettings = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1511,6 +2076,7 @@ export const putSettings = <ThrowOnError extends boolean = false>(
 
 /**
  * List users
+ * Returns the typed users family. Use schema_type to filter human users, service accounts, or AI agents.
  */
 export const listUsers = <ThrowOnError extends boolean = false>(
   options?: Options<ListUsersData, ThrowOnError>,
@@ -1522,6 +2088,11 @@ export const listUsers = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1532,7 +2103,8 @@ export const listUsers = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Create a user
+ * Create a users-family resource
+ * Creates a human user, service account, or AI agent. Provide schema_id in the request body to select the schema-backed subtype.
  */
 export const createUser = <ThrowOnError extends boolean = false>(
   options: Options<CreateUserData, ThrowOnError>,
@@ -1544,6 +2116,11 @@ export const createUser = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
         scheme: "bearer",
         type: "http",
       },
@@ -1558,7 +2135,8 @@ export const createUser = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Delete a user
+ * Delete a users-family resource
+ * Deletes a resource from the canonical users family endpoint.
  */
 export const deleteUser = <ThrowOnError extends boolean = false>(
   options: Options<DeleteUserData, ThrowOnError>,
@@ -1570,27 +2148,10 @@ export const deleteUser = <ThrowOnError extends boolean = false>(
   >({
     security: [
       {
-        scheme: "bearer",
-        type: "http",
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
       },
-    ],
-    url: "/v1/users/{id}",
-    ...options,
-  });
-};
-
-/**
- * Get a user
- */
-export const getUser = <ThrowOnError extends boolean = false>(
-  options: Options<GetUserData, ThrowOnError>,
-) => {
-  return (options.client ?? _heyApiClient).get<
-    GetUserResponse,
-    unknown,
-    ThrowOnError
-  >({
-    security: [
       {
         scheme: "bearer",
         type: "http",
@@ -1602,7 +2163,36 @@ export const getUser = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Update a user
+ * Get a users-family resource
+ * Returns a single resource from the users family, including schema_id and schema_type.
+ */
+export const getUser = <ThrowOnError extends boolean = false>(
+  options: Options<GetUserData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    GetUserResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/users/{id}",
+    ...options,
+  });
+};
+
+/**
+ * Update a users-family resource
+ * Updates a resource from the users family. Keep schema_id as the canonical subtype discriminator in write payloads.
  */
 export const updateUser = <ThrowOnError extends boolean = false>(
   options: Options<UpdateUserData, ThrowOnError>,
@@ -1613,6 +2203,11 @@ export const updateUser = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",
@@ -1628,7 +2223,8 @@ export const updateUser = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Set a user password
+ * Set a password for a users-family resource
+ * Sets a password when the selected users-family schema supports password authentication.
  */
 export const setUserPassword = <ThrowOnError extends boolean = false>(
   options: Options<SetUserPasswordData, ThrowOnError>,
@@ -1639,6 +2235,11 @@ export const setUserPassword = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
       {
         scheme: "bearer",
         type: "http",

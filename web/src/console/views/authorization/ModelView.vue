@@ -12,7 +12,7 @@
           <Shield class="size-3" />
           OpenFGA v1.1
         </Badge>
-        <Button variant="outline" size="sm" @click="fetchModelGraph" :disabled="loadingModel">
+        <Button variant="outline" size="sm" :disabled="loadingModel" @click="fetchModelGraph">
           <RefreshCw class="size-3.5 mr-1" :class="{ 'animate-spin': loadingModel }" />
           Refresh
         </Button>

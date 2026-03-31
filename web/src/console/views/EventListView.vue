@@ -1,5 +1,4 @@
 <template>
-  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Events</h1>
@@ -24,8 +23,9 @@
           <span>{{ countSession }} Session events</span>
         </div>
       </div>
-      <Button size="sm" :variant="isLive ? 'default' : 'outline'" @click="toggleLive" 
-              :class="isLive ? 'bg-red-600 hover:bg-red-700 text-white border-red-600' : ''">
+      <Button
+size="sm" :variant="isLive ? 'default' : 'outline'" :class="isLive ? 'bg-red-600 hover:bg-red-700 text-white border-red-600' : ''" 
+              @click="toggleLive">
         <Radio class="size-3.5 mr-1.5" :class="isLive ? 'animate-pulse' : ''" />
         {{ isLive ? '● Live' : 'Live' }}
       </Button>
@@ -33,15 +33,15 @@
 
     <DataTable 
       v-if="events.length > 0"
+      v-model:row-selection="selectedRows" 
       :columns="columns as any" 
-      :data="events" 
-      v-model:rowSelection="selectedRows"
+      :data="events"
     >
       <template #toolbar="{ table }">
         <div style="display:none">{{ __setTable(table) }}</div>
         <div class="flex items-center justify-between w-full mb-4">
           <!-- Unified Search Bar -->
-          <div class="w-full max-w-lg relative" ref="searchContainerRef">
+          <div ref="searchContainerRef" class="w-full max-w-lg relative">
                 <div class="relative w-full">
                   <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
                   <Input
@@ -92,7 +92,7 @@
           </div>
           
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>
@@ -133,7 +133,7 @@
                </div>
             </div>
             <!-- Wide Event Context (ADR-023) -->
-            <div class="grid grid-cols-3 gap-4 pt-2" v-if="row.original.request_id || row.original.client_id || row.original.delegation_type">
+            <div v-if="row.original.request_id || row.original.client_id || row.original.delegation_type" class="grid grid-cols-3 gap-4 pt-2">
                <div v-if="row.original.request_id">
                   <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Request ID</h4>
                   <RouterLink :to="`/console/traces?id=${row.original.request_id}`" class="text-xs font-mono text-primary hover:underline">{{ row.original.request_id.slice(0, 16) }}…</RouterLink>

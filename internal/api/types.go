@@ -63,9 +63,9 @@ type SchemaIdentityCountResponse struct {
 	Count int `json:"count"`
 }
 
-// --- Identity (extensions) ---
+// --- Users family (extensions) ---
 
-// UpdateUserRequest is the body for PATCH /v1/entities/{id}.
+// UpdateUserRequest is the body for PATCH /v1/users/{id}.
 type UpdateUserRequest struct {
 	Identifier   string         `json:"identifier,omitempty"`
 	DisplayName  string         `json:"display_name,omitempty"`

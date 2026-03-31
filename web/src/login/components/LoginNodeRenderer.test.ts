@@ -46,7 +46,8 @@ const stubs = {
   Input: {
     props: ['modelValue', 'type', 'disabled'],
     emits: ['update:modelValue'],
-    template: '<input :type="type" :disabled="disabled" />',
+    template:
+      '<input :value="modelValue" :type="type" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)" />',
   },
   Label: { template: '<label><slot /></label>' },
   Separator: { template: '<hr />' },
@@ -120,5 +121,64 @@ describe('LoginNodeRenderer captcha gating', () => {
     const html = wrapper.find('form').html()
     expect(html.indexOf('Continue')).toBeLessThan(html.indexOf('captcha-widget'))
     expect(html.indexOf('captcha-widget')).toBeLessThan(html.indexOf('Create an account'))
+  })
+
+  it('emits form data updates for text fields', async () => {
+    const wrapper = mountRenderer([
+      { type: 'input', name: 'identifier', label: 'Email', input_type: 'email' },
+    ])
+
+    await wrapper.find('input[type="email"]').setValue('james@example.com')
+
+    expect(wrapper.emitted('update:form-data')).toEqual([
+      [{ identifier: 'james@example.com' }],
+    ])
+  })
+
+  it('emits checkbox updates for consent fields', async () => {
+    const wrapper = mountRenderer([
+      { type: 'consent_checkbox', name: 'terms', label: 'I agree' },
+    ])
+
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+
+    expect(wrapper.emitted('update:form-data')).toEqual([
+      [{ terms: true }],
+    ])
+  })
+
+  it('emits confirm password updates during registration', async () => {
+    const wrapper = mount(LoginNodeRenderer, {
+      props: {
+        flowStep: {
+          ...baseStep,
+          step: 'register',
+          nodes: [{ type: 'input', name: 'password', label: 'Password', input_type: 'password' }],
+        },
+        formData: {},
+        confirmPasswords: {},
+      },
+      global: {
+        stubs,
+      },
+    })
+
+    const inputs = wrapper.findAll('input[type="password"]')
+    expect(inputs).toHaveLength(2)
+
+    await inputs[1].setValue('super-secret')
+
+    expect(wrapper.emitted('update:confirm-passwords')).toEqual([
+      [{ password: 'super-secret' }],
+    ])
+  })
+
+  it('keeps preview inputs read-only', () => {
+    const wrapper = mountRenderer(
+      [{ type: 'input', name: 'identifier', label: 'Email', input_type: 'email' }],
+      { preview: true },
+    )
+
+    expect(wrapper.find('input[type="email"]').attributes('disabled')).toBeDefined()
   })
 })

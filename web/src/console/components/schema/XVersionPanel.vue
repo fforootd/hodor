@@ -84,8 +84,8 @@
       variant="outline"
       size="sm"
       class="w-full"
-      @click="$emit('promote')"
       :disabled="promoteLoading"
+      @click="$emit('promote')"
     >
       {{ promoteLoading ? 'Promoting…' : '★ Promote to Default' }}
     </Button>

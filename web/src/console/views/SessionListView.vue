@@ -1,5 +1,4 @@
 <template>
-  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Sessions</h1>
@@ -39,15 +38,15 @@
     </div>
 
     <DataTable 
+      v-model:row-selection="selectedRows" 
       :columns="columns as any" 
-      :data="sessions" 
-      v-model:rowSelection="selectedRows"
+      :data="sessions"
     >
       <template #toolbar="{ table }">
         <div style="display:none">{{ __setTable(table) }}</div>
         <div class="flex items-center justify-between w-full mb-4">
           <!-- Unified Search Bar with Autocomplete Chips -->
-          <div class="w-full max-w-lg relative" ref="searchContainerRef">
+          <div ref="searchContainerRef" class="w-full max-w-lg relative">
                 <div class="relative w-full">
                   <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
                   <Input
@@ -96,7 +95,7 @@
           
           <!-- View Columns Dropdown -->
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>
@@ -139,11 +138,11 @@
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Expires</span>
             <p class="text-xs">{{ row.original.expires_at ? new Date(row.original.expires_at).toLocaleString() : '—' }}</p>
           </div>
-          <div class="space-y-1" v-if="row.original.revoked_at">
+          <div v-if="row.original.revoked_at" class="space-y-1">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Revoked</span>
             <p class="text-xs text-destructive">{{ new Date(row.original.revoked_at).toLocaleString() }}</p>
           </div>
-          <div class="space-y-1" v-if="row.original.auth_method">
+          <div v-if="row.original.auth_method" class="space-y-1">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Auth Method</span>
             <div class="flex flex-wrap gap-1">
               <Badge v-for="(method, methodIndex) in (Array.isArray(row.original.auth_method) ? row.original.auth_method : [row.original.auth_method])" :key="methodIndex" variant="outline" class="text-xs">
@@ -151,7 +150,7 @@
               </Badge>
             </div>
           </div>
-          <div class="space-y-1" v-if="row.original.geo">
+          <div v-if="row.original.geo" class="space-y-1">
             <span class="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Geo</span>
             <p class="text-xs">{{ row.original.geo.city || '' }} {{ row.original.geo.country || '' }}</p>
           </div>

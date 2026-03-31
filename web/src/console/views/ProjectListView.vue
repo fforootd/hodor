@@ -1,5 +1,6 @@
 <template>
   <ResourceListView
+    v-model:search-query="searchQuery"
     title="Projects"
     singular-title="Project"
     create-route="/projects/new"
@@ -7,7 +8,6 @@
     :loading="loading"
     :columns="columns"
     :search-fields="['name', 'id']"
-    v-model:search-query="searchQuery"
   >
     <template #empty-icon><FolderKanban /></template>
   </ResourceListView>

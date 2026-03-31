@@ -54,15 +54,15 @@
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button size="sm" variant="outline" @click="saveCurrentQuery" :disabled="!query">
+          <Button size="sm" variant="outline" :disabled="!query" @click="saveCurrentQuery">
             <Save class="mr-1.5 size-3.5" />
             Save
           </Button>
-          <Button size="sm" variant="outline" @click="formatQuery" v-if="activeMode === 'sql'">
+          <Button v-if="activeMode === 'sql'" size="sm" variant="outline" @click="formatQuery">
             <FileJson class="mr-1.5 size-3.5" />
             Format
           </Button>
-          <Button size="sm" @click="runQuery" :disabled="running">
+          <Button size="sm" :disabled="running" @click="runQuery">
             <Play class="mr-1.5 size-3.5" />
             {{ running ? 'Running...' : 'Run Query' }}
           </Button>
@@ -153,7 +153,7 @@
               </div>
             </div>
             
-            <div class="pt-2" v-if="queryError">
+            <div v-if="queryError" class="pt-2">
               <p class="text-sm text-destructive">{{ queryError }}</p>
             </div>
           </CardContent>
@@ -212,15 +212,15 @@
         <ChartContainer :config="chartConfig" class="h-64 w-full">
           <VisXYContainer :data="chartData" :margin="{top: 20, right: 20, bottom: 20, left: 40}">
             <template v-if="chartType === 'bar'">
-              <VisStackedBar :x="(d: any, i: number) => i" :y="[(d: any) => d.value]" color="hsl(12, 76%, 61%)" :roundedCorners="4" />
+              <VisStackedBar :x="(d: any, i: number) => i" :y="[(d: any) => d.value]" color="hsl(12, 76%, 61%)" :rounded-corners="4" />
             </template>
             <template v-else>
-              <VisLine :x="(d: any, i: number) => i" :y="[(d: any) => d.value]" color="hsl(12, 76%, 61%)" :lineWidth="2" />
+              <VisLine :x="(d: any, i: number) => i" :y="[(d: any) => d.value]" color="hsl(12, 76%, 61%)" :line-width="2" />
               <VisArea :x="(d: any, i: number) => i" :y="[(d: any) => d.value]" color="hsl(12, 76%, 61%)" :opacity="0.1" />
             </template>
-            <VisAxis type="x" :tickFormat="(i: number) => chartData[i]?.label || ''" :gridLine="false" />
-            <VisAxis type="y" :tickLine="false" :domainLine="false" />
-            <ChartCrosshair :customTooltip="(d: any) => `<div class='bg-background text-foreground border rounded px-2 py-1 shadow-sm font-mono text-xs'><strong>${d.label}</strong>: ${d.value}</div>`" />
+            <VisAxis type="x" :tick-format="(i: number) => chartData[i]?.label || ''" :grid-line="false" />
+            <VisAxis type="y" :tick-line="false" :domain-line="false" />
+            <ChartCrosshair :custom-tooltip="(d: any) => `<div class='bg-background text-foreground border rounded px-2 py-1 shadow-sm font-mono text-xs'><strong>${d.label}</strong>: ${d.value}</div>`" />
           </VisXYContainer>
         </ChartContainer>
       </CardContent>

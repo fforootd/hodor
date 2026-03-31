@@ -70,6 +70,11 @@ import {
   getUser,
   updateUser,
   deleteUser,
+  listApps as listAppsFn,
+  createApp as createAppFn,
+  getApp as getAppFn,
+  updateApp as updateAppFn,
+  deleteApp as deleteAppFn,
   listSchemas,
   getSchema,
   updateSchema,
@@ -127,10 +132,11 @@ async function unwrapItems<T>(promise: Promise<any>): Promise<T[]> {
 }
 
 // ------------------------------------------------------------------
-// User API — unified CRUD for all user types (human_user, service_user, ai_agent)
+// User API — canonical users family for human_user, service_user, and ai_agent
 // ------------------------------------------------------------------
 export const userApi = {
-  list: (): Promise<IdentityResponse[]> => unwrapItems<IdentityResponse>(listUsers()),
+  list: (params?: { org_id?: string; schema_type?: string; state?: string; limit?: number }): Promise<IdentityResponse[]> =>
+    unwrapItems<IdentityResponse>(listUsers({ query: params as any })),
   get: (id: string): Promise<IdentityResponse> => unwrap<IdentityResponse>(getUser({ path: { id } })),
   create: (data: Record<string, unknown>): Promise<IdentityResponse> => unwrap<IdentityResponse>(createUser({ body: data as any })),
   update: (id: string, data: Record<string, unknown>): Promise<IdentityResponse> => unwrap<IdentityResponse>(updateUser({ path: { id }, body: data as any })),
@@ -324,7 +330,7 @@ export const countsApi = {
 }
 
 // ------------------------------------------------------------------
-// App API (OIDC Clients — dedicated `apps` table)
+// App API — canonical applications family
 // ------------------------------------------------------------------
 export interface App {
   id: string
@@ -349,18 +355,16 @@ export interface App {
 }
 
 export const appApi = {
-  list: (orgId?: string): Promise<App[]> => {
-    const qs = orgId ? `?org_id=${encodeURIComponent(orgId)}` : ''
-    return api.get<{ items: App[] }>(`/v1/apps${qs}`).then(r => (r.items || []).map(normalizeApp))
-  },
+  list: (params?: { org_id?: string; schema_type?: string; state?: string; limit?: number }): Promise<App[]> =>
+    unwrapItems<App>(listAppsFn({ query: params as any })).then(items => items.map(normalizeApp)),
   get: (id: string): Promise<App> =>
-    api.get<App>(`/v1/apps/${encodeURIComponent(id)}`).then(normalizeApp),
+    unwrap<App>(getAppFn({ path: { id } })).then(normalizeApp),
   create: (data: Partial<App> & { name?: string; data?: Record<string, unknown> }): Promise<App> =>
-    api.post<App>('/v1/apps', data).then(normalizeApp),
+    unwrap<App>(createAppFn({ body: data as any })).then(normalizeApp),
   update: (id: string, data: Partial<App>): Promise<App> =>
-    api.patch<App>(`/v1/apps/${encodeURIComponent(id)}`, data).then(normalizeApp),
+    unwrap<App>(updateAppFn({ path: { id }, body: data as any })).then(normalizeApp),
   delete: (id: string): Promise<void> =>
-    api.delete(`/v1/apps/${encodeURIComponent(id)}`),
+    unwrap<void>(deleteAppFn({ path: { id } })),
 }
 
 // Normalize JSON-encoded array fields that come back as strings from the generic list handler.

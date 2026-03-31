@@ -1,5 +1,4 @@
 <template>
-  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6 pb-10">
     <div
       v-if="loadError && !identity"

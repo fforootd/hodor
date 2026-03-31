@@ -4,7 +4,7 @@
 
 > ⚠️ **Experimental** — This is a research/prototype project exploring a reimagined identity platform architecture. It is not production-ready and APIs may change without notice. See [Zitadel](https://github.com/zitadel/zitadel) for the production IAM system.
 
-**Identity infrastructure for humans and AI.** Open-source identity platform with unified auth, fine-grained authorization, and schema-driven identity management — in a single binary.
+**Identity infrastructure for humans and AI.** Open-source identity platform with unified auth, fine-grained authorization, and schema-driven user and application management — in a single binary.
 
 ## Quick Start
 
@@ -92,7 +92,8 @@ More contributor detail lives in [docs/guides/local-development.md](docs/guides/
 ## Architecture
 
 - **Single binary** — REST API, login UI (Vue), admin console (Vue), account self-service (Vue)
-- **Schema-driven identities** — JSON Schema with annotations (`x-claim-mapping`, `x-user-editable`, `x-sensitive`, `x-hidden`)
+- **Typed resource families** — canonical family endpoints like `/v1/users` and `/v1/apps`, with `schema_id` for writes and `schema_type` for list filtering
+- **Schema-driven resources** — JSON Schema with annotations (`x-claim-mapping`, `x-user-editable`, `x-sensitive`, `x-hidden`)
 - **SSO Federation** — Protocol-agnostic providers (OIDC, SAML, SCIM) with `expr`-based claim mapping
 - **Embedded OpenFGA** — Zanzibar-style authorization in-process
 - **SQLite + Postgres** — zero-config dev, production-ready with Postgres

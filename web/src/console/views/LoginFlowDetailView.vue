@@ -617,6 +617,8 @@
                   :preview="true"
                   :form-data="previewFormData"
                   :confirm-passwords="previewConfirmPasswords"
+                  @update:form-data="handlePreviewFormDataUpdate"
+                  @update:confirm-passwords="handlePreviewConfirmPasswordsUpdate"
                 />
               </LoginShell>
             </div>
@@ -775,6 +777,23 @@
     { id: 'card_image', label: 'Card with image' },
     { id: 'minimal', label: 'Minimal' },
   ]
+
+  function replacePreviewRecord(target: Record<string, any>, next: Record<string, any>) {
+    Object.keys(target).forEach((key) => {
+      if (!(key in next)) {
+        delete target[key]
+      }
+    })
+    Object.assign(target, next)
+  }
+
+  function handlePreviewFormDataUpdate(nextValue: Record<string, any>) {
+    replacePreviewRecord(previewFormData, nextValue)
+  }
+
+  function handlePreviewConfirmPasswordsUpdate(nextValue: Record<string, string>) {
+    replacePreviewRecord(previewConfirmPasswords, nextValue)
+  }
 
   const strategyLabels: Record<string, string> = {
     identifier_first: 'Identifier first',

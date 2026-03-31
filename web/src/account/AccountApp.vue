@@ -88,7 +88,7 @@
                 </p>
               </div>
 
-              <Button @click="saveProfile" :disabled="saving" class="mt-2">
+              <Button :disabled="saving" class="mt-2" @click="saveProfile">
                 {{ saving ? 'Saving…' : 'Save changes' }}
               </Button>
             </CardContent>

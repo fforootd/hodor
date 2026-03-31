@@ -1,5 +1,5 @@
 // Package api provides REST+JSON handlers for the Zitadel v2 API.
-// Identity and schema CRUD are served as plain JSON endpoints.
+// Schema-driven resource families and schema CRUD are served as plain JSON endpoints.
 // OpenAPI spec is dynamically generated from the schema registry.
 package api
 
@@ -150,15 +150,15 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 		return
 	}
 
-	// Unified /v1/users — all user types (human_user, service_user, ai_agent)
-	// in one endpoint. IDs are globally unique across all user types.
+	// Canonical /v1/users family endpoint for human_user, service_user, and ai_agent.
+	// Use schema_id on writes and schema_type for family filtering on reads.
 	mux.HandleFunc("GET /v1/users", a.listUsers)
 	mux.HandleFunc("POST /v1/users", a.createUser)
 	mux.HandleFunc("GET /v1/users/{id}", a.getUser)
 	mux.HandleFunc("PATCH /v1/users/{id}", a.updateUser)
 	mux.HandleFunc("DELETE /v1/users/{id}", a.deleteUser)
 	mux.HandleFunc("POST /v1/users/{id}/password", a.setEntityPassword)
-	logging.Printf("[api] registered /v1/users (all user types)")
+	logging.Printf("[api] registered /v1/users (typed family)")
 
 	// Dedicated Org CRUD routes.
 	mux.HandleFunc("GET /v1/orgs", a.listOrgs)
@@ -190,13 +190,13 @@ func (a *API) registerEntityRoutes(mux *http.ServeMux) {
 		logging.Printf("[api] registered /v1/%s (table=%s)", entry.Path, tbl)
 	}
 
-	// Dedicated App CRUD routes (OIDC clients live in the `apps` table).
+	// Canonical /v1/apps family endpoint for application schemas.
 	mux.HandleFunc("GET /v1/apps", a.listApps)
 	mux.HandleFunc("POST /v1/apps", a.createApp)
 	mux.HandleFunc("GET /v1/apps/{id}", a.getApp)
 	mux.HandleFunc("PATCH /v1/apps/{id}", a.updateApp)
 	mux.HandleFunc("DELETE /v1/apps/{id}", a.deleteApp)
-	logging.Printf("[api] registered /v1/apps (full CRUD)")
+	logging.Printf("[api] registered /v1/apps (typed family)")
 }
 
 // --- Org types ---
@@ -566,7 +566,9 @@ type AppResponse struct {
 
 func (a *API) buildAppResponse(ctx context.Context, row AppResponse, metadataStr string) AppResponse {
 	metadata := decodeObjectString(metadataStr)
-	if rec, err := a.resolveResourceSchema(ctx, "app", row.SchemaID); err == nil {
+	if row.SchemaID != "" && row.SchemaType != "" {
+		// The family list endpoint already resolved the schema context.
+	} else if rec, err := a.resolveResourceSchema(ctx, "app", row.SchemaID); err == nil {
 		row.SchemaID = rec.ID
 		row.SchemaType = rec.Type
 	}
@@ -600,22 +602,33 @@ func (a *API) buildAppResponse(ctx context.Context, row AppResponse, metadataStr
 func (a *API) listApps(w http.ResponseWriter, r *http.Request) {
 	limit, cursor := parsePagination(r)
 	orgID := r.URL.Query().Get("org_id")
+	state := r.URL.Query().Get("state")
+	schemaType := r.URL.Query().Get("schema_type")
 
 	var where []string
 	var args []any
-	where = append(where, "id > ?")
+	where = append(where, "a.id > ?")
 	args = append(args, cursor)
 	if orgID != "" {
-		where = append(where, "org_id = ?")
+		where = append(where, "a.org_id = ?")
 		args = append(args, orgID)
 	}
+	if state != "" {
+		where = append(where, "a.state = ?")
+		args = append(args, state)
+	}
+	if schemaType != "" {
+		where = append(where, "s.type = ?")
+		args = append(args, schemaType)
+	}
 
-	query := `SELECT id, org_id, name, app_type, client_id,
-	                 COALESCE(redirect_uris,'[]'), COALESCE(grant_types,'[]'), COALESCE(response_types,'[]'),
-	                 state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
-	          FROM apps
+	query := `SELECT a.id, a.org_id, a.name, a.app_type, a.client_id,
+	                 COALESCE(a.redirect_uris,'[]'), COALESCE(a.grant_types,'[]'), COALESCE(a.response_types,'[]'),
+	                 a.state, COALESCE(a.schema_id,''), COALESCE(s.type,''), COALESCE(a.metadata,'{}'), a.created_at, a.updated_at
+	          FROM apps a
+	          LEFT JOIN schemas s ON a.schema_id = s.id
 	          WHERE ` + strings.Join(where, " AND ") + `
-	          ORDER BY id ASC
+	          ORDER BY a.id ASC
 	          LIMIT ?`
 	args = append(args, limit+1)
 
@@ -641,6 +654,7 @@ func (a *API) listApps(w http.ResponseWriter, r *http.Request) {
 			&responseTypes,
 			&row.State,
 			&row.SchemaID,
+			&row.SchemaType,
 			&metadataStr,
 			&row.CreatedAt,
 			&row.UpdatedAt,
@@ -1321,10 +1335,11 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 		cursor = c
 	}
 
-	// Optional schema_type filter (e.g. ?schema_type=app for OIDC clients).
+	// Optional schema_type filter for a specific user-family schema.
 	schemaType := r.URL.Query().Get("schema_type")
 	// Optional org_id filter for org context scoping.
 	orgIDFilter := r.URL.Query().Get("org_id")
+	stateFilter := r.URL.Query().Get("state")
 
 	var rows *sql.Rows
 	var err error
@@ -1332,10 +1347,11 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	// Build query dynamically based on filters.
 	var where []string
 	var args []any
-	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.user_type, i.state, i.metadata, i.created_at, i.updated_at
-		 FROM users i`
+	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.user_type, i.state,
+		COALESCE(i.schema_id,''), COALESCE(s.type,''), i.metadata, i.created_at, i.updated_at
+		 FROM users i
+		 LEFT JOIN schemas s ON i.schema_id = s.id`
 	if schemaType != "" {
-		baseSelect += ` JOIN schemas s ON i.schema_id = s.id`
 		where = append(where, `s.type = ?`)
 		args = append(args, schemaType)
 	}
@@ -1343,6 +1359,10 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	if orgIDFilter != "" {
 		where = append(where, `i.id IN (SELECT user_id FROM memberships WHERE resource_type='org' AND resource_id=?)`)
 		args = append(args, orgIDFilter)
+	}
+	if stateFilter != "" {
+		where = append(where, `i.state = ?`)
+		args = append(args, stateFilter)
 	}
 	where = append(where, `i.id > ?`)
 	args = append(args, cursor)
@@ -2379,14 +2399,20 @@ func (a *API) loadCapabilities(_ *http.Request, _ string) []string {
 
 func scanUserRow(rows *sql.Rows) (UserResponse, error) {
 	var resp UserResponse
-	var displayName, metaStr sql.NullString
+	var displayName, metaStr, schemaID, schemaType sql.NullString
 	err := rows.Scan(&resp.ID, &resp.OrgID, &resp.Identifier, &displayName, &resp.UserType, &resp.State,
-		&metaStr, &resp.CreatedAt, &resp.UpdatedAt)
+		&schemaID, &schemaType, &metaStr, &resp.CreatedAt, &resp.UpdatedAt)
 	if err != nil {
 		return resp, err
 	}
 	if displayName.Valid {
 		resp.DisplayName = displayName.String
+	}
+	if schemaID.Valid {
+		resp.SchemaID = schemaID.String
+	}
+	if schemaType.Valid {
+		resp.SchemaType = schemaType.String
 	}
 	if metaStr.Valid {
 		json.Unmarshal([]byte(metaStr.String), &resp.Metadata)

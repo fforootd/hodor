@@ -1,5 +1,4 @@
 <template>
-  <!-- eslint-disable vue/valid-v-for -->
   <div class="space-y-6 pb-10">
     <section class="sticky top-0 z-10 rounded-3xl border bg-background/95 p-6 shadow-sm backdrop-blur">
       <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">

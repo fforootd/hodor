@@ -1,5 +1,6 @@
 <template>
   <ResourceListView
+    v-model:search-query="searchQuery"
     title="Groups"
     singular-title="Group"
     create-route="/groups/new"
@@ -7,7 +8,6 @@
     :loading="loading"
     :columns="columns"
     :search-fields="['name', 'id']"
-    v-model:search-query="searchQuery"
   >
     <template #empty-icon><UsersRound /></template>
   </ResourceListView>

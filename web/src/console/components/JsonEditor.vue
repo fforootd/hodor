@@ -1,10 +1,10 @@
 <template>
   <div class="json-editor-wrap">
-    <div class="editor-toolbar" v-if="!hideToolbar">
+    <div v-if="!hideToolbar" class="editor-toolbar">
       <span class="editor-label">{{ label }}</span>
       <div class="toolbar-actions">
-        <button type="button" class="tb-btn" @click="format" title="Format JSON">⎘ Format</button>
-        <button type="button" class="tb-btn" @click="copy" title="Copy to clipboard">📋 Copy</button>
+        <button type="button" class="tb-btn" title="Format JSON" @click="format">⎘ Format</button>
+        <button type="button" class="tb-btn" title="Copy to clipboard" @click="copy">📋 Copy</button>
       </div>
     </div>
     <div class="editor-container" :style="{ height: height }">

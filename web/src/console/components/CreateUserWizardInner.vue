@@ -83,8 +83,8 @@
                   <Checkbox
                     :id="'org-' + org.id"
                     :checked="selectedOrgs.includes(String(org.id))"
-                    @update:checked="$emit('toggle-org', String(org.id))"
                     class="mt-0.5"
+                    @update:checked="$emit('toggle-org', String(org.id))"
                   />
                   <div class="min-w-0 flex-1">
                     <label
@@ -217,7 +217,7 @@
               </p>
             </div>
 
-            <RadioGroup :model-value="authMethod" @update:model-value="$emit('update:auth-method', String($event ?? ''))" class="space-y-3">
+            <RadioGroup :model-value="authMethod" class="space-y-3" @update:model-value="$emit('update:auth-method', String($event ?? ''))">
               <!-- Invite Email (only if magic_link is enabled) -->
               <div
                 v-if="authMethodsConfig.magic_link?.enabled"
@@ -225,7 +225,7 @@
                 :class="authMethod === 'invite' ? 'border-primary bg-primary/5' : ''"
                 @click="$emit('update:auth-method', 'invite')"
               >
-                <RadioGroupItem value="invite" id="auth-invite" />
+                <RadioGroupItem id="auth-invite" value="invite" />
                 <div class="flex flex-col flex-1 min-w-0">
                   <div class="flex items-center text-sm font-medium">
                     <Mail class="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
@@ -245,7 +245,7 @@
                   class="flex items-center gap-3 p-4 hover:bg-muted/50 cursor-pointer"
                   @click="$emit('update:auth-method', 'password')"
                 >
-                  <RadioGroupItem value="password" id="auth-password" />
+                  <RadioGroupItem id="auth-password" value="password" />
                   <div class="flex flex-col flex-1 min-w-0">
                     <div class="flex items-center text-sm font-medium">
                       <Lock class="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
@@ -277,7 +277,7 @@
                 :class="authMethod === 'passwordless' ? 'border-primary bg-primary/5' : ''"
                 @click="$emit('update:auth-method', 'passwordless')"
               >
-                <RadioGroupItem value="passwordless" id="auth-passwordless" />
+                <RadioGroupItem id="auth-passwordless" value="passwordless" />
                 <div class="flex flex-col flex-1 min-w-0">
                   <div class="flex items-center text-sm font-medium">
                     <Shield class="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
@@ -362,15 +362,15 @@
           <Button
             variant="outline"
             size="sm"
-            @click="$emit('prev')"
             :disabled="currentStep === 0 || submitting"
+            @click="$emit('prev')"
           >
             Back
           </Button>
           <Button
             size="sm"
-            @click="$emit('next')"
             :disabled="!canProceed || submitting"
+            @click="$emit('next')"
           >
             <Loader2 v-if="submitting" class="w-4 h-4 mr-2 animate-spin" />
             {{ isLastStep ? (submitting ? 'Creating...' : 'Create User') : 'Continue' }}

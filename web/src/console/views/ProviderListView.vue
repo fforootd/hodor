@@ -35,13 +35,13 @@
 
     <DataTable
       v-if="providers.length > 0"
+      v-model:row-selection="selectedRows"
       :columns="columns as any"
       :data="providers"
-      v-model:rowSelection="selectedRows"
     >
       <template #toolbar="{ table }">
         <div class="flex items-center justify-between w-full mb-4">
-          <div class="w-full max-w-lg relative" ref="searchContainerRef">
+          <div ref="searchContainerRef" class="w-full max-w-lg relative">
             <div class="relative w-full">
               <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
               <Input
@@ -141,7 +141,7 @@
           </div>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger as-child>
               <Button variant="outline" class="ml-auto">
                 View <ChevronDown class="ml-2 h-4 w-4" />
               </Button>

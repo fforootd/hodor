@@ -7,7 +7,7 @@
       </div>
       <!-- New Schema Type button -->
       <Dialog v-model:open="showCreateDialog">
-        <DialogTrigger asChild>
+        <DialogTrigger as-child>
           <Button size="sm" class="gap-1.5">
             <Plus class="size-3.5" />
             New Schema Type
@@ -33,7 +33,7 @@
           </div>
           <DialogFooter>
             <Button variant="outline" @click="showCreateDialog = false">Cancel</Button>
-            <Button @click="createSchemaType" :disabled="!newTypeName.trim() || creatingType">
+            <Button :disabled="!newTypeName.trim() || creatingType" @click="createSchemaType">
               {{ creatingType ? 'Creating…' : 'Create' }}
             </Button>
           </DialogFooter>
