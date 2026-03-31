@@ -22,6 +22,7 @@ import (
 type Service struct {
 	srv            *server.Server
 	db             *sql.DB
+	dialect        string          // "sqlite", "d1", "libsql", "postgres"
 	storeID        string          // internal _system store
 	modelID        string          // current authorization model ID
 	enabledModules map[string]bool // marketplace modules currently enabled
@@ -54,7 +55,7 @@ func New(ctx context.Context, db *sql.DB, dialect string) (*Service, error) {
 		return nil, fmt.Errorf("fga: create server: %w", err)
 	}
 
-	svc := &Service{srv: srv, db: db, enabledModules: make(map[string]bool)}
+	svc := &Service{srv: srv, db: db, dialect: dialect, enabledModules: make(map[string]bool)}
 
 	// 4. Ensure the internal _system store exists.
 	if err := svc.ensureSystemStore(ctx); err != nil {

@@ -36,6 +36,7 @@
 | [023](adr/023-wide-events.md) | Wide Events as Internal Observability Primitive | Accepted | 2026-03-29 |
 | [024](adr/024-risk-evaluation-policy-consumers.md) | Risk Evaluation and Policy Consumers | Accepted | 2026-03-30 |
 | [025](adr/025-explicit-bootstrap-and-local-recovery.md) | Explicit Bootstrap and Local Break-Glass Recovery | Proposed | 2026-03-31 |
+| [026](adr/026-cloud-container-per-tenant.md) | Cloud Deployment — Container-per-Tenant with D1 | Proposed | 2026-03-31 |
 
 ## Architecture
 
@@ -105,4 +106,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 026
+- **Next ADR number**: 027

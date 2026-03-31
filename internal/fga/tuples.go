@@ -3,15 +3,26 @@ package fga
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
+
+	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/logging"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
 )
 
 // WriteTuples writes multiple relationship tuples to the system store in a single request.
+// On D1 (which doesn't support transactions), falls back to direct SQL inserts.
 func (s *Service) WriteTuples(ctx context.Context, tuples ...[3]string) error {
 	if len(tuples) == 0 {
 		return nil
+	}
+
+	// D1 doesn't support the transactions that OpenFGA's Write uses internally.
+	// Fall back to direct SQL inserts for D1.
+	if s.dialect == "d1" {
+		return s.writeTuplesDirect(ctx, tuples...)
 	}
 
 	keys := make([]*openfgav1.TupleKey, len(tuples))
@@ -33,6 +44,45 @@ func (s *Service) WriteTuples(ctx context.Context, tuples ...[3]string) error {
 		return fmt.Errorf("fga: write tuples: %w", err)
 	}
 	return nil
+}
+
+// writeTuplesDirect inserts tuples into the OpenFGA tuple table via direct SQL,
+// bypassing OpenFGA's transactional Write method. Used for D1 which lacks
+// transaction support.
+func (s *Service) writeTuplesDirect(ctx context.Context, tuples ...[3]string) error {
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	for _, t := range tuples {
+		user, relation, object := t[0], t[1], t[2]
+
+		// Parse "type:id" format.
+		userType, userID := splitTypeID(user)
+		objectType, objectID := splitTypeID(object)
+
+		ulid := id.New()
+
+		_, err := s.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO tuple
+			 (store, object_type, object_id, relation,
+			  user_object_type, user_object_id, user_relation, user_type,
+			  ulid, inserted_at, condition_name, condition_context)
+			 VALUES (?, ?, ?, ?, ?, ?, '', 'user', ?, ?, '', NULL)`,
+			s.storeID, objectType, objectID, relation,
+			userType, userID,
+			ulid, now,
+		)
+		if err != nil {
+			return fmt.Errorf("fga: direct write tuple [%s %s %s]: %w", user, relation, object, err)
+		}
+	}
+	return nil
+}
+
+// splitTypeID splits "type:id" into ("type", "id"). If no colon, returns ("", input).
+func splitTypeID(s string) (string, string) {
+	if i := strings.Index(s, ":"); i >= 0 {
+		return s[:i], s[i+1:]
+	}
+	return "", s
 }
 
 // DeleteTuples removes multiple relationship tuples from the system store.
