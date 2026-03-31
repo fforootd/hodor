@@ -199,6 +199,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
+import { notifyError } from '@/lib/notify'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -386,7 +387,7 @@ async function createFlow() {
     }
     await loadFlows()
   } catch (e: any) {
-    console.error('Failed to create login flow:', e)
+    notifyError('Failed to create login flow', e)
   } finally {
     creating.value = false
   }

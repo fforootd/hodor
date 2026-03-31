@@ -666,6 +666,7 @@
   import { computed, onMounted, reactive, ref } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import { api } from '@/api/client'
+  import { notifyError } from '@/lib/notify'
   import type { FlowBranding } from '@/api/branding'
   import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
   import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1017,7 +1018,7 @@
       })
       await loadFlow()
     } catch (e: any) {
-      console.error('Failed to save login flow:', e)
+      notifyError('Failed to save login flow', e)
     } finally {
       saving.value = false
     }
@@ -1052,7 +1053,7 @@
       )
       form.branding[field] = resp.url
     } catch (e) {
-      console.error(`Failed to upload ${field}:`, e)
+      notifyError(`Failed to upload ${field}`, e)
     } finally {
       assetBusy[field] = false
       input.value = ''
@@ -1073,7 +1074,7 @@
       form.branding[field] = resp.url
       assetImportUrls[field] = ''
     } catch (e) {
-      console.error(`Failed to import ${field}:`, e)
+      notifyError(`Failed to import ${field}`, e)
     } finally {
       assetBusy[field] = false
     }
@@ -1089,7 +1090,7 @@
       }
       form.branding[field] = ''
     } catch (e) {
-      console.error(`Failed to remove ${field}:`, e)
+      notifyError(`Failed to remove ${field}`, e)
     } finally {
       assetBusy[field] = false
     }
@@ -1102,7 +1103,7 @@
       await api.post(`/v1/login-flows/${flow.value.id}/promote`, {})
       await loadFlow()
     } catch (e: any) {
-      console.error('Failed to promote flow:', e)
+      notifyError('Failed to promote flow', e)
     } finally {
       promoting.value = false
     }

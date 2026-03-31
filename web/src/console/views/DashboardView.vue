@@ -71,7 +71,7 @@ const stats = ref([
   { label: 'Events', value: '—', icon: markRaw(Activity), description: 'Last 1 hour' },
 ])
 
-const recentEvents = ref<any[]>([])
+const recentEvents = ref<{ id: string; event_type: string; subject: string; time_ago: string }[]>([])
 
 function timeAgo(ts: string): string {
   const d = Date.now() - new Date(ts).getTime()
@@ -114,7 +114,9 @@ onMounted(async () => {
         time_ago: timeAgo(e.created_at),
       }))
     }
-  } catch { /* demo fallback */ }
+  } catch (err) {
+    console.error('Failed to load dashboard data', err)
+  }
 })
 </script>
 

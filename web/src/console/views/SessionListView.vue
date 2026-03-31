@@ -172,6 +172,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { sessionApi, userApi, orgApi, type Session } from '@/api/resources'
 import type { IdentityResponse } from '@zitadel/client-js'
 import { getSessionUserFilter } from '@/console/utils/route-filters'
+import { notifyError } from '@/lib/notify'
 
 /** Session with a computed state field and optional server-side extras. */
 type SessionWithState = Session & { state: string } & Record<string, any>
@@ -179,7 +180,6 @@ import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Popover, PopoverAnchor, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { 
@@ -383,7 +383,7 @@ async function revoke(id: string) {
       sessions.value = newSessions
     }
   } catch (err) {
-    console.error("Failed to revoke session", err)
+    notifyError('Failed to revoke session', err)
     // Refresh to sync state if we got a 404 because it was already revoked
     const sessRes = await sessionApi.list(
       routeUserFilter.value ? { user_id: routeUserFilter.value } : undefined,

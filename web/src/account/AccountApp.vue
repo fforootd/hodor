@@ -9,6 +9,7 @@
   />
 
   <div v-else class="min-h-screen bg-background">
+    <Toaster />
     <!-- Header -->
     <header class="border-b bg-card">
       <div class="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
@@ -195,6 +196,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
+import { Toaster } from '@/components/ui/sonner'
+import { notifyError } from '@/lib/notify'
 import { LogOut } from 'lucide-vue-next'
 
 const DEFAULT_BRANDING: Branding = {
@@ -224,7 +227,9 @@ const {
   async () => {
     try {
       branding.value = await brandingApi.get()
-    } catch {}
+    } catch {
+      // Non-critical: fall back to default branding
+    }
     await loadProfile()
   },
   {
@@ -279,14 +284,18 @@ async function loadSessions() {
   try {
     const data = await api.get<any>('/v1/account/sessions')
     sessions.value = data.sessions || []
-  } catch {}
+  } catch (err) {
+    console.error('Failed to load sessions', err)
+  }
 }
 
 async function loadActivity() {
   try {
     const data = await api.get<any>('/v1/account/activity?limit=10')
     events.value = data.events || []
-  } catch {}
+  } catch (err) {
+    console.error('Failed to load activity', err)
+  }
 }
 
 async function saveProfile() {
@@ -306,7 +315,9 @@ async function saveProfile() {
     await api.patch<any>('/v1/account/profile', body)
     await loadProfile()
     await loadActivity()
-  } catch {}
+  } catch (err) {
+    notifyError('Failed to save profile', err)
+  }
   saving.value = false
 }
 
@@ -315,7 +326,9 @@ async function revokeSession(id: string) {
     await api.post<any>(`/v1/account/sessions/${id}/revoke`, {})
     sessions.value = sessions.value.filter(s => s.id !== id)
     await loadActivity()
-  } catch {}
+  } catch (err) {
+    notifyError('Failed to revoke session', err)
+  }
 }
 
 async function revokeOthers() {
@@ -323,7 +336,9 @@ async function revokeOthers() {
     await api.post<any>('/v1/account/sessions/revoke-others', {})
     await loadSessions()
     await loadActivity()
-  } catch {}
+  } catch (err) {
+    notifyError('Failed to revoke sessions', err)
+  }
 }
 
 function signOut() {

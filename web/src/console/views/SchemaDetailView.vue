@@ -141,6 +141,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { schemaApi, type Schema } from '@/api/resources'
+import { notifyError } from '@/lib/notify'
 import SchemaAnnotationRenderer from '@/console/components/schema/SchemaAnnotationRenderer.vue'
 import SchemaUpgradePreview from '@/console/components/schema/SchemaUpgradePreview.vue'
 
@@ -437,7 +438,9 @@ async function promoteThis() {
     const s = await schemaApi.get(schema.value.id)
     schema.value = s
     versionHistory.value = await schemaApi.listByType(s.type)
-  } catch {}
+  } catch (err) {
+    notifyError('Failed to promote schema', err)
+  }
   promoteLoading.value = false
 }
 
