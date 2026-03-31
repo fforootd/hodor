@@ -52,9 +52,22 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/v1': 'http://localhost:8080',
+      '/openapi.json': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/healthz': 'http://localhost:8080',
       '/readyz': 'http://localhost:8080',
       '/assets': 'http://localhost:8080',
+      // OIDC endpoints (Go OIDC provider on :8080).
+      '/.well-known': 'http://localhost:8080',
+      '/authorize': 'http://localhost:8080',
+      '/oauth': 'http://localhost:8080',
+      '/userinfo': 'http://localhost:8080',
+      '/end_session': 'http://localhost:8080',
+      '/keys': 'http://localhost:8080',
+      '/revoke': 'http://localhost:8080',
+      '/devicecode': 'http://localhost:8080',
     },
   },
 })

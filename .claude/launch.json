@@ -10,7 +10,7 @@
     {
       "name": "go-backend",
       "runtimeExecutable": "go",
-      "runtimeArgs": ["run", "./cmd/zitadel", "start", "-c", "fixtures/zitadel.dev.toml"],
+      "runtimeArgs": ["run", "-tags", "devweb", "./cmd/zitadel", "start", "-c", "fixtures/zitadel.dev.toml"],
       "port": 8080
     }
   ]

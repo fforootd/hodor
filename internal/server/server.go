@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	cryptotls "crypto/tls"
-	"embed"
 	"fmt"
 	"io/fs"
 	"net"
@@ -39,9 +38,6 @@ import (
 	"github.com/zitadel/zitadel/internal/ui"
 	"github.com/zitadel/zitadel/internal/ztls"
 )
-
-//go:embed all:webdist
-var webAssets embed.FS
 
 // Server is the main Zitadel HTTP server.
 type Server struct {

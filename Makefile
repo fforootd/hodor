@@ -1,4 +1,4 @@
-.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ci-test fmt fmt-check vet release-snapshot quality check openapi-export client-js test-web test-e2e typecheck lint-web
+.PHONY: dev dev-hot dev-full dev-clean test fuzz lint generate build clean web web-install webdist ensure-webdist ci-test fmt fmt-check vet release-snapshot quality check openapi-export client-js test-web test-e2e typecheck lint-web
 
 # ─── Build DAG ──────────────────────────────────────────────
 # web → webdist → Go binary
@@ -35,6 +35,16 @@ webdist-only:
 	rm -rf internal/server/webdist
 	cp -r web/dist internal/server/webdist
 
+# Create minimal placeholder webdist so go build/test works without -tags devweb.
+ensure-webdist:
+	@if [ ! -d internal/server/webdist ]; then \
+		mkdir -p internal/server/webdist/src/login internal/server/webdist/src/console internal/server/webdist/src/account internal/server/webdist/assets; \
+		echo '<!DOCTYPE html><html><body>dev placeholder</body></html>' > internal/server/webdist/src/login/index.html; \
+		echo '<!DOCTYPE html><html><body>dev placeholder</body></html>' > internal/server/webdist/src/console/index.html; \
+		echo '<!DOCTYPE html><html><body>dev placeholder</body></html>' > internal/server/webdist/src/account/index.html; \
+		echo "Created placeholder webdist (use 'make webdist' for real assets)"; \
+	fi
+
 # ─── Go ────────────────────────────────────────────────────
 
 # Development — run server with embedded assets.
@@ -48,6 +58,7 @@ dev-full: webdist
 # Hot reload development — Vite HMR on :5173 proxying to Go on :8080.
 # Access the app at http://localhost:5173 for instant CSS/JS reloads.
 # Go server still needs manual restart on .go changes (use `air` for that).
+# Uses -tags devweb so the Go binary compiles without webdist/.
 dev-hot: node_modules
 	@echo "─── Starting Vite dev server (:5173) + Go server (:8080) ───"
 	@echo "→  Open http://localhost:5173 for hot-reload UI"
@@ -57,7 +68,7 @@ dev-hot: node_modules
 	@sleep 0.5
 	@trap 'kill 0' EXIT; \
 	npm run dev & \
-	go run ./cmd/zitadel start -c fixtures/zitadel.dev.toml
+	go run -tags devweb ./cmd/zitadel start -c fixtures/zitadel.dev.toml
 
 # Clean start — wipe DB and restart with dev config.
 dev-clean:
