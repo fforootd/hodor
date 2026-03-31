@@ -11,34 +11,72 @@
     "inherit": true
   },
   "properties": {
+    "default_locale": {
+      "type": "string",
+      "default": "en",
+      "description": "Default locale used when a notification request does not provide one"
+    },
+    "email": {
+      "type": "object",
+      "properties": {
+        "default_channel": {
+          "type": "string",
+          "default": "dev_stdout"
+        },
+        "channels": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/NotificationChannel"
+          }
+        }
+      }
+    },
+    "sms": {
+      "type": "object",
+      "properties": {
+        "default_channel": {
+          "type": "string",
+          "default": "dev_stdout"
+        },
+        "channels": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/NotificationChannel"
+          }
+        }
+      }
+    },
     "email_from": {
       "type": "string",
       "format": "email",
-      "description": "Sender email address"
+      "description": "Deprecated legacy alias for the default SMTP sender address"
     },
     "email_from_name": {
       "type": "string",
-      "description": "Sender display name"
+      "description": "Deprecated legacy alias for the default SMTP sender name"
     },
     "smtp_host": {
       "type": "string",
-      "description": "SMTP server hostname"
+      "description": "Deprecated legacy alias for the default SMTP hostname"
     },
     "smtp_port": {
       "type": "integer",
       "default": 587,
-      "description": "SMTP port"
+      "description": "Deprecated legacy alias for the default SMTP port"
     },
     "smtp_user": {
-      "type": "string"
+      "type": "string",
+      "description": "Deprecated legacy alias for the default SMTP username"
     },
     "smtp_password": {
       "type": "string",
-      "x-sensitive": true
+      "x-sensitive": true,
+      "description": "Deprecated legacy alias for the default SMTP password"
     },
     "smtp_tls": {
       "type": "boolean",
-      "default": true
+      "default": true,
+      "description": "Deprecated legacy alias for the default SMTP TLS flag"
     },
     "sms_provider": {
       "type": "string",
@@ -47,16 +85,83 @@
         "custom",
         "none"
       ],
-      "default": "none"
+      "default": "none",
+      "description": "Deprecated legacy alias for the default SMS provider"
     },
     "sms_config": {
       "type": "object",
-      "description": "Provider-specific SMS configuration"
+      "description": "Deprecated legacy alias for the default SMS provider configuration"
     },
     "webhook_url": {
       "type": "string",
       "format": "uri",
-      "description": "Default webhook endpoint"
+      "description": "Deprecated legacy alias for the default custom HTTP URL"
+    }
+  },
+  "$defs": {
+    "NotificationChannel": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "driver": {
+          "type": "string",
+          "enum": [
+            "stdout",
+            "smtp",
+            "custom_http"
+          ]
+        },
+        "preset": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "from_name": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "default": 587
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string",
+          "x-sensitive": true
+        },
+        "tls": {
+          "type": "boolean",
+          "default": true
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "method": {
+          "type": "string",
+          "default": "POST"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body_template": {
+          "type": "string"
+        }
+      }
     }
   }
 }

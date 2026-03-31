@@ -1,0 +1,46 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/settings",
+  "$version": "1.0",
+  "type": "object",
+  "x-settings": {
+    "hierarchy": [
+      "instance",
+      "org"
+    ],
+    "merge_strategy": "deep_merge",
+    "inherit": true
+  },
+  "properties": {
+    "default_locale": {
+      "type": "string",
+      "default": "en",
+      "description": "Fallback locale for notification templates"
+    },
+    "templates": {
+      "type": "object",
+      "description": "Template overrides keyed by template key",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "locales": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string"
+                },
+                "text_body": {
+                  "type": "string"
+                },
+                "html_body": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

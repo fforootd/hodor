@@ -542,6 +542,20 @@
       "nav": "hidden",
       "fga_type": "settings",
       "fga_scope": "instance"
+    },
+    "notification_templates": {
+      "$ref": "schemas/notification_templates.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Notification Templates",
+      "singular": "Notification Templates",
+      "path": "settings/notification-templates",
+      "icon": "📝",
+      "sort_order": 8,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
     }
   },
   "type": "object",
