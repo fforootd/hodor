@@ -5,11 +5,9 @@
         <h1 class="text-2xl font-semibold tracking-tight">Organizations</h1>
         <p class="text-sm text-muted-foreground">{{ loading ? 'Loading…' : `${items.length} organization${items.length !== 1 ? 's' : ''}` }}</p>
       </div>
-      <Button as-child>
-        <router-link to="/orgs/new">
-          <Plus class="mr-2 size-4" />
-          New Organization
-        </router-link>
+      <Button @click="showCreate = true">
+        <Plus class="mr-2 size-4" />
+        New Organization
       </Button>
     </div>
 
@@ -25,11 +23,9 @@
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent v-if="!searchQuery">
-        <Button as-child>
-          <router-link to="/orgs/new">
-            <Plus class="mr-2 size-4" />
-            New Organization
-          </router-link>
+        <Button @click="showCreate = true">
+          <Plus class="mr-2 size-4" />
+          New Organization
         </Button>
       </EmptyContent>
     </Empty>
@@ -79,13 +75,25 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
+
+    <ResourceCreateSheet
+      v-model:open="showCreate"
+      title="Create Organization"
+      description="Use the schema-backed form, inspect the canonical JSON, or copy the API call."
+      schema-type="org"
+      api-path="/v1/orgs"
+      resource-label="Organization"
+      :create-fn="(payload) => orgApi.create(payload)"
+      @created="onCreated"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, h } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { orgApi, type Org } from '@/api/resources'
+import ResourceCreateSheet from '@/console/components/ResourceCreateSheet.vue'
 import { useResourceList } from '@/console/composables/useResourceList'
 import { formatDate } from '@/console/utils/format'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
@@ -109,6 +117,8 @@ const { items, loading, searchQuery, filteredItems, fetch: fetchOrgs } = useReso
   searchFields: ['name', 'id'],
 })
 
+const router = useRouter()
+const showCreate = ref(false)
 const selectedRows = ref({})
 const globalSearch = ref('')
 
@@ -135,6 +145,10 @@ function getSortIcon(column: any) {
 }
 
 onMounted(fetchOrgs)
+
+function onCreated(id: string) {
+  router.push(`/orgs/${id}`)
+}
 
 const columnHelper = createColumnHelper<Org>()
 

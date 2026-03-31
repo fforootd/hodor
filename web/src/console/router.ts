@@ -12,7 +12,7 @@ const router = createRouter({
     // Unified aggregate views
     { path: '/users', name: 'users', component: () => import('./views/UnifiedUsersView.vue') },
     { path: '/applications', name: 'applications', component: () => import('./views/UnifiedAppsView.vue') },
-    { path: '/applications/new', name: 'application-create', component: () => import('./views/AppCreateView.vue') },
+    // Create views now use ResourceCreateSheet (inline sheet on list page)
     { path: '/applications/:id', name: 'application-detail', component: () => import('./views/AppDetailView.vue') },
     // Dynamic schema-type identity list: /s/human_user, /s/app, /s/ai_agent, etc. (backward compat)
     { path: '/s/:schemaType', name: 'schema-identities', component: () => import('./views/IdentityListView.vue'), props: true },
@@ -25,27 +25,24 @@ const router = createRouter({
     { path: '/identities/:id', redirect: to => `/users/${to.params.id}` },
     // Orgs — dedicated routes (not a schema type)
     { path: '/orgs', name: 'orgs', component: () => import('./views/OrgListView.vue') },
-    { path: '/orgs/new', name: 'org-create', component: () => import('./views/OrgCreateView.vue') },
     { path: '/orgs/:id', name: 'org-detail', component: () => import('./views/OrgDetailView.vue') },
     { path: '/s/org', redirect: '/orgs' },
-    { path: '/s/org/new', redirect: '/orgs/new' },
+    { path: '/s/org/new', redirect: '/orgs' },
     { path: '/s/org/:id', redirect: to => `/orgs/${to.params.id}` },
     // Groups — dedicated list + detail
     { path: '/groups', name: 'groups', component: () => import('./views/GroupListView.vue') },
-    { path: '/groups/new', name: 'group-create', component: () => import('./views/GroupCreateView.vue') },
     { path: '/groups/:id', name: 'group-detail', component: () => import('./views/GroupDetailView.vue') },
     { path: '/s/group', redirect: '/groups' },
-    { path: '/s/group/new', redirect: '/groups/new' },
+    { path: '/s/group/new', redirect: '/groups' },
     { path: '/s/group/:id', redirect: to => `/groups/${to.params.id}` },
     // Projects — dedicated list + detail
     { path: '/projects', name: 'projects', component: () => import('./views/ProjectListView.vue') },
-    { path: '/projects/new', name: 'project-create', component: () => import('./views/ProjectCreateView.vue') },
     { path: '/projects/:id', name: 'project-detail', component: () => import('./views/ProjectDetailView.vue') },
     { path: '/s/project', redirect: '/projects' },
-    { path: '/s/project/new', redirect: '/projects/new' },
+    { path: '/s/project/new', redirect: '/projects' },
     { path: '/s/project/:id', redirect: to => `/projects/${to.params.id}` },
     { path: '/s/app', redirect: '/applications' },
-    { path: '/s/app/new', redirect: '/applications/new' },
+    { path: '/s/app/new', redirect: '/applications' },
     { path: '/s/app/:id', redirect: to => `/applications/${to.params.id}` },
     // System views
     { path: '/schemas', name: 'schemas', component: () => import('./views/SchemaListView.vue') },

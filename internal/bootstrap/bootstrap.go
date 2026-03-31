@@ -319,7 +319,7 @@ func seedDefaultLoginFlow(ctx context.Context, db *database.DB) error {
 	}
 
 	flowID := id.New()
-	defaultConfig := `{"captcha":{"provider":"altcha","mode":"risk_based","difficulty":3},"fingerprint":{"enabled":true,"provider":"thumbmarkjs"},"rate_limit":{"max_attempts":5,"window_seconds":300,"scope":"ip"},"telemetry":{"enabled":true,"sample_rate":1.0}}`
+	defaultConfig := `{"captcha":{"provider":"altcha","mode":"never","difficulty":3},"fingerprint":{"enabled":true,"provider":"thumbmarkjs"},"rate_limit":{"max_attempts":5,"window_seconds":300,"scope":"ip"},"telemetry":{"enabled":true,"sample_rate":1.0}}`
 
 	_, err = db.SQL().ExecContext(ctx,
 		`INSERT INTO login_flows (id, name, strategy, is_default, enabled, state, priority, config, audience, auth_methods, created_at, updated_at)

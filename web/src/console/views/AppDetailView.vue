@@ -29,46 +29,25 @@
       @update:json-valid="(value) => jsonValid = value"
     />
 
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle class="text-sm">System Information</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <dl class="grid grid-cols-[100px_1fr] gap-x-4 gap-y-2 text-sm">
-          <dt class="text-muted-foreground">ID</dt>
-          <dd class="font-mono text-xs break-all">{{ app.id }}</dd>
-          <dt class="text-muted-foreground">Org</dt>
-          <dd>{{ app.org_id || '—' }}</dd>
-          <dt class="text-muted-foreground">Schema</dt>
-          <dd>{{ app.schema_id || '—' }}</dd>
-          <dt class="text-muted-foreground">Created</dt>
-          <dd>{{ formatDateTime(app.created_at) }}</dd>
-          <dt class="text-muted-foreground">Updated</dt>
-          <dd>{{ formatDateTime(app.updated_at) }}</dd>
-        </dl>
-      </CardContent>
-    </Card>
-
-    <div v-if="error" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+    <div v-if="error" role="alert" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
       {{ error }}
     </div>
 
-    <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete Application</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete <strong>{{ app.name }}</strong>? This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter class="gap-2">
-          <Button variant="outline" @click="showDeleteConfirm = false">Cancel</Button>
-          <Button variant="destructive" :disabled="deleting" @click="deleteApp">
-            {{ deleting ? 'Deleting…' : 'Delete' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <SystemInfoCard
+      :id="app.id"
+      :org-id="app.org_id"
+      :schema-id="app.schema_id"
+      :created-at="app.created_at"
+      :updated-at="app.updated_at"
+    />
+
+    <ResourceDeleteDialog
+      v-model:open="showDeleteConfirm"
+      resource-name="Application"
+      :item-name="app.name"
+      :deleting="deleting"
+      @confirm="deleteApp"
+    />
 
     <Button variant="link" as-child class="px-0 text-muted-foreground">
       <router-link to="/applications">← Back to Applications</router-link>
@@ -82,9 +61,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { appApi, type App } from '@/api/resources'
+import ResourceDeleteDialog from '@/console/components/ResourceDeleteDialog.vue'
 import SchemaTabsEditor from '@/console/components/SchemaTabsEditor.vue'
+import SystemInfoCard from '@/console/components/SystemInfoCard.vue'
 import { useOrgContext } from '@/console/composables/useOrgContext'
-import { formatDateTime } from '@/console/utils/format'
 import {
   buildCurlSnippets,
   buildResourceWriteBody,
@@ -95,10 +75,6 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
 
 const route = useRoute()
 const router = useRouter()

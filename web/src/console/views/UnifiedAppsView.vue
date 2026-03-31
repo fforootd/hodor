@@ -7,11 +7,9 @@
           Manage OIDC and SAML applications{{ totalCount > 0 ? ` (${totalCount} total)` : '' }}
         </p>
       </div>
-      <Button as-child>
-        <router-link to="/applications/new">
-          <Plus class="mr-2 size-4" />
-          New Application
-        </router-link>
+      <Button @click="showCreate = true">
+        <Plus class="mr-2 size-4" />
+        New Application
       </Button>
     </div>
 
@@ -65,11 +63,9 @@
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button as-child>
-          <router-link to="/applications/new">
-            <Plus class="mr-2 size-4" />
-            New Application
-          </router-link>
+        <Button @click="showCreate = true">
+          <Plus class="mr-2 size-4" />
+          New Application
         </Button>
       </EmptyContent>
     </Empty>
@@ -119,13 +115,27 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
+
+    <ResourceCreateSheet
+      v-model:open="showCreate"
+      title="Create Application"
+      description="Fill the schema form, inspect the JSON payload, or copy the API call directly."
+      schema-type="app"
+      api-path="/v1/apps"
+      resource-label="Application"
+      :include-org-header="true"
+      :default-form-data="{ app_type: 'web', redirect_uris: [], grant_types: ['authorization_code'], response_types: ['code'] }"
+      :create-fn="(payload) => appApi.create(payload)"
+      @created="onCreated"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, h, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { appApi, type App } from '@/api/resources'
+import ResourceCreateSheet from '@/console/components/ResourceCreateSheet.vue'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
@@ -145,6 +155,8 @@ import {
 } from 'lucide-vue-next'
 import { createColumnHelper } from '@tanstack/vue-table'
 
+const router = useRouter()
+const showCreate = ref(false)
 const activeTab = ref('all')
 const allApps = ref<App[]>([])
 const selectedRows = ref({})
@@ -212,6 +224,10 @@ async function loadApps() {
 }
 
 onMounted(() => loadApps())
+
+function onCreated(id: string) {
+  router.push(`/applications/${id}`)
+}
 
 watch(currentOrgId, () => loadApps())
 

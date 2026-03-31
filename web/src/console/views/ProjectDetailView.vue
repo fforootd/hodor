@@ -70,46 +70,25 @@
       </CardContent>
     </Card>
 
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle class="text-sm">System Information</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <dl class="grid grid-cols-[100px_1fr] gap-x-4 gap-y-2 text-sm">
-          <dt class="text-muted-foreground">ID</dt>
-          <dd class="font-mono text-xs break-all">{{ project.id }}</dd>
-          <dt class="text-muted-foreground">Org</dt>
-          <dd>{{ project.org_id || '—' }}</dd>
-          <dt class="text-muted-foreground">Schema</dt>
-          <dd>{{ project.schema_id || '—' }}</dd>
-          <dt class="text-muted-foreground">Created</dt>
-          <dd>{{ formatDateTime(project.created_at) }}</dd>
-          <dt class="text-muted-foreground">Updated</dt>
-          <dd>{{ formatDateTime(project.updated_at) }}</dd>
-        </dl>
-      </CardContent>
-    </Card>
-
-    <div v-if="error" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+    <div v-if="error" role="alert" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
       {{ error }}
     </div>
 
-    <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete Project</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete <strong>{{ projectTitle }}</strong>? This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter class="gap-2">
-          <Button variant="outline" @click="showDeleteConfirm = false">Cancel</Button>
-          <Button variant="destructive" :disabled="deleting" @click="deleteProject">
-            {{ deleting ? 'Deleting…' : 'Delete' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <SystemInfoCard
+      :id="project.id"
+      :org-id="project.org_id"
+      :schema-id="project.schema_id"
+      :created-at="project.created_at"
+      :updated-at="project.updated_at"
+    />
+
+    <ResourceDeleteDialog
+      v-model:open="showDeleteConfirm"
+      resource-name="Project"
+      :item-name="projectTitle"
+      :deleting="deleting"
+      @confirm="deleteProject"
+    />
 
     <Dialog v-model:open="showAddMember">
       <DialogContent class="sm:max-w-md">
@@ -142,7 +121,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { projectApi, type Member, type Project } from '@/api/resources'
+import ResourceDeleteDialog from '@/console/components/ResourceDeleteDialog.vue'
 import SchemaTabsEditor from '@/console/components/SchemaTabsEditor.vue'
+import SystemInfoCard from '@/console/components/SystemInfoCard.vue'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import {
   buildCurlSnippets,
@@ -151,7 +132,6 @@ import {
   normalizeResourceData,
   type ResourceSchemaContext,
 } from '@/console/utils/schema-resource'
-import { formatDateTime } from '@/console/utils/format'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

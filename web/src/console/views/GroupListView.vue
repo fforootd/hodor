@@ -5,11 +5,9 @@
         <h1 class="text-2xl font-semibold tracking-tight">Groups</h1>
         <p class="text-sm text-muted-foreground">{{ loading ? 'Loading…' : `${items.length} group${items.length !== 1 ? 's' : ''}` }}</p>
       </div>
-      <Button as-child>
-        <router-link to="/groups/new">
-          <Plus class="mr-2 size-4" />
-          New Group
-        </router-link>
+      <Button @click="showCreate = true">
+        <Plus class="mr-2 size-4" />
+        New Group
       </Button>
     </div>
 
@@ -25,11 +23,9 @@
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent v-if="!searchQuery">
-        <Button as-child>
-          <router-link to="/groups/new">
-            <Plus class="mr-2 size-4" />
-            New Group
-          </router-link>
+        <Button @click="showCreate = true">
+          <Plus class="mr-2 size-4" />
+          New Group
         </Button>
       </EmptyContent>
     </Empty>
@@ -79,13 +75,26 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
+
+    <ResourceCreateSheet
+      v-model:open="showCreate"
+      title="Create Group"
+      description="Define the group with schema fields, inspect its JSON, or copy the request cURL."
+      schema-type="group"
+      api-path="/v1/groups"
+      resource-label="Group"
+      :include-org-header="true"
+      :create-fn="(payload) => groupApi.create(payload)"
+      @created="onCreated"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, h } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { groupApi, type Group } from '@/api/resources'
+import ResourceCreateSheet from '@/console/components/ResourceCreateSheet.vue'
 import { useResourceList } from '@/console/composables/useResourceList'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
@@ -108,6 +117,8 @@ const { items, loading, searchQuery, filteredItems, fetch: fetchGroups } = useRe
   searchFields: ['name', 'description', 'id'],
 })
 
+const router = useRouter()
+const showCreate = ref(false)
 const selectedRows = ref({})
 const globalSearch = ref('')
 
@@ -134,6 +145,10 @@ function getSortIcon(column: any) {
 }
 
 onMounted(fetchGroups)
+
+function onCreated(id: string) {
+  router.push(`/groups/${id}`)
+}
 
 const columnHelper = createColumnHelper<Group>()
 

@@ -70,44 +70,24 @@
       </CardContent>
     </Card>
 
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle class="text-sm">System Information</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <dl class="grid grid-cols-[100px_1fr] gap-x-4 gap-y-2 text-sm">
-          <dt class="text-muted-foreground">ID</dt>
-          <dd class="font-mono text-xs break-all">{{ org.id }}</dd>
-          <dt class="text-muted-foreground">Schema</dt>
-          <dd>{{ org.schema_id || '—' }}</dd>
-          <dt class="text-muted-foreground">Created</dt>
-          <dd>{{ formatDateTime(org.created_at) }}</dd>
-          <dt class="text-muted-foreground">Updated</dt>
-          <dd>{{ formatDateTime(org.updated_at) }}</dd>
-        </dl>
-      </CardContent>
-    </Card>
-
-    <div v-if="error" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+    <div v-if="error" role="alert" class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
       {{ error }}
     </div>
 
-    <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete Organization</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete <strong>{{ orgTitle }}</strong>? This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter class="gap-2">
-          <Button variant="outline" @click="showDeleteConfirm = false">Cancel</Button>
-          <Button variant="destructive" :disabled="deleting" @click="deleteOrg">
-            {{ deleting ? 'Deleting…' : 'Delete' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <SystemInfoCard
+      :id="org.id"
+      :schema-id="org.schema_id"
+      :created-at="org.created_at"
+      :updated-at="org.updated_at"
+    />
+
+    <ResourceDeleteDialog
+      v-model:open="showDeleteConfirm"
+      resource-name="Organization"
+      :item-name="orgTitle"
+      :deleting="deleting"
+      @confirm="deleteOrg"
+    />
 
     <Dialog v-model:open="showAddMember">
       <DialogContent class="sm:max-w-md">
@@ -140,7 +120,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { orgApi, orgMembersApi, type Org, type OrgMember } from '@/api/resources'
+import ResourceDeleteDialog from '@/console/components/ResourceDeleteDialog.vue'
 import SchemaTabsEditor from '@/console/components/SchemaTabsEditor.vue'
+import SystemInfoCard from '@/console/components/SystemInfoCard.vue'
 import {
   buildCurlSnippets,
   buildResourceWriteBody,
@@ -148,10 +130,11 @@ import {
   normalizeResourceData,
   type ResourceSchemaContext,
 } from '@/console/utils/schema-resource'
-import { formatDate, formatDateTime } from '@/console/utils/format'
+import { formatDate } from '@/console/utils/format'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+// Dialog still needed for Add Member dialog
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
