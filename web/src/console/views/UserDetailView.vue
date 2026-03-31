@@ -15,8 +15,8 @@
     </div>
 
     <template v-else-if="identity">
-      <section class="rounded-3xl border bg-gradient-to-br from-muted/50 via-background to-background p-6 shadow-sm">
-        <div class="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+      <section class="sticky top-0 z-10 rounded-3xl border bg-background/95 p-6 shadow-sm backdrop-blur">
+        <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div class="flex items-start gap-4">
             <Button variant="ghost" size="icon" as-child class="mt-1 shrink-0">
               <RouterLink :to="backRoute" aria-label="Back to users">
@@ -95,401 +95,419 @@
         </div>
       </section>
 
-      <div class="grid gap-4 xl:grid-cols-[1.2fr_1fr_0.9fr]">
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <CardTitle class="text-sm">Key Facts</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl v-if="summaryFacts.length" class="grid gap-4 sm:grid-cols-2">
-              <div
-                v-for="fact in summaryFacts"
-                :key="fact.label"
-                class="space-y-1 rounded-2xl border bg-muted/20 px-4 py-3"
-              >
-                <dt class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {{ fact.label }}
-                </dt>
-                <dd class="text-sm font-medium text-foreground">{{ fact.value }}</dd>
-              </div>
-            </dl>
-            <p v-else class="text-sm text-muted-foreground">
-              This identity does not expose schema-specific facts yet.
-            </p>
-          </CardContent>
-        </Card>
+      <Tabs v-model="activeTab" class="space-y-6">
+        <TabsList class="grid w-full grid-cols-2 gap-2 rounded-2xl bg-muted/50 p-1 md:grid-cols-4">
+          <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="security" data-testid="tab-security">Security & Sessions</TabsTrigger>
+          <TabsTrigger value="activity" data-testid="tab-activity">Activity</TabsTrigger>
+          <TabsTrigger value="edit" data-testid="tab-edit">Edit & API</TabsTrigger>
+        </TabsList>
 
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <CardTitle class="text-sm">Access Model</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-4">
-            <div class="space-y-2">
-              <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Supported auth methods
-              </p>
-              <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
-                <Badge
-                  v-for="method in authMethodItems"
-                  :key="method.name"
-                  variant="outline"
-                  class="gap-1.5 border-dashed text-xs"
-                  :class="authMethodBadgeClass(method)"
-                >
-                  <span>{{ method.label }}</span>
-                  <span class="text-[10px] uppercase tracking-wider opacity-75">
-                    {{ method.enabled ? (method.interactive ? 'interactive' : 'service') : 'disabled' }}
-                  </span>
-                </Badge>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No schema-defined auth methods.</p>
-            </div>
+        <TabsContent value="overview" class="space-y-6">
+          <div class="grid gap-6 xl:grid-cols-[1.35fr_minmax(0,0.95fr)]">
+            <Card class="rounded-3xl shadow-sm">
+              <CardHeader class="pb-3">
+                <CardTitle class="text-sm">Overview</CardTitle>
+              </CardHeader>
+              <CardContent class="space-y-5">
+                <section class="space-y-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <h2 class="text-sm font-semibold">Key facts</h2>
+                    <Badge variant="outline" class="text-xs">{{ summaryFacts.length }} facts</Badge>
+                  </div>
+                  <dl v-if="summaryFacts.length" class="grid gap-4 sm:grid-cols-2">
+                    <div
+                      v-for="fact in summaryFacts"
+                      :key="fact.label"
+                      class="space-y-1 rounded-2xl border bg-muted/20 px-4 py-3"
+                    >
+                      <dt class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        {{ fact.label }}
+                      </dt>
+                      <dd class="text-sm font-medium text-foreground">{{ fact.value }}</dd>
+                    </div>
+                  </dl>
+                  <p v-else class="text-sm text-muted-foreground">
+                    This identity does not expose schema-specific facts yet.
+                  </p>
+                </section>
 
-            <div class="space-y-2">
-              <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Capabilities
-              </p>
-              <div v-if="capabilityItems.length" class="flex flex-wrap gap-2">
-                <Badge v-for="capability in capabilityItems" :key="capability" variant="secondary" class="text-xs">
-                  {{ formatFieldLabel(capability) }}
-                </Badge>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">
-                No explicit capabilities attached to this identity.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+                <Separator />
 
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <CardTitle class="text-sm">Timestamps</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl class="space-y-3 text-sm">
-              <div class="flex items-center justify-between gap-4">
-                <dt class="text-muted-foreground">Created</dt>
-                <dd class="text-right font-medium">{{ formatDateTime(identity.created_at) }}</dd>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <dt class="text-muted-foreground">Updated</dt>
-                <dd class="text-right font-medium">{{ formatDateTime(identity.updated_at) }}</dd>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <dt class="text-muted-foreground">Organizations</dt>
-                <dd class="text-right font-medium">{{ userOrgs.length }}</dd>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <dt class="text-muted-foreground">Sessions</dt>
-                <dd class="text-right font-medium">{{ sessions.length }}</dd>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <dt class="text-muted-foreground">Recent Events</dt>
-                <dd class="text-right font-medium">{{ recentEvents.length }}</dd>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <dt class="text-muted-foreground">Trace Groups</dt>
-                <dd class="text-right font-medium">{{ recentTraces.length }}</dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-      </div>
+                <section class="space-y-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <h2 class="text-sm font-semibold">Access & Security</h2>
+                    <Badge variant="secondary" class="text-xs">{{ enabledAuthMethodItems.length }} enabled</Badge>
+                  </div>
+                  <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
+                    <Badge
+                      v-for="method in authMethodItems"
+                      :key="method.name"
+                      variant="outline"
+                      class="gap-1.5 border-dashed text-xs"
+                      :class="authMethodBadgeClass(method)"
+                    >
+                      <span>{{ method.label }}</span>
+                      <span class="text-[10px] uppercase tracking-wider opacity-75">
+                        {{ method.enabled ? (method.interactive ? 'interactive' : 'service') : 'disabled' }}
+                      </span>
+                    </Badge>
+                  </div>
+                  <div v-if="capabilityItems.length" class="flex flex-wrap gap-2">
+                    <Badge v-for="capability in capabilityItems" :key="capability" variant="secondary" class="text-xs">
+                      {{ formatFieldLabel(capability) }}
+                    </Badge>
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="rounded-2xl border bg-background/80 px-4 py-3">
+                      <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Security posture</p>
+                      <p class="mt-1 text-sm font-medium">{{ securitySummary }}</p>
+                    </div>
+                    <div class="rounded-2xl border bg-background/80 px-4 py-3">
+                      <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Organizations</p>
+                      <p class="mt-1 text-sm font-medium">{{ organizationSummary }}</p>
+                    </div>
+                  </div>
+                </section>
+              </CardContent>
+            </Card>
 
-      <div class="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle class="text-lg">Security & Sessions</CardTitle>
-                <p class="mt-1 text-sm text-muted-foreground">
-                  Access paths, organization memberships, and the sessions this identity currently owns.
-                </p>
-              </div>
-              <div class="flex items-center gap-2">
-                <Badge variant="secondary" class="text-xs">{{ activeSessionCount }} active</Badge>
-                <Button variant="outline" size="sm" as-child data-testid="view-all-sessions">
-                  <RouterLink :to="sessionsRoute">
-                    <Monitor class="mr-1.5 size-3.5" />
-                    View all sessions
-                  </RouterLink>
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent class="space-y-5">
-            <section class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-semibold">Access methods</h2>
-                <Badge variant="outline" class="text-xs">{{ enabledAuthMethodItems.length }} enabled</Badge>
-              </div>
-              <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
-                <Badge
-                  v-for="method in authMethodItems"
-                  :key="`security-${method.name}`"
-                  variant="outline"
-                  class="text-xs"
-                  :class="authMethodBadgeClass(method)"
-                >
-                  {{ method.label }}
-                </Badge>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No auth methods configured.</p>
-            </section>
+            <div class="space-y-6">
+              <Card class="rounded-3xl shadow-sm">
+                <CardHeader class="pb-3">
+                  <CardTitle class="text-sm">Current State</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <dl class="space-y-3 text-sm">
+                    <div class="flex items-center justify-between gap-4">
+                      <dt class="text-muted-foreground">Created</dt>
+                      <dd class="text-right font-medium">{{ formatDateTime(identity.created_at) }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4">
+                      <dt class="text-muted-foreground">Updated</dt>
+                      <dd class="text-right font-medium">{{ formatDateTime(identity.updated_at) }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4">
+                      <dt class="text-muted-foreground">Sessions</dt>
+                      <dd class="text-right font-medium">{{ activeSessionCount }} active / {{ sessions.length }} total</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4">
+                      <dt class="text-muted-foreground">Last event</dt>
+                      <dd class="text-right font-medium">{{ formatDateTime(lastEventAt) }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-4">
+                      <dt class="text-muted-foreground">Last trace</dt>
+                      <dd class="text-right font-medium">{{ formatDateTime(lastTraceAt) }}</dd>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
 
-            <Separator />
-
-            <section class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-semibold">Organization memberships</h2>
-                <DropdownMenu v-if="availableOrgs.length">
-                  <DropdownMenuTrigger as-child>
-                    <Button variant="outline" size="sm">
-                      <Plus class="mr-1.5 size-3.5" />
-                      Add membership
+              <Card class="rounded-3xl shadow-sm">
+                <CardHeader class="pb-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <CardTitle class="text-sm">Recent activity summary</CardTitle>
+                    <Button variant="outline" size="sm" as-child data-testid="view-all-activity">
+                      <RouterLink :to="eventsRoute">Open activity</RouterLink>
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem v-for="org in availableOrgs" :key="org.id" @click="addToOrg(org.id)">
-                      {{ org.name }}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                  </div>
+                </CardHeader>
+                <CardContent class="space-y-3">
+                  <div class="rounded-2xl border bg-muted/20 px-4 py-3">
+                    <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Last event</p>
+                    <p class="mt-1 text-sm font-medium">{{ lastEventSummary }}</p>
+                  </div>
+                  <div class="rounded-2xl border bg-muted/20 px-4 py-3">
+                    <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Trace signal</p>
+                    <p class="mt-1 text-sm font-medium">{{ lastTraceSummary }}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
 
-              <div v-if="userOrgs.length" class="space-y-2">
-                <div
-                  v-for="membership in userOrgs"
-                  :key="membership.org_id"
-                  class="flex items-center justify-between gap-4 rounded-2xl border bg-muted/20 px-4 py-3"
-                >
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{{ membership.org_name || membership.org_id }}</p>
-                    <p class="text-xs text-muted-foreground">
-                      {{ formatFieldLabel(membership.role) }} · added {{ formatDate(membership.added_at) }}
+        <TabsContent value="security" class="space-y-6">
+          <div class="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <Card class="rounded-3xl shadow-sm">
+              <CardHeader class="pb-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle class="text-lg">Access & Membership</CardTitle>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                      Login methods, access posture, and organization relationships.
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-                    :disabled="removingOrgId === membership.org_id"
-                    @click="removeFromOrg(membership.org_id)"
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-5">
+                <section class="space-y-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <h2 class="text-sm font-semibold">Login methods</h2>
+                    <Badge variant="outline" class="text-xs">{{ enabledAuthMethodItems.length }} enabled</Badge>
+                  </div>
+                  <div v-if="authMethodItems.length" class="flex flex-wrap gap-2">
+                    <Badge
+                      v-for="method in authMethodItems"
+                      :key="`security-${method.name}`"
+                      variant="outline"
+                      class="text-xs"
+                      :class="authMethodBadgeClass(method)"
+                    >
+                      {{ method.label }}
+                    </Badge>
+                  </div>
+                </section>
+
+                <Separator />
+
+                <section class="space-y-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <h2 class="text-sm font-semibold">Organization memberships</h2>
+                    <DropdownMenu v-if="availableOrgs.length">
+                      <DropdownMenuTrigger as-child>
+                        <Button variant="outline" size="sm">
+                          <Plus class="mr-1.5 size-3.5" />
+                          Add membership
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem v-for="org in availableOrgs" :key="org.id" @click="addToOrg(org.id)">
+                          {{ org.name }}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  <div v-if="userOrgs.length" class="space-y-2">
+                    <div
+                      v-for="membership in userOrgs"
+                      :key="membership.org_id"
+                      class="flex items-center justify-between gap-4 rounded-2xl border bg-muted/20 px-4 py-3"
+                    >
+                      <div class="min-w-0">
+                        <p class="truncate text-sm font-medium">{{ membership.org_name || membership.org_id }}</p>
+                        <p class="text-xs text-muted-foreground">
+                          {{ formatFieldLabel(membership.role) }} · added {{ formatDate(membership.added_at) }}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        :disabled="removingOrgId === membership.org_id"
+                        @click="removeFromOrg(membership.org_id)"
+                      >
+                        <X class="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <p v-else class="text-sm text-muted-foreground">This identity is not a member of any organizations.</p>
+                </section>
+              </CardContent>
+            </Card>
+
+            <Card class="rounded-3xl shadow-sm">
+              <CardHeader class="pb-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle class="text-lg">Sessions</CardTitle>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                      Current devices first, with deeper details available in the dedicated sessions view.
+                    </p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <Badge variant="secondary" class="text-xs">{{ activeSessionCount }} active</Badge>
+                    <Button variant="outline" size="sm" as-child data-testid="view-all-sessions">
+                      <RouterLink :to="sessionsRoute">
+                        <Monitor class="mr-1.5 size-3.5" />
+                        View all sessions
+                      </RouterLink>
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-3">
+                <div v-if="sessionPreview.length" class="space-y-3">
+                  <div
+                    v-for="session in sessionPreview"
+                    :key="session.id"
+                    class="rounded-2xl border bg-background/80 px-4 py-3"
                   >
-                    <X class="size-3.5" />
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div class="min-w-0 space-y-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" class="text-xs">{{ sessionDeviceLabel(session.user_agent) }}</Badge>
+                          <Badge variant="outline" class="text-xs">{{ sessionOsLabel(session.user_agent) }}</Badge>
+                          <Badge variant="outline" class="text-xs" :class="sessionBadgeClass(session.state)">
+                            {{ session.state }}
+                          </Badge>
+                        </div>
+                        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span v-if="session.ip_address">IP {{ session.ip_address }}</span>
+                          <span>{{ sessionLocationSummary(session) }}</span>
+                          <span>Seen {{ formatDateTime(session.created_at) }}</span>
+                        </div>
+                        <details class="text-xs text-muted-foreground">
+                          <summary class="cursor-pointer select-none">Device details</summary>
+                          <div class="mt-2 space-y-1">
+                            <p>{{ session.user_agent || 'Unknown user agent' }}</p>
+                            <p>Expires {{ formatDateTime(session.expires_at) }}</p>
+                            <p v-if="session.revoked_at">Revoked {{ formatDateTime(session.revoked_at) }}</p>
+                          </div>
+                        </details>
+                      </div>
+
+                      <div class="flex items-center gap-2 sm:justify-end">
+                        <Button variant="ghost" size="sm" as-child>
+                          <RouterLink :to="sessionsRoute">Open</RouterLink>
+                        </Button>
+                        <Button
+                          v-if="session.state === 'active'"
+                          variant="outline"
+                          size="sm"
+                          :disabled="revokingSessionId === session.id"
+                          :data-testid="`revoke-session-${session.id}`"
+                          @click="revokeSession(session.id)"
+                        >
+                          {{ revokingSessionId === session.id ? 'Revoking…' : 'Revoke' }}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p v-else class="text-sm text-muted-foreground">No sessions found for this identity.</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="activity" class="space-y-6">
+          <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <Card class="rounded-3xl shadow-sm">
+              <CardHeader class="pb-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle class="text-lg">Events</CardTitle>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                      Audit trail preview. Use the full events view for forensic work.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" as-child data-testid="view-all-events">
+                    <RouterLink :to="eventsRoute">
+                      <Activity class="mr-1.5 size-3.5" />
+                      Open events
+                    </RouterLink>
                   </Button>
                 </div>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">This identity is not a member of any organizations.</p>
-            </section>
-
-            <Separator />
-
-            <section class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-semibold">Recent sessions</h2>
-                <Badge variant="outline" class="text-xs">{{ sessions.length }} total</Badge>
-              </div>
-
-              <div v-if="sessionPreview.length" class="space-y-2">
-                <div
-                  v-for="session in sessionPreview"
-                  :key="session.id"
-                  class="rounded-2xl border bg-background/80 px-4 py-3"
-                >
-                  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div class="min-w-0 space-y-2">
+              </CardHeader>
+              <CardContent class="space-y-3">
+                <div v-if="recentEvents.length" class="space-y-2">
+                  <div
+                    v-for="event in recentEvents"
+                    :key="event.id"
+                    class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3"
+                  >
+                    <div class="min-w-0 space-y-1">
                       <div class="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" class="text-xs">{{ sessionDeviceLabel(session.user_agent) }}</Badge>
-                        <Badge variant="outline" class="text-xs" :class="sessionBadgeClass(session.state)">
-                          {{ session.state }}
+                        <Badge variant="outline" class="font-mono text-[11px]">{{ event.event_type }}</Badge>
+                        <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
+                      </div>
+                      <p class="truncate text-sm font-medium">{{ describeEvent(event) }}</p>
+                      <p class="truncate text-xs text-muted-foreground">
+                        Aggregate {{ event.aggregate_type }} · {{ truncateId(event.aggregate_id) }}
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="sm" as-child :data-testid="`event-link-${event.id}`">
+                      <RouterLink :to="eventRoute(event.id)">Open</RouterLink>
+                    </Button>
+                  </div>
+                </div>
+                <p v-else class="text-sm text-muted-foreground">No recent events for this identity.</p>
+              </CardContent>
+            </Card>
+
+            <Card class="rounded-3xl shadow-sm">
+              <CardHeader class="pb-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle class="text-lg">Traces</CardTitle>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                      Actor trace preview. Deep diagnostics live in the dedicated traces view.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" as-child data-testid="view-all-traces">
+                    <RouterLink :to="tracesRoute">
+                      <Route class="mr-1.5 size-3.5" />
+                      Open traces
+                    </RouterLink>
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent class="space-y-3">
+                <div v-if="recentTraces.length" class="space-y-2">
+                  <div
+                    v-for="trace in recentTraces"
+                    :key="trace.trace_group"
+                    class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3"
+                  >
+                    <div class="min-w-0 space-y-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" class="text-[11px]">
+                          {{ trace.method || 'trace' }}
                         </Badge>
-                        <Badge v-if="session.ip_address" variant="secondary" class="font-mono text-[11px]">
-                          {{ session.ip_address }}
+                        <Badge
+                          v-if="typeof trace.status === 'number'"
+                          variant="outline"
+                          class="text-[11px]"
+                          :class="trace.status >= 400 ? 'border-red-200 text-red-700' : 'border-emerald-200 text-emerald-700'"
+                        >
+                          {{ trace.status }}
                         </Badge>
+                        <span class="text-xs text-muted-foreground">{{ formatDateTime(trace.started_at) }}</span>
                       </div>
                       <p class="truncate text-sm font-medium">
-                        {{ session.user_agent || 'Unknown device' }}
+                        {{ trace.path || trace.request_id || trace.session_id || trace.trace_group }}
                       </p>
                       <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span>Created {{ formatDateTime(session.created_at) }}</span>
-                        <span>Expires {{ formatDateTime(session.expires_at) }}</span>
-                        <span v-if="session.revoked_at">Revoked {{ formatDateTime(session.revoked_at) }}</span>
+                        <span>{{ trace.span_count }} events</span>
+                        <span v-if="trace.duration">{{ trace.duration }}ms</span>
+                        <span v-if="trace.client_id">client {{ truncateId(trace.client_id) }}</span>
+                        <span v-if="trace.fingerprint">fingerprint {{ truncateId(trace.fingerprint, 10) }}</span>
                       </div>
                     </div>
-
-                    <div class="flex items-center gap-2 sm:justify-end">
-                      <Button variant="ghost" size="sm" as-child>
-                        <RouterLink :to="sessionsRoute">Open</RouterLink>
-                      </Button>
-                      <Button
-                        v-if="session.state === 'active'"
-                        variant="outline"
-                        size="sm"
-                        :disabled="revokingSessionId === session.id"
-                        :data-testid="`revoke-session-${session.id}`"
-                        @click="revokeSession(session.id)"
-                      >
-                        {{ revokingSessionId === session.id ? 'Revoking…' : 'Revoke' }}
-                      </Button>
-                    </div>
+                    <Button variant="ghost" size="sm" as-child :data-testid="`trace-link-${trace.trace_group}`">
+                      <RouterLink :to="tracesRoute">Open</RouterLink>
+                    </Button>
                   </div>
                 </div>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No sessions found for this identity.</p>
-            </section>
-          </CardContent>
-        </Card>
-
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle class="text-lg">Recent Activity</CardTitle>
-                <p class="mt-1 text-sm text-muted-foreground">
-                  Jump into audit events or actor traces without leaving the user context.
-                </p>
-              </div>
-              <div class="flex gap-2">
-                <Button variant="outline" size="sm" as-child data-testid="view-all-events">
-                  <RouterLink :to="eventsRoute">
-                    <Activity class="mr-1.5 size-3.5" />
-                    Events
-                  </RouterLink>
-                </Button>
-                <Button variant="outline" size="sm" as-child data-testid="view-all-traces">
-                  <RouterLink :to="tracesRoute">
-                    <Route class="mr-1.5 size-3.5" />
-                    Traces
-                  </RouterLink>
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent class="space-y-5">
-            <section class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-semibold">Events</h2>
-                <Badge variant="outline" class="text-xs">{{ recentEvents.length }} loaded</Badge>
-              </div>
-
-              <div v-if="recentEvents.length" class="space-y-2">
-                <div
-                  v-for="event in recentEvents"
-                  :key="event.id"
-                  class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3"
-                >
-                  <div class="min-w-0 space-y-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" class="font-mono text-[11px]">{{ event.event_type }}</Badge>
-                      <span class="text-xs text-muted-foreground">{{ formatDateTime(event.created_at) }}</span>
-                    </div>
-                    <p class="truncate text-sm font-medium">{{ describeEvent(event) }}</p>
-                    <p class="truncate text-xs text-muted-foreground">
-                      Aggregate {{ event.aggregate_type }} · {{ truncateId(event.aggregate_id) }}
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" as-child :data-testid="`event-link-${event.id}`">
-                    <RouterLink :to="eventRoute(event.id)">Open</RouterLink>
-                  </Button>
-                </div>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No recent events for this identity.</p>
-            </section>
-
-            <Separator />
-
-            <section class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
-                <h2 class="text-sm font-semibold">Trace preview</h2>
-                <Badge variant="outline" class="text-xs">{{ recentTraces.length }} groups</Badge>
-              </div>
-
-              <div v-if="recentTraces.length" class="space-y-2">
-                <div
-                  v-for="trace in recentTraces"
-                  :key="trace.trace_group"
-                  class="flex items-start justify-between gap-4 rounded-2xl border bg-background/80 px-4 py-3"
-                >
-                  <div class="min-w-0 space-y-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" class="text-[11px]">
-                        {{ trace.method || 'trace' }}
-                      </Badge>
-                      <Badge
-                        v-if="typeof trace.status === 'number'"
-                        variant="outline"
-                        class="text-[11px]"
-                        :class="trace.status >= 400 ? 'border-red-200 text-red-700' : 'border-emerald-200 text-emerald-700'"
-                      >
-                        {{ trace.status }}
-                      </Badge>
-                      <span class="text-xs text-muted-foreground">{{ formatDateTime(trace.started_at) }}</span>
-                    </div>
-                    <p class="truncate text-sm font-medium">
-                      {{ trace.path || trace.request_id || trace.session_id || trace.trace_group }}
-                    </p>
-                    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      <span>{{ trace.span_count }} events</span>
-                      <span v-if="trace.duration">{{ trace.duration }}ms</span>
-                      <span v-if="trace.client_id">client {{ truncateId(trace.client_id) }}</span>
-                      <span v-if="trace.fingerprint">fingerprint {{ truncateId(trace.fingerprint, 10) }}</span>
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" as-child :data-testid="`trace-link-${trace.trace_group}`">
-                    <RouterLink :to="tracesRoute">Open</RouterLink>
-                  </Button>
-                </div>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No trace groups found for this identity.</p>
-            </section>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Collapsible
-        v-model:open="editSectionOpen"
-        class="rounded-3xl border bg-card shadow-sm"
-        data-testid="edit-api-section"
-      >
-        <div
-          ref="editSectionRef"
-          class="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div class="space-y-1">
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-              Edit & API
-            </p>
-            <h2 class="text-lg font-semibold">Update the identity without losing operator context</h2>
-            <p class="text-sm text-muted-foreground">
-              Form editing stays first. Canonical JSON and cURL are here when you need to inspect the raw contract.
-            </p>
+                <p v-else class="text-sm text-muted-foreground">No trace groups found for this identity.</p>
+              </CardContent>
+            </Card>
           </div>
-          <CollapsibleTrigger as-child>
-            <Button variant="outline" data-testid="edit-api-toggle">
-              <Code2 class="mr-2 size-4" />
-              {{ editSectionOpen ? 'Hide editor' : 'Open editor' }}
-            </Button>
-          </CollapsibleTrigger>
-        </div>
+        </TabsContent>
 
-        <CollapsibleContent>
-          <Separator />
-          <div class="space-y-4 p-6 pt-5">
-            <SchemaTabsEditor
-              v-model="formData"
-              :schema="schemaContext.schema"
-              :curl-snippets="curlSnippets"
-              :form-title="`${schemaLabel} fields`"
-              @update:json-valid="(value) => jsonValid = value"
-            />
-
-            <div class="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <TabsContent value="edit" class="space-y-6" data-testid="edit-api-section">
+          <Card class="rounded-3xl shadow-sm">
+            <CardHeader class="pb-3">
+              <CardTitle class="text-lg">Edit & API</CardTitle>
               <p class="text-sm text-muted-foreground">
-                Save persists the schema-backed user payload. Delete remains in the header because it is operationally significant.
+                Developer tooling is intentionally separated from the operator views. Form editing stays first, raw JSON and cURL remain available when needed.
               </p>
-              <div class="flex gap-2">
-                <Button variant="outline" @click="editSectionOpen = false">Collapse</Button>
+            </CardHeader>
+            <CardContent class="space-y-4">
+              <SchemaTabsEditor
+                v-model="formData"
+                :schema="schemaContext.schema"
+                :curl-snippets="curlSnippets"
+                :form-title="`${schemaLabel} fields`"
+                @update:json-valid="(value) => jsonValid = value"
+              />
+
+              <div class="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p class="text-sm text-muted-foreground">
+                  Save persists the schema-backed user payload. Delete stays in the header because it changes the whole resource state.
+                </p>
                 <Button
                   :disabled="saving || !jsonValid"
                   data-testid="save-user"
@@ -498,10 +516,10 @@
                   {{ saving ? 'Saving…' : 'Save changes' }}
                 </Button>
               </div>
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </template>
   </div>
 
@@ -590,7 +608,6 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Dialog,
   DialogContent,
@@ -603,6 +620,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { StateBadge } from '@/components/ui/state-badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { notifyError, notifyMutationError, notifyMutationSuccess, notifySuccess } from '@/lib/notify'
 import {
   Activity,
@@ -673,8 +691,7 @@ const userOrgs = ref<OrgMembership[]>([])
 const sessions = ref<SessionPreview[]>([])
 const recentEvents = ref<Event[]>([])
 const recentTraces = ref<TracePreview[]>([])
-const editSectionRef = ref<HTMLElement | null>(null)
-const editSectionOpen = ref(false)
+const activeTab = ref('overview')
 const removingOrgId = ref('')
 const revokingSessionId = ref('')
 const jsonValid = ref(true)
@@ -766,6 +783,27 @@ const identityInitials = computed(() => initials(identityTitle.value))
 const summaryFacts = computed(() => collectSummaryFacts(formData.value, schemaContext.value.schema).slice(0, 6))
 const sessionPreview = computed(() => sessions.value.slice(0, 5))
 const activeSessionCount = computed(() => sessions.value.filter((session) => session.state === 'active').length)
+const lastEventAt = computed(() => recentEvents.value[0]?.created_at || '')
+const lastTraceAt = computed(() => recentTraces.value[0]?.started_at || '')
+const lastEventSummary = computed(() =>
+  recentEvents.value[0]
+    ? `${recentEvents.value[0].event_type} · ${formatDateTime(recentEvents.value[0].created_at)}`
+    : 'No recent events'
+)
+const lastTraceSummary = computed(() =>
+  recentTraces.value[0]
+    ? `${recentTraces.value[0].method || 'trace'} ${recentTraces.value[0].path || truncateId(recentTraces.value[0].trace_group)}`
+    : 'No recent traces'
+)
+const securitySummary = computed(() => {
+  if (!enabledAuthMethodItems.value.length) return 'No enabled authentication methods'
+  return enabledAuthMethodItems.value.map((method) => method.label).join(', ')
+})
+const organizationSummary = computed(() => {
+  if (!userOrgs.value.length) return 'No organization memberships'
+  if (userOrgs.value.length === 1) return userOrgs.value[0].org_name || userOrgs.value[0].org_id
+  return `${userOrgs.value[0].org_name || userOrgs.value[0].org_id} +${userOrgs.value.length - 1} more`
+})
 
 async function loadIdentity() {
   if (!identityId.value) return
@@ -975,9 +1013,8 @@ async function deleteIdentity() {
 }
 
 async function openEditSection() {
-  editSectionOpen.value = true
+  activeTab.value = 'edit'
   await nextTick()
-  editSectionRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
 
 function eventRoute(eventId: string) {
@@ -1031,6 +1068,25 @@ function sessionDeviceLabel(userAgent?: string): string {
   if (value.includes('firefox')) return 'Firefox'
   if (value.includes('edge')) return 'Edge'
   return 'Browser'
+}
+
+function sessionOsLabel(userAgent?: string): string {
+  const value = String(userAgent || '').toLowerCase()
+  if (!value) return 'Unknown OS'
+  if (value.includes('mac os') || value.includes('macos')) return 'macOS'
+  if (value.includes('windows')) return 'Windows'
+  if (value.includes('linux')) return 'Linux'
+  if (value.includes('ios')) return 'iOS'
+  if (value.includes('android')) return 'Android'
+  return 'Unknown OS'
+}
+
+function sessionLocationSummary(session: SessionPreview): string {
+  const geo = (session as any).geo
+  if (geo?.city || geo?.country) {
+    return [geo.city, geo.country].filter(Boolean).join(', ')
+  }
+  return 'Location unavailable'
 }
 
 function authMethodBadgeClass(method: AuthMethodDisplay): string {

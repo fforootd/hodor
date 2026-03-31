@@ -207,9 +207,9 @@ func NewService(db *sql.DB, dialect string, bus *eventbus.Bus, box *zcrypto.Secr
 
 // EnsureSchema bootstraps the lightweight notification queue table for the POC.
 func (s *Service) EnsureSchema(ctx context.Context) error {
-	var ddl []string
+	ddl := make([]string, 0, 4)
 	if s.dialect == "postgres" {
-		ddl = []string{
+		ddl = append(ddl,
 			`CREATE TABLE IF NOT EXISTS notification_requests (
 				id TEXT PRIMARY KEY,
 				org_id TEXT NOT NULL DEFAULT '0',
@@ -234,9 +234,9 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
 				created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 				updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 			)`,
-		}
+		)
 	} else {
-		ddl = []string{
+		ddl = append(ddl,
 			`CREATE TABLE IF NOT EXISTS notification_requests (
 				id TEXT PRIMARY KEY,
 				org_id TEXT NOT NULL DEFAULT '0',
@@ -261,7 +261,7 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
 				created_at TEXT NOT NULL DEFAULT (datetime('now')),
 				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 			)`,
-		}
+		)
 	}
 	ddl = append(ddl,
 		`CREATE INDEX IF NOT EXISTS idx_notification_requests_state_next
@@ -844,10 +844,12 @@ func (s *Service) emitEvent(ctx context.Context, db execer, eventType, aggregate
 	delegationType := telemetry.DelegationTypeFromContext(ctx)
 	sdkName := telemetry.SDKNameFromContext(ctx)
 	sdkVersion := telemetry.SDKVersionFromContext(ctx)
-	db.ExecContext(ctx,
+	if _, err := db.ExecContext(ctx,
 		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
 		 VALUES (?, ?, ?, '0', '', '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
+		eventID, eventType, eventCategory(eventType), aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion); err != nil {
+		logging.Printf("notify: emit event %s failed: %v", eventType, err)
+	}
 }
 
 func defaultNotificationConfig() notificationConfig {
@@ -899,11 +901,11 @@ func applyLegacyConfig(cfg *notificationConfig) {
 }
 
 func ensureChannelDefaults(cfg *notificationConfig) {
-	if cfg.Email.Channels == nil || len(cfg.Email.Channels) == 0 {
+	if len(cfg.Email.Channels) == 0 {
 		defaults := defaultNotificationConfig()
 		cfg.Email = defaults.Email
 	}
-	if cfg.SMS.Channels == nil || len(cfg.SMS.Channels) == 0 {
+	if len(cfg.SMS.Channels) == 0 {
 		defaults := defaultNotificationConfig()
 		cfg.SMS = defaults.SMS
 	}

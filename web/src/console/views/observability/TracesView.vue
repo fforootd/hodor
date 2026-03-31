@@ -90,7 +90,7 @@
         </div>
 
         <!-- Table Rows -->
-        <div v-for="(trace, idx) in traceGroups" :key="trace.trace_group" class="border-b last:border-b-0">
+        <div v-for="trace in traceGroups" :key="trace.trace_group" class="border-b last:border-b-0">
           <!-- Summary Row -->
           <div 
             class="grid grid-cols-[2fr_2fr_80px_100px_80px_100px] gap-4 px-4 py-3 items-center cursor-pointer hover:bg-muted/20 transition-colors"
@@ -757,22 +757,6 @@ const waterfallSpans = computed(() => {
 
   // No span tree — flat chronological timeline (ADR-023: wide events, no span hierarchy)
   return parsed
-
-  // Flatten tree with depth
-  const flat: any[] = []
-  function walk(nodes: any[], depth: number) {
-    nodes.forEach((node: any, idx: number) => {
-      node.depth = depth
-      node.isLast = idx === nodes.length - 1
-      flat.push(node)
-      if (node.children.length > 0) {
-        walk(node.children, depth + 1)
-      }
-    })
-  }
-  walk(rootSpans, 0)
-
-  return flat
 })
 
 // --- Helpers ---

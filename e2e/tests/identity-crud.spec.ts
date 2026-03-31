@@ -12,12 +12,13 @@ test.describe('Identity CRUD', () => {
   })
 
   test('identity list page loads @full', async ({ page }) => {
-    await page.goto('/console#/identities')
+    await page.goto('/console/users')
     await expect(page.locator('table, .table-wrap')).toBeVisible({ timeout: 5000 })
   })
 
   test('create identity form is accessible @full', async ({ page }) => {
-    await page.goto('/console#/identities/new')
-    await expect(page.locator('input, form')).toBeVisible({ timeout: 5000 })
+    await page.goto('/console/users/new')
+    await expect(page.getByRole('heading', { name: /Create/i })).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('button', { name: /Create /i })).toBeVisible({ timeout: 5000 })
   })
 })

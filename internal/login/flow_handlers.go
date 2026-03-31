@@ -303,7 +303,7 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 			h.renderFlowStep(w, r, flow)
 			return
 		}
-		if _, _, err := h.queueMagicLink(r.Context(), flow.Identifier, "reset"); err != nil {
+		if _, _, err := h.queueMagicLink(ctx, flow.Identifier, "reset"); err != nil {
 			logging.Printf("[flow] %s failed to queue password reset for %s: %v", flow.ID, flow.Identifier, err)
 			flow.Errors = append(flow.Errors, FlowError{Code: "reset_failed", Message: "We couldn't send a reset link right now. Please try again."})
 			h.renderFlowStep(w, r, flow)

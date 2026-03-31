@@ -142,7 +142,7 @@
                       <SelectItem value="=">=</SelectItem>
                       <SelectItem value="!=">!=</SelectItem>
                       <SelectItem value=">">></SelectItem>
-                      <SelectItem value="<"><</SelectItem>
+                      <SelectItem value="<">&lt;</SelectItem>
                       <SelectItem value="LIKE">LIKE</SelectItem>
                     </SelectContent>
                   </Select>

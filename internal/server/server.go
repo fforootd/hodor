@@ -63,45 +63,14 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	}
 	mux := http.NewServeMux()
 
-	// Health check — always first.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.SQL().PingContext(r.Context()); err != nil {
-			http.Error(w, "database unhealthy", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	// Readiness check.
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if !srv.ready.Load() {
-			http.Error(w, "starting", http.StatusServiceUnavailable)
-			return
-		}
-		if err := db.SQL().PingContext(r.Context()); err != nil {
-			http.Error(w, "database unhealthy", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ready"))
-	})
+	registerProbeRoutes(mux, db, &srv.ready)
 
 	// Create hardened cookie config.
 	cookieCfg := session.NewCookieConfig(cfg.Server.CookieSecrets, cfg.Server.ExternalDomain)
 
 	// --- Initialize Application-Level Encryption (ALE) ---
 	// SecretBox provides AES-256-GCM envelope encryption for all secrets at rest.
-	secretBox, err := zcrypto.NewSecretBox(cfg.Encryption.ActiveKeyID, cfg.Encryption.KeyMap())
-	if err != nil {
-		logging.Fatalf("encryption init: %v", err)
-	}
-	if secretBox.Plaintext() {
-		logging.Println("[WARN] encryption: no keys configured — secrets stored in plaintext (dev mode)")
-	} else {
-		logging.Printf("[encryption] active_key=%s, ring_size=%d", cfg.Encryption.ActiveKeyID, len(cfg.Encryption.Keys))
-	}
-	secretStore := zcrypto.NewSecretStore(db.SQL(), secretBox)
+	secretBox, secretStore := initSecretStore(cfg, db)
 
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
 	restAPI := api.New(db, bus, cookieCfg)
@@ -134,64 +103,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	loginAPI := login.New(db, passwords, restAPI, cookieCfg, loginflow.NewResolver(db), notifier, issuerURL(cfg))
 	loginAPI.Register(mux)
 
-	// Serve web assets (JS/CSS) from go:embed.
-	webFS, err := fs.Sub(webAssets, "webdist")
-	if err == nil {
-		mux.Handle("GET /assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			http.FileServer(http.FS(webFS)).ServeHTTP(w, r)
-		}))
-	}
-
-	// Vue login page — server-rendered shell enhanced by Vue.
-	serveLogin := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		data, err := webAssets.ReadFile("webdist/src/login/index.html")
-		if err != nil {
-			http.Error(w, "login page not found", http.StatusNotFound)
-			return
-		}
-		_, _ = w.Write(data)
-	}
-	mux.HandleFunc("GET /login", serveLogin)
-
-	// Vue account (self-service profile) page.
-	serveAccount := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		data, err := webAssets.ReadFile("webdist/src/account/index.html")
-		if err != nil {
-			http.Error(w, "account page not found", http.StatusNotFound)
-			return
-		}
-		w.Write(data)
-	}
-	mux.HandleFunc("/account", serveAccount)
-	mux.HandleFunc("/account/", serveAccount)
-
-	// Root redirect → login.
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/login", http.StatusTemporaryRedirect)
-	})
-
-	// Vue console SPA — catch-all for /console/* routes.
-	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		data, err := webAssets.ReadFile("webdist/src/console/index.html")
-		if err != nil {
-			http.Error(w, "console not found", http.StatusNotFound)
-			return
-		}
-		w.Write(data)
-	})
-	mux.HandleFunc("/console/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		data, err := webAssets.ReadFile("webdist/src/console/index.html")
-		if err != nil {
-			http.Error(w, "console not found", http.StatusNotFound)
-			return
-		}
-		w.Write(data)
-	})
+	registerWebRoutes(mux)
 
 	// Mount UI routes — login, logout, admin console.
 	uiHandlers := ui.New(db, bus, restAPI, cookieCfg)
@@ -199,33 +111,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Mount OIDC Provider (OP) — handles /.well-known/openid-configuration,
 	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
-	issues := issuerURL(cfg)
-	oidcStorage := oidcop.NewStorage(db, secretStore)
-	var firstCookieSecret string
-	if len(cfg.Server.CookieSecrets) > 0 {
-		firstCookieSecret = cfg.Server.CookieSecrets[0]
-	}
-	// The OIDC encryption key now lives in the secrets table (type 'oidc_encryption').
-	// On first boot it's auto-generated and stored encrypted.
-	oidcEncKey := getOrCreateOIDCEncryptionKey(secretStore)
-	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil, oidcEncKey, firstCookieSecret)
-	if err != nil {
-		logging.Printf("WARN: OIDC Provider setup failed: %v", err)
-	} else {
-		// The OP handler is mounted as a fallback: the mux tries registered patterns first,
-		// and if none match, falls through to the OP which handles OIDC-specific paths.
-		mux.Handle("/authorize", opHandler)
-		mux.Handle("/authorize/", opHandler)
-		mux.Handle("/oauth/", opHandler)
-		mux.Handle("/userinfo", opHandler)
-		mux.Handle("/end_session", opHandler)
-		mux.Handle("/keys", opHandler)
-		mux.Handle("/revoke", opHandler)
-		mux.Handle("/devicecode", opHandler)
-		// Discovery endpoint (appended — the existing well-known in api.go is a redirect)
-		mux.Handle("GET /.well-known/openid-configuration", opHandler)
-		logging.Printf("OIDC Provider ready (issuer=%s)", issues)
-	}
+	mountOIDCProvider(mux, cfg, db, secretStore)
 
 	// --- Resolve paths for route prefixing ---
 	paths := cfg.Server.ResolvePaths()
@@ -233,20 +119,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// --- Build middleware chain (outermost first) ---
 	// 1. RealIP — resolve true client IP from proxy headers.
-	var realIPCfg *RealIPConfig
-	if len(cfg.Server.TrustedProxies) > 0 {
-		cidrs, err := ParseTrustedProxies(cfg.Server.TrustedProxies)
-		if err != nil {
-			logging.Printf("WARN: failed to parse trusted proxies: %v", err)
-		} else {
-			realIPCfg = &RealIPConfig{
-				TrustedCIDRs: cidrs,
-				Mode:         cfg.Server.ProxyHeaderMode,
-				CustomHeader: cfg.Server.RealIPHeader,
-			}
-			logging.Printf("RealIP middleware: mode=%q trusted_cidrs=%d", realIPCfg.Mode, len(cidrs))
-		}
-	}
+	realIPCfg := buildRealIPConfig(cfg)
 
 	// 2. Security headers.
 	isSecure := cfg.Server.TLSCert != "" || (cfg.Server.ExternalDomain != "" && cfg.Server.ExternalDomain != "localhost")
@@ -257,58 +130,20 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// and returned Internal Server Error (4000) after the SQLite busy timeout.
 	// A separate connection lets both write concurrently via WAL mode.
 	ctx := context.Background()
-	fgaDB, err := database.Open(cfg.Database.URL)
-	if err != nil {
-		logging.Fatalf("fga: open dedicated db connection: %v", err)
-	}
-	fgaSvc, err := fga.New(ctx, fgaDB.SQL(), fgaDB.Dialect())
-	if err != nil {
-		logging.Fatalf("fga init: %v", err)
-	}
+	fgaSvc := initFGAService(ctx, cfg)
 
 	// Set the global FGA service reference for the API layer.
 	api.FGAService = fgaSvc
 
 	// Post-init FGA bootstrap: if admin exists but has no FGA tuples, seed them now.
 	// This handles the case where EnsureAdmin ran before FGA was initialized.
-	{
-		var adminID string
-		if err := db.SQL().QueryRowContext(ctx,
-			`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`,
-		).Scan(&adminID); err == nil && adminID != "" {
-			// Check if tuples already exist for this admin.
-			tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:self")
-			if len(tuples) == 0 {
-				if err := fgaSvc.OnBootstrap(ctx, adminID); err != nil {
-					logging.Printf("WARN: FGA post-init bootstrap failed: %v", err)
-				} else {
-					logging.Printf("[fga] post-init bootstrap: admin=%s", adminID)
-				}
-			}
-		}
-	}
+	bootstrapAdminFGA(ctx, db, fgaSvc)
 
 	// Build FGA middleware.
 	fgaMiddleware := fga.NewMiddleware(fgaSvc)
 
 	// Initialize rate limiter — backend from config (memory | sql | redis).
-	var rlStore ratelimit.Store
-	gcInterval := time.Duration(cfg.RateLimit.GCInterval) * time.Second
-	if gcInterval == 0 {
-		gcInterval = 60 * time.Second
-	}
-	switch cfg.RateLimit.Backend {
-	case "sql":
-		logging.Printf("Rate limiter: sql backend (batch_write=%v) — not yet implemented, using memory", cfg.RateLimit.BatchWrite)
-		rlStore = ratelimit.NewMemoryStore(gcInterval)
-	case "redis":
-		logging.Printf("Rate limiter: redis backend (%s) — not yet implemented, using memory", cfg.RateLimit.RedisURL)
-		rlStore = ratelimit.NewMemoryStore(gcInterval)
-	default: // "memory"
-		rlStore = ratelimit.NewMemoryStore(gcInterval)
-		logging.Printf("Rate limiter ready (backend=memory, gc=%s)", gcInterval)
-	}
-	rateLimiter := ratelimit.New(rlStore, db.SQL())
+	rateLimiter := newRateLimiter(cfg, db)
 
 	// Start catalog background refresh (after boot, non-blocking).
 	catalogSvc.StartBackground()
@@ -337,10 +172,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 
 	// Initialize TLS manager.
 	isDev := cfg.Dev.MockOIDC || cfg.Dev.SeedFile != ""
-	tlsMgr, err := ztls.NewManager(cfg.TLS, &cfg.Server, db.SQL(), secretBox, isDev)
-	if err != nil {
-		logging.Printf("WARN: TLS manager init failed: %v", err)
-	}
+	tlsMgr := initTLSManager(cfg, db, secretBox, isDev)
 
 	srv.http = httpSrv
 	srv.api = restAPI
@@ -351,6 +183,183 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	srv.ready.Store(true)
 
 	return srv
+}
+
+func registerProbeRoutes(mux *http.ServeMux, db *database.DB, ready *atomic.Bool) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		if err := db.SQL().PingContext(r.Context()); err != nil {
+			http.Error(w, "database unhealthy", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !ready.Load() {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		if err := db.SQL().PingContext(r.Context()); err != nil {
+			http.Error(w, "database unhealthy", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready"))
+	})
+}
+
+func initSecretStore(cfg *config.Config, db *database.DB) (*zcrypto.SecretBox, *zcrypto.SecretStore) {
+	secretBox, err := zcrypto.NewSecretBox(cfg.Encryption.ActiveKeyID, cfg.Encryption.KeyMap())
+	if err != nil {
+		logging.Fatalf("encryption init: %v", err)
+	}
+	if secretBox.Plaintext() {
+		logging.Println("[WARN] encryption: no keys configured — secrets stored in plaintext (dev mode)")
+	} else {
+		logging.Printf("[encryption] active_key=%s, ring_size=%d", cfg.Encryption.ActiveKeyID, len(cfg.Encryption.Keys))
+	}
+	return secretBox, zcrypto.NewSecretStore(db.SQL(), secretBox)
+}
+
+func registerWebRoutes(mux *http.ServeMux) {
+	webFS, err := fs.Sub(webAssets, "webdist")
+	if err == nil {
+		mux.Handle("GET /assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			http.FileServer(http.FS(webFS)).ServeHTTP(w, r)
+		}))
+	}
+
+	mux.HandleFunc("GET /login", serveEmbeddedPage("webdist/src/login/index.html", "login page not found"))
+
+	serveAccount := serveEmbeddedPage("webdist/src/account/index.html", "account page not found")
+	mux.HandleFunc("/account", serveAccount)
+	mux.HandleFunc("/account/", serveAccount)
+
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/login", http.StatusTemporaryRedirect)
+	})
+
+	serveConsole := serveEmbeddedPage("webdist/src/console/index.html", "console not found")
+	mux.HandleFunc("/console", serveConsole)
+	mux.HandleFunc("/console/", serveConsole)
+}
+
+func serveEmbeddedPage(path, missingMessage string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data, err := webAssets.ReadFile(path)
+		if err != nil {
+			http.Error(w, missingMessage, http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(data)
+	}
+}
+
+func mountOIDCProvider(mux *http.ServeMux, cfg *config.Config, db *database.DB, secretStore *zcrypto.SecretStore) {
+	issues := issuerURL(cfg)
+	oidcStorage := oidcop.NewStorage(db, secretStore)
+	var firstCookieSecret string
+	if len(cfg.Server.CookieSecrets) > 0 {
+		firstCookieSecret = cfg.Server.CookieSecrets[0]
+	}
+	oidcEncKey := getOrCreateOIDCEncryptionKey(secretStore)
+	opHandler, err := oidcop.SetupProvider(oidcStorage, issues, nil, oidcEncKey, firstCookieSecret)
+	if err != nil {
+		logging.Printf("WARN: OIDC Provider setup failed: %v", err)
+		return
+	}
+
+	mux.Handle("/authorize", opHandler)
+	mux.Handle("/authorize/", opHandler)
+	mux.Handle("/oauth/", opHandler)
+	mux.Handle("/userinfo", opHandler)
+	mux.Handle("/end_session", opHandler)
+	mux.Handle("/keys", opHandler)
+	mux.Handle("/revoke", opHandler)
+	mux.Handle("/devicecode", opHandler)
+	mux.Handle("GET /.well-known/openid-configuration", opHandler)
+	logging.Printf("OIDC Provider ready (issuer=%s)", issues)
+}
+
+func buildRealIPConfig(cfg *config.Config) *RealIPConfig {
+	if len(cfg.Server.TrustedProxies) == 0 {
+		return nil
+	}
+	cidrs, err := ParseTrustedProxies(cfg.Server.TrustedProxies)
+	if err != nil {
+		logging.Printf("WARN: failed to parse trusted proxies: %v", err)
+		return nil
+	}
+	realIPCfg := &RealIPConfig{
+		TrustedCIDRs: cidrs,
+		Mode:         cfg.Server.ProxyHeaderMode,
+		CustomHeader: cfg.Server.RealIPHeader,
+	}
+	logging.Printf("RealIP middleware: mode=%q trusted_cidrs=%d", realIPCfg.Mode, len(cidrs))
+	return realIPCfg
+}
+
+func initFGAService(ctx context.Context, cfg *config.Config) *fga.Service {
+	fgaDB, err := database.Open(cfg.Database.URL)
+	if err != nil {
+		logging.Fatalf("fga: open dedicated db connection: %v", err)
+	}
+	fgaSvc, err := fga.New(ctx, fgaDB.SQL(), fgaDB.Dialect())
+	if err != nil {
+		logging.Fatalf("fga init: %v", err)
+	}
+	return fgaSvc
+}
+
+func bootstrapAdminFGA(ctx context.Context, db *database.DB, fgaSvc *fga.Service) {
+	var adminID string
+	if err := db.SQL().QueryRowContext(ctx,
+		`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`,
+	).Scan(&adminID); err != nil || adminID == "" {
+		return
+	}
+
+	tuples, _ := fgaSvc.ReadTuples(ctx, "", "", "instance:self")
+	if len(tuples) > 0 {
+		return
+	}
+	if err := fgaSvc.OnBootstrap(ctx, adminID); err != nil {
+		logging.Printf("WARN: FGA post-init bootstrap failed: %v", err)
+		return
+	}
+	logging.Printf("[fga] post-init bootstrap: admin=%s", adminID)
+}
+
+func newRateLimiter(cfg *config.Config, db *database.DB) *ratelimit.Limiter {
+	gcInterval := time.Duration(cfg.RateLimit.GCInterval) * time.Second
+	if gcInterval == 0 {
+		gcInterval = 60 * time.Second
+	}
+
+	var rlStore ratelimit.Store
+	switch cfg.RateLimit.Backend {
+	case "sql":
+		logging.Printf("Rate limiter: sql backend (batch_write=%v) — not yet implemented, using memory", cfg.RateLimit.BatchWrite)
+		rlStore = ratelimit.NewMemoryStore(gcInterval)
+	case "redis":
+		logging.Printf("Rate limiter: redis backend (%s) — not yet implemented, using memory", cfg.RateLimit.RedisURL)
+		rlStore = ratelimit.NewMemoryStore(gcInterval)
+	default:
+		rlStore = ratelimit.NewMemoryStore(gcInterval)
+		logging.Printf("Rate limiter ready (backend=memory, gc=%s)", gcInterval)
+	}
+	return ratelimit.New(rlStore, db.SQL())
+}
+
+func initTLSManager(cfg *config.Config, db *database.DB, secretBox *zcrypto.SecretBox, isDev bool) *ztls.Manager {
+	tlsMgr, err := ztls.NewManager(cfg.TLS, &cfg.Server, db.SQL(), secretBox, isDev)
+	if err != nil {
+		logging.Printf("WARN: TLS manager init failed: %v", err)
+	}
+	return tlsMgr
 }
 
 // Handler returns the HTTP handler for testing purposes.

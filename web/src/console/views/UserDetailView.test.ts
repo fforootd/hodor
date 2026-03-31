@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { defineComponent, h, inject, provide, ref, toRef, type Ref } from 'vue'
+import { computed, defineComponent, h, inject, provide, ref, toRef, watch, type Ref } from 'vue'
 
 const mocked = vi.hoisted(() => ({
   analyticsPost: vi.fn(),
@@ -95,7 +95,7 @@ vi.mock('lucide-vue-next', () => {
 import UserDetailView from './UserDetailView.vue'
 
 const dialogState = Symbol('dialog-state')
-const collapsibleState = Symbol('collapsible-state')
+const tabsState = Symbol('tabs-state')
 
 const ButtonStub = defineComponent({
   props: {
@@ -160,21 +160,6 @@ const DialogContentStub = defineComponent({
 
 const DialogScaffold = SimpleWrapper('div', 'dialog-scaffold')
 
-const CollapsibleStub = defineComponent({
-  props: { open: { type: Boolean, default: false } },
-  setup(props, { slots }) {
-    provide(collapsibleState, toRef(props, 'open'))
-    return () => h('div', { class: 'collapsible-root' }, slots.default?.())
-  },
-})
-
-const CollapsibleContentStub = defineComponent({
-  setup(_, { slots }) {
-    const open = inject<Ref<boolean>>(collapsibleState, ref(true))
-    return () => open.value ? h('div', { class: 'collapsible-content' }, slots.default?.()) : null
-  },
-})
-
 const SchemaTabsEditorStub = defineComponent({
   props: {
     modelValue: {
@@ -210,6 +195,51 @@ const DropdownItemStub = defineComponent({
   },
 })
 
+const TabsStub = defineComponent({
+  props: {
+    modelValue: { type: String, default: '' },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit, slots }) {
+    const current = ref(props.modelValue)
+    watch(() => props.modelValue, (value) => {
+      current.value = value
+    })
+    provide(tabsState, {
+      current,
+      setCurrent: (value: string) => emit('update:modelValue', value),
+    })
+    return () => h('div', { class: 'tabs-root' }, slots.default?.())
+  },
+})
+
+const TabsListStub = SimpleWrapper('div', 'tabs-list')
+
+const TabsTriggerStub = defineComponent({
+  props: {
+    value: { type: String, required: true },
+  },
+  setup(props, { attrs, slots }) {
+    const tabs = inject<{ current: Ref<string>; setCurrent: (value: string) => void }>(tabsState)
+    return () => h('button', {
+      ...attrs,
+      'data-active': tabs?.current.value === props.value ? 'true' : 'false',
+      onClick: () => tabs?.setCurrent(props.value),
+    }, slots.default?.())
+  },
+})
+
+const TabsContentStub = defineComponent({
+  props: {
+    value: { type: String, required: true },
+  },
+  setup(props, { attrs, slots }) {
+    const tabs = inject<{ current: Ref<string> }>(tabsState)
+    const visible = computed(() => tabs?.current.value === props.value)
+    return () => visible.value ? h('div', attrs, slots.default?.()) : null
+  },
+})
+
 const stubs = {
   Avatar: SimpleWrapper('div', 'avatar'),
   AvatarFallback: SimpleWrapper('div', 'avatar-fallback'),
@@ -228,9 +258,6 @@ const stubs = {
   CardContent: SimpleWrapper('div', 'card-content'),
   CardHeader: SimpleWrapper('div', 'card-header'),
   CardTitle: SimpleWrapper('div', 'card-title'),
-  Collapsible: CollapsibleStub,
-  CollapsibleContent: CollapsibleContentStub,
-  CollapsibleTrigger: SimpleWrapper('div', 'collapsible-trigger'),
   Dialog: DialogStub,
   DialogContent: DialogContentStub,
   DialogDescription: DialogScaffold,
@@ -250,6 +277,10 @@ const stubs = {
       return () => h('span', { class: 'state-badge' }, props.state)
     },
   }),
+  Tabs: TabsStub,
+  TabsContent: TabsContentStub,
+  TabsList: TabsListStub,
+  TabsTrigger: TabsTriggerStub,
 }
 
 function makeRouter(initialPath = '/users/user-1') {
@@ -406,7 +437,12 @@ describe('UserDetailView', () => {
     expect(wrapper.find('[data-testid="set-password"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="send-invite"]').exists()).toBe(true)
 
+    await wrapper.find('[data-testid="tab-security"]').trigger('click')
+    await flushPromises()
     expect(wrapper.find('a[href="/sessions?user_id=user-1"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="tab-activity"]').trigger('click')
+    await flushPromises()
     expect(wrapper.find('a[href="/events?aggregate_id=user-1"]').exists()).toBe(true)
     expect(wrapper.find('a[href="/traces?actor_id=user-1"]').exists()).toBe(true)
 
@@ -463,6 +499,8 @@ describe('UserDetailView', () => {
     expect(service.wrapper.text()).toContain('Rotates customer tokens')
     expect(service.wrapper.find('[data-testid="send-invite"]').exists()).toBe(false)
     expect(service.wrapper.find('[data-testid="set-password"]').exists()).toBe(true)
+    await service.wrapper.find('[data-testid="tab-activity"]').trigger('click')
+    await flushPromises()
     expect(service.wrapper.find('a[href="/traces?actor_id=svc-1"]').exists()).toBe(true)
 
     service.wrapper.unmount()
@@ -498,12 +536,16 @@ describe('UserDetailView', () => {
     expect(agent.wrapper.text()).toContain('gpt-5.4')
     expect(agent.wrapper.find('[data-testid="send-invite"]').exists()).toBe(false)
     expect(agent.wrapper.find('[data-testid="set-password"]').exists()).toBe(false)
+    await agent.wrapper.find('[data-testid="tab-security"]').trigger('click')
+    await flushPromises()
     expect(agent.wrapper.find('a[href="/sessions?user_id=agent-1"]').exists()).toBe(true)
   })
 
   it('revokes preview sessions and preserves the password + delete flows', async () => {
     const { router, wrapper } = await mountView()
 
+    await wrapper.find('[data-testid="tab-security"]').trigger('click')
+    await flushPromises()
     await wrapper.find('[data-testid="revoke-session-sess-1"]').trigger('click')
     await flushPromises()
 
