@@ -49,6 +49,9 @@ describe('buildPreviewFlowStep', () => {
     expect(step.nodes.some((node) => node.type === 'input' && node.name === 'password')).toBe(true)
     expect(step.nodes.some((node) => node.type === 'captcha_altcha')).toBe(true)
     expect(step.nodes.some((node) => node.type === 'submit')).toBe(true)
+    expect(step.nodes.findIndex((node) => node.type === 'submit')).toBeLessThan(
+      step.nodes.findIndex((node) => node.type === 'captcha_altcha'),
+    )
   })
 
   it('builds an sso-only preview without a submit button', () => {

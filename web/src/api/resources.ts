@@ -181,14 +181,20 @@ export interface CatalogVariable {
   default?: any
 }
 
+export interface CatalogListResponse {
+  templates: CatalogTemplate[]
+  total: number
+  can_refresh: boolean
+}
+
 export const catalogApi = {
   list: (type?: string, tag?: string) => {
     const query: Record<string, string> = {}
     if (type) query.type = type
     if (tag) query.tags = tag
-    return api.get<{ templates: CatalogTemplate[]; total: number }>(
+    return api.get<CatalogListResponse>(
       `/v1/catalog${Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : ''}`
-    ).then(r => r.templates || [])
+    )
   },
   get: (id: string): Promise<CatalogTemplateDetailResponse> => unwrap<CatalogTemplateDetailResponse>(getCatalogEntry({ path: { id } })),
   install: (id: string, variables: Record<string, any>): Promise<CatalogInstallResponse> =>

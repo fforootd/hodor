@@ -102,7 +102,7 @@ export interface FlowStep {
 export interface FlowCompleteResponse {
   flow_id: string
   step: string
-  session_id: number
+  session_id: string
   redirect_uri: string
 }
 
@@ -127,13 +127,14 @@ function flowHeaders(): Record<string, string> {
 }
 
 export const flowApi = {
-  create: (baseUrl = '', redirectUri?: string, state?: string) => {
+  create: (baseUrl = '', redirectUri?: string, state?: string, authRequestId?: string) => {
     const body: Record<string, string> = {}
     if (redirectUri) body.redirect_uri = redirectUri
     if (state) body.state = state
+    if (authRequestId) body.auth_request_id = authRequestId
     const fingerprint = getDeviceFingerprint()
     if (fingerprint) body.fingerprint = fingerprint
-    return requestJSON<FlowStep>(
+    return requestJSON<FlowStep | FlowCompleteResponse>(
       '/v1/login/flows',
       {
         method: 'POST',

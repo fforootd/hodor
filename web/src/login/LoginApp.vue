@@ -64,11 +64,8 @@
     traceFormSubmit,
     setFlowId,
   } from '@/lib/telemetry'
-  import { collectFingerprint, submitFingerprint } from '@/lib/fingerprint'
-  import {
-    createReadyzWaiter,
-    useAppBootstrap,
-  } from '@/bootstrap/app-bootstrap'
+  import { collectFingerprint } from '@/lib/fingerprint'
+  import { createReadyzWaiter, useAppBootstrap } from '@/bootstrap/app-bootstrap'
   import { toLoginErrorDetail, type LoginErrorDetail } from './init-state'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
   import LoginShell from './components/LoginShell.vue'
@@ -79,6 +76,7 @@
       apiBaseUrl?: string
       redirectUri?: string
       state?: string
+      authRequestId?: string
       layoutOverride?: string
       darkModeOverride?: string
       coverImageOverride?: string
@@ -88,6 +86,7 @@
       apiBaseUrl: '',
       redirectUri: '',
       state: '',
+      authRequestId: '',
       layoutOverride: '',
       darkModeOverride: '',
       coverImageOverride: '',
@@ -110,6 +109,10 @@
   const pendingAction = ref('')
   const captchaSolving = ref(false)
   const fingerprintCollected = ref(false)
+  const currentUrlParams = computed(() => new URLSearchParams(window.location.search))
+  const effectiveRedirectUri = computed(() => props.redirectUri || currentUrlParams.value.get('redirect_uri') || '')
+  const effectiveState = computed(() => props.state || currentUrlParams.value.get('state') || '')
+  const effectiveAuthRequestId = computed(() => props.authRequestId || currentUrlParams.value.get('auth_request_id') || '')
 
   const {
     state: initState,
@@ -121,8 +124,14 @@
   } = useAppBootstrap(
     async () => {
       resetFormState()
-      const step = await flowApi.create(props.apiBaseUrl || '', props.redirectUri, props.state)
-      applyInitializedFlow(step)
+      const resp = await flowApi.create(
+        props.apiBaseUrl || '',
+        effectiveRedirectUri.value,
+        effectiveState.value,
+        effectiveAuthRequestId.value,
+      )
+      if (handleCompleteResponse(resp)) return
+      applyInitializedFlow(resp as FlowStep)
     },
     {
       waitForReady: createReadyzWaiter(props.apiBaseUrl || ''),
@@ -193,6 +202,7 @@
   function resetFormState() {
     flowStep.value = null
     submitError.value = ''
+    fingerprintCollected.value = false
     Object.keys(formData).forEach((key) => {
       delete formData[key]
     })
@@ -202,7 +212,7 @@
     captchaSolving.value = false
   }
 
-  function applyInitializedFlow(step: FlowStep) {
+  function applyFlowStepState(step: FlowStep) {
     flowStep.value = step
     branding.value = step.branding
     setFlowId(step.flow_id)
@@ -212,8 +222,25 @@
         formData[node.name] = node.value
       }
     }
+  }
 
+  function applyInitializedFlow(step: FlowStep) {
+    applyFlowStepState(step)
     maybeCollectFingerprint(step)
+  }
+
+  function handleCompleteResponse(resp: FlowStep | FlowCompleteResponse): boolean {
+    if (!('redirect_uri' in resp) || !resp.redirect_uri) {
+      return false
+    }
+
+    const complete = resp as FlowCompleteResponse
+    emit('login-complete', {
+      session_id: String(complete.session_id || ''),
+      redirect_uri: complete.redirect_uri,
+    })
+    window.location.href = complete.redirect_uri
+    return true
   }
 
   onMounted(async () => {
@@ -310,19 +337,12 @@
         return
       }
 
-      if ('redirect_uri' in resp && (resp as FlowCompleteResponse).redirect_uri) {
-        const complete = resp as FlowCompleteResponse
-        emit('login-complete', {
-          session_id: String(complete.session_id),
-          redirect_uri: complete.redirect_uri,
-        })
-        window.location.href = complete.redirect_uri
+      if (handleCompleteResponse(resp)) {
         return
       }
 
       const step = resp as FlowStep
-      flowStep.value = step
-      if (step.branding) branding.value = step.branding
+      applyFlowStepState(step)
 
       if (step.step !== previousStep) {
         traceStepTransition(previousStep || 'unknown', step.step, step.flow_id)
@@ -397,7 +417,22 @@
       })
 
       await submitAction('captcha_submit', { altcha_payload: payload })
-    } catch {
+    } catch (err) {
+      const detail = toLoginErrorDetail(err)
+      if (
+        detail.status === 400 &&
+        detail.message.toLowerCase().includes('not active for this step') &&
+        flowStep.value
+      ) {
+        try {
+          const refreshedStep = await flowApi.get(props.apiBaseUrl || '', flowStep.value.flow_id)
+          applyFlowStepState(refreshedStep)
+          submitError.value = ''
+          return
+        } catch {
+          // Fall through to the generic captcha error if the refresh also fails.
+        }
+      }
       submitError.value = 'Captcha verification failed'
       captchaSolving.value = false
     } finally {
@@ -419,7 +454,16 @@
 
     try {
       const fp = await collectFingerprint()
-      await submitFingerprint(props.apiBaseUrl || '', step.flow_id, fp)
+      const refreshedStep = (await flowApi.submit(
+        props.apiBaseUrl || '',
+        step.flow_id,
+        'fingerprint_submit',
+        {
+          visitor_id: fp.visitorId,
+          fingerprint_hash: fp.visitorId,
+        },
+      )) as FlowStep
+      applyFlowStepState(refreshedStep)
       fingerprintCollected.value = true
     } catch {
       // Fingerprint collection should never block login.

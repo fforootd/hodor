@@ -53,6 +53,7 @@ import {
 } from '@/console/utils/schema-resource'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
 import { ArrowLeft } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -90,12 +91,12 @@ onMounted(async () => {
 
 async function submit() {
   submitting.value = true
-  error.value = ''
   try {
     const created = await appApi.create(payload.value)
+    notifyMutationSuccess('Application', 'create')
     router.push(`/applications/${created.id}`)
   } catch (err: any) {
-    error.value = err?.message || 'Failed to create application'
+    notifyMutationError('Application', 'create', err)
   } finally {
     submitting.value = false
   }

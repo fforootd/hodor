@@ -27,6 +27,17 @@ const (
 	MaxAge = 86400
 )
 
+// DocumentationCookieName returns the canonical production cookie name for docs
+// and API references. Local development may use the non-secure variant.
+func DocumentationCookieName() string {
+	return secureCookieName
+}
+
+// CookieNames returns all accepted session cookie names.
+func CookieNames() []string {
+	return []string{secureCookieName, devCookieName}
+}
+
 // CookieConfig holds the settings needed for cookie operations.
 type CookieConfig struct {
 	// Secrets is an ordered list of HMAC keys. The first key is used for signing;

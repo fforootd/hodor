@@ -48,19 +48,70 @@ func (s *Storage) Health(_ context.Context) error {
 // ---------- Client ----------
 
 func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.Client, error) {
-	var metadataJSON, schemaJSON sql.NullString
+	var appType, redirectURIsJSON, grantTypesJSON, responseTypesJSON, metadataJSON, schemaJSON sql.NullString
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT COALESCE(a.metadata, '{}'), COALESCE(sc.schema, '{}')
+		`SELECT COALESCE(a.app_type, 'web'),
+		        COALESCE(a.redirect_uris, '[]'),
+		        COALESCE(a.grant_types, '[]'),
+		        COALESCE(a.response_types, '[]'),
+		        COALESCE(a.metadata, '{}'),
+		        COALESCE(sc.schema, '{}')
 		 FROM apps a
 		 LEFT JOIN schemas sc ON a.schema_id = sc.id
 		 WHERE a.client_id = ? AND a.state = 'active'`,
 		clientID,
-	).Scan(&metadataJSON, &schemaJSON)
+	).Scan(&appType, &redirectURIsJSON, &grantTypesJSON, &responseTypesJSON, &metadataJSON, &schemaJSON)
 	if err != nil {
 		return nil, fmt.Errorf("client not found: %w", err)
 	}
 
-	return ClientFromIdentity(clientID, metadataJSON.String, schemaJSON.String)
+	dataJSON := buildClientDataJSON(
+		metadataJSON.String,
+		appType.String,
+		redirectURIsJSON.String,
+		grantTypesJSON.String,
+		responseTypesJSON.String,
+	)
+
+	return ClientFromIdentity(clientID, dataJSON, schemaJSON.String)
+}
+
+func buildClientDataJSON(metadataJSON, appType, redirectURIsJSON, grantTypesJSON, responseTypesJSON string) string {
+	data := map[string]any{}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		_ = json.Unmarshal([]byte(metadataJSON), &data)
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+
+	if strings.TrimSpace(appType) != "" {
+		data["app_type"] = strings.TrimSpace(appType)
+	}
+	if json.Valid([]byte(redirectURIsJSON)) {
+		var redirectURIs []string
+		if err := json.Unmarshal([]byte(redirectURIsJSON), &redirectURIs); err == nil {
+			data["redirect_uris"] = redirectURIs
+		}
+	}
+	if json.Valid([]byte(grantTypesJSON)) {
+		var grantTypes []string
+		if err := json.Unmarshal([]byte(grantTypesJSON), &grantTypes); err == nil {
+			data["grant_types"] = grantTypes
+		}
+	}
+	if json.Valid([]byte(responseTypesJSON)) {
+		var responseTypes []string
+		if err := json.Unmarshal([]byte(responseTypesJSON), &responseTypes); err == nil {
+			data["response_types"] = responseTypes
+		}
+	}
+
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 func (s *Storage) AuthorizeClientIDSecret(ctx context.Context, clientID, clientSecret string) error {
@@ -118,21 +169,41 @@ func (s *Storage) CreateAuthRequest(ctx context.Context, authReq *oidc.AuthReque
 		cc = authReq.CodeChallenge
 		ccm = string(authReq.CodeChallengeMethod)
 	}
+	dataJSON := encodeAuthRequestData(authReq)
 
 	_, err := s.db.SQL().ExecContext(ctx,
-		`INSERT INTO auth_states (id, type, client_id, redirect_uri, scopes, state, nonce, response_type, code_challenge, code_challenge_method, user_id, expires_at)
-		 VALUES (?, 'oidc_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'))`,
+		`INSERT INTO auth_states (id, type, client_id, redirect_uri, scopes, state, nonce, response_type, code_challenge, code_challenge_method, user_id, data, expires_at)
+		 VALUES (?, 'oidc_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'))`,
 		id, authReq.ClientID, authReq.RedirectURI,
 		strings.Join(authReq.Scopes, " "),
 		authReq.State, authReq.Nonce,
 		string(authReq.ResponseType),
-		cc, ccm, userID,
+		cc, ccm, userID, dataJSON,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create auth request: %w", err)
 	}
 
 	return s.authRequestFromRow(ctx, id)
+}
+
+func encodeAuthRequestData(authReq *oidc.AuthRequest) string {
+	data := map[string]any{}
+	if len(authReq.Prompt) > 0 {
+		data["prompt"] = []string(authReq.Prompt)
+	}
+	if authReq.LoginHint != "" {
+		data["login_hint"] = authReq.LoginHint
+	}
+	if authReq.MaxAge != nil {
+		data["max_age"] = *authReq.MaxAge
+	}
+
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 func (s *Storage) AuthRequestByID(ctx context.Context, id string) (op.AuthRequest, error) {

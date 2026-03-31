@@ -4,6 +4,11 @@
   "name": "Microsoft Entra ID",
   "description": "Microsoft Entra ID (Azure AD) provider with tenant-aware OIDC configuration. Maps Microsoft claims including UPN, preferred_username, and group memberships.",
   "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider instance (shown on the login screen)",
+      "default": "Microsoft Entra ID"
+    },
     "tenant_id": {
       "type": "string",
       "description": "Azure AD Tenant ID (or 'common' for multi-tenant)"
@@ -19,7 +24,7 @@
     }
   },
   "payload": {
-    "display_name": "Microsoft Entra ID",
+    "display_name": "{{provider_name}}",
     "kind": "entra",
     "protocol": "oidc",
     "connection": {

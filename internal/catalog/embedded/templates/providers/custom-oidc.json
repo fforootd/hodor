@@ -7,7 +7,7 @@
     "provider_name": {
       "type": "string",
       "description": "Display name for this provider (shown on login screen)",
-      "default": "SSO"
+      "default": "Custom OIDC"
     },
     "issuer_url": {
       "type": "string",

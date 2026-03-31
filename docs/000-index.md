@@ -29,8 +29,12 @@
 | [018](adr/018-startup-lifecycle.md) | Startup Lifecycle & Schema Migration | Proposed | 2026-03-28 |
 | [019](adr/019-server-driven-login-wc.md) | Server-Driven Login UI + Web Components | Accepted | 2026-03-28 |
 | [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Marketplace Modules | Accepted | 2026-03-29 |
+| [021](adr/021-login-flow-schema.md) | Login Flow Schema — Composable Bot Detection & Behavioral Telemetry | Accepted | 2026-03-29 |
 | [021](adr/021-multi-tenancy.md) | Multi-Tenancy via Instance Isolation | Accepted | 2026-03-30 |
+| [022](adr/022-dedicated-resource-tables.md) | Dedicated Resource Tables + Metadata Extensions | Proposed | 2026-03-30 |
 | [022](adr/022-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
+| [023](adr/023-wide-events.md) | Wide Events as Internal Observability Primitive | Accepted | 2026-03-29 |
+| [024](adr/024-risk-evaluation-policy-consumers.md) | Risk Evaluation and Policy Consumers | Accepted | 2026-03-30 |
 
 ## Architecture
 
@@ -46,6 +50,13 @@
 | [Developer Experience](design/developer-experience.md) | Zero-config, pure Go binary, config cascade, testing philosophy |
 | [Design Decisions](design/design-decisions.md) | Resolved architecture and product decisions with rationale |
 | [Design Patterns](design/design-patterns.md) | Unified identity, i18n, notifications, schemas, UI architecture |
+
+## Guides
+
+| Document | Summary |
+|---|---|
+| [Local Development](guides/local-development.md) | Canonical `make dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
+| [Zitadel Login Web Component](guides/zitadel-login-wc.md) | Embed and customize the server-driven login web component |
 
 ## Vision
 
@@ -92,4 +103,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 023
+- **Next ADR number**: 025

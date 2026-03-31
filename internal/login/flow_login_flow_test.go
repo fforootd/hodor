@@ -2,6 +2,8 @@ package login
 
 import (
 	"testing"
+
+	"github.com/zitadel/zitadel/internal/risk"
 )
 
 func TestExtractLoginFlowConfig(t *testing.T) {
@@ -377,6 +379,57 @@ func TestToFlowStepIncludesCaptchaFlags(t *testing.T) {
 	}
 	if !step.CaptchaVerified {
 		t.Fatal("CaptchaVerified = false, want true")
+	}
+}
+
+func TestToFlowStepOmitsAdaptiveCaptchaForLowRisk(t *testing.T) {
+	flow := &Flow{
+		ID:          "flow_low",
+		CurrentStep: StepIdentifier,
+		SchemaConfig: &SchemaAuthConfig{
+			Branding: defaultBrandingConfig(),
+			Captcha:  &CaptchaConfig{Provider: "altcha", Mode: "risk_based"},
+		},
+		PreAuthRisk:     &risk.Result{Stage: risk.StagePreAuth, Level: risk.LevelLow, RecommendedNextStep: risk.RecommendationAllow},
+		AdaptiveCaptcha: false,
+	}
+
+	step := flow.ToFlowStep()
+	if step.CaptchaRequired {
+		t.Fatal("CaptchaRequired = true, want false")
+	}
+	for _, node := range step.Nodes {
+		if node.Type == "captcha_altcha" || node.Type == "captcha_checkbox" {
+			t.Fatalf("unexpected captcha node %#v", node)
+		}
+	}
+}
+
+func TestToFlowStepRendersAdaptiveCaptchaForElevatedRisk(t *testing.T) {
+	flow := &Flow{
+		ID:          "flow_high",
+		CurrentStep: StepIdentifier,
+		SchemaConfig: &SchemaAuthConfig{
+			Branding: defaultBrandingConfig(),
+			Captcha:  &CaptchaConfig{Provider: "altcha", Mode: "risk_based"},
+		},
+		PreAuthRisk:     &risk.Result{Stage: risk.StagePreAuth, Level: risk.LevelMedium, RecommendedNextStep: risk.RecommendationRequireCaptcha},
+		AdaptiveCaptcha: true,
+	}
+
+	step := flow.ToFlowStep()
+	if !step.CaptchaRequired {
+		t.Fatal("CaptchaRequired = false, want true")
+	}
+	foundCaptcha := false
+	for _, node := range step.Nodes {
+		if node.Type == "captcha_altcha" {
+			foundCaptcha = true
+			break
+		}
+	}
+	if !foundCaptcha {
+		t.Fatal("expected adaptive captcha node to be rendered")
 	}
 }
 

@@ -1,0 +1,49 @@
+# Frontend local seed pack.
+# Default for `make dev` so console and login flows have deterministic data.
+
+users:
+  - identifier: admin
+    display_name: Admin
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [admin, password]
+    pats:
+      - name: dev-admin-token
+        token: zitadel-dev-pat-do-not-use-in-production
+        scopes: [admin]
+    profile:
+      email: admin@zitadel.local
+
+  - identifier: jane@example.com
+    display_name: Jane Doe
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: jane@example.com
+      display_name: Jane Doe
+      locale: en-US
+      phone: "+1-555-0100"
+
+  - identifier: bob@example.com
+    display_name: Bob Smith
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: bob@example.com
+      display_name: Bob Smith
+      locale: de-DE
+
+  - identifier: alice@example.com
+    display_name: Alice Wonder
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: alice@example.com
+      display_name: Alice Wonder

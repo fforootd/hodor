@@ -36,6 +36,7 @@ func main() {
 
 	root.AddCommand(startCmd())
 	root.AddCommand(migrateCmd())
+	root.AddCommand(seedCmd())
 	root.AddCommand(versionCmd())
 	root.AddCommand(openapiExportCmd())
 
@@ -81,6 +82,11 @@ func startCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve local storage: %w", err)
 			}
+			resolvedSeedFile, err := resolveSeedFilePath(configPath, cfg.Dev.SeedFile)
+			if err != nil {
+				return fmt.Errorf("resolve seed file: %w", err)
+			}
+			cfg.Dev.SeedFile = resolvedSeedFile
 
 			// Initialize logging — streams, sinks, redaction.
 			// DB is nil here; analytics drainer activates after DB open.
@@ -152,7 +158,7 @@ func startCmd() *cobra.Command {
 			// Bootstrap — behavior depends on config.
 			bootstrapMode := cfg.Database.ResolveBootstrapMode()
 			if bootstrapMode == "auto" {
-				if err := bootstrap.EnsureAdmin(context.Background(), db, cfg.Dev.SeedFile); err != nil {
+				if err := bootstrap.EnsureAdmin(context.Background(), db, resolvedSeedFile); err != nil {
 					return fmt.Errorf("bootstrap: %w", err)
 				}
 			} else {
@@ -188,8 +194,8 @@ func startCmd() *cobra.Command {
 			}
 
 			// Apply seed file if configured.
-			if cfg.Dev.SeedFile != "" {
-				if err := seed.LoadAndApply(context.Background(), db.SQL(), cfg.Dev.SeedFile); err != nil {
+			if resolvedSeedFile != "" {
+				if err := seed.LoadAndApply(context.Background(), db.SQL(), resolvedSeedFile); err != nil {
 					return fmt.Errorf("apply seed: %w", err)
 				}
 			}
@@ -241,6 +247,10 @@ For Postgres, an advisory lock ensures safe concurrent execution.`,
 			if err != nil {
 				return fmt.Errorf("resolve local storage: %w", err)
 			}
+			resolvedSeedFile, err := resolveSeedFilePath(configPath, cfg.Dev.SeedFile)
+			if err != nil {
+				return fmt.Errorf("resolve seed file: %w", err)
+			}
 
 			// Minimal logging for migration command.
 			logging.Init(logging.Config{
@@ -266,7 +276,12 @@ For Postgres, an advisory lock ensures safe concurrent execution.`,
 			if doBootstrap {
 				sf := seedFile
 				if sf == "" {
-					sf = cfg.Dev.SeedFile
+					sf = resolvedSeedFile
+				} else {
+					sf, err = resolveSeedFilePath(configPath, sf)
+					if err != nil {
+						return fmt.Errorf("resolve seed file: %w", err)
+					}
 				}
 				if err := bootstrap.EnsureAdmin(context.Background(), db, sf); err != nil {
 					return fmt.Errorf("bootstrap: %w", err)
@@ -284,6 +299,120 @@ For Postgres, an advisory lock ensures safe concurrent execution.`,
 
 	// Add status subcommand.
 	cmd.AddCommand(migrateStatusCmd())
+
+	return cmd
+}
+
+func seedCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "seed",
+		Short: "Manage declarative seed files",
+	}
+	cmd.AddCommand(seedApplyCmd(), seedValidateCmd())
+	return cmd
+}
+
+func seedApplyCmd() *cobra.Command {
+	var configPath string
+	var seedFile string
+
+	cmd := &cobra.Command{
+		Use:   "apply",
+		Short: "Apply a seed file to the configured database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			if _, err := cfg.ResolveLocalStorage(configPath); err != nil {
+				return fmt.Errorf("resolve local storage: %w", err)
+			}
+
+			targetSeed := seedFile
+			if targetSeed == "" {
+				targetSeed = cfg.Dev.SeedFile
+			}
+			targetSeed, err = resolveSeedFilePath(configPath, targetSeed)
+			if err != nil {
+				return fmt.Errorf("resolve seed file: %w", err)
+			}
+			if targetSeed == "" {
+				return fmt.Errorf("no seed file provided (use --file or configure dev.seed_file)")
+			}
+
+			logging.Init(logging.Config{
+				Level:  cfg.Observability.LogLevel,
+				Format: cfg.Observability.LogFormat,
+			})
+
+			db, err := database.OpenWithConfig(cfg.Database.URL, database.PoolConfig{})
+			if err != nil {
+				return fmt.Errorf("open database: %w", err)
+			}
+			defer db.Close()
+
+			if err := database.Migrate(db); err != nil {
+				return fmt.Errorf("run migrations: %w", err)
+			}
+			if err := bootstrap.EnsureAdmin(context.Background(), db, targetSeed); err != nil {
+				return fmt.Errorf("bootstrap: %w", err)
+			}
+			if err := seed.LoadAndApply(context.Background(), db.SQL(), targetSeed); err != nil {
+				return fmt.Errorf("apply seed: %w", err)
+			}
+
+			fmt.Printf("Applied seed file: %s\n", targetSeed)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to zitadel.toml config file")
+	cmd.Flags().StringVar(&seedFile, "file", "", "path to YAML seed file to apply")
+
+	return cmd
+}
+
+func seedValidateCmd() *cobra.Command {
+	var configPath string
+	var seedFile string
+
+	cmd := &cobra.Command{
+		Use:   "validate",
+		Short: "Validate a seed file without touching the database",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			targetSeed := seedFile
+			if targetSeed == "" && configPath != "" {
+				cfg, err := config.Load(configPath)
+				if err != nil {
+					return fmt.Errorf("load config: %w", err)
+				}
+				targetSeed = cfg.Dev.SeedFile
+			}
+			targetSeed, err := resolveSeedFilePath(configPath, targetSeed)
+			if err != nil {
+				return fmt.Errorf("resolve seed file: %w", err)
+			}
+			if targetSeed == "" {
+				return fmt.Errorf("no seed file provided (use --file or configure dev.seed_file)")
+			}
+
+			parsed, err := seed.LoadFile(targetSeed)
+			if err != nil {
+				return err
+			}
+
+			summary := parsed.Summary()
+			fmt.Printf("Seed file: %s\n", targetSeed)
+			fmt.Printf("Providers: %d\n", summary.Providers)
+			fmt.Printf("Users:     %d\n", summary.Users)
+			fmt.Println("Status:    valid")
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "path to zitadel.toml config file")
+	cmd.Flags().StringVar(&seedFile, "file", "", "path to YAML seed file to validate")
 
 	return cmd
 }
@@ -355,6 +484,13 @@ func logLegacyStorageWarning(resolution *config.LocalStorageResolution) {
 	}
 
 	logging.Printf("[WARN] local storage: %s", strings.Join(parts, "; "))
+}
+
+func resolveSeedFilePath(configPath, seedFile string) (string, error) {
+	if seedFile == "" {
+		return "", nil
+	}
+	return config.ResolveConfigRelativePath(configPath, seedFile)
 }
 
 func versionCmd() *cobra.Command {

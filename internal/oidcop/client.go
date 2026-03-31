@@ -40,28 +40,7 @@ func ClientFromIdentity(clientID string, dataJSON string, schemaJSON string) (*C
 		devMode:             true,
 	}
 
-	// Parse data JSON for redirect_uris, post_logout_redirect_uris.
-	if dataJSON != "" && dataJSON != "{}" {
-		var data map[string]any
-		if err := json.Unmarshal([]byte(dataJSON), &data); err == nil {
-			if uris, ok := data["redirect_uris"].([]any); ok {
-				for _, u := range uris {
-					if s, ok := u.(string); ok {
-						c.redirectURIs = append(c.redirectURIs, s)
-					}
-				}
-			}
-			if uris, ok := data["post_logout_redirect_uris"].([]any); ok {
-				for _, u := range uris {
-					if s, ok := u.(string); ok {
-						c.postLogoutURIs = append(c.postLogoutURIs, s)
-					}
-				}
-			}
-		}
-	}
-
-	// Parse schema JSON for x-oidc annotation.
+	// Parse schema JSON first for defaults, then let per-app data override them.
 	if schemaJSON != "" {
 		var schema map[string]any
 		if err := json.Unmarshal([]byte(schemaJSON), &schema); err == nil {
@@ -101,7 +80,79 @@ func ClientFromIdentity(clientID string, dataJSON string, schemaJSON string) (*C
 		}
 	}
 
+	if dataJSON != "" && dataJSON != "{}" {
+		var data map[string]any
+		if err := json.Unmarshal([]byte(dataJSON), &data); err == nil {
+			c.redirectURIs = stringSliceFromField(data["redirect_uris"])
+			c.postLogoutURIs = stringSliceFromField(data["post_logout_redirect_uris"])
+
+			switch strings.TrimSpace(stringValueFromField(data["app_type"])) {
+			case "native":
+				c.applicationType = op.ApplicationTypeNative
+			case "spa":
+				c.applicationType = op.ApplicationTypeUserAgent
+			default:
+				c.applicationType = op.ApplicationTypeWeb
+			}
+
+			if grantTypes := grantTypesFromField(data["grant_types"]); len(grantTypes) > 0 {
+				c.grantTypes = grantTypes
+			}
+			if responseTypes := responseTypesFromField(data["response_types"]); len(responseTypes) > 0 {
+				c.responseTypes = responseTypes
+			}
+		}
+	}
+
 	return c, nil
+}
+
+func stringValueFromField(value any) string {
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func stringSliceFromField(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if s, ok := value.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func grantTypesFromField(value any) []oidc.GrantType {
+	values := stringSliceFromField(value)
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make([]oidc.GrantType, 0, len(values))
+	for _, value := range values {
+		result = append(result, oidc.GrantType(value))
+	}
+	return result
+}
+
+func responseTypesFromField(value any) []oidc.ResponseType {
+	values := stringSliceFromField(value)
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make([]oidc.ResponseType, 0, len(values))
+	for _, value := range values {
+		result = append(result, oidc.ResponseType(value))
+	}
+	return result
 }
 
 // op.Client interface implementation

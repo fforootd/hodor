@@ -110,7 +110,7 @@ const bgVars = computed(() => ({
 .split-cover-side {
   position: relative;
   display: none;
-  background: hsl(var(--muted, 0 0% 96%));
+  background: var(--color-muted, #f4f4f5);
   overflow: hidden;
 }
 @media (min-width: 1024px) {

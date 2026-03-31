@@ -65,7 +65,12 @@ func (c *Config) ResolveLocalStorage(configPath string) (*LocalStorageResolution
 			resolution.DatabasePath = resolution.DefaultDatabasePath
 		}
 	} else if strings.HasPrefix(c.Database.URL, "sqlite://") {
-		resolution.DatabasePath = strings.TrimPrefix(c.Database.URL, "sqlite://")
+		path := strings.TrimPrefix(c.Database.URL, "sqlite://")
+		if path != "" && path != ":memory:" {
+			path = resolveLocalPath(baseDir, path)
+			c.Database.URL = "sqlite://" + path
+		}
+		resolution.DatabasePath = path
 	}
 
 	if c.Observability.CachePath == DefaultCachePath {
@@ -78,10 +83,25 @@ func (c *Config) ResolveLocalStorage(configPath string) (*LocalStorageResolution
 			resolution.CachePath = resolution.DefaultCachePath
 		}
 	} else {
+		c.Observability.CachePath = resolveLocalPath(baseDir, c.Observability.CachePath)
 		resolution.CachePath = c.Observability.CachePath
 	}
 
 	return resolution, nil
+}
+
+// ResolveConfigRelativePath resolves a relative path against the config file
+// directory (or the current working directory when no config file is used).
+func ResolveConfigRelativePath(configPath, path string) (string, error) {
+	if path == "" || filepath.IsAbs(path) {
+		return path, nil
+	}
+
+	baseDir, err := resolveStorageBaseDir(configPath)
+	if err != nil {
+		return "", err
+	}
+	return resolveLocalPath(baseDir, path), nil
 }
 
 func resolveStorageBaseDir(configPath string) (string, error) {

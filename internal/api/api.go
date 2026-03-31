@@ -20,6 +20,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/risk"
 
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
@@ -34,11 +35,23 @@ type API struct {
 	cookies *session.CookieConfig
 	spec    *OpenAPIRegistry
 	catalog *catalog.Service
+	risk    risk.Evaluator
 }
 
 // New creates a new API handler.
 func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API {
-	return &API{db: db, bus: bus, cookies: cookies, spec: &OpenAPIRegistry{}}
+	var riskEvaluator risk.Evaluator
+	if db != nil {
+		riskEvaluator = risk.NewEvaluator(db.SQL())
+	}
+
+	return &API{
+		db:      db,
+		bus:     bus,
+		cookies: cookies,
+		spec:    &OpenAPIRegistry{},
+		risk:    riskEvaluator,
+	}
 }
 
 func (a *API) SetCatalogService(svc *catalog.Service) {
@@ -2545,6 +2558,12 @@ func emitEvent(ctx context.Context, tx *sql.Tx, eventType string, actorID, aggre
 // EmitAuthEvent emits an auth-category event outside a transaction and signals the bus.
 func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
 	emitEventTo(ctx, a.db.SQL(), eventType, actorID, actorID, "auth", payload)
+	a.bus.Signal()
+}
+
+// EmitEvent emits a generic event outside a transaction and signals the bus.
+func (a *API) EmitEvent(ctx context.Context, eventType, actorID, aggregateID, aggregateType string, payload map[string]any) {
+	emitEventTo(ctx, a.db.SQL(), eventType, actorID, aggregateID, aggregateType, payload)
 	a.bus.Signal()
 }
 

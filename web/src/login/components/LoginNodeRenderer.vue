@@ -27,7 +27,7 @@
 
   <Transition name="fade" mode="out-in">
     <form v-if="flowStep" :key="flowStep.step" @submit.prevent="emit('submit')" class="space-y-4">
-      <template v-for="(node, i) in flowStep.nodes" :key="i">
+      <template v-for="(node, i) in orderedNodes" :key="i">
         <h1 v-if="node.type === 'heading'" class="text-xl font-semibold text-center">
           {{ node.text }}
         </h1>
@@ -340,11 +340,27 @@
 
   const formData = reactive(props.formData)
   const confirmPasswords = reactive(props.confirmPasswords)
+  const orderedNodes = computed(() => {
+    const nodes = props.flowStep?.nodes || []
+    const captchaNodes = nodes.filter(
+      (node) => node.type === 'captcha_altcha' || node.type === 'captcha_checkbox',
+    )
+    if (captchaNodes.length === 0) return nodes
+
+    const withoutCaptcha = nodes.filter(
+      (node) => node.type !== 'captcha_altcha' && node.type !== 'captcha_checkbox',
+    )
+    const submitIndex = withoutCaptcha.findIndex((node) => node.type === 'submit')
+    if (submitIndex === -1) return withoutCaptcha.concat(captchaNodes)
+
+    withoutCaptcha.splice(submitIndex + 1, 0, ...captchaNodes)
+    return withoutCaptcha
+  })
 
   const isRegistrationStep = computed(() => props.flowStep?.step === 'register')
   const firstInputIndex = computed(() => {
     if (!props.flowStep) return -1
-    return props.flowStep.nodes.findIndex((n) => n.type === 'input')
+    return orderedNodes.value.findIndex((n) => n.type === 'input')
   })
   const passwordsMatch = computed(() => {
     if (!isRegistrationStep.value) return true

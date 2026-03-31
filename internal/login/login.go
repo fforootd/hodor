@@ -22,6 +22,7 @@ import (
 	"github.com/zitadel/zitadel/internal/loginflow"
 	"github.com/zitadel/zitadel/internal/notify"
 	providers "github.com/zitadel/zitadel/internal/provider"
+	"github.com/zitadel/zitadel/internal/risk"
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/uniqueness"
@@ -39,6 +40,7 @@ type Handler struct {
 	captchaHMACKey string
 	captchaHTTP    *http.Client
 	resolver       *loginflow.Resolver
+	risk           risk.Evaluator
 }
 
 // New creates a new login API handler.
@@ -58,6 +60,7 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, coo
 		captchaHMACKey: hmacKey,
 		captchaHTTP:    &http.Client{Timeout: 10 * time.Second},
 		resolver:       resolver,
+		risk:           risk.NewEvaluator(db.SQL()),
 	}
 }
 

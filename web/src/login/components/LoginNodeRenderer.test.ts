@@ -107,4 +107,18 @@ describe('LoginNodeRenderer captcha gating', () => {
     expect(buttons[0].attributes('disabled')).toBeUndefined()
     expect(buttons[1].attributes('disabled')).toBeUndefined()
   })
+
+  it('renders captcha immediately after the submit action', () => {
+    const wrapper = mountRenderer([
+      { type: 'input', name: 'identifier', label: 'Email' },
+      { type: 'submit', label: 'Continue', action: 'identifier' },
+      { type: 'divider' },
+      { type: 'registration_link', label: 'Create an account', action: 'register' },
+      { type: 'captcha_checkbox', name: 'captcha', attributes: { provider: 'turnstile' } },
+    ])
+
+    const html = wrapper.find('form').html()
+    expect(html.indexOf('Continue')).toBeLessThan(html.indexOf('captcha-widget'))
+    expect(html.indexOf('captcha-widget')).toBeLessThan(html.indexOf('Create an account'))
+  })
 })

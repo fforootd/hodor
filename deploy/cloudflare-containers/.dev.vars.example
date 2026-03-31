@@ -1,0 +1,11 @@
+# Required for `wrangler dev`.
+ZITADEL_ADMIN_PASSWORD=change-me-before-sharing
+ZITADEL_ADMIN_PAT=change-me-before-sharing
+ZITADEL_COOKIE_SECRETS=replace-with-a-long-random-string
+
+# Optional overrides.
+ZITADEL_ADMIN_EMAIL=admin@example.com
+# Pin the public hostname instead of deriving it from the incoming request.
+# ZITADEL_EXTERNAL_DOMAIN=127.0.0.1:8787
+# Override the inferred TLS mode for special setups.
+# ZITADEL_TLS_MODE=off

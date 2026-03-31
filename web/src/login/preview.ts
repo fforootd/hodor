@@ -81,6 +81,10 @@ export function buildPreviewFlowStep(options: LoginFlowPreviewOptions): FlowStep
     ...buildAuthNodes(options.strategy),
   ]
 
+  if (options.strategy !== 'sso_only') {
+    nodes.push({ type: 'submit', label: 'Sign in', action: 'password' })
+  }
+
   if (options.captchaEnabled) {
     nodes.push(
       options.captchaProvider === 'altcha'
@@ -91,10 +95,6 @@ export function buildPreviewFlowStep(options: LoginFlowPreviewOptions): FlowStep
             attributes: { provider: options.captchaProvider },
           },
     )
-  }
-
-  if (options.strategy !== 'sso_only') {
-    nodes.push({ type: 'submit', label: 'Sign in', action: 'password' })
   }
 
   nodes.push({

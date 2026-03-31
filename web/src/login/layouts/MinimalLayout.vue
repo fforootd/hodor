@@ -32,7 +32,7 @@ const bgVars = computed(() => ({
   min-height: 100svh;
   width: 100%;
   padding: 1.5rem;
-  background: hsl(var(--background, 0 0% 100%));
+  background: var(--color-background, #ffffff);
 }
 .login-layout-minimal.is-preview {
   min-height: 100%;

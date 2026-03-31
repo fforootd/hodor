@@ -1,0 +1,37 @@
+# E2E local seed pack.
+# Keeps deterministic identities for Playwright and browser debugging.
+
+users:
+  - identifier: admin
+    display_name: Admin
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [admin, password]
+    pats:
+      - name: dev-admin-token
+        token: zitadel-dev-pat-do-not-use-in-production
+        scopes: [admin]
+    profile:
+      email: admin@zitadel.local
+
+  - identifier: e2e-user@example.com
+    display_name: E2E User
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: e2e-user@example.com
+      display_name: E2E User
+      locale: en-US
+
+  - identifier: reviewer@example.com
+    display_name: Reviewer
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: reviewer@example.com
+      display_name: Reviewer

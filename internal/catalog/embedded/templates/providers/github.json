@@ -4,6 +4,11 @@
   "name": "GitHub",
   "description": "GitHub OAuth provider for developer sign-in. Maps GitHub user profile including login, email, avatar, and organization memberships.",
   "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider instance (shown on the login screen)",
+      "default": "GitHub"
+    },
     "client_id": {
       "type": "string",
       "description": "GitHub OAuth App Client ID (from GitHub Settings > Developer settings)"
@@ -15,7 +20,7 @@
     }
   },
   "payload": {
-    "display_name": "GitHub",
+    "display_name": "{{provider_name}}",
     "kind": "github",
     "protocol": "oauth2",
     "connection": {

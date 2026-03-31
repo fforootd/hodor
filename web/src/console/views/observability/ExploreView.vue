@@ -48,7 +48,7 @@
                   <span class="font-medium">{{ sq.name }}</span>
                   <span class="text-xs text-muted-foreground block truncate">{{ sq.description || sq.sql.slice(0, 60) }}</span>
                 </button>
-                <button class="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive p-1 transition-opacity" @click.stop="deleteSavedQuery(sq.id)">
+                <button class="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive p-1 transition-opacity" @click.stop="requestDeleteSavedQuery(sq)">
                   <Trash2 class="size-3.5" />
                 </button>
               </div>
@@ -272,6 +272,25 @@
         <p class="text-sm mt-1">Try modifying your query or time range.</p>
       </CardContent>
     </Card>
+
+    <Dialog :open="savedQueryPendingDelete !== null" @update:open="handleSavedQueryDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Saved Query</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete
+            <strong>{{ savedQueryPendingDelete?.name || 'this saved query' }}</strong
+            >? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="savedQueryPendingDelete = null">Cancel</Button>
+          <Button variant="destructive" :disabled="deletingSavedQuery" @click="deleteSavedQuery">
+            {{ deletingSavedQuery ? 'Deleting…' : 'Delete' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -282,12 +301,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Play, FileJson, BarChart3, TrendingUp, Search, Database, ExternalLink, Save, Trash2, Bookmark as BookmarkIcon } from 'lucide-vue-next'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { api } from '@/api/client'
+import { notifyError, notifyMutationError, notifyMutationSuccess, notifySuccess } from '@/lib/notify'
 import { VisXYContainer, VisLine, VisArea, VisAxis, VisStackedBar } from '@unovis/vue'
 import { ChartContainer, ChartCrosshair } from '@/components/ui/chart'
 import { Badge } from '@/components/ui/badge'
@@ -336,6 +364,8 @@ const columns = ref<string[]>([])
 // Saved queries
 interface SavedQueryItem { id: string; name: string; description: string; sql: string; created_at: string }
 const savedQueries = ref<SavedQueryItem[]>([])
+const savedQueryPendingDelete = ref<SavedQueryItem | null>(null)
+const deletingSavedQuery = ref(false)
 
 async function fetchSavedQueries() {
   try {
@@ -351,8 +381,9 @@ async function saveCurrentQuery() {
   try {
     await api.post('/v1/analytics/queries', { name, description: desc || '', sql: query.value })
     await fetchSavedQueries()
+    notifySuccess('Saved query created')
   } catch (err: any) {
-    alert('Failed to save: ' + (err.message || err))
+    notifyError('Failed to save query', err)
   }
 }
 
@@ -361,12 +392,27 @@ function loadSavedQuery(sq: SavedQueryItem) {
   activeMode.value = 'sql'
 }
 
-async function deleteSavedQuery(id: string) {
-  if (!confirm('Delete this saved query?')) return
+function requestDeleteSavedQuery(savedQuery: SavedQueryItem) {
+  savedQueryPendingDelete.value = savedQuery
+}
+
+function handleSavedQueryDialogOpen(next: boolean) {
+  if (!next) savedQueryPendingDelete.value = null
+}
+
+async function deleteSavedQuery() {
+  if (!savedQueryPendingDelete.value) return
+  deletingSavedQuery.value = true
   try {
-    await api.delete(`/v1/analytics/queries/${id}`)
+    await api.delete(`/v1/analytics/queries/${savedQueryPendingDelete.value.id}`)
     await fetchSavedQueries()
-  } catch { /* ignore */ }
+    notifyMutationSuccess('Saved query', 'delete')
+    savedQueryPendingDelete.value = null
+  } catch (err: any) {
+    notifyMutationError('Saved query', 'delete', err)
+  } finally {
+    deletingSavedQuery.value = false
+  }
 }
 
 const editorOptions = {

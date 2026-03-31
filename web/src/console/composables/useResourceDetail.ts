@@ -6,7 +6,7 @@
  */
 import { ref, computed, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { notifyMutationError, notifyMutationSuccess, notifyError } from '@/lib/notify'
 
 export interface UseResourceDetailOptions<T> {
   /** Function that fetches the resource by ID */
@@ -41,7 +41,7 @@ export function useResourceDetail<T extends Record<string, any>>(options: UseRes
       item.value = await options.fetchFn(resourceId.value)
     } catch (e: any) {
       error.value = e?.message || `Failed to load ${options.resourceName}`
-      toast.error(`Failed to load ${options.resourceName}`, { description: e?.message })
+      notifyError(`Failed to load ${options.resourceName}`, e)
     } finally {
       loading.value = false
     }
@@ -53,10 +53,10 @@ export function useResourceDetail<T extends Record<string, any>>(options: UseRes
     error.value = ''
     try {
       item.value = await options.updateFn(resourceId.value, data)
-      toast.success(`${options.resourceName} updated`)
+      notifyMutationSuccess(options.resourceName, 'update')
     } catch (e: any) {
       error.value = e?.message || `Failed to update ${options.resourceName}`
-      toast.error(`Failed to update ${options.resourceName}`, { description: e?.message })
+      notifyMutationError(options.resourceName, 'update', e)
     } finally {
       saving.value = false
     }
@@ -67,10 +67,10 @@ export function useResourceDetail<T extends Record<string, any>>(options: UseRes
     deleting.value = true
     try {
       await options.deleteFn(resourceId.value)
-      toast.success(`${options.resourceName} deleted`)
+      notifyMutationSuccess(options.resourceName, 'delete')
       router.push(options.listRoute)
     } catch (e: any) {
-      toast.error(`Failed to delete ${options.resourceName}`, { description: e?.message })
+      notifyMutationError(options.resourceName, 'delete', e)
       showDeleteConfirm.value = false
     } finally {
       deleting.value = false

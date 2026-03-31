@@ -24,50 +24,77 @@ function spaFallback(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [vue(), tailwindcss(), spaFallback()],
-  resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
-      '@zitadel/client-js': resolve(__dirname, 'src/lib/zitadel-client-stub.ts'),
-    },
-  },
-  build: {
-    outDir: 'dist',
-    rollupOptions: {
-      input: {
-        login: resolve(__dirname, 'src/login/index.html'),
-        console: resolve(__dirname, 'src/console/index.html'),
-        account: resolve(__dirname, 'src/account/index.html'),
+export default defineConfig(() => {
+  const apiBase = process.env.ZITADEL_API_BASE || 'http://localhost:8080'
+
+  return {
+    plugins: [vue(), tailwindcss(), spaFallback()],
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src'),
+        '@zitadel/client-js': resolve(__dirname, 'src/lib/zitadel-client-stub.ts'),
       },
     },
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      // SSE endpoint — must be defined BEFORE /v1 so it takes precedence.
-      // changeOrigin ensures the Host header matches the Go server.
-      '/v1/events/stream': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
+    build: {
+      outDir: 'dist',
+      rollupOptions: {
+        input: {
+          login: resolve(__dirname, 'src/login/index.html'),
+          console: resolve(__dirname, 'src/console/index.html'),
+          account: resolve(__dirname, 'src/account/index.html'),
+        },
       },
-      '/v1': 'http://localhost:8080',
-      '/openapi.json': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/healthz': 'http://localhost:8080',
-      '/readyz': 'http://localhost:8080',
-      '/assets': 'http://localhost:8080',
-      // OIDC endpoints (Go OIDC provider on :8080).
-      '/.well-known': 'http://localhost:8080',
-      '/authorize': 'http://localhost:8080',
-      '/oauth': 'http://localhost:8080',
-      '/userinfo': 'http://localhost:8080',
-      '/end_session': 'http://localhost:8080',
-      '/keys': 'http://localhost:8080',
-      '/revoke': 'http://localhost:8080',
-      '/devicecode': 'http://localhost:8080',
     },
-  },
+    server: {
+      port: 5173,
+      proxy: {
+        // SSE endpoint — must be defined BEFORE /v1 so it takes precedence.
+        // changeOrigin ensures the Host header matches the Go server.
+        '/v1/events/stream': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/v1': apiBase,
+        '/openapi.json': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/.well-known': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/authorize': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/oauth': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/userinfo': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/keys': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/end_session': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/revoke': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/devicecode': {
+          target: apiBase,
+          changeOrigin: true,
+        },
+        '/healthz': apiBase,
+        '/readyz': apiBase,
+        '/assets': apiBase,
+      },
+    },
+  }
 })

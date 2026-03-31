@@ -1,17 +1,21 @@
 package login
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/captcha"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/risk"
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
@@ -25,17 +29,37 @@ import (
 func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 	// Optional: accept OIDC redirect context, preview flow ID, and device fingerprint.
 	var req struct {
-		RedirectURI string `json:"redirect_uri,omitempty"`
-		State       string `json:"state,omitempty"`
-		Fingerprint string `json:"fingerprint,omitempty"`
-		FlowID      string `json:"flow_id,omitempty"`   // preview: load a specific login flow
-		ClientID    string `json:"client_id,omitempty"` // OIDC: resolve flow by app
+		AuthRequestID string `json:"auth_request_id,omitempty"`
+		RedirectURI   string `json:"redirect_uri,omitempty"`
+		State         string `json:"state,omitempty"`
+		Fingerprint   string `json:"fingerprint,omitempty"`
+		FlowID        string `json:"flow_id,omitempty"`   // preview: load a specific login flow
+		ClientID      string `json:"client_id,omitempty"` // OIDC: resolve flow by app
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	// Also check query param for preview: /v1/login/flows?flow=xxx
 	if req.FlowID == "" {
 		req.FlowID = r.URL.Query().Get("flow")
+	}
+	if req.AuthRequestID == "" {
+		req.AuthRequestID = strings.TrimSpace(r.URL.Query().Get("auth_request_id"))
+	}
+
+	var oidcAuthReq *oidcAuthRequestContext
+	if req.AuthRequestID != "" {
+		authReq, err := h.lookupOIDCAuthRequest(r.Context(), req.AuthRequestID)
+		if err != nil {
+			writeLoginError(w, http.StatusBadRequest, loginBadRequest("OIDC authentication request was not found or has expired."))
+			return
+		}
+		oidcAuthReq = authReq
+		if req.RedirectURI == "" {
+			req.RedirectURI = authReq.RedirectURI
+		}
+		if req.State == "" {
+			req.State = authReq.State
+		}
 	}
 
 	// Resolve the best login flow config (or use preview override).
@@ -57,15 +81,44 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 		SchemaConfig:    cfg,
 		RevealMode:      IdentityRevealModeAnonymous,
 		SSOProviders:    ssoProviders,
+		AuthRequestID:   req.AuthRequestID,
 		RedirectURI:     req.RedirectURI,
 		OIDCState:       req.State,
 		VisitorID:       req.Fingerprint,
 		FingerprintHash: req.Fingerprint,
 		AuthMethod:      "password",
 	}
-	if trustedUserID, ok := h.resolveTrustedUserID(r, req.State); ok {
-		flow.TrustedUserID = trustedUserID
-		flow.RevealMode = IdentityRevealModeKnownUser
+	if oidcAuthReq != nil {
+		flow.OIDCPrompts = oidcAuthReq.Prompt
+		flow.OIDCLoginHint = oidcAuthReq.LoginHint
+		if flow.Identifier == "" && oidcAuthReq.LoginHint != "" {
+			flow.Identifier = oidcAuthReq.LoginHint
+		}
+	}
+	if allowTrustedSessionReuse(flow.OIDCPrompts) {
+		if trustedUserID, ok := h.resolveTrustedUserID(r, req.State); ok {
+			flow.TrustedUserID = trustedUserID
+			flow.RevealMode = IdentityRevealModeKnownUser
+			flow.Identifier, flow.DisplayName = h.loadTrustedIdentitySummary(r.Context(), trustedUserID)
+		}
+	}
+
+	if flow.AuthRequestID != "" && requireSilentTrustedSession(flow.OIDCPrompts) {
+		if flow.TrustedUserID != "" {
+			if err := h.completeOIDCAuthRequest(r.Context(), flow.AuthRequestID, flow.TrustedUserID); err != nil {
+				writeLoginError(w, http.StatusInternalServerError, loginInternalError("OIDC login could not continue. Please try again."))
+				return
+			}
+		}
+		h.completeFlowWithTrustedSession(w, flow)
+		return
+	}
+
+	if flow.AuthRequestID != "" && flow.TrustedUserID != "" {
+		flow.CurrentStep = StepSessionReuse
+		h.flows.Put(flow)
+		h.renderFlowStep(w, r, flow)
+		return
 	}
 
 	// Determine entry step based on strategy.
@@ -80,8 +133,114 @@ func (h *Handler) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 
 	h.flows.Put(flow)
 	logging.Printf("[flow] created %s (strategy=%s, step=%s, login_flow=%s, host=%s, org=%s)", flowID, cfg.Login.Strategy, flow.CurrentStep, cfg.LoginFlowID, meta.Host, meta.OrgID)
+	h.renderFlowStep(w, r, flow)
+}
 
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+type oidcAuthRequestContext struct {
+	RedirectURI string
+	State       string
+	Prompt      []string
+	LoginHint   string
+}
+
+func (h *Handler) lookupOIDCAuthRequest(ctx context.Context, requestID string) (*oidcAuthRequestContext, error) {
+	var authReq oidcAuthRequestContext
+	var dataJSON string
+	err := h.db.SQL().QueryRowContext(ctx,
+		`SELECT redirect_uri, state, COALESCE(data, '{}')
+		 FROM auth_states
+		 WHERE id = ?
+			   AND type = 'oidc_auth'
+			   AND expires_at > datetime('now')`,
+		requestID,
+	).Scan(&authReq.RedirectURI, &authReq.State, &dataJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		return nil, err
+	}
+	if dataJSON != "" && dataJSON != "{}" {
+		var data map[string]any
+		if err := json.Unmarshal([]byte(dataJSON), &data); err == nil {
+			authReq.Prompt = stringSliceFromAny(data["prompt"])
+			if loginHint, ok := data["login_hint"].(string); ok {
+				authReq.LoginHint = loginHint
+			}
+		}
+	}
+	return &authReq, nil
+}
+
+func (h *Handler) completeOIDCAuthRequest(ctx context.Context, requestID, userID string) error {
+	result, err := h.db.SQL().ExecContext(ctx,
+		`UPDATE auth_states
+		 SET user_id = ?, done = 1, auth_time = datetime('now')
+		 WHERE id = ? AND type = 'oidc_auth'`,
+		userID, requestID,
+	)
+	if err != nil {
+		return err
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (h *Handler) oidcAuthorizeCallbackURL(requestID string) string {
+	return "/authorize/callback?id=" + url.QueryEscape(requestID)
+}
+
+func stringSliceFromAny(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if s, ok := value.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func hasOIDCPrompt(prompts []string, want string) bool {
+	for _, prompt := range prompts {
+		if prompt == want {
+			return true
+		}
+	}
+	return false
+}
+
+func allowTrustedSessionReuse(prompts []string) bool {
+	return !hasOIDCPrompt(prompts, "login") && !hasOIDCPrompt(prompts, "select_account")
+}
+
+func requireSilentTrustedSession(prompts []string) bool {
+	return hasOIDCPrompt(prompts, "none")
+}
+
+func (h *Handler) loadTrustedIdentitySummary(ctx context.Context, userID string) (identifier, displayName string) {
+	_ = h.db.SQL().QueryRowContext(ctx,
+		`SELECT COALESCE(identifier, ''), COALESCE(display_name, '')
+		 FROM users
+		 WHERE id = ?`,
+		userID,
+	).Scan(&identifier, &displayName)
+	return identifier, displayName
+}
+
+func (h *Handler) completeFlowWithTrustedSession(w http.ResponseWriter, flow *Flow) {
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
+		"flow_id":      flow.ID,
+		"step":         "complete",
+		"session_id":   "",
+		"redirect_uri": h.oidcAuthorizeCallbackURL(flow.AuthRequestID),
+	})
 }
 
 // handleFlowSubmit processes a step submission and advances the flow.
@@ -116,6 +275,8 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "identifier":
 		h.flowSubmitIdentifier(w, r, flow, req["identifier"])
+	case "use_session":
+		h.flowSubmitUseSession(w, r, flow)
 	case "password":
 		h.flowSubmitPassword(w, r, flow, req["password"])
 	case "magic_link":
@@ -135,16 +296,14 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 	case "forgot_password":
 		flow.transitionToStep(StepForgotPassword)
 		flow.Errors = nil
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 	case "send_reset":
 		// Reuse magic link infrastructure with password reset messaging.
 		flow.transitionToStep(StepMagicLink)
 		flow.Messages = []FlowMessage{{Type: "info", Text: "Password reset link sent to " + flow.Identifier}}
-		h.flows.Put(flow)
 		// TODO: actually send recovery email (reuse magic link sender with purpose="reset")
 		logging.Printf("[flow] %s sent password reset to %s", flow.ID, flow.Identifier)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 	case "back":
 		flow.clearCaptchaState()
 		flow.transitionToStep(StepIdentifier)
@@ -155,8 +314,7 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		flow.Verified = false
 		flow.Errors = nil
 		flow.Messages = nil
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 	default:
 		writeLoginError(w, http.StatusBadRequest, loginBadRequest(fmt.Sprintf("Unknown login action %q.", action)))
 	}
@@ -177,7 +335,72 @@ func (h *Handler) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.renderFlowStep(w, r, flow)
+}
+
+func (h *Handler) renderFlowStep(w http.ResponseWriter, r *http.Request, flow *Flow) {
+	if flow == nil {
+		writeLoginError(w, http.StatusBadRequest, loginBadRequest("Login flow was not found or has expired."))
+		return
+	}
+
+	ctx := telemetry.WithFlowID(r.Context(), flow.ID)
+	r = r.WithContext(ctx)
+	h.evaluatePreAuthRisk(r, flow)
+	h.flows.Put(flow)
 	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+}
+
+func (h *Handler) evaluatePreAuthRisk(r *http.Request, flow *Flow) {
+	if flow == nil || flow.SchemaConfig == nil || flow.SchemaConfig.Captcha == nil {
+		return
+	}
+	if flow.SchemaConfig.Captcha.Mode != "risk_based" || !captchaActiveForStep(flow.SchemaConfig.Captcha, flow.CurrentStep) {
+		flow.PreAuthRisk = nil
+		flow.AdaptiveCaptcha = false
+		return
+	}
+
+	result := risk.FailureResult(risk.StagePreAuth, risk.RecommendationRequireCaptcha)
+	if h.risk != nil {
+		evaluatedRisk, err := h.risk.Evaluate(r.Context(), risk.Input{
+			Stage:          risk.StagePreAuth,
+			UserID:         flow.IduserID,
+			LoginFlowID:    flow.ID,
+			IPAddress:      remoteIPFromAddr(r.RemoteAddr),
+			UserAgent:      r.UserAgent(),
+			TrustedSession: flow.TrustedUserID != "",
+			Reauth:         flow.TrustedUserID != "" && flow.TrustedUserID == flow.IduserID,
+			Signals: risk.Signals{
+				CaptchaProvider: flow.CaptchaProvider,
+				CaptchaVerified: flow.CaptchaVerified,
+				CaptchaScore:    flow.CaptchaScore,
+				PoWCompleted:    flow.PoWCompleted,
+				PoWDurationMs:   flow.PoWDurationMs,
+				VisitorID:       firstNonEmptyString(flow.VisitorID, telemetry.FingerprintFromContext(r.Context())),
+				FingerprintHash: firstNonEmptyString(flow.FingerprintHash, flow.VisitorID, telemetry.FingerprintFromContext(r.Context())),
+				RequestID:       telemetry.RequestIDFromContext(r.Context()),
+			},
+		})
+		if err != nil {
+			logging.Printf("[risk] pre-auth evaluation failed flow=%s step=%s: %v", flow.ID, flow.CurrentStep, err)
+		} else {
+			result = evaluatedRisk
+		}
+	}
+
+	flow.PreAuthRisk = result
+	flow.AdaptiveCaptcha = result.RecommendedNextStep == risk.RecommendationRequireCaptcha || result.RecommendedNextStep == risk.RecommendationBlock
+	h.api.EmitEvent(r.Context(), "signal.risk_evaluated", flow.IduserID, flow.ID, "login_flow", map[string]any{
+		"score":                 result.Score,
+		"level":                 string(result.Level),
+		"reasons":               result.Reasons,
+		"recommended_next_step": string(result.RecommendedNextStep),
+		"stage":                 string(result.Stage),
+		"evaluator_version":     result.EvaluatorVersion,
+		"policy_name":           "builtin_adaptive_captcha_v1",
+		"policy_version":        "v1",
+	})
 }
 
 func configuredCaptchaForStep(flow *Flow) (*CaptchaConfig, string, bool) {
@@ -185,7 +408,7 @@ func configuredCaptchaForStep(flow *Flow) (*CaptchaConfig, string, bool) {
 		return nil, "", false
 	}
 	scope := captchaScopeForStep(flow.CurrentStep)
-	if scope == "" || !captchaActiveForStep(flow.SchemaConfig.Captcha, flow.CurrentStep) {
+	if scope == "" || !flow.captchaRequiredForCurrentStep() {
 		return nil, "", false
 	}
 	return flow.SchemaConfig.Captcha, scope, true
@@ -204,6 +427,7 @@ func (h *Handler) ensureCaptchaVerifiedForAction(w http.ResponseWriter, r *http.
 	if !protectedCaptchaAction(action) {
 		return true
 	}
+	h.evaluatePreAuthRisk(r, flow)
 	_, scope, active := configuredCaptchaForStep(flow)
 	if !active {
 		return true
@@ -213,8 +437,7 @@ func (h *Handler) ensureCaptchaVerifiedForAction(w http.ResponseWriter, r *http.
 	}
 
 	flow.Errors = []FlowError{{Code: "captcha_required", Message: "Complete captcha verification to continue."}}
-	h.flows.Put(flow)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
 	return false
 }
 
@@ -224,8 +447,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
 		flow.Errors = append(flow.Errors, FlowError{Code: "identifier_required", Message: "Email or username is required"})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -236,8 +458,7 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	if errors.Is(err, uniqueness.ErrIdentityNotFound) {
 		flow.Identifier = identifier // preserve for registration
 		flow.Errors = append(flow.Errors, FlowError{Code: "not_found", Message: "Account not found"})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 	if err != nil {
@@ -257,17 +478,49 @@ func (h *Handler) flowSubmitIdentifier(w http.ResponseWriter, r *http.Request, f
 	}
 	flow.transitionToStep(StepAuthSelect)
 	flow.Errors = nil
-	h.flows.Put(flow)
 
 	logging.Printf("[flow] %s identifier resolved: %s (identity=%s)", flow.ID, identifier, resolved.UserID)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
+}
+
+func (h *Handler) flowSubmitUseSession(w http.ResponseWriter, r *http.Request, flow *Flow) {
+	if flow.TrustedUserID == "" {
+		flow.Errors = append(flow.Errors, FlowError{Code: "session_unavailable", Message: "Your existing session is no longer available. Please sign in again."})
+		flow.transitionToStep(StepIdentifier)
+		h.renderFlowStep(w, r, flow)
+		return
+	}
+	currentTrustedUserID, ok := h.resolveTrustedUserIDFromRequest(r)
+	if !ok || currentTrustedUserID != flow.TrustedUserID {
+		flow.Errors = append(flow.Errors, FlowError{Code: "session_unavailable", Message: "Your existing session is no longer available. Please sign in again."})
+		flow.transitionToStep(StepIdentifier)
+		h.renderFlowStep(w, r, flow)
+		return
+	}
+	if flow.AuthRequestID == "" {
+		flow.Errors = append(flow.Errors, FlowError{Code: "oidc_request_missing", Message: "OIDC login could not continue. Please sign in again."})
+		flow.transitionToStep(StepIdentifier)
+		h.renderFlowStep(w, r, flow)
+		return
+	}
+	if err := h.completeOIDCAuthRequest(r.Context(), flow.AuthRequestID, flow.TrustedUserID); err != nil {
+		flow.Errors = append(flow.Errors, FlowError{Code: "oidc_complete_failed", Message: "OIDC login could not continue. Please sign in again."})
+		flow.transitionToStep(StepIdentifier)
+		h.renderFlowStep(w, r, flow)
+		return
+	}
+
+	flow.IduserID = flow.TrustedUserID
+	flow.AuthMethod = "session_reuse"
+	flow.transitionToStep(StepComplete)
+	h.completeFlowWithTrustedSession(w, flow)
+	h.flows.Delete(flow.ID)
 }
 
 func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flow *Flow, password string) {
 	if password == "" {
 		flow.Errors = append(flow.Errors, FlowError{Code: "password_required", Message: "Password is required"})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -279,8 +532,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	if err != nil {
 		logging.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IduserID, err)
 		flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Something went wrong. Please try again."})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -289,8 +541,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	if hash == "" {
 		logging.Printf("[flow] %s invalid credential data for identity=%s", flow.ID, flow.IduserID)
 		flow.Errors = append(flow.Errors, FlowError{Code: "internal", Message: "Something went wrong. Please try again."})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -301,8 +552,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 			"flow_id": flow.ID,
 		})
 		flow.Errors = append(flow.Errors, FlowError{Code: "invalid_password", Message: "Invalid password. Please try again."})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -313,8 +563,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 	// Check if MFA is required.
 	if flow.SchemaConfig.Login.MFARequired {
 		flow.transitionToStep(StepMFA)
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -325,8 +574,7 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	if flow.Identifier == "" {
 		flow.Errors = append(flow.Errors, FlowError{Code: "no_identifier", Message: "No identifier set"})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -335,15 +583,13 @@ func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, fl
 	flow.transitionToStep(StepMagicLink)
 	flow.Errors = nil
 	flow.Messages = append(flow.Messages, FlowMessage{Type: "success", Text: "Sign-in link sent!"})
-	h.flows.Put(flow)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
 }
 
 func (h *Handler) flowSubmitSSO(w http.ResponseWriter, r *http.Request, flow *Flow, providerID string) {
 	if providerID == "" {
 		flow.Errors = append(flow.Errors, FlowError{Code: "provider_required", Message: "Provider is required"})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -359,8 +605,7 @@ func (h *Handler) flowSubmitSSO(w http.ResponseWriter, r *http.Request, flow *Fl
 func (h *Handler) flowTransitionToRegister(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	if !flow.SchemaConfig.Login.RegistrationAllowed {
 		flow.Errors = append(flow.Errors, FlowError{Code: "registration_disabled", Message: "Registration is not available"})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -369,8 +614,7 @@ func (h *Handler) flowTransitionToRegister(w http.ResponseWriter, r *http.Reques
 	if flow.RegData == nil {
 		flow.RegData = make(map[string]string)
 	}
-	h.flows.Put(flow)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
 }
 
 // flowSubmitRegister handles the registration form submission.
@@ -378,7 +622,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	h.mergeRegistrationData(flow, formData)
 
 	if validationErrors := validateFlowRegistrationFields(flow.SchemaConfig.SchemaProps, flow.RegData); len(validationErrors) > 0 {
-		h.respondWithFlowErrors(w, flow, validationErrors)
+		h.respondWithFlowErrors(w, r, flow, validationErrors)
 		return
 	}
 
@@ -405,7 +649,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	tx, err := h.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
 		logging.Printf("[flow] %s registration tx failed: %v", flow.ID, err)
-		h.respondWithFlowErrors(w, flow, []FlowError{{Code: "internal", Message: "Registration failed. Please try again."}})
+		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration failed. Please try again."}})
 		return
 	}
 	defer tx.Rollback()
@@ -418,23 +662,23 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	if err != nil {
 		logging.Printf("[flow] %s registration failed: %v", flow.ID, err)
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "unique") {
-			h.respondWithFlowErrors(w, flow, []FlowError{{Code: "already_exists", Message: "An account with this identifier already exists"}})
+			h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "already_exists", Message: "An account with this identifier already exists"}})
 		} else {
-			h.respondWithFlowErrors(w, flow, []FlowError{{Code: "internal", Message: "Registration failed. Please try again."}})
+			h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration failed. Please try again."}})
 		}
 		return
 	}
 	if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, newID, orgID, identifier); err != nil {
-		h.respondWithFlowErrors(w, flow, []FlowError{{Code: "already_exists", Message: "An account with this identifier already exists"}})
+		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "already_exists", Message: "An account with this identifier already exists"}})
 		return
 	}
 	if err := uniqueness.Enforce(r.Context(), tx, newID, orgID, uniqueness.ExtractConstraints(schemaRec.Schema), payload); err != nil {
-		h.respondWithFlowErrors(w, flow, []FlowError{{Code: "already_exists", Message: "An account with this identifier already exists"}})
+		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "already_exists", Message: "An account with this identifier already exists"}})
 		return
 	}
 	if err := tx.Commit(); err != nil {
 		logging.Printf("[flow] %s registration commit failed: %v", flow.ID, err)
-		h.respondWithFlowErrors(w, flow, []FlowError{{Code: "internal", Message: "Registration failed. Please try again."}})
+		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration failed. Please try again."}})
 		return
 	}
 
@@ -515,7 +759,7 @@ func (h *Handler) resolveFlowRegistrationSchema(w http.ResponseWriter, r *http.R
 		schemaRec, err := schema.ResolveDefaultHumanUserSchema(r.Context(), h.db.SQL())
 		if err != nil {
 			logging.Printf("[flow] %s default human user schema unavailable: %v", flow.ID, err)
-			h.respondWithFlowErrors(w, flow, []FlowError{{Code: "internal", Message: "Registration is not available right now."}})
+			h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration is not available right now."}})
 			return nil, false
 		}
 		return schemaRec, true
@@ -524,7 +768,7 @@ func (h *Handler) resolveFlowRegistrationSchema(w http.ResponseWriter, r *http.R
 	schemaRec, err := schema.LoadSchemaRecord(r.Context(), h.db.SQL(), schemaID)
 	if err != nil {
 		logging.Printf("[flow] %s failed to load schema %s: %v", flow.ID, schemaID, err)
-		h.respondWithFlowErrors(w, flow, []FlowError{{Code: "internal", Message: "Registration is not available right now."}})
+		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "internal", Message: "Registration is not available right now."}})
 		return nil, false
 	}
 	return schemaRec, true
@@ -538,7 +782,7 @@ func (h *Handler) buildFlowRegistrationPayload(w http.ResponseWriter, r *http.Re
 	payload := schema.MaterializeUserData(schemaJSON, identifier, displayName, registrationData)
 	if err := schema.ValidateData(schemaJSON, payload); err != nil {
 		logging.Printf("[flow] %s registration validation failed: %v", flow.ID, err)
-		h.respondWithFlowErrors(w, flow, []FlowError{{Code: "invalid_registration", Message: "Please complete the highlighted fields and try again."}})
+		h.respondWithFlowErrors(w, r, flow, []FlowError{{Code: "invalid_registration", Message: "Please complete the highlighted fields and try again."}})
 		return nil, "", false
 	}
 
@@ -552,16 +796,15 @@ func (h *Handler) buildFlowRegistrationPayload(w http.ResponseWriter, r *http.Re
 	return payload, profileJSON, true
 }
 
-func (h *Handler) respondWithFlowErrors(w http.ResponseWriter, flow *Flow, errs []FlowError) {
+func (h *Handler) respondWithFlowErrors(w http.ResponseWriter, r *http.Request, flow *Flow, errs []FlowError) {
 	flow.Errors = errs
-	h.flows.Put(flow)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
 }
 
 func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flow) {
 	// Create session via the existing API.
 	// Collect accumulated client signals from the flow.
-	signals := &ClientSignals{
+	signals := &risk.Signals{
 		CaptchaProvider: flow.CaptchaProvider,
 		CaptchaVerified: flow.CaptchaVerified,
 		CaptchaScore:    flow.CaptchaScore,
@@ -574,12 +817,15 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 	sessResp, err := h.api.CreateSessionForLogin(r.Context(), flow.IduserID, r.UserAgent(), r.RemoteAddr, signals, &SessionProvenance{
 		AuthMethod:  flow.AuthMethod,
 		LoginFlowID: flow.ID,
-		AuthContext: map[string]any{"flow_id": flow.ID},
+		AuthContext: map[string]any{
+			"flow_id":         flow.ID,
+			"trusted_session": flow.TrustedUserID != "",
+			"trusted_reauth":  flow.TrustedUserID != "" && flow.TrustedUserID == flow.IduserID,
+		},
 	})
 	if err != nil {
 		flow.Errors = append(flow.Errors, FlowError{Code: "session_failed", Message: "Failed to create session. Please try again."})
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -591,15 +837,24 @@ func (h *Handler) flowComplete(w http.ResponseWriter, r *http.Request, flow *Flo
 
 	logging.Printf("[flow] %s completed (identity=%s, session=%s)", flow.ID, flow.IduserID, sessResp.Session.ID)
 
-	h.api.EmitAuthEvent(r.Context(), "auth.login_completed", flow.IduserID, map[string]any{
+	authCtx := telemetry.WithSessionID(r.Context(), sessResp.Session.ID)
+	h.api.EmitAuthEvent(authCtx, "auth.login_completed", flow.IduserID, map[string]any{
 		"session_id": sessResp.Session.ID,
 		"flow_id":    flow.ID,
 		"method":     flow.AuthMethod,
 	})
 
-	// Determine redirect URI: OIDC redirect_uri if present, otherwise /console.
+	// Determine redirect URI: hand OIDC flows back to the provider callback,
+	// otherwise fall back to the requested redirect or the console.
 	redirectURI := "/console"
-	if flow.RedirectURI != "" {
+	if flow.AuthRequestID != "" {
+		if err := h.completeOIDCAuthRequest(r.Context(), flow.AuthRequestID, flow.IduserID); err != nil {
+			flow.Errors = append(flow.Errors, FlowError{Code: "oidc_complete_failed", Message: "OIDC login could not continue. Please try again."})
+			h.renderFlowStep(w, r, flow)
+			return
+		}
+		redirectURI = h.oidcAuthorizeCallbackURL(flow.AuthRequestID)
+	} else if flow.RedirectURI != "" {
 		redirectURI = flow.RedirectURI
 	}
 
@@ -657,6 +912,8 @@ func (h *Handler) handleFlowCaptchaChallenge(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	r = r.WithContext(telemetry.WithFlowID(r.Context(), flowID))
+	h.evaluatePreAuthRisk(r, flow)
 	cc, _, active := configuredCaptchaForStep(flow)
 	if !active || cc.Provider != "altcha" {
 		httputil.WriteError(w, http.StatusBadRequest, "altcha captcha is not active for this step")
@@ -673,11 +930,11 @@ func (h *Handler) handleFlowCaptchaChallenge(w http.ResponseWriter, r *http.Requ
 
 // flowSubmitCaptcha handles the "captcha_submit" action.
 func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow *Flow, req map[string]string) {
+	h.evaluatePreAuthRisk(r, flow)
 	cc, scope, active := configuredCaptchaForStep(flow)
 	if !active {
 		flow.Errors = []FlowError{{Code: "captcha_not_required", Message: "Captcha is not required for this step."}}
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -690,8 +947,7 @@ func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow
 		payload := req["altcha_payload"]
 		if payload == "" {
 			flow.Errors = []FlowError{{Code: "captcha_missing", Message: "Captcha verification required."}}
-			h.flows.Put(flow)
-			httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+			h.renderFlowStep(w, r, flow)
 			return
 		}
 		result = captcha.VerifyAltcha(h.altchaVerifierForConfig(flow.SchemaConfig), payload)
@@ -700,15 +956,13 @@ func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow
 			logging.Printf("[flow] %s captcha provider %s is missing site_key or secret_key", flow.ID, cc.Provider)
 			flow.clearCaptchaState()
 			flow.Errors = []FlowError{{Code: "captcha_failed", Message: "Captcha is not configured correctly. Contact your administrator."}}
-			h.flows.Put(flow)
-			httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+			h.renderFlowStep(w, r, flow)
 			return
 		}
 		token := req["captcha_token"]
 		if token == "" {
 			flow.Errors = []FlowError{{Code: "captcha_missing", Message: "Captcha verification required."}}
-			h.flows.Put(flow)
-			httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+			h.renderFlowStep(w, r, flow)
 			return
 		}
 		var err error
@@ -717,15 +971,13 @@ func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow
 			logging.Printf("[flow] %s captcha verify failed for provider=%s: %v", flow.ID, cc.Provider, err)
 			flow.clearCaptchaState()
 			flow.Errors = []FlowError{{Code: "captcha_failed", Message: "Captcha verification failed. Please try again."}}
-			h.flows.Put(flow)
-			httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+			h.renderFlowStep(w, r, flow)
 			return
 		}
 	default:
 		flow.clearCaptchaState()
 		flow.Errors = []FlowError{{Code: "captcha_failed", Message: "Captcha provider is not supported."}}
-		h.flows.Put(flow)
-		httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+		h.renderFlowStep(w, r, flow)
 		return
 	}
 
@@ -743,8 +995,7 @@ func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow
 		flow.Errors = []FlowError{{Code: "captcha_failed", Message: "Captcha verification failed. Please try again."}}
 	}
 
-	h.flows.Put(flow)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
 }
 
 // flowSubmitFingerprint handles the "fingerprint_submit" action.
@@ -752,6 +1003,14 @@ func (h *Handler) flowSubmitCaptcha(w http.ResponseWriter, r *http.Request, flow
 func (h *Handler) flowSubmitFingerprint(w http.ResponseWriter, r *http.Request, flow *Flow, req map[string]string) {
 	flow.VisitorID = req["visitor_id"]
 	flow.FingerprintHash = req["fingerprint_hash"]
-	h.flows.Put(flow)
-	httputil.WriteJSON(w, http.StatusOK, flow.ToFlowStep())
+	h.renderFlowStep(w, r, flow)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

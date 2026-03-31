@@ -1,0 +1,16 @@
+# Minimal local seed pack.
+# Best for backend work where you only need a deterministic admin account.
+
+users:
+  - identifier: admin
+    display_name: Admin
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [admin, password]
+    pats:
+      - name: dev-admin-token
+        token: zitadel-dev-pat-do-not-use-in-production
+        scopes: [admin]
+    profile:
+      email: admin@zitadel.local

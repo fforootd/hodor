@@ -75,34 +75,40 @@ export function extractSchemaFields(
   const properties = (schema.properties || {}) as Record<string, Record<string, any>>
   const required = new Set<string>(Array.isArray(schema.required) ? schema.required : [])
 
-  return Object.entries(properties).map(([name, definition]) => {
-    const path = pathPrefix ? `${pathPrefix}.${name}` : name
-    const type = Array.isArray(definition.type) ? String(definition.type[0] || 'string') : String(definition.type || inferSchemaType(definition))
-    const itemSchema = definition.items && typeof definition.items === 'object'
-      ? definition.items as Record<string, any>
-      : null
+  return Object.entries(properties)
+    .map(([name, definition], index) => {
+      const path = pathPrefix ? `${pathPrefix}.${name}` : name
+      const type = Array.isArray(definition.type) ? String(definition.type[0] || 'string') : String(definition.type || inferSchemaType(definition))
+      const itemSchema = definition.items && typeof definition.items === 'object'
+        ? definition.items as Record<string, any>
+        : null
 
-    return {
-      name,
-      path,
-      label: formatFieldLabel(name),
-      description: definition.description || '',
-      type,
-      format: definition.format,
-      enum: Array.isArray(definition.enum) ? definition.enum.map(String) : undefined,
-      required: required.has(name),
-      hidden: Boolean(definition['x-hidden']),
-      editable: definition['x-editable'] !== false,
-      sensitive: Boolean(definition['x-sensitive']),
-      identifier: Boolean(definition['x-identifier']),
-      properties: type === 'object'
-        ? extractSchemaFields(definition, path)
-        : undefined,
-      item: type === 'array' && itemSchema
-        ? extractSchemaFields({ properties: { item: itemSchema }, required: [] }, path)[0] || null
-        : null,
-    }
-  })
+      return {
+        index,
+        field: {
+          name,
+          path,
+          label: formatFieldLabel(name),
+          description: definition.description || '',
+          type,
+          format: definition.format,
+          enum: Array.isArray(definition.enum) ? definition.enum.map(String) : undefined,
+          required: required.has(name),
+          hidden: Boolean(definition['x-hidden']),
+          editable: definition['x-editable'] !== false,
+          sensitive: Boolean(definition['x-sensitive']),
+          identifier: Boolean(definition['x-identifier']),
+          properties: type === 'object'
+            ? extractSchemaFields(definition, path)
+            : undefined,
+          item: type === 'array' && itemSchema
+            ? extractSchemaFields({ properties: { item: itemSchema }, required: [] }, path)[0] || null
+            : null,
+        } satisfies SchemaFieldDefinition,
+      }
+    })
+    .sort((left, right) => compareSchemaFieldOrder(left.field, right.field, left.index, right.index))
+    .map(({ field }) => field)
 }
 
 export function formatFieldLabel(name: string): string {
@@ -247,4 +253,26 @@ function inferSchemaType(definition: Record<string, any>): string {
   if (definition.items) return 'array'
   if (definition.enum) return 'string'
   return 'string'
+}
+
+function compareSchemaFieldOrder(
+  left: SchemaFieldDefinition,
+  right: SchemaFieldDefinition,
+  leftIndex: number,
+  rightIndex: number,
+): number {
+  const leftPriority = schemaFieldPriority(left)
+  const rightPriority = schemaFieldPriority(right)
+
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority
+  }
+
+  return leftIndex - rightIndex
+}
+
+function schemaFieldPriority(field: SchemaFieldDefinition): number {
+  if (field.identifier) return 0
+  if (field.name === 'metadata') return 2
+  return 1
 }

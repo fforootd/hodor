@@ -1,7 +1,7 @@
 <template>
-  <div class="space-y-6 pb-10">
+  <div class="space-y-5 pb-8">
     <section class="rounded-2xl border bg-card shadow-sm">
-      <div class="flex flex-col gap-5 p-5 lg:flex-row lg:items-start lg:justify-between">
+      <div class="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
         <div class="flex items-start gap-4">
           <Button
             variant="ghost"
@@ -11,25 +11,39 @@
           >
             <ArrowLeft class="size-4" />
           </Button>
-          <div class="space-y-1">
-            <div class="flex items-center gap-2">
-              <h1 class="text-2xl font-semibold tracking-tight">
-                {{ flow?.name || 'Login Flow' }}
-              </h1>
+          <div class="space-y-2.5">
+            <div class="flex flex-wrap items-center gap-2">
               <Badge v-if="flow?.is_default" variant="default">Default</Badge>
               <Badge :variant="stateVariant(flow?.state)" class="text-xs capitalize">{{
                 flow?.state || 'draft'
               }}</Badge>
-              <Badge v-if="templateSource" variant="secondary">Template</Badge>
+              <Badge v-if="templateSource" variant="secondary">Template-backed</Badge>
             </div>
-            <p class="max-w-2xl text-sm text-muted-foreground">
-              <template v-if="flow?.is_default">
-                Fallback experience for anyone who does not match a more specific flow.
-              </template>
-              <template v-else>
-                Configure the strategy, protections, and visual shell for this login flow.
-              </template>
-            </p>
+            <div class="space-y-1">
+              <h1 class="text-2xl font-semibold tracking-tight lg:text-[2rem]">
+                {{ flow?.name || 'Login Flow' }}
+              </h1>
+              <p class="max-w-2xl text-sm text-muted-foreground">
+                <template v-if="flow?.is_default">
+                  Fallback experience for anyone who does not match a more specific flow.
+                </template>
+                <template v-else>
+                  Configure how this flow starts, protects sign-in, and looks.
+                </template>
+              </p>
+            </div>
+
+            <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <div class="rounded-full border bg-muted/40 px-2.5 py-1">
+                Strategy: <span class="font-medium text-foreground">{{ strategyLabel }}</span>
+              </div>
+              <div class="rounded-full border bg-muted/40 px-2.5 py-1">
+                Layout: <span class="font-medium text-foreground">{{ currentLayoutLabel }}</span>
+              </div>
+              <div class="rounded-full border bg-muted/40 px-2.5 py-1">
+                Priority: <span class="font-medium text-foreground">{{ form.priority }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -52,19 +66,28 @@
       </div>
     </section>
 
-    <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_26rem]">
-      <div class="min-w-0 space-y-6">
-        <Tabs v-model="activePanel" class="space-y-4">
+    <div
+      v-if="flow?.is_default"
+      class="flex items-center gap-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+    >
+      <Shield class="size-4 shrink-0 text-primary" />
+      <p>
+        <span class="font-medium text-foreground">Fallback flow.</span> Applies when no targeted
+        flow matches.
+      </p>
+    </div>
+
+    <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="min-w-0 space-y-5">
+        <Tabs v-model="activePanel" class="space-y-3">
           <div
-            class="flex flex-col gap-4 rounded-2xl border bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-3 rounded-xl border bg-card p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
           >
             <div>
               <p class="text-sm font-medium">Flow editor</p>
-              <p class="text-xs text-muted-foreground">
-                Shape the experience first, then layer in the protections and signals.
-              </p>
+              <p class="text-xs text-muted-foreground">Experience and protection</p>
             </div>
-            <TabsList class="grid w-full grid-cols-2 sm:w-[320px]">
+            <TabsList class="grid w-full grid-cols-2 sm:w-[280px]">
               <TabsTrigger value="experience" class="gap-2">
                 <Palette class="size-4" />
                 Experience
@@ -76,9 +99,9 @@
             </TabsList>
           </div>
 
-          <TabsContent value="experience" class="mt-0 space-y-6">
+          <TabsContent value="experience" class="mt-0 space-y-4">
             <Card class="overflow-hidden shadow-sm">
-              <CardHeader class="border-b bg-muted/20 pb-4">
+              <CardHeader class="border-b bg-muted/20 pb-3">
                 <div class="flex items-start gap-3">
                   <div class="rounded-lg border bg-background p-2">
                     <LayoutPanelTop class="size-4 text-muted-foreground" />
@@ -86,13 +109,12 @@
                   <div>
                     <CardTitle class="text-base">General</CardTitle>
                     <p class="mt-1 text-sm text-muted-foreground">
-                      Define the flow identity, evaluation priority, and the strategy that controls
-                      how sign-in starts.
+                      Name, order, and how sign-in starts.
                     </p>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent class="space-y-5 pt-5">
+              <CardContent class="space-y-4 pt-4">
                 <div class="grid gap-4 sm:grid-cols-2">
                   <div class="space-y-2">
                     <Label for="name">Name</Label>
@@ -127,15 +149,14 @@
                     </SelectContent>
                   </Select>
                   <p class="text-xs text-muted-foreground">
-                    Strategy controls how the flow starts and branches. For complete starting
-                    points, use Marketplace templates.
+                    Controls the first step in the flow. Use Marketplace templates for full presets.
                   </p>
                 </div>
               </CardContent>
             </Card>
 
             <Card class="overflow-hidden shadow-sm">
-              <CardHeader class="border-b bg-muted/20 pb-4">
+              <CardHeader class="border-b bg-muted/20 pb-3">
                 <div class="flex items-start gap-3">
                   <div class="rounded-lg border bg-background p-2">
                     <ImageIcon class="size-4 text-muted-foreground" />
@@ -143,69 +164,60 @@
                   <div>
                     <CardTitle class="text-base">Branding</CardTitle>
                     <p class="mt-1 text-sm text-muted-foreground">
-                      Upload logos, cover art, and the favicon used by the hosted login page and the
-                      shared web component.
+                      Assets for the hosted login page and live preview.
                     </p>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent class="space-y-5 pt-5">
-                <Accordion type="multiple" :default-value="openAssets" class="w-full">
-                  <AccordionItem
+              <CardContent class="space-y-4 pt-4">
+                <div class="grid gap-4 lg:grid-cols-2">
+                  <div
                     v-for="assetField in brandingAssetFields"
                     :key="assetField.key"
-                    :value="assetField.key"
+                    class="rounded-xl border bg-muted/10 p-3.5"
                   >
-                    <AccordionTrigger class="py-3 hover:no-underline">
-                      <div class="flex items-center gap-3">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <p class="text-sm font-medium">{{ assetField.label }}</p>
+                        <p class="mt-1 text-xs text-muted-foreground">
+                          {{ assetField.description }}
+                        </p>
+                      </div>
+                      <Button
+                        v-if="form.branding[assetField.key]"
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        :disabled="assetBusy[assetField.key]"
+                        @click="removeBrandingAsset(assetField.key)"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+
+                    <div class="mt-4 space-y-3">
+                      <div class="rounded-lg border border-dashed bg-background/80 p-3">
                         <div
                           v-if="form.branding[assetField.key]"
-                          class="size-8 rounded border overflow-hidden bg-muted/20 flex items-center justify-center shrink-0"
+                          class="flex min-h-24 items-center justify-center rounded-md bg-muted/20 p-3"
                         >
                           <img
                             :src="form.branding[assetField.key]"
                             :alt="assetField.label"
-                            class="max-h-full max-w-full object-contain"
+                            class="max-h-20 max-w-full rounded object-contain"
                           />
                         </div>
                         <div
                           v-else
-                          class="size-8 rounded border bg-muted/20 flex items-center justify-center shrink-0"
+                          class="flex min-h-24 flex-col items-center justify-center rounded-md bg-muted/20 text-center"
                         >
-                          <ImageIcon class="size-3 text-muted-foreground" />
-                        </div>
-                        <div class="text-left">
-                          <p class="text-sm font-medium">{{ assetField.label }}</p>
-                          <p class="text-xs text-muted-foreground">
-                            {{ form.branding[assetField.key] ? 'Uploaded' : 'Not set' }}
-                          </p>
+                          <ImageIcon class="mb-2 size-4 text-muted-foreground" />
+                          <p class="text-xs text-muted-foreground">No asset uploaded yet</p>
                         </div>
                       </div>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <div class="space-y-3 pb-2">
-                        <p class="text-xs text-muted-foreground">{{ assetField.description }}</p>
 
-                        <div
-                          v-if="form.branding[assetField.key]"
-                          class="flex items-center justify-between rounded-lg border border-dashed bg-background/80 p-3"
-                        >
-                          <img
-                            :src="form.branding[assetField.key]"
-                            :alt="assetField.label"
-                            class="max-h-16 max-w-[50%] rounded object-contain"
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            :disabled="assetBusy[assetField.key]"
-                            @click.stop="removeBrandingAsset(assetField.key)"
-                          >
-                            Remove
-                          </Button>
-                        </div>
-
+                      <div class="space-y-2">
+                        <Label :for="`upload-${assetField.key}`">Upload file</Label>
                         <input
                           :id="`upload-${assetField.key}`"
                           type="file"
@@ -214,37 +226,36 @@
                           :disabled="assetBusy[assetField.key]"
                           @change="onBrandingFileSelected(assetField.key, $event)"
                         />
-
-                        <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
-                          <Input
-                            v-model="assetImportUrls[assetField.key]"
-                            :placeholder="assetField.placeholder"
-                            :disabled="assetBusy[assetField.key]"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
-                            @click="importBrandingAsset(assetField.key)"
-                          >
-                            {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
-                          </Button>
-                        </div>
-
-                        <p
-                          v-if="
-                            assetField.key === 'cover_image' &&
-                            !['split', 'card_image'].includes(form.layout)
-                          "
-                          class="text-xs text-muted-foreground"
-                        >
-                          Cover art only appears in Split and Card with image layouts.
-                        </p>
                       </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                </Accordion>
+
+                      <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <Input
+                          v-model="assetImportUrls[assetField.key]"
+                          :placeholder="assetField.placeholder"
+                          :disabled="assetBusy[assetField.key]"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          :disabled="assetBusy[assetField.key] || !assetImportUrls[assetField.key]"
+                          @click="importBrandingAsset(assetField.key)"
+                        >
+                          {{ assetBusy[assetField.key] ? 'Importing…' : 'Import URL' }}
+                        </Button>
+                      </div>
+
+                      <p
+                        v-if="
+                          assetField.key === 'cover_image' &&
+                          !['split', 'card_image'].includes(form.layout)
+                        "
+                        class="text-xs text-muted-foreground"
+                      >
+                        Cover art only appears in Split and Card with image layouts.
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
                 <Separator />
 
@@ -262,8 +273,7 @@
                       >Hide “Powered by Zitadel” footer</Label
                     >
                     <p class="text-xs text-muted-foreground">
-                      Removes the footer signature in both the hosted login page and the shared
-                      preview.
+                      Removes the footer in the hosted page and live preview.
                     </p>
                   </div>
                 </div>
@@ -271,9 +281,9 @@
             </Card>
           </TabsContent>
 
-          <TabsContent value="protection" class="mt-0 space-y-6">
+          <TabsContent value="protection" class="mt-0 space-y-4">
             <Card class="overflow-hidden shadow-sm">
-              <CardHeader class="border-b bg-muted/20 pb-4">
+              <CardHeader class="border-b bg-muted/20 pb-3">
                 <div class="flex items-start justify-between gap-3">
                   <div class="flex items-start gap-3">
                     <div class="rounded-lg border bg-background p-2">
@@ -282,7 +292,7 @@
                     <div>
                       <CardTitle class="text-base">Captcha</CardTitle>
                       <p class="mt-1 text-sm text-muted-foreground">
-                        Gate login actions with a human check before continuing.
+                        Require a human check before continuing.
                       </p>
                     </div>
                   </div>
@@ -294,7 +304,7 @@
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent class="space-y-5 pt-5">
+              <CardContent class="space-y-4 pt-4">
                 <div class="grid gap-4 lg:grid-cols-2">
                   <div class="space-y-2">
                     <Label>Provider</Label>
@@ -330,10 +340,10 @@
                   class="border-amber-500/30 bg-amber-500/5"
                 >
                   <Sparkles class="size-4 text-amber-500" />
-                  <AlertTitle class="text-sm font-medium">Risk-based is still cosmetic</AlertTitle>
+                  <AlertTitle class="text-sm font-medium">Adaptive challenge</AlertTitle>
                   <AlertDescription class="text-xs text-muted-foreground">
-                    The UI exposes the option, but the runtime does not yet make adaptive challenge
-                    decisions.
+                    The login runtime evaluates local signals and only asks for a challenge when a
+                    sign-in looks suspicious.
                   </AlertDescription>
                 </Alert>
 
@@ -352,16 +362,15 @@
                     class="w-full accent-primary"
                   />
                   <p class="text-xs text-muted-foreground">
-                    Higher values increase the proof-of-work cost. A value of 3 is a good default
-                    for this prototype.
+                    Higher values increase proof-of-work cost. A value of 3 is a sensible default.
                   </p>
                 </div>
               </CardContent>
             </Card>
 
-            <div class="grid gap-6 lg:grid-cols-2">
+            <div class="grid gap-4 lg:grid-cols-2">
               <Card class="overflow-hidden shadow-sm">
-                <CardHeader class="border-b bg-muted/20 pb-4">
+                <CardHeader class="border-b bg-muted/20 pb-3">
                   <div class="flex items-start justify-between gap-3">
                     <div class="flex items-start gap-3">
                       <div class="rounded-lg border bg-background p-2">
@@ -370,7 +379,7 @@
                       <div>
                         <CardTitle class="text-base">Browser fingerprinting</CardTitle>
                         <p class="mt-1 text-sm text-muted-foreground">
-                          Collect a stable browser identifier to support returning-user detection.
+                          Add a passive browser signal for returning-user detection.
                         </p>
                       </div>
                     </div>
@@ -382,7 +391,7 @@
                     </Badge>
                   </div>
                 </CardHeader>
-                <CardContent class="space-y-5 pt-5">
+                <CardContent class="space-y-4 pt-4">
                   <div class="flex items-start gap-3">
                     <Checkbox
                       id="fp-on"
@@ -426,7 +435,7 @@
                           Persist across sessions
                         </Label>
                         <p class="text-xs text-muted-foreground">
-                          Reuses the browser signal for returning-user detection.
+                          Reuse the signal for returning-user detection.
                         </p>
                       </div>
                     </div>
@@ -435,7 +444,7 @@
               </Card>
 
               <Card class="overflow-hidden shadow-sm">
-                <CardHeader class="border-b bg-muted/20 pb-4">
+                <CardHeader class="border-b bg-muted/20 pb-3">
                   <div class="flex items-start gap-3">
                     <div class="rounded-lg border bg-background p-2">
                       <Gauge class="size-4 text-muted-foreground" />
@@ -443,12 +452,12 @@
                     <div>
                       <CardTitle class="text-base">Rate limiting</CardTitle>
                       <p class="mt-1 text-sm text-muted-foreground">
-                        Throttle abusive behavior before it becomes a support problem.
+                        Slow abusive retries before they become a support problem.
                       </p>
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent class="space-y-5 pt-5">
+                <CardContent class="space-y-4 pt-4">
                   <div class="grid gap-4 sm:grid-cols-2">
                     <div class="space-y-2">
                       <Label for="max-attempts">Max attempts</Label>
@@ -500,7 +509,7 @@
             </div>
 
             <Card class="overflow-hidden shadow-sm">
-              <CardHeader class="border-b bg-muted/20 pb-4">
+              <CardHeader class="border-b bg-muted/20 pb-3">
                 <div class="flex items-start justify-between gap-3">
                   <div class="flex items-start gap-3">
                     <div class="rounded-lg border bg-background p-2">
@@ -509,7 +518,7 @@
                     <div>
                       <CardTitle class="text-base">Telemetry</CardTitle>
                       <p class="mt-1 text-sm text-muted-foreground">
-                        Capture client-side telemetry for debugging and flow quality checks.
+                        Collect client-side signals for debugging.
                       </p>
                     </div>
                   </div>
@@ -518,7 +527,7 @@
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent class="space-y-5 pt-5">
+              <CardContent class="space-y-4 pt-4">
                 <div class="flex items-start gap-3">
                   <Checkbox
                     id="tel-on"
@@ -533,8 +542,7 @@
                       >Collect browser telemetry</Label
                     >
                     <p class="text-xs text-muted-foreground">
-                      Useful for troubleshooting login issues and instrumenting this shared
-                      renderer.
+                      Useful for troubleshooting and flow quality checks.
                     </p>
                   </div>
                 </div>
@@ -561,42 +569,48 @@
         </Tabs>
       </div>
 
-      <div class="space-y-4 xl:sticky xl:top-6">
+      <div class="space-y-3 xl:sticky xl:top-4">
         <Card class="overflow-hidden shadow-sm">
-          <CardHeader class="border-b bg-muted/20 pb-4">
+          <CardHeader class="border-b bg-muted/20 pb-3">
             <div class="flex items-start gap-3">
               <div class="rounded-lg border bg-background p-2">
-                <Eye class="size-4 text-muted-foreground" />
+                <BadgeCheck class="size-4 text-muted-foreground" />
               </div>
               <div>
                 <CardTitle class="text-base">Live preview</CardTitle>
                 <p class="mt-1 text-sm text-muted-foreground">
-                  Updates as you edit.
+                  A live preview of the hosted login experience.
                 </p>
               </div>
             </div>
           </CardHeader>
 
-          <CardContent class="space-y-5 pt-5">
-            <div>
-              <p class="text-xs font-medium text-muted-foreground mb-2">Layout</p>
-              <div class="flex flex-wrap gap-2">
+          <CardContent class="space-y-4 pt-4">
+            <div
+              class="rounded-xl border bg-[radial-gradient(circle_at_top_left,rgba(242,85,67,0.16),transparent_45%),linear-gradient(180deg,rgba(244,244,246,0.95),rgba(244,244,246,0.55))] p-3"
+            >
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium">Layout</p>
+                </div>
+                <Badge variant="secondary">{{ currentLayoutLabel }}</Badge>
+              </div>
+
+              <div class="flex flex-wrap gap-1.5">
                 <Button
                   v-for="layout in layouts"
                   :key="layout.id"
                   type="button"
                   size="sm"
                   :variant="form.layout === layout.id ? 'default' : 'outline'"
-                  class="flex items-center gap-1.5"
                   @click="form.layout = layout.id"
                 >
-                  <component :is="layout.icon" class="size-3.5" />
                   {{ layout.label }}
                 </Button>
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-2xl border bg-muted/20 p-4">
+            <div class="overflow-hidden rounded-xl border bg-muted/20 p-3">
               <LoginShell :branding="previewBranding" preview>
                 <LoginNodeRenderer
                   :flow-step="previewStep"
@@ -605,6 +619,39 @@
                   :confirm-passwords="previewConfirmPasswords"
                 />
               </LoginShell>
+            </div>
+
+            <Separator />
+
+            <div class="grid gap-2 text-xs">
+              <div class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Strategy</span>
+                <span class="text-muted-foreground"> · {{ strategyLabel }}</span>
+              </div>
+              <div v-if="templateSource" class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Template source</span>
+                <span class="font-mono text-muted-foreground"> · {{ templateSource }}</span>
+              </div>
+              <div v-if="form.telemetry.enabled" class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Telemetry</span>
+                <span class="text-muted-foreground">
+                  · {{ Math.round(form.telemetry.sampleRate * 100) }}% sample rate</span
+                >
+              </div>
+              <div
+                v-if="form.fingerprint.enabled"
+                class="rounded-lg border bg-background px-3 py-2"
+              >
+                <span class="font-medium text-foreground">Fingerprinting</span>
+                <span class="text-muted-foreground"> · {{ form.fingerprint.provider }}</span>
+              </div>
+              <div class="rounded-lg border bg-background px-3 py-2">
+                <span class="font-medium text-foreground">Rate limit</span>
+                <span class="text-muted-foreground">
+                  · {{ form.rateLimit.maxAttempts }} attempts / {{ form.rateLimit.windowSeconds }}s
+                  (per {{ form.rateLimit.scope }})
+                </span>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -618,7 +665,7 @@
   import { useRoute, useRouter } from 'vue-router'
   import { api } from '@/api/client'
   import type { FlowBranding } from '@/api/branding'
-  import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+  import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
   import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
   import { Badge } from '@/components/ui/badge'
   import { Button } from '@/components/ui/button'
@@ -639,19 +686,15 @@
     Activity,
     ArrowLeft,
     ArrowUp,
-    Columns2,
-    Eye,
+    BadgeCheck,
     Gauge,
     ImageIcon,
     LayoutPanelTop,
-    Minus,
     Palette,
     Radar,
     Shield,
     ShieldCheck,
     Sparkles,
-    Square,
-    GalleryHorizontalEnd,
   } from 'lucide-vue-next'
   import LoginShell from '@/login/components/LoginShell.vue'
   import LoginNodeRenderer from '@/login/components/LoginNodeRenderer.vue'
@@ -702,42 +745,36 @@
     {
       key: 'logo_url',
       label: 'Logo',
-      description: 'Used in the login card header on light backgrounds.',
+      description: 'Shown in the card header on light layouts.',
       placeholder: 'https://example.com/logo.svg',
     },
     {
       key: 'logo_dark',
       label: 'Dark Logo',
-      description: 'Used when dark mode is active and a dark-specific logo is available.',
+      description: 'Shown when dark mode is active.',
       placeholder: 'https://example.com/logo-dark.svg',
     },
     {
       key: 'cover_image',
       label: 'Cover Image',
-      description: 'Used by Split and Card with image layouts.',
+      description: 'Shown in Split and Card with image layouts.',
       placeholder: 'https://example.com/cover.jpg',
     },
     {
       key: 'favicon',
       label: 'Favicon',
-      description: 'Shown in the browser tab for the hosted login page.',
+      description: 'Shown in the browser tab.',
       placeholder: 'https://example.com/favicon.png',
     },
   ] as const
 
   const layouts = [
-    { id: 'centered', label: 'Centered', icon: LayoutPanelTop },
-    { id: 'split', label: 'Split', icon: Columns2 },
-    { id: 'muted', label: 'Muted', icon: Square },
-    { id: 'card_image', label: 'Card with image', icon: GalleryHorizontalEnd },
-    { id: 'minimal', label: 'Minimal', icon: Minus },
+    { id: 'centered', label: 'Centered' },
+    { id: 'split', label: 'Split' },
+    { id: 'muted', label: 'Muted' },
+    { id: 'card_image', label: 'Card with image' },
+    { id: 'minimal', label: 'Minimal' },
   ]
-
-  const openAssets = computed(() =>
-    brandingAssetFields
-      .filter(f => form.branding[f.key])
-      .map(f => f.key)
-  )
 
   const strategyLabels: Record<string, string> = {
     identifier_first: 'Identifier first',
@@ -798,18 +835,18 @@
       logo_url: form.branding.logo_url || '',
       org_name: branding.org_name || 'Acme Corp',
       colors: {
-        primary: '#6366f1',
+        primary: '#f25543',
         primary_foreground: '#ffffff',
-        background: '#f0f2ff',
+        background: '#f4f4f6',
         surface: '#ffffff',
-        text: '#1a1a2e',
-        muted: '#f4f4f5',
-        accent: '#6366f1',
-        border: '#e4e4e7',
+        text: '#0f0f11',
+        muted: '#f4f4f6',
+        accent: '#f25543',
+        border: '#e5e5e7',
         error: '#ef4444',
         ...(branding.colors || {}),
       },
-      font_family: branding.font_family || 'Inter, system-ui, sans-serif',
+      font_family: branding.font_family || 'Arimo, Inter, system-ui, sans-serif',
       font_url: branding.font_url || '',
       texts: branding.texts || {},
       custom_css: branding.custom_css || '',

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"github.com/zitadel/zitadel/internal/risk"
 )
 
 // ─── Schema Annotation Types ────────────────────────────────
@@ -84,7 +86,7 @@ type BrandingConfig struct {
 // CaptchaConfig represents x-captcha on the login flow schema.
 type CaptchaConfig struct {
 	Provider  string   `json:"provider"`             // "altcha" | "hcaptcha" | "recaptcha" | "turnstile"
-	Mode      string   `json:"mode"`                 // "invisible" | "checkbox" | "floating"
+	Mode      string   `json:"mode"`                 // "always" | "risk_based" | "never"
 	On        []string `json:"on"`                   // ["register", "forgot_password", "login"]
 	Steps     []string `json:"steps,omitempty"`      // legacy alias from console/runtime config
 	Algorithm string   `json:"algorithm,omitempty"`  // "SHA-256" | "SHA-384" | "SHA-512" (Altcha PoW hash)
@@ -711,6 +713,7 @@ type StepType string
 
 const (
 	StepIdentifier     StepType = "identifier"
+	StepSessionReuse   StepType = "session_reuse"
 	StepAuthSelect     StepType = "auth_select"
 	StepPassword       StepType = "password"
 	StepPasskey        StepType = "passkey"
@@ -801,8 +804,11 @@ type Flow struct {
 	SSOProviders  []map[string]any
 	Errors        []FlowError       // accumulated errors for current step
 	Messages      []FlowMessage     // accumulated messages for current step
+	AuthRequestID string            // OIDC auth_request_id from the OP
 	RedirectURI   string            // OIDC redirect_uri (stored from auth request)
 	OIDCState     string            // OIDC state parameter
+	OIDCPrompts   []string          // OIDC prompt values
+	OIDCLoginHint string            // OIDC login_hint
 	RegData       map[string]string // registration form data (accumulated)
 	LoginFlowID   string            // if set, login flow schema was used
 	AuthMethod    string
@@ -816,6 +822,8 @@ type Flow struct {
 	PoWDurationMs        float64 // how long the PoW solve took (client-reported)
 	VisitorID            string  // ThumbmarkJS persistent fingerprint
 	FingerprintHash      string  // composite component hash
+	AdaptiveCaptcha      bool
+	PreAuthRisk          *risk.Result
 }
 
 // FlowStore is an in-memory store for active login flows.
@@ -865,6 +873,8 @@ func BuildNodes(flow *Flow) []UINode {
 	switch flow.CurrentStep {
 	case StepIdentifier:
 		nodes = buildIdentifierNodes(flow, cfg, texts)
+	case StepSessionReuse:
+		nodes = buildSessionReuseNodes(flow, texts)
 	case StepAuthSelect:
 		nodes = buildAuthSelectNodes(flow, cfg, texts)
 	case StepPassword:
@@ -887,8 +897,8 @@ func BuildNodes(flow *Flow) []UINode {
 		return []UINode{{Type: "heading", Text: "Unknown step"}}
 	}
 
-	// Append captcha node if configured for this step.
-	if captchaActiveForStep(cfg.Captcha, flow.CurrentStep) {
+	// Append captcha node if this step's policy requires it.
+	if flow.captchaRequiredForCurrentStep() {
 		cc := cfg.Captcha
 		attrs := map[string]string{}
 		switch cc.Provider {
@@ -1026,6 +1036,33 @@ func buildIdentifierNodes(flow *Flow, cfg *SchemaAuthConfig, texts map[string]st
 		})
 	}
 
+	return nodes
+}
+
+func buildSessionReuseNodes(flow *Flow, texts map[string]string) []UINode {
+	heading := textOr(texts, "session_reuse_heading", "Use your existing session?")
+	description := textOr(texts, "session_reuse_description", "You're already signed in. Continue with that session or choose a different account.")
+	primaryLabel := textOr(texts, "session_reuse_continue", "Continue with this session")
+	switchAccountLabel := textOr(texts, "session_reuse_switch", "Use a different account")
+
+	initial := ""
+	if flow.DisplayName != "" {
+		initial = string([]rune(flow.DisplayName)[0])
+	} else if flow.Identifier != "" {
+		initial = string([]rune(flow.Identifier)[0])
+	}
+
+	nodes := []UINode{
+		{Type: "heading", Text: heading},
+		{Type: "description", Text: description},
+	}
+	if flow.DisplayName != "" || flow.Identifier != "" {
+		nodes = append(nodes, UINode{Type: "avatar", Initial: initial, Text: flow.authSelectHeading()})
+	}
+	nodes = append(nodes,
+		UINode{Type: "button", Label: primaryLabel, Action: "use_session"},
+		UINode{Type: "link", Label: switchAccountLabel, Action: "back"},
+	)
 	return nodes
 }
 
@@ -1330,6 +1367,22 @@ func (f *Flow) captchaVerifiedForCurrentStep() bool {
 	return scope != "" && f.CaptchaVerified && f.CaptchaVerifiedScope == scope
 }
 
+func (f *Flow) captchaRequiredForCurrentStep() bool {
+	if f == nil || f.SchemaConfig == nil {
+		return false
+	}
+	if !captchaActiveForStep(f.SchemaConfig.Captcha, f.CurrentStep) {
+		return false
+	}
+	if f.SchemaConfig.Captcha != nil && f.SchemaConfig.Captcha.Mode == "risk_based" {
+		if f.PreAuthRisk == nil {
+			return true
+		}
+		return f.AdaptiveCaptcha
+	}
+	return true
+}
+
 func (f *Flow) clearCaptchaState() {
 	f.CaptchaProvider = ""
 	f.CaptchaVerified = false
@@ -1345,6 +1398,8 @@ func (f *Flow) transitionToStep(step StepType) {
 	if currentScope != "" && nextScope != currentScope {
 		f.clearCaptchaState()
 	}
+	f.AdaptiveCaptcha = false
+	f.PreAuthRisk = nil
 	f.CurrentStep = step
 }
 
@@ -1358,7 +1413,7 @@ func (f *Flow) ToFlowStep() *FlowStep {
 		Errors:          f.Errors,
 		Messages:        f.Messages,
 		CSS:             f.SchemaConfig.Branding.CustomCSS,
-		CaptchaRequired: captchaActiveForStep(f.SchemaConfig.Captcha, f.CurrentStep),
+		CaptchaRequired: f.captchaRequiredForCurrentStep(),
 		CaptchaVerified: f.captchaVerifiedForCurrentStep(),
 	}
 	if f.revealsKnownUserIdentity() && f.DisplayName != "" {

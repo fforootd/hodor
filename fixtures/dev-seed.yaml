@@ -1,5 +1,5 @@
-# Dev seed — deterministic admin + test users.
-# Designed for: rm zitadel.db && make dev-hot
+# Deprecated compatibility seed.
+# Use fixtures/seeds/frontend.yaml for the canonical local dev pack.
 #
 # WARNING: These credentials are for LOCAL DEVELOPMENT ONLY.
 # Never commit production tokens to version control.

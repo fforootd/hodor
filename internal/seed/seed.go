@@ -14,6 +14,7 @@ import (
 	"github.com/zitadel/zitadel/internal/logging"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -29,6 +30,20 @@ import (
 type SeedFile struct {
 	Providers  []SeedProvider `yaml:"providers"`
 	Identities []SeedIdentity `yaml:"users"`
+}
+
+// Summary returns a compact count summary for CLI and logs.
+func (s SeedFile) Summary() SeedSummary {
+	return SeedSummary{
+		Providers: len(s.Providers),
+		Users:     len(s.Identities),
+	}
+}
+
+// SeedSummary is a compact summary of a seed file's contents.
+type SeedSummary struct {
+	Providers int
+	Users     int
 }
 
 // SeedProvider defines a provider to seed.
@@ -86,21 +101,33 @@ func substituteEnvVars(input []byte) []byte {
 	})
 }
 
-// LoadAndApply reads a seed YAML file and applies it to the database.
-// It is idempotent — existing records are handled per on_conflict setting.
-func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
+// LoadFile reads, expands, parses, and validates a seed file.
+func LoadFile(path string) (*SeedFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read seed file %s: %w", path, err)
+		return nil, fmt.Errorf("read seed file %s: %w", path, err)
 	}
 
-	// Substitute environment variables.
 	data = substituteEnvVars(data)
 
 	var seed SeedFile
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(&seed); err != nil {
-		return fmt.Errorf("parse seed file: %w", err)
+		return nil, fmt.Errorf("parse seed file: %w", err)
+	}
+	if err := validate(seed); err != nil {
+		return nil, err
+	}
+
+	return &seed, nil
+}
+
+// LoadAndApply reads a seed YAML file and applies it to the database.
+// It is idempotent — existing records are handled per on_conflict setting.
+func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
+	seed, err := LoadFile(path)
+	if err != nil {
+		return err
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -133,6 +160,45 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 
 	totalItems := len(seed.Providers) + len(seed.Identities)
 	logging.Printf("[seed] applied %d items from %s", totalItems, path)
+	return nil
+}
+
+func validate(seed SeedFile) error {
+	providerIDs := map[string]struct{}{}
+	providerNames := map[string]struct{}{}
+	userIdentifiers := map[string]struct{}{}
+	validConflictModes := []string{"", "skip", "warn", "update"}
+
+	for _, provider := range seed.Providers {
+		if id := strings.TrimSpace(provider.ID); id != "" {
+			if _, exists := providerIDs[id]; exists {
+				return fmt.Errorf("validate seed file: duplicate provider id %q", id)
+			}
+			providerIDs[id] = struct{}{}
+		}
+		if name := strings.TrimSpace(provider.Name); name != "" {
+			if _, exists := providerNames[name]; exists {
+				return fmt.Errorf("validate seed file: duplicate provider name %q", name)
+			}
+			providerNames[name] = struct{}{}
+		}
+	}
+
+	for _, identity := range seed.Identities {
+		identifier := strings.TrimSpace(identity.Identifier)
+		if identifier == "" {
+			return fmt.Errorf("validate seed file: user identifier is required")
+		}
+		if _, exists := userIdentifiers[identifier]; exists {
+			return fmt.Errorf("validate seed file: duplicate user identifier %q", identifier)
+		}
+		userIdentifiers[identifier] = struct{}{}
+
+		if !slices.Contains(validConflictModes, identity.OnConflict) {
+			return fmt.Errorf("validate seed file: unsupported on_conflict %q for user %q", identity.OnConflict, identifier)
+		}
+	}
+
 	return nil
 }
 

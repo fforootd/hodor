@@ -79,8 +79,8 @@ const bgVars = computed(() => {
   width: 100%;
   overflow: hidden;
   border-radius: var(--radius, 0.75rem);
-  border: 1px solid hsl(var(--border, 0 0% 90%));
-  background: hsl(var(--card, 0 0% 100%));
+  border: 1px solid var(--color-border, #e4e4e7);
+  background: var(--color-card, #ffffff);
   box-shadow: 0 4px 14px -3px rgba(0, 0, 0, 0.1);
 }
 @media (min-width: 768px) {
@@ -101,7 +101,7 @@ const bgVars = computed(() => {
 .card-image-media {
   display: none;
   position: relative;
-  background: hsl(var(--muted, 0 0% 96%));
+  background: var(--color-muted, #f4f4f5);
   min-height: 20rem;
   overflow: hidden;
 }

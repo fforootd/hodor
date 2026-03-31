@@ -286,6 +286,9 @@
         "properties": {
           "session": {
             "properties": {
+              "auth_method": {
+                "type": "string"
+              },
               "created_at": {
                 "type": "string"
               },
@@ -298,7 +301,20 @@
               "ip_address": {
                 "type": "string"
               },
+              "login_flow_id": {
+                "type": "string"
+              },
+              "metadata": {
+                "additionalProperties": {},
+                "type": "object"
+              },
               "org_id": {
+                "type": "string"
+              },
+              "provider_id": {
+                "type": "string"
+              },
+              "provider_kind": {
                 "type": "string"
               },
               "revoked_at": {
@@ -678,33 +694,6 @@
       },
       "ImportRequest": {
         "properties": {
-          "entities": {
-            "items": {
-              "properties": {
-                "display_name": {
-                  "type": "string"
-                },
-                "identifier": {
-                  "type": "string"
-                },
-                "password": {
-                  "type": "string"
-                },
-                "profile": {
-                  "additionalProperties": {},
-                  "type": "object"
-                },
-                "schema_id": {
-                  "type": "string"
-                },
-                "state": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "type": "array"
-          },
           "linked_identities": {
             "items": {
               "properties": {
@@ -754,6 +743,33 @@
                   "type": "string"
                 },
                 "template": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "users": {
+            "items": {
+              "properties": {
+                "display_name": {
+                  "type": "string"
+                },
+                "identifier": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                },
+                "profile": {
+                  "additionalProperties": {},
+                  "type": "object"
+                },
+                "schema_id": {
+                  "type": "string"
+                },
+                "state": {
                   "type": "string"
                 }
               },
@@ -832,6 +848,62 @@
           "status",
           "purpose",
           "message"
+        ],
+        "type": "object"
+      },
+      "OrgRequest": {
+        "properties": {
+          "data": {},
+          "metadata": {},
+          "name": {
+            "type": "string"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "OrgResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {},
+          "id": {
+            "type": "string"
+          },
+          "metadata": {},
+          "name": {
+            "type": "string"
+          },
+          "schema_id": {
+            "type": "string"
+          },
+          "schema_type": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "state",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -1084,9 +1156,6 @@
                 "id": {
                   "type": "string"
                 },
-                "link": {
-                  "type": "string"
-                },
                 "resource_type": {
                   "type": "string"
                 },
@@ -1111,6 +1180,9 @@
       },
       "SessionResponse": {
         "properties": {
+          "auth_method": {
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -1125,7 +1197,20 @@
           "ip_address": {
             "type": "string"
           },
+          "login_flow_id": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {},
+            "type": "object"
+          },
           "org_id": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_kind": {
             "type": "string"
           },
           "revoked_at": {
@@ -1287,6 +1372,7 @@
             },
             "type": "array"
           },
+          "data": {},
           "display_name": {
             "type": "string"
           },
@@ -1333,7 +1419,33 @@
           "org_id": {
             "type": "string"
           },
+          "orgs": {
+            "items": {
+              "properties": {
+                "added_at": {
+                  "type": "string"
+                },
+                "org_id": {
+                  "type": "string"
+                },
+                "org_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
           "profile": {},
+          "schema_id": {
+            "type": "string"
+          },
+          "schema_type": {
+            "type": "string"
+          },
           "state": {
             "type": "string"
           },
@@ -1362,6 +1474,12 @@
         "bearerFormat": "PAT or session token",
         "scheme": "bearer",
         "type": "http"
+      },
+      "cookieAuth": {
+        "description": "Uses the browser session cookie in the console. Secure deployments use `__Host-zitadel_session`; local development uses `__zitadel_session`.",
+        "in": "cookie",
+        "name": "__Host-zitadel_session",
+        "type": "apiKey"
       }
     }
   },
@@ -1398,6 +1516,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1423,6 +1544,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -1458,6 +1582,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1484,6 +1611,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1509,6 +1639,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -1547,6 +1680,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1565,6 +1701,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -1758,6 +1897,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1837,6 +1979,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1862,6 +2007,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -1942,6 +2090,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1979,6 +2130,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2014,6 +2168,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2051,6 +2208,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2086,6 +2246,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2123,6 +2286,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2149,6 +2315,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2174,6 +2343,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2211,6 +2383,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2246,6 +2421,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2294,6 +2472,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2327,6 +2508,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2363,6 +2547,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2452,10 +2639,169 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
         "summary": "List organizations",
+        "tags": [
+          "Organizations"
+        ]
+      },
+      "post": {
+        "operationId": "createOrg",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            },
+            "description": "Create an organization"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create an organization",
+        "tags": [
+          "Organizations"
+        ]
+      }
+    },
+    "/v1/orgs/{id}": {
+      "delete": {
+        "operationId": "deleteOrg",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Delete an organization"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete an organization",
+        "tags": [
+          "Organizations"
+        ]
+      },
+      "get": {
+        "operationId": "getOrg",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            },
+            "description": "Get an organization"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get an organization",
+        "tags": [
+          "Organizations"
+        ]
+      },
+      "patch": {
+        "operationId": "updateOrg",
+        "parameters": [
+          {
+            "description": "Resource ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            },
+            "description": "Update an organization"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update an organization",
         "tags": [
           "Organizations"
         ]
@@ -2477,6 +2823,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2512,6 +2861,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2542,6 +2894,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2567,6 +2922,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2601,6 +2959,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2646,6 +3007,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2680,6 +3044,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2726,6 +3093,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2762,6 +3132,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2795,6 +3168,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2847,6 +3223,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2891,6 +3270,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -2938,6 +3320,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -2974,6 +3359,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3022,6 +3410,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3058,6 +3449,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3103,6 +3497,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3128,6 +3525,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3162,6 +3562,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3200,6 +3603,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3237,6 +3643,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3266,6 +3675,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3316,6 +3728,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3360,6 +3775,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3421,6 +3839,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3455,6 +3876,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3484,6 +3908,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3519,6 +3946,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }
@@ -3565,6 +3995,9 @@
         },
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -3604,6 +4037,9 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "bearerAuth": []
           }

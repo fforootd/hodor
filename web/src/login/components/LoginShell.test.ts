@@ -36,33 +36,6 @@ const branding: FlowBranding = {
   consent: [],
 }
 
-const stubs = {
-  CenteredLayout: {
-    template: '<div class="layout-centered"><slot /><slot name="footer" /></div>',
-  },
-  SplitLayout: {
-    template: '<div class="layout-split"><slot /><slot name="footer" /></div>',
-  },
-  MutedLayout: {
-    template: '<div class="layout-muted"><slot /><slot name="footer" /></div>',
-  },
-  CardImageLayout: {
-    template: '<div class="layout-card-image"><slot /><slot name="footer" /></div>',
-  },
-  MinimalLayout: {
-    template: '<div class="layout-minimal"><slot /><slot name="footer" /></div>',
-  },
-  Card: {
-    template: '<div class="card"><slot /></div>',
-  },
-  CardHeader: {
-    template: '<div class="card-header"><slot /></div>',
-  },
-  CardContent: {
-    template: '<div class="card-content"><slot /></div>',
-  },
-}
-
 function mountShell(overrides: Partial<FlowBranding> = {}, props: Record<string, unknown> = {}) {
   return mount(LoginShell, {
     props: {
@@ -74,9 +47,6 @@ function mountShell(overrides: Partial<FlowBranding> = {}, props: Record<string,
     },
     slots: {
       default: '<div class="shell-body">Body</div>',
-    },
-    global: {
-      stubs,
     },
   })
 }
@@ -99,5 +69,19 @@ describe('LoginShell', () => {
 
     const logo = wrapper.get('img')
     expect(logo.attributes('src')).toBe('/logo-dark.svg')
+  })
+
+  it('falls back to the centered layout when split has no cover image', () => {
+    const wrapper = mountShell({ layout: 'split', cover_image: '' })
+
+    expect(wrapper.find('.login-layout-centered').exists()).toBe(true)
+    expect(wrapper.find('.login-layout-split').exists()).toBe(false)
+  })
+
+  it('avoids duplicating the brand name inside muted layout cards', () => {
+    const wrapper = mountShell({ layout: 'muted', logo_url: '' })
+    const brandMatches = wrapper.text().match(/Acme Corp/g) || []
+
+    expect(brandMatches).toHaveLength(1)
   })
 })

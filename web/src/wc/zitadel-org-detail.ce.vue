@@ -1,5 +1,7 @@
 <template>
   <div class="zitadel-wc" :class="{ dark: isDark }">
+    <WCToaster :dark="isDark" />
+
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-16 text-sm text-[var(--color-muted-foreground)]">
       <div class="space-y-3 w-full max-w-md">
@@ -10,7 +12,7 @@
     </div>
 
     <!-- Error -->
-    <div v-if="error" class="error-banner">{{ error }}</div>
+    <div v-if="loadError" class="error-banner">{{ loadError }}</div>
 
     <!-- Content -->
     <div v-if="!loading && org" class="space-y-6">
@@ -32,7 +34,7 @@
         <button
           v-if="editable"
           class="btn-danger-outline"
-          @click="onDelete"
+          @click="showDeleteConfirm = true"
         >Delete</button>
       </div>
 
@@ -117,11 +119,23 @@
         </div>
       </div>
     </div>
+
+    <WCConfirmDialog
+      :open="showDeleteConfirm"
+      title="Delete Organization"
+      :description="`Are you sure you want to delete ${org?.name || 'this organization'}? This action cannot be undone.`"
+      :loading="deleting"
+      @update:open="showDeleteConfirm = $event"
+      @confirm="onDelete"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, watch } from 'vue'
+import { notifyError, notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
+import WCConfirmDialog from '@/wc/components/WCConfirmDialog.vue'
+import WCToaster from '@/wc/components/WCToaster.vue'
 import { createWCApiClient, type WCApiClient } from '@/wc/wc-api-client'
 import { dispatchWCEvent, resolveApiBase, isDarkMode } from '@/wc/host-utils'
 
@@ -144,7 +158,9 @@ const isDark = computed(() => isDarkMode(props.darkMode))
 const org = ref<any>(null)
 const loading = ref(false)
 const saving = ref(false)
-const error = ref('')
+const deleting = ref(false)
+const loadError = ref('')
+const showDeleteConfirm = ref(false)
 const editValues = reactive<Record<string, string>>({})
 
 let api: WCApiClient
@@ -182,12 +198,12 @@ function resetEdits() {
 async function loadOrg() {
   if (!props.orgId) return
   loading.value = true
-  error.value = ''
+  loadError.value = ''
   try {
     org.value = await api.get<any>(`/v1/orgs/${encodeURIComponent(props.orgId)}`)
     resetEdits()
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load organization'
+    loadError.value = e?.message || 'Failed to load organization'
   } finally {
     loading.value = false
   }
@@ -207,7 +223,7 @@ async function onSave() {
       try {
         body.metadata = JSON.parse(editValues.metadata)
       } catch {
-        error.value = 'Invalid metadata JSON'
+        notifyError('Invalid metadata JSON')
         saving.value = false
         return
       }
@@ -218,21 +234,28 @@ async function onSave() {
       changes: body,
     })
     await loadOrg()
+    notifyMutationSuccess('Organization', 'update')
   } catch (e: any) {
-    error.value = e?.message || 'Failed to save'
+    notifyMutationError('Organization', 'update', e)
+    dispatchWCEvent(TAG_NAME, 'org-error', { error: e?.message || 'Failed to save' })
   } finally {
     saving.value = false
   }
 }
 
 async function onDelete() {
-  if (!confirm('Delete this organization? This cannot be undone.')) return
+  if (!props.orgId) return
+  deleting.value = true
   try {
     await api.delete(`/v1/orgs/${encodeURIComponent(props.orgId)}`)
     dispatchWCEvent(TAG_NAME, 'org-deleted', { id: props.orgId })
+    notifyMutationSuccess('Organization', 'delete')
+    showDeleteConfirm.value = false
   } catch (e: any) {
-    error.value = e?.message || 'Failed to delete'
-    dispatchWCEvent(TAG_NAME, 'org-error', { error: error.value })
+    notifyMutationError('Organization', 'delete', e)
+    dispatchWCEvent(TAG_NAME, 'org-error', { error: e?.message || 'Failed to delete' })
+  } finally {
+    deleting.value = false
   }
 }
 

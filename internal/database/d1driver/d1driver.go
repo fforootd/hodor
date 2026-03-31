@@ -46,12 +46,15 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 func init() {
@@ -99,7 +102,7 @@ func (c *conn) Begin() (driver.Tx, error) {
 func (c *conn) post(endpoint string, query string, args []driver.Value) (*d1Result, error) {
 	params := make([]interface{}, len(args))
 	for i, a := range args {
-		params[i] = a
+		params[i] = encodeParamValue(a)
 	}
 
 	body, err := json.Marshal(d1Request{SQL: query, Params: params})
@@ -119,13 +122,17 @@ func (c *conn) post(endpoint string, query string, args []driver.Value) (*d1Resu
 	}
 
 	var result d1Result
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&result); err != nil {
 		return nil, fmt.Errorf("d1: decode response: %w", err)
 	}
 
 	if !result.Success {
 		return nil, fmt.Errorf("d1: query error: %s", result.Error)
 	}
+
+	normalizeResultNumbers(&result)
 
 	return &result, nil
 }
@@ -142,6 +149,26 @@ func (s *stmt) Close() error { return nil }
 func (s *stmt) NumInput() int { return -1 } // variable number of args
 
 func (s *stmt) Exec(args []driver.Value) (driver.Result, error) {
+	statements := splitStatements(s.query)
+	if len(statements) > 1 {
+		if len(args) > 0 {
+			return nil, fmt.Errorf("d1: multi-statement exec does not support bound parameters")
+		}
+
+		var last execResult
+		for _, statement := range statements {
+			resp, err := s.conn.post("/exec", statement, nil)
+			if err != nil {
+				return nil, err
+			}
+			last = execResult{
+				lastInsertID: resp.Meta.LastRowID,
+				rowsAffected: resp.Meta.Changes,
+			}
+		}
+		return &last, nil
+	}
+
 	resp, err := s.conn.post("/exec", s.query, args)
 	if err != nil {
 		return nil, err
@@ -235,6 +262,11 @@ type d1Request struct {
 	Params []interface{} `json:"params,omitempty"`
 }
 
+type d1BlobParam struct {
+	Type   string `json:"__d1_type"`
+	Base64 string `json:"base64"`
+}
+
 // d1Result mirrors the D1Result object from the Workers Binding API.
 // See: https://developers.cloudflare.com/d1/worker-api/return-object/
 type d1Result struct {
@@ -257,4 +289,136 @@ type d1Meta struct {
 	RowsRead  int64   `json:"rows_read"`
 	RowsWrite int64   `json:"rows_written"`
 	Duration  float64 `json:"duration"`
+}
+
+func normalizeResultNumbers(result *d1Result) {
+	for rowIndex, row := range result.Results {
+		for column, value := range row {
+			result.Results[rowIndex][column] = normalizeJSONValue(value)
+		}
+	}
+}
+
+func normalizeJSONValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case json.Number:
+		if i, err := typed.Int64(); err == nil {
+			return i
+		}
+		if f, err := typed.Float64(); err == nil {
+			if math.Trunc(f) == f {
+				return int64(f)
+			}
+			return f
+		}
+		return typed.String()
+	case []interface{}:
+		if blob, ok := normalizeJSONArrayToBytes(typed); ok {
+			return blob
+		}
+		for i, element := range typed {
+			typed[i] = normalizeJSONValue(element)
+		}
+		return typed
+	case map[string]interface{}:
+		for key, element := range typed {
+			typed[key] = normalizeJSONValue(element)
+		}
+		return typed
+	case string:
+		if parsed, ok := parseD1Timestamp(typed); ok {
+			return parsed
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func parseD1Timestamp(value string) (time.Time, bool) {
+	if len(value) < len("2006-01-02 15:04:05") {
+		return time.Time{}, false
+	}
+
+	if len(value) >= 10 && value[4] == '-' && value[7] == '-' {
+		if strings.Contains(value, "T") {
+			parsed, err := time.Parse(time.RFC3339Nano, value)
+			if err == nil {
+				return parsed, true
+			}
+			return time.Time{}, false
+		}
+
+		layouts := []string{
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02 15:04:05",
+		}
+		for _, layout := range layouts {
+			parsed, err := time.ParseInLocation(layout, value, time.UTC)
+			if err == nil {
+				return parsed, true
+			}
+		}
+	}
+
+	return time.Time{}, false
+}
+
+func encodeParamValue(value driver.Value) interface{} {
+	switch typed := value.(type) {
+	case []byte:
+		return d1BlobParam{
+			Type:   "blob",
+			Base64: base64.StdEncoding.EncodeToString(typed),
+		}
+	default:
+		return typed
+	}
+}
+
+func normalizeJSONArrayToBytes(value []interface{}) ([]byte, bool) {
+	bytes := make([]byte, len(value))
+	for i, element := range value {
+		normalized := normalizeJSONValue(element)
+		byteValue, ok := jsonValueAsByte(normalized)
+		if !ok {
+			return nil, false
+		}
+		bytes[i] = byteValue
+	}
+	return bytes, true
+}
+
+func jsonValueAsByte(value interface{}) (byte, bool) {
+	switch typed := value.(type) {
+	case json.Number:
+		if i, err := typed.Int64(); err == nil && i >= 0 && i <= math.MaxUint8 {
+			return byte(i), true
+		}
+	case int64:
+		if typed >= 0 && typed <= math.MaxUint8 {
+			return byte(typed), true
+		}
+	case int:
+		if typed >= 0 && typed <= math.MaxUint8 {
+			return byte(typed), true
+		}
+	case float64:
+		if math.Trunc(typed) == typed && typed >= 0 && typed <= math.MaxUint8 {
+			return byte(typed), true
+		}
+	}
+	return 0, false
+}
+
+func splitStatements(query string) []string {
+	parts := strings.Split(query, ";")
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			statements = append(statements, trimmed)
+		}
+	}
+	return statements
 }

@@ -5,7 +5,7 @@
  * and fetch wrapper — eliminating boilerplate across list views.
  */
 import { ref, computed, type Ref } from 'vue'
-import { toast } from 'vue-sonner'
+import { notifyError } from '@/lib/notify'
 
 export interface UseResourceListOptions<T> {
   /** Function that fetches the resource list from the API */
@@ -42,7 +42,7 @@ export function useResourceList<T extends Record<string, any>>(options: UseResou
       items.value = await options.fetchFn()
     } catch (e: any) {
       error.value = e?.message || `Failed to load ${options.resourceName}`
-      toast.error(`Failed to load ${options.resourceName}`, { description: e?.message })
+      notifyError(`Failed to load ${options.resourceName}`, e)
     } finally {
       loading.value = false
     }

@@ -44,11 +44,7 @@
       "storage": "virtual",
       "route": "/users",
       "countable": true,
-      "aggregates": [
-        "human_user",
-        "service_user",
-        "ai_agent"
-      ],
+      "aggregates": ["human_user", "service_user", "ai_agent"],
       "fga_type": "entity",
       "fga_scope": "instance"
     },
@@ -62,9 +58,7 @@
       "storage": "virtual",
       "route": "/applications",
       "countable": true,
-      "aggregates": [
-        "app"
-      ],
+      "aggregates": ["app"],
       "fga_type": "app",
       "fga_scope": "org"
     },
@@ -83,11 +77,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "member",
-            "owner",
-            "viewer"
-          ]
+          "relations": ["member", "owner", "viewer"]
         },
         "claims": {
           "model": "expr",
@@ -114,10 +104,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "member",
-            "owner"
-          ]
+          "relations": ["member", "owner"]
         }
       },
       "fga_type": "entity",
@@ -137,10 +124,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "owner",
-            "viewer"
-          ]
+          "relations": ["owner", "viewer"]
         }
       },
       "fga_type": "entity",
@@ -160,10 +144,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "owner",
-            "viewer"
-          ]
+          "relations": ["owner", "viewer"]
         },
         "claims": {
           "model": "expr",
@@ -188,11 +169,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "member",
-            "owner",
-            "admin"
-          ]
+          "relations": ["member", "owner", "admin"]
         }
       },
       "fga_type": "org",
@@ -213,11 +190,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "member",
-            "admin",
-            "owner"
-          ]
+          "relations": ["member", "admin", "owner"]
         }
       },
       "fga_type": "group",
@@ -238,11 +211,7 @@
       "engines": {
         "authorization": {
           "model": "fga",
-          "relations": [
-            "member",
-            "admin",
-            "owner"
-          ]
+          "relations": ["member", "admin", "owner"]
         }
       },
       "fga_type": "project",
@@ -306,14 +275,13 @@
     "endpoint": {
       "group": "nav",
       "nav_group": "configure",
-      "alias": "Endpoints",
-      "singular": "Endpoint",
-      "path": "endpoints",
+      "alias": "API & Protocols",
+      "singular": "API & Protocols",
+      "path": "api-protocols",
       "icon": "🌐",
       "sort_order": 13,
       "storage": "dedicated",
-      "nav": "hidden",
-      "route": "/endpoints",
+      "route": "/api-protocols",
       "fga_type": "endpoint",
       "fga_scope": "instance"
     },
@@ -603,12 +571,7 @@
       "properties": {
         "strategy": {
           "type": "string",
-          "enum": [
-            "identifier_first",
-            "passkey_first",
-            "sso_only",
-            "custom"
-          ],
+          "enum": ["identifier_first", "passkey_first", "sso_only", "custom"],
           "default": "identifier_first"
         },
         "mfa_required": {
@@ -695,22 +658,12 @@
         },
         "layout": {
           "type": "string",
-          "enum": [
-            "centered",
-            "split",
-            "muted",
-            "card_image",
-            "minimal"
-          ],
+          "enum": ["centered", "split", "muted", "card_image", "minimal"],
           "default": "centered"
         },
         "dark_mode": {
           "type": "string",
-          "enum": [
-            "light",
-            "dark",
-            "auto"
-          ],
+          "enum": ["light", "dark", "auto"],
           "default": "light"
         },
         "cover_image": {
@@ -729,13 +682,7 @@
         },
         "border_radius": {
           "type": "string",
-          "enum": [
-            "sm",
-            "md",
-            "lg",
-            "xl",
-            "full"
-          ],
+          "enum": ["sm", "md", "lg", "xl", "full"],
           "default": "md"
         },
         "terms_url": {
@@ -748,10 +695,7 @@
         },
         "social_position": {
           "type": "string",
-          "enum": [
-            "top",
-            "bottom"
-          ],
+          "enum": ["top", "bottom"],
           "default": "bottom"
         },
         "consent": {
@@ -773,10 +717,7 @@
                 "default": false
               }
             },
-            "required": [
-              "id",
-              "label"
-            ]
+            "required": ["id", "label"]
           }
         }
       },
@@ -793,26 +734,17 @@
           },
           "x-verify": {
             "type": "string",
-            "enum": [
-              "email",
-              "sms"
-            ],
+            "enum": ["email", "sms"],
             "description": "Verification channel"
           },
           "x-recover": {
             "type": "string",
-            "enum": [
-              "email",
-              "sms"
-            ],
+            "enum": ["email", "sms"],
             "description": "Recovery channel"
           },
           "x-mfa": {
             "type": "string",
-            "enum": [
-              "sms",
-              "totp"
-            ],
+            "enum": ["sms", "totp"],
             "description": "MFA method via this field"
           },
           "x-claim": {
@@ -830,21 +762,13 @@
           },
           "x-source": {
             "type": "string",
-            "enum": [
-              "admin",
-              "user",
-              "system",
-              "sso"
-            ]
+            "enum": ["admin", "user", "system", "sso"]
           },
           "x-unique": {
             "oneOf": [
               {
                 "type": "string",
-                "enum": [
-                  "instance",
-                  "org"
-                ]
+                "enum": ["instance", "org"]
               },
               {
                 "type": "boolean",
@@ -883,10 +807,7 @@
           "description": "Max tokens for PAT/API key methods"
         }
       },
-      "required": [
-        "enabled",
-        "interactive"
-      ]
+      "required": ["enabled", "interactive"]
     }
   }
 }

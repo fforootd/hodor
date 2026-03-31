@@ -41,7 +41,7 @@ HTTP Request
        │
        ▼
 ┌──────────────┐
-│  pre_auth    │ ← Captcha, device fingerprint, bot detection
+│  pre_auth    │ ← Captcha policy consumer, device fingerprint, bot detection
 └──────┬───────┘
        │
        ▼
@@ -51,7 +51,7 @@ HTTP Request
        │
        ▼
 ┌──────────────┐
-│  post_auth   │ ← Risk scoring, session binding, claim enrichment
+│  post_auth   │ ← Risk policy consumer, session binding, claim enrichment
 └──────┬───────┘
        │
        ▼
@@ -255,11 +255,19 @@ Each stage can have multiple engines. The engine type determines what runs:
 |---|---|---|
 | `expr` | any | Evaluate an expression, transform data, conditional logic |
 | `rate_limit` | `on_request` | Token bucket / sliding window rate limiting |
-| `captcha` | `pre_auth` | hCaptcha / reCAPTCHA challenge |
-| `risk` | `post_auth` | Risk score (device, geo, velocity) → step-up MFA |
+| `captcha` | `pre_auth` | Challenge provider + policy consumer that gates by server-side risk result |
+| `risk` | `pre_auth`, `post_auth` | Built-in evaluator returns score, reasons, and recommended next step |
 | `webhook` | `on_event`, `post_auth` | HTTP POST to external URL |
 | `fga` | `post_auth` | Fine-grained authorization check |
 | `built-in` | `auth` | Core auth flows (password, passkey, etc.) |
+
+Risk is special compared with other engines: the evaluator itself does **not** own the final allow/deny decision. It returns a reusable result and the hook consumer applies policy for the current stage.
+
+For example:
+
+- `pre_auth` may map `require_captcha` to `captcha_required=true`
+- `post_auth` may persist the result into session metadata and emit follow-up observation events
+- future `on_token` or async consumers may reuse the same contract without re-implementing scoring
 
 ### 7. How Rules Cascade
 

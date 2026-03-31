@@ -50,8 +50,8 @@ Each login flow composes four independent signal modules:
 │  └─────────────────────┬──────────────────────┘  │
 │                        │                          │
 │              ┌─────────┴─────────┐                │
-│              │   Risk Scorer     │                │
-│              │ computeRiskLevel()│                │
+│              │  Risk Evaluator   │                │
+│              │  RiskResult{}     │                │
 │              └─────────┬─────────┘                │
 │                        │                          │
 │              ┌─────────┴─────────┐                │
@@ -102,20 +102,36 @@ The `/v1/otel/traces` endpoint is public and requires 4-layer protection:
 | Flow scoping | `X-Flow-ID` header | Links to active flow |
 | Tail sampling | `shouldSampleSpan()` | Keep: errors, slow >3s, page loads, flow-linked |
 
-### Risk Scoring
+### Risk Evaluation
 
-`computeRiskLevel()` combines all signals into a single risk level:
+Risk evaluation is now a built-in runtime capability defined by ADR-024. The evaluator produces a reusable `RiskResult` instead of directly enforcing allow or deny behavior.
 
-| Signal | Weight | Logic |
-|---|---|---|
-| PoW completion | 0.3 | Solved + timing reasonable |
-| Solve timing | 0.1 | < 50ms = suspicious |
-| Fingerprint | 0.2 | Present = lower risk |
-| Captcha score | 0.2 | From Altcha scoring |
-| Trace presence | 0.1 | OTel traces = real browser |
-| Document load | 0.1 | < 100ms = suspicious |
+```go
+type RiskResult struct {
+    Score               float64
+    Level               "low" | "medium" | "high" | "unknown"
+    Reasons             []RiskReason
+    RecommendedNextStep RiskRecommendation
+    Stage               "pre_auth" | "post_auth"
+    EvaluatorVersion    string
+}
+```
 
-Threshold: `≥ 0.5 = low`, `≥ 0.3 = medium`, `< 0.3 = high`.
+The v1 evaluator combines bounded-cost local signals such as:
+
+| Signal | Effect |
+|---|---|
+| Fingerprint presence / known fingerprint | lowers risk for returning devices, raises risk for missing or new devices |
+| Captcha completion and PoW timing | lowers risk when completed normally, raises risk on suspiciously fast solves |
+| Trusted session / revalidation context | lowers risk for known reauthentication flows |
+| Auth method strength | passkeys lower risk, low-assurance methods raise it |
+| Recent failures / revocations | raises risk based on recent session, token, and login history |
+| IP / user-agent novelty | raises risk when posture changes unexpectedly |
+
+The evaluator is used in two places:
+
+- `pre_auth`: adaptive CAPTCHA maps `RiskResult.RecommendedNextStep` to `captcha_required`
+- `post_auth`: the login runtime persists the final result into session metadata after the auth method is known
 
 ### Schema Annotations
 
@@ -136,8 +152,9 @@ All annotation keys are validated at schema-write time (not at login time).
 
 | Tier | What | Where |
 |---|---|---|
-| Tier 1 (OLTP) | `sessions.risk_level` summary | SQLite/Postgres |
+| Tier 1 (OLTP) | `sessions.risk_level` plus structured `sessions.metadata.risk` | SQLite/Postgres |
 | Tier 2 (OLAP) | Full signal payload (`signal.session_*` events) | Logger → cache → drain |
+| Tier 2 (OLAP) | Risk evaluation summaries (`signal.risk_evaluated`) | Logger → cache → drain |
 | Tier 2 (OLAP) | OTel traces (`signal.session_trace` events) | Logger → cache → drain |
 
 Default retention: **7 days** (configurable via `zitadel.yaml`).
@@ -166,7 +183,7 @@ Rejected because it's a paid service. ThumbmarkJS is open-source and provides si
 ### Positive
 - **Zero external dependencies** for default bot detection
 - **Privacy-compliant** — no PII leaves the system
-- **Observable** — all signals visible in the analytics dashboard
+- **Observable** — signals and risk evaluation summaries are visible in the analytics dashboard
 - **Extensible** — captcha providers, fingerprint providers, and rate limit scopes are pluggable
 - **Schema-driven** — flows are entities, managed through the same CRUD as everything else
 
@@ -177,4 +194,5 @@ Rejected because it's a paid service. ThumbmarkJS is open-source and provides si
 
 ### Migration
 - No breaking changes. Existing flows without `x-captcha`/`x-fingerprint` work as before
-- New flows default to `captcha: risk_based` + `fingerprint: enabled`
+- `captcha: risk_based` is now runtime-backed: low-risk sign-ins can proceed without a challenge, while elevated-risk sign-ins are gated adaptively
+- Post-auth session metadata now stores a structured `risk` object in addition to the legacy `risk_level` summary

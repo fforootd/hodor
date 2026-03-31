@@ -24,13 +24,13 @@
   // Instance types:
   //   lite       → 1/16 vCPU,  256 MiB RAM,  2 GB disk
   //   basic      → 1/4  vCPU,  1   GiB RAM,  4 GB disk
-  //   standard-1 → 1/2  vCPU,  4   GiB RAM,  8 GB disk  ← production
+  //   standard-1 → 1/2  vCPU,  4   GiB RAM,  8 GB disk
   //
   "containers": [
     {
       "class_name": "ZitadelContainer",
       "image": "../../Dockerfile.cloudflare",
-      "max_instances": 3,
+      "max_instances": 1,
       "instance_type": "standard-1"
     }
   ],

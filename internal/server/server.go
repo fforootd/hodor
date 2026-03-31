@@ -28,9 +28,9 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/fga"
 	"github.com/zitadel/zitadel/internal/jobs"
+	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/loginflow"
-	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/mgmt"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/ratelimit"
@@ -209,6 +209,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 		// The OP handler is mounted as a fallback: the mux tries registered patterns first,
 		// and if none match, falls through to the OP which handles OIDC-specific paths.
 		mux.Handle("/authorize", opHandler)
+		mux.Handle("/authorize/", opHandler)
 		mux.Handle("/oauth/", opHandler)
 		mux.Handle("/userinfo", opHandler)
 		mux.Handle("/end_session", opHandler)

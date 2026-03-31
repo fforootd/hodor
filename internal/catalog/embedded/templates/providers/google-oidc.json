@@ -4,6 +4,11 @@
   "name": "Google OIDC",
   "description": "Google identity provider with standard OpenID Connect configuration. Maps Google profile claims to Zitadel identity fields including email, name, and profile picture.",
   "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider instance (shown on the login screen)",
+      "default": "Google"
+    },
     "client_id": {
       "type": "string",
       "description": "Google OAuth 2.0 Client ID (from Google Cloud Console)"
@@ -15,7 +20,7 @@
     }
   },
   "payload": {
-    "display_name": "Google",
+    "display_name": "{{provider_name}}",
     "kind": "google",
     "protocol": "oidc",
     "connection": {

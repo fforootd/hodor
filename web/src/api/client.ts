@@ -79,6 +79,19 @@ export function parseApiErrorPayload(
   }
 }
 
+async function readErrorPayload(resp: Response): Promise<any> {
+  const text = await resp.text().catch(() => '')
+  if (!text) {
+    return { error: resp.statusText }
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { error: text }
+  }
+}
+
 /** Track whether we've already shown a 401 toast to avoid duplicates. */
 let is401Redirecting = false
 
@@ -103,7 +116,11 @@ function handleUnauthorized() {
 }
 
 // Dynamic credentials mode: 'include' for cross-origin (WC embedding), 'same-origin' for same-origin.
-function credentialsMode(baseUrl = BASE_URL): RequestCredentials {
+export function getApiBaseUrl(): string {
+  return BASE_URL
+}
+
+export function credentialsMode(baseUrl = BASE_URL): RequestCredentials {
   if (!baseUrl) return 'same-origin'
   try {
     const apiOrigin = new URL(baseUrl, window.location.origin).origin
@@ -113,7 +130,7 @@ function credentialsMode(baseUrl = BASE_URL): RequestCredentials {
   }
 }
 
-function getCurrentOrgHeader(): string | null {
+export function getCurrentOrgHeader(): string | null {
   try {
     const orgId = localStorage.getItem('zitadel_org')
     return orgId && orgId.trim() ? orgId.trim() : null
@@ -195,7 +212,7 @@ export async function requestJSON<T>(
   const resp = await fetchWithContext(path, opts, baseUrl)
 
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({ error: resp.statusText }))
+    const body = await readErrorPayload(resp)
     const parsed = parseApiErrorPayload(body, resp.status, resp.statusText)
 
     // Handle 401 globally — session expired or invalid token.
@@ -220,7 +237,7 @@ export async function requestText(
   const resp = await fetchWithContext(path, opts, baseUrl)
 
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({ error: resp.statusText }))
+    const body = await readErrorPayload(resp)
     const parsed = parseApiErrorPayload(body, resp.status, resp.statusText)
     throw new ApiError(parsed.message, resp.status, parsed.code, parsed.retryable, parsed.kind)
   }

@@ -128,11 +128,13 @@ cache_path = "./custom-cache.db"
 		t.Fatalf("ResolveLocalStorage: %v", err)
 	}
 
-	if cfg.Database.URL != "sqlite://./custom.db" {
-		t.Fatalf("database url changed to %q", cfg.Database.URL)
+	wantDB := filepath.Join(canonicalPath(t, filepath.Dir(cfgPath)), "custom.db")
+	wantCache := filepath.Join(canonicalPath(t, filepath.Dir(cfgPath)), "custom-cache.db")
+	if got := canonicalSQLiteURL(t, cfg.Database.URL); got != "sqlite://"+wantDB {
+		t.Fatalf("database url = %q, want %q", got, "sqlite://"+wantDB)
 	}
-	if cfg.Observability.CachePath != "./custom-cache.db" {
-		t.Fatalf("cache path changed to %q", cfg.Observability.CachePath)
+	if got := canonicalPath(t, cfg.Observability.CachePath); got != wantCache {
+		t.Fatalf("cache path = %q, want %q", got, wantCache)
 	}
 }
 
@@ -188,4 +190,19 @@ func canonicalPath(t *testing.T, path string) string {
 func canonicalSQLiteURL(t *testing.T, url string) string {
 	t.Helper()
 	return "sqlite://" + canonicalPath(t, filepath.Clean(strings.TrimPrefix(url, "sqlite://")))
+}
+
+func TestResolveConfigRelativePath(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "zitadel.toml")
+
+	got, err := ResolveConfigRelativePath(cfgPath, "./seeds/frontend.yaml")
+	if err != nil {
+		t.Fatalf("ResolveConfigRelativePath: %v", err)
+	}
+
+	want := filepath.Join(canonicalPath(t, cfgDir), "seeds", "frontend.yaml")
+	if got := canonicalPath(t, got); got != want {
+		t.Fatalf("resolved path = %q, want %q", got, want)
+	}
 }

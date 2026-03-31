@@ -87,6 +87,29 @@ func TestOpenAPISpecGeneration(t *testing.T) {
 	if _, exists := secSchemes["bearerAuth"]; !exists {
 		t.Error("bearerAuth security scheme missing")
 	}
+	if _, exists := secSchemes["cookieAuth"]; !exists {
+		t.Error("cookieAuth security scheme missing")
+	}
+
+	// Verify protected operations allow cookie OR bearer auth.
+	accountPath, ok := paths["/v1/account/profile"].(map[string]any)
+	if !ok {
+		t.Fatal("missing /v1/account/profile path")
+	}
+	getProfile, ok := accountPath["get"].(map[string]any)
+	if !ok {
+		t.Fatal("missing GET /v1/account/profile operation")
+	}
+	security, ok := getProfile["security"].([]map[string]any)
+	if !ok || len(security) != 2 {
+		t.Fatalf("expected two security alternatives for GET /v1/account/profile, got %T %#v", getProfile["security"], getProfile["security"])
+	}
+	if _, ok := security[0]["cookieAuth"]; !ok {
+		t.Error("expected cookieAuth to be the default security scheme")
+	}
+	if _, ok := security[1]["bearerAuth"]; !ok {
+		t.Error("expected bearerAuth to remain available")
+	}
 
 	// Verify tags are present.
 	tags, ok := spec["tags"].([]map[string]any)

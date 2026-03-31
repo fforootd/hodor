@@ -4,6 +4,11 @@
   "name": "GitLab",
   "description": "GitLab OIDC provider for developer sign-in. Supports both GitLab.com and self-hosted instances. Maps GitLab profile claims including username, email, and avatar.",
   "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider instance (shown on the login screen)",
+      "default": "GitLab"
+    },
     "gitlab_url": {
       "type": "string",
       "description": "GitLab instance URL (use https://gitlab.com for SaaS)",
@@ -20,7 +25,7 @@
     }
   },
   "payload": {
-    "display_name": "GitLab",
+    "display_name": "{{provider_name}}",
     "kind": "gitlab",
     "protocol": "oidc",
     "connection": {

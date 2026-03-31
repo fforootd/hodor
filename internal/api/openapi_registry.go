@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/session"
 )
 
 // OpenAPIRegistry collects API operations and generates an OpenAPI 3.1 spec.
@@ -132,6 +134,7 @@ func (r *OpenAPIRegistry) Spec() map[string]any {
 		// Security
 		if op.Security {
 			operation["security"] = []map[string]any{
+				{"cookieAuth": []string{}},
 				{"bearerAuth": []string{}},
 			}
 		}
@@ -171,6 +174,12 @@ func (r *OpenAPIRegistry) Spec() map[string]any {
 		"components": map[string]any{
 			"schemas": schemas,
 			"securitySchemes": map[string]any{
+				"cookieAuth": map[string]any{
+					"type":        "apiKey",
+					"in":          "cookie",
+					"name":        session.DocumentationCookieName(),
+					"description": "Uses the browser session cookie in the console. Secure deployments use `__Host-zitadel_session`; local development uses `__zitadel_session`.",
+				},
 				"bearerAuth": map[string]any{
 					"type":         "http",
 					"scheme":       "bearer",

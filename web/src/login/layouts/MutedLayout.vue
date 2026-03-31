@@ -37,7 +37,7 @@ const logo = computed(() => {
 
 const bgVars = computed(() => ({
   fontFamily: props.branding?.font_family || 'Inter, system-ui, sans-serif',
-  background: 'hsl(var(--muted, 0 0% 96%))',
+  background: 'var(--color-muted, #f4f4f5)',
 }))
 </script>
 
@@ -81,10 +81,5 @@ const bgVars = computed(() => ({
 .muted-org-name { font-size: 1.125rem; font-weight: 600; }
 .muted-card-wrap {
   width: 100%;
-  background: hsl(var(--card, 0 0% 100%));
-  border-radius: var(--radius, 0.5rem);
-  border: 1px solid hsl(var(--border, 0 0% 90%));
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
 }
 </style>

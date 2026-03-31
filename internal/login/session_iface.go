@@ -1,26 +1,17 @@
 package login
 
-import "context"
+import (
+	"context"
+
+	"github.com/zitadel/zitadel/internal/risk"
+)
 
 // SessionCreator abstracts session creation, breaking the import cycle
 // between login and api packages.
 type SessionCreator interface {
-	CreateSessionForLogin(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals, provenance *SessionProvenance) (*CreateSessionResponse, error)
+	CreateSessionForLogin(ctx context.Context, userID string, userAgent, ipAddress string, signals *risk.Signals, provenance *SessionProvenance) (*CreateSessionResponse, error)
 	EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any)
-}
-
-// ClientSignals contains client-side signals collected during a login flow.
-// Mirrored from api.ClientSignals to avoid import cycle.
-type ClientSignals struct {
-	CaptchaProvider string  `json:"captcha_provider,omitempty"`
-	CaptchaVerified bool    `json:"captcha_verified,omitempty"`
-	CaptchaScore    float64 `json:"captcha_score,omitempty"`
-	PoWCompleted    bool    `json:"pow_completed,omitempty"`
-	PoWDurationMs   float64 `json:"pow_duration_ms,omitempty"`
-	VisitorID       string  `json:"visitor_id,omitempty"`
-	FingerprintHash string  `json:"fingerprint_hash,omitempty"`
-	RequestID       string  `json:"request_id,omitempty"`
-	DocumentLoadMs  float64 `json:"document_load_ms,omitempty"`
+	EmitEvent(ctx context.Context, eventType, actorID, aggregateID, aggregateType string, payload map[string]any)
 }
 
 type SessionProvenance struct {

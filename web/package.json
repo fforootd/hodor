@@ -19,6 +19,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@guolao/vue-monaco-editor": "^1.6.0",
+    "@scalar/api-reference": "^1.49.7",
     "@tailwindcss/vite": "^4.2.2",
     "@tanstack/vue-table": "^8.21.3",
     "@thumbmarkjs/thumbmarkjs": "^1.7.6",

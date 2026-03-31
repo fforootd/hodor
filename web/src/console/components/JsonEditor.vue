@@ -21,7 +21,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { computed, ref, toRaw, watch } from 'vue'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 
 const props = withDefaults(defineProps<{
@@ -105,14 +105,29 @@ watch(() => props.schema, (schema) => {
 
 function setSchema(schema: any) {
   if (!monacoInstance) return
+  const safeSchema = toSerializableSchema(schema)
   monacoInstance.languages.json.jsonDefaults.setDiagnosticsOptions({
     validate: true,
     schemas: [{
       uri: 'http://zitadel-local/entity-schema.json',
       fileMatch: ['*'],
-      schema: schema,
+      schema: safeSchema,
     }],
   })
+}
+
+function toSerializableSchema(schema: any) {
+  const rawSchema = toRaw(schema)
+
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(rawSchema)
+    } catch {
+      // Fall through to JSON cloning for plain schema objects.
+    }
+  }
+
+  return JSON.parse(JSON.stringify(rawSchema))
 }
 
 function format() {

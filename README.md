@@ -9,18 +9,85 @@
 ## Quick Start
 
 ```bash
-# Build & run with defaults (SQLite, port 8080)
-go run ./cmd/zitadel start
-
-# With mock OIDC provider for SSO testing
-go run ./cmd/zitadel start --mock-oidc
-
-# With seed data for local dev
-go run ./cmd/zitadel start --mock-oidc --seed fixtures/dev-seed.yaml
-
-# Via environment variables (Docker/K8s/Workers)
-ZITADEL_DATABASE_URL=postgres://... ZITADEL_MOCK_OIDC=true go run ./cmd/zitadel start
+# Fresh clone: install web deps, build embedded assets, start Go + Vite
+make dev
 ```
+
+Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` for the Go API / OIDC endpoints.
+
+## Local Development
+
+### Fresh clone
+
+```bash
+make dev
+```
+
+Default local credentials:
+
+- `admin / admin123`
+- PAT: `zitadel-dev-pat-do-not-use-in-production`
+
+### Go-only dev
+
+```bash
+make dev-go
+```
+
+This reuses embedded web assets when they already exist. If you have not built them yet, run `make webdist` or `make dev` once first.
+
+### Frontend dev
+
+```bash
+# Start the backend in another terminal
+make dev-go
+
+# Then run Vite HMR
+make dev-web
+```
+
+To point Vite at a different API:
+
+```bash
+ZITADEL_API_BASE=http://localhost:8081 make dev-web
+```
+
+### Reset local DB
+
+```bash
+make dev-reset
+```
+
+This deletes local SQLite files under `./data/`, refuses to run against non-SQLite `ZITADEL_DATABASE_URL` values, and then boots the default frontend seed pack again.
+
+### Reseed data
+
+```bash
+# Default pack used by make dev
+make dev-seed
+
+# Alternate packs
+make dev-seed SEED=minimal
+make dev-seed SEED=e2e
+```
+
+Named seed packs live in [`fixtures/seeds`](/Users/ffo/git/hodor/zitadel/fixtures/seeds). Validate one without touching the DB:
+
+```bash
+go run ./cmd/zitadel seed validate --file fixtures/seeds/frontend.yaml
+```
+
+### Standalone Go binary
+
+The zero-config path still works:
+
+```bash
+go run ./cmd/zitadel start
+```
+
+That uses SQLite at `./data/zitadel.db` with no required config file.
+
+More contributor detail lives in [docs/guides/local-development.md](docs/guides/local-development.md).
 
 ## Architecture
 
@@ -30,7 +97,6 @@ ZITADEL_DATABASE_URL=postgres://... ZITADEL_MOCK_OIDC=true go run ./cmd/zitadel 
 - **Embedded OpenFGA** — Zanzibar-style authorization in-process
 - **SQLite + Postgres** — zero-config dev, production-ready with Postgres
 - **Event-sourced audit** — every mutation emitted as an event with field-level redaction
-- **Sonyflake IDs** — time-ordered, 64-bit distributed IDs
 - **Import & Seed** — `POST /v1/import` for migrations, `--seed` YAML files for CI/dev
 
 ## Testing

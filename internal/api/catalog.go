@@ -6,6 +6,7 @@ import (
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/zitadel/zitadel/internal/catalog"
 )
@@ -30,8 +31,9 @@ func listCatalog(svc *catalog.Service) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"templates": templates,
-			"total":     len(templates),
+			"templates":   templates,
+			"total":       len(templates),
+			"can_refresh": svc.CanRefresh(),
 		})
 	}
 }
@@ -95,7 +97,11 @@ func refreshCatalog(svc *catalog.Service) http.HandlerFunc {
 		count, err := svc.Refresh(r.Context())
 		if err != nil {
 			logging.Printf("[catalog] refresh failed: %v", err)
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			status := http.StatusBadGateway
+			if strings.Contains(err.Error(), "no remote URL configured") {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 

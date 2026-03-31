@@ -12,6 +12,8 @@ import (
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/login"
+	"github.com/zitadel/zitadel/internal/risk"
+	"github.com/zitadel/zitadel/internal/telemetry"
 )
 
 // --- Session types ---
@@ -41,70 +43,6 @@ type CreateSessionRequest struct {
 type CreateSessionResponse struct {
 	Session SessionResponse `json:"session"`
 	Token   string          `json:"token"`
-}
-
-// ClientSignals contains client-side signals collected during a login flow.
-// These are used for risk scoring and session metadata enrichment.
-type ClientSignals struct {
-	// Captcha (Altcha or third-party)
-	CaptchaProvider string  `json:"captcha_provider,omitempty"`
-	CaptchaVerified bool    `json:"captcha_verified,omitempty"`
-	CaptchaScore    float64 `json:"captcha_score,omitempty"`
-	PoWCompleted    bool    `json:"pow_completed,omitempty"`
-	PoWDurationMs   float64 `json:"pow_duration_ms,omitempty"`
-
-	// Fingerprint (ThumbmarkJS)
-	VisitorID       string         `json:"visitor_id,omitempty"`
-	FingerprintHash string         `json:"fingerprint_hash,omitempty"`
-	BrowserSignals  map[string]any `json:"browser_signals,omitempty"`
-
-	// Telemetry
-	RequestID        string  `json:"request_id,omitempty"`
-	DocumentLoadMs   float64 `json:"document_load_ms,omitempty"`
-	InteractionCount int     `json:"interaction_count,omitempty"`
-}
-
-// computeRiskLevel derives a risk level from collected client signals.
-func computeRiskLevel(signals *ClientSignals) string {
-	if signals == nil {
-		return "unknown"
-	}
-
-	score := 0.0
-
-	// PoW completed → good signal (bots struggle with memory-bound PoW).
-	if signals.PoWCompleted {
-		score += 0.3
-	}
-	// PoW took realistic time (not instant = not pre-computed).
-	if signals.PoWDurationMs > 100 && signals.PoWDurationMs < 30000 {
-		score += 0.1
-	}
-	// Fingerprint present → browser has canvas, webgl, audio APIs.
-	if signals.VisitorID != "" {
-		score += 0.2
-	}
-	// Request ID present → real page load happened.
-	if signals.RequestID != "" {
-		score += 0.1
-	}
-	// Realistic document load time.
-	if signals.DocumentLoadMs > 200 {
-		score += 0.1
-	}
-	// Captcha verified.
-	if signals.CaptchaVerified {
-		score += 0.2
-	}
-
-	switch {
-	case score >= 0.7:
-		return "low" // likely human
-	case score >= 0.4:
-		return "medium" // suspicious, may trigger MFA
-	default:
-		return "high" // likely bot, may block
-	}
 }
 
 // RegisterSessionRoutes mounts session-related REST routes.
@@ -137,7 +75,7 @@ func (a *API) createSession(w http.ResponseWriter, r *http.Request) {
 
 // CreateSessionInternal creates a session programmatically (used by UI login).
 // signals may be nil for legacy callers.
-func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgent, ipAddress string, signals *ClientSignals, provenance *login.SessionProvenance) (*CreateSessionResponse, error) {
+func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgent, ipAddress string, signals *risk.Signals, provenance *login.SessionProvenance) (*CreateSessionResponse, error) {
 	sessionID := id.New()
 
 	rawToken, tokenHash, err := generatePrefixedToken(PrefixSession)
@@ -148,28 +86,39 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	now := time.Now().UTC()
 	expiresAt := now.Add(24 * time.Hour)
 
-	// Compute risk level from client signals.
-	riskLevel := computeRiskLevel(signals)
+	effectiveSignals := hydrateSignalsFromContext(ctx, signals)
+	riskResult := risk.FailureResult(risk.StagePostAuth, risk.RecommendationAllowAndLog)
+	if a.risk != nil {
+		evaluatedRisk, evalErr := a.risk.Evaluate(ctx, buildRiskInput(risk.StagePostAuth, userID, userAgent, ipAddress, effectiveSignals, provenance))
+		if evalErr != nil {
+			logging.Printf("[risk] post-auth evaluation failed user=%s flow=%s: %v", userID, stringOr(provenanceValue(provenance, "login_flow_id")), evalErr)
+		} else {
+			riskResult = evaluatedRisk
+		}
+	}
 
-	// Build metadata JSON with risk level.
-	metadata := map[string]any{"risk_level": riskLevel}
-	if signals != nil {
-		if signals.CaptchaProvider != "" {
+	// Build metadata JSON with structured risk and signal summaries.
+	metadata := map[string]any{
+		"risk_level": string(riskResult.Level),
+		"risk":       riskMetadata(riskResult, effectiveSignals),
+	}
+	if effectiveSignals != nil {
+		if effectiveSignals.CaptchaProvider != "" {
 			metadata["captcha"] = map[string]any{
-				"provider": signals.CaptchaProvider,
-				"verified": signals.CaptchaVerified,
-				"score":    signals.CaptchaScore,
-				"pow":      signals.PoWCompleted,
+				"provider": effectiveSignals.CaptchaProvider,
+				"verified": effectiveSignals.CaptchaVerified,
+				"score":    effectiveSignals.CaptchaScore,
+				"pow":      effectiveSignals.PoWCompleted,
 			}
 		}
-		if signals.VisitorID != "" {
+		if effectiveSignals.VisitorID != "" {
 			metadata["fingerprint"] = map[string]any{
-				"visitor_id": signals.VisitorID,
+				"visitor_id": effectiveSignals.VisitorID,
 			}
 		}
-		if signals.RequestID != "" {
+		if effectiveSignals.RequestID != "" {
 			metadata["telemetry"] = map[string]any{
-				"request_id": signals.RequestID,
+				"request_id": effectiveSignals.RequestID,
 			}
 		}
 	}
@@ -208,13 +157,18 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		return nil, fmt.Errorf("check identity: %w", err)
 	}
 
+	sessionFingerprint := ""
+	if effectiveSignals != nil {
+		sessionFingerprint = effectiveSignals.VisitorID
+	}
+
 	// Insert session (metadata record).
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at)
-		 VALUES (?, ?, '_global', ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, fingerprint)
+		 VALUES (?, ?, '_global', ?, ?, ?, ?, ?, ?, ?)`,
 		sessionID, userID, tokenHash,
 		userAgent, ipAddress, string(metadataJSON),
-		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
+		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339), sessionFingerprint,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert session: %w", err)
@@ -232,7 +186,12 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		return nil, fmt.Errorf("insert token: %w", err)
 	}
 
-	emitEvent(ctx, tx, "session.created", userID, sessionID, "session", map[string]any{
+	ctxWithSession := telemetry.WithSessionID(ctx, sessionID)
+	if sessionFingerprint != "" {
+		ctxWithSession = telemetry.WithFingerprint(ctxWithSession, sessionFingerprint)
+	}
+
+	emitEvent(ctxWithSession, tx, "session.created", userID, sessionID, "session", map[string]any{
 		"user_id":       userID,
 		"user_agent":    userAgent,
 		"ip_address":    ipAddress,
@@ -242,6 +201,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		"login_flow_id": metadata["login_flow_id"],
 		"auth_context":  metadata["auth_context"],
 	})
+	emitEvent(ctxWithSession, tx, "signal.risk_evaluated", userID, sessionID, "session", riskEventPayload(riskResult, "builtin_post_auth_advisory_v1", "v1"))
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
@@ -278,6 +238,124 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		},
 		Token: rawToken,
 	}, nil
+}
+
+func hydrateSignalsFromContext(ctx context.Context, signals *risk.Signals) *risk.Signals {
+	if signals == nil {
+		signals = &risk.Signals{}
+	} else {
+		cloned := *signals
+		signals = &cloned
+	}
+
+	if signals.RequestID == "" {
+		signals.RequestID = telemetry.RequestIDFromContext(ctx)
+	}
+	if signals.VisitorID == "" {
+		signals.VisitorID = telemetry.FingerprintFromContext(ctx)
+	}
+	if signals.FingerprintHash == "" {
+		signals.FingerprintHash = signals.VisitorID
+	}
+
+	return signals
+}
+
+func buildRiskInput(stage risk.Stage, userID, userAgent, ipAddress string, signals *risk.Signals, provenance *login.SessionProvenance) risk.Input {
+	input := risk.Input{
+		Stage:     stage,
+		UserID:    userID,
+		UserAgent: userAgent,
+		IPAddress: ipAddress,
+	}
+	if signals != nil {
+		input.Signals = *signals
+	}
+	if provenance == nil {
+		return input
+	}
+
+	input.AuthMethod = provenance.AuthMethod
+	input.ProviderID = provenance.ProviderID
+	input.ProviderKind = provenance.ProviderKind
+	input.LoginFlowID = provenance.LoginFlowID
+	if provenance.AuthContext != nil {
+		input.TrustedSession = boolOr(provenance.AuthContext["trusted_session"])
+		input.Reauth = boolOr(provenance.AuthContext["trusted_reauth"])
+	}
+
+	return input
+}
+
+func riskMetadata(result *risk.Result, signals *risk.Signals) map[string]any {
+	if result == nil {
+		return map[string]any{
+			"level":                 string(risk.LevelUnknown),
+			"recommended_next_step": string(risk.RecommendationAllowAndLog),
+			"stage":                 string(risk.StagePostAuth),
+			"evaluator_version":     risk.EvaluatorVersion,
+		}
+	}
+
+	return map[string]any{
+		"score":                 result.Score,
+		"level":                 string(result.Level),
+		"reasons":               result.Reasons,
+		"recommended_next_step": string(result.RecommendedNextStep),
+		"stage":                 string(result.Stage),
+		"evaluator_version":     result.EvaluatorVersion,
+		"signals":               riskSignalSummary(signals),
+	}
+}
+
+func riskSignalSummary(signals *risk.Signals) map[string]any {
+	if signals == nil {
+		return map[string]any{}
+	}
+
+	return map[string]any{
+		"captcha_verified": signals.CaptchaVerified,
+		"captcha_provider": signals.CaptchaProvider,
+		"pow_completed":    signals.PoWCompleted,
+		"pow_duration_ms":  signals.PoWDurationMs,
+		"request_id":       signals.RequestID,
+		"visitor_id":       signals.VisitorID,
+	}
+}
+
+func riskEventPayload(result *risk.Result, policyName, policyVersion string) map[string]any {
+	payload := map[string]any{
+		"policy_name":    policyName,
+		"policy_version": policyVersion,
+	}
+	if result == nil {
+		return payload
+	}
+
+	payload["score"] = result.Score
+	payload["level"] = string(result.Level)
+	payload["reasons"] = result.Reasons
+	payload["recommended_next_step"] = string(result.RecommendedNextStep)
+	payload["stage"] = string(result.Stage)
+	payload["evaluator_version"] = result.EvaluatorVersion
+	return payload
+}
+
+func provenanceValue(provenance *login.SessionProvenance, key string) any {
+	if provenance == nil {
+		return nil
+	}
+	switch key {
+	case "login_flow_id":
+		return provenance.LoginFlowID
+	default:
+		return nil
+	}
+}
+
+func boolOr(value any) bool {
+	b, _ := value.(bool)
+	return b
 }
 
 func (a *API) getSession(w http.ResponseWriter, r *http.Request) {

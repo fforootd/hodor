@@ -112,6 +112,11 @@ func (s *Service) EmbeddedCount() int {
 	return len(s.embedded.Templates)
 }
 
+// CanRefresh reports whether a refresh source is configured.
+func (s *Service) CanRefresh() bool {
+	return s.cfg.URL != "" || s.cfg.LocalPath != ""
+}
+
 // List returns all templates, optionally filtered by type and/or tags.
 func (s *Service) List(typeFilter string, tagFilter string) []Template {
 	s.mu.RLock()
@@ -350,6 +355,10 @@ func (s *Service) loadTemplatePayload(tpl *Template) (*TemplatePayload, error) {
 
 // loadFromDBCache loads the cached remote index from the database.
 func (s *Service) loadFromDBCache() *Index {
+	if s.db == nil {
+		return nil
+	}
+
 	var data string
 	err := s.db.QueryRow(
 		`SELECT data FROM cache WHERE namespace = 'catalog' AND key = 'remote_index'`,
@@ -371,6 +380,10 @@ func (s *Service) loadFromDBCache() *Index {
 
 // CacheToDB stores the remote index in the database for offline restarts.
 func (s *Service) CacheToDB(idx *Index) {
+	if s.db == nil {
+		return
+	}
+
 	data, err := json.Marshal(idx)
 	if err != nil {
 		logging.Printf("[catalog] failed to marshal index for cache: %v", err)

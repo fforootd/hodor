@@ -69,6 +69,19 @@ describe('schema-resource utilities', () => {
     expect(fields[3].item).toMatchObject({ path: 'tags.item', enum: ['a', 'b'] })
   })
 
+  it('prioritizes identifier fields first and metadata last', () => {
+    const fields = extractSchemaFields({
+      type: 'object',
+      properties: {
+        description: { type: 'string' },
+        metadata: { type: 'object', additionalProperties: true },
+        name: { type: 'string', 'x-identifier': true },
+      },
+    })
+
+    expect(fields.map((field) => field.name)).toEqual(['name', 'description', 'metadata'])
+  })
+
   it('builds canonical write bodies for user and app resources', () => {
     const userBody = buildResourceWriteBody('user', 'human_user_v1', {
       email: 'alice@example.com',

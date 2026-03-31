@@ -1,13 +1,15 @@
 <template>
   <div class="zitadel-wc" :class="{ dark: isDark }">
+    <WCToaster :dark="isDark" />
+
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-16 text-sm text-[var(--color-muted-foreground)]">
       Loading identity…
     </div>
 
     <!-- Error -->
-    <div v-if="error" class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-      {{ error }}
+    <div v-if="loadError" class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {{ loadError }}
     </div>
 
     <!-- Content -->
@@ -36,7 +38,7 @@
         <button
           v-if="editable"
           class="inline-flex items-center rounded-md border border-red-200 bg-transparent px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
-          @click="onDelete"
+          @click="showDeleteConfirm = true"
         >Delete</button>
       </div>
 
@@ -90,11 +92,23 @@
         </div>
       </div>
     </div>
+
+    <WCConfirmDialog
+      :open="showDeleteConfirm"
+      title="Delete Identity"
+      :description="`Are you sure you want to delete ${identity?.display_name || identity?.identifier || 'this identity'}? This action cannot be undone.`"
+      :loading="deleting"
+      @update:open="showDeleteConfirm = $event"
+      @confirm="onDelete"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, watch } from 'vue'
+import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
+import WCConfirmDialog from '@/wc/components/WCConfirmDialog.vue'
+import WCToaster from '@/wc/components/WCToaster.vue'
 import { createWCApiClient, type WCApiClient } from '@/wc/wc-api-client'
 import { dispatchWCEvent, resolveApiBase, isDarkMode } from '@/wc/host-utils'
 
@@ -117,7 +131,9 @@ const isDark = computed(() => isDarkMode(props.darkMode))
 const identity = ref<any>(null)
 const loading = ref(false)
 const saving = ref(false)
-const error = ref('')
+const deleting = ref(false)
+const loadError = ref('')
+const showDeleteConfirm = ref(false)
 const editValues = reactive<Record<string, string>>({})
 
 let api: WCApiClient
@@ -151,7 +167,7 @@ function formatDate(ts: string): string {
 async function loadIdentity() {
   if (!props.identityId) return
   loading.value = true
-  error.value = ''
+  loadError.value = ''
   try {
     identity.value = await api.get<any>(`/v1/users/${encodeURIComponent(props.identityId)}`)
     // Reset edit values from profile
@@ -159,7 +175,7 @@ async function loadIdentity() {
       editValues[k] = String(v ?? '')
     }
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load identity'
+    loadError.value = e?.message || 'Failed to load identity'
   } finally {
     loading.value = false
   }
@@ -182,20 +198,26 @@ async function onSave() {
       changes: profileUpdates,
     })
     await loadIdentity()
+    notifyMutationSuccess('Identity', 'update')
   } catch (e: any) {
-    error.value = e?.message || 'Failed to save'
+    notifyMutationError('Identity', 'update', e)
   } finally {
     saving.value = false
   }
 }
 
 async function onDelete() {
-  if (!confirm('Delete this identity? This cannot be undone.')) return
+  if (!props.identityId) return
+  deleting.value = true
   try {
     await api.delete(`/v1/users/${encodeURIComponent(props.identityId)}`)
     dispatchWCEvent(TAG_NAME, 'identity-deleted', { id: props.identityId })
+    notifyMutationSuccess('Identity', 'delete')
+    showDeleteConfirm.value = false
   } catch (e: any) {
-    error.value = e?.message || 'Failed to delete'
+    notifyMutationError('Identity', 'delete', e)
+  } finally {
+    deleting.value = false
   }
 }
 
