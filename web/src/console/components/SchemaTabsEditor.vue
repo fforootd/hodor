@@ -1,6 +1,6 @@
 <template>
-  <Tabs v-model="activeTab" class="space-y-4">
-    <TabsList class="grid w-full max-w-md grid-cols-3">
+  <Tabs v-model="activeTab" class="space-y-3">
+    <TabsList class="grid w-full grid-cols-3">
       <TabsTrigger value="form">Form</TabsTrigger>
       <TabsTrigger value="json">JSON</TabsTrigger>
       <TabsTrigger value="curl">cURL</TabsTrigger>
@@ -8,8 +8,8 @@
 
     <TabsContent value="form">
       <Card>
-        <CardHeader class="pb-3">
-          <CardTitle class="text-sm">{{ formTitle }}</CardTitle>
+        <CardHeader class="pb-2">
+          <CardTitle class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ formTitle }}</CardTitle>
         </CardHeader>
         <CardContent>
           <SchemaFieldEditor

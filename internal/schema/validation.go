@@ -156,9 +156,6 @@ func ObjectMap(value any) (map[string]any, error) {
 	if value == nil {
 		return map[string]any{}, nil
 	}
-	if typed, ok := value.(map[string]any); ok {
-		return cloneObjectMap(typed), nil
-	}
 
 	data, err := json.Marshal(value)
 	if err != nil {

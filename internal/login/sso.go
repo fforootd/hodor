@@ -269,7 +269,13 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	})
 
 	session.SetSessionCookie(w, sessResp.Token, h.cookies)
-	http.Redirect(w, r, "/console", http.StatusFound)
+	redirectURI, err := h.ssoSuccessRedirect(r.Context(), r, flowID, userID)
+	if err != nil {
+		logging.Printf("[sso] success redirect resolution failed: %v", err)
+		http.Redirect(w, r, "/login?error=sso_complete", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, redirectURI, http.StatusFound)
 }
 
 func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers.Provider, externalSub, externalEmail string, claims map[string]any) (string, error) {
@@ -287,7 +293,7 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 		return userID, nil
 	}
 
-	if linkedUserID, ok := h.findLinkableIdentity(ctx, prov.Linking, externalEmail, externalSub); ok {
+	if linkedUserID, ok := h.findLinkableIdentity(ctx, prov.Linking, externalEmail, externalSub, claims); ok {
 		claimsJSON, _ := json.Marshal(claims)
 		linkID := id.New()
 		if _, linkErr := h.db.SQL().ExecContext(ctx,
@@ -379,10 +385,10 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 	return newID, nil
 }
 
-func (h *Handler) findLinkableIdentity(ctx context.Context, linking providers.Linking, externalEmail, externalSub string) (string, bool) {
+func (h *Handler) findLinkableIdentity(ctx context.Context, linking providers.Linking, externalEmail, externalSub string, claims map[string]any) (string, bool) {
 	switch linking.MatchBy {
 	case providers.LinkMatchVerifiedEmail:
-		if externalEmail == "" {
+		if externalEmail == "" || !claimBool(claims["email_verified"]) {
 			return "", false
 		}
 		var userID string
@@ -401,6 +407,102 @@ func (h *Handler) findLinkableIdentity(ctx context.Context, linking providers.Li
 		return userID, err == nil
 	default:
 		return "", false
+	}
+}
+
+func (h *Handler) ssoSuccessRedirect(ctx context.Context, r *http.Request, flowID, userID string) (string, error) {
+	if strings.TrimSpace(flowID) == "" {
+		return loginExitURL("sso_success", ""), nil
+	}
+
+	flow, ok := h.flows.Get(flowID)
+	if !ok {
+		return loginExitURL("sso_success", ""), nil
+	}
+	defer h.flows.Delete(flowID)
+
+	if flow.AuthRequestID != "" {
+		if err := h.completeOIDCAuthRequest(ctx, flow.AuthRequestID, userID); err != nil {
+			return "", err
+		}
+		return h.oidcAuthorizeCallbackURL(flow.AuthRequestID), nil
+	}
+
+	return loginExitURL("sso_success", sanitizeContinueTo(r, flow.RedirectURI)), nil
+}
+
+func loginExitURL(exit, continueTo string) string {
+	values := url.Values{}
+	values.Set("exit", exit)
+	if continueTo != "" {
+		values.Set("continue_to", continueTo)
+	}
+	return "/login?" + values.Encode()
+}
+
+func sanitizeContinueTo(r *http.Request, candidate string) string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return ""
+	}
+	if strings.HasPrefix(candidate, "//") {
+		return ""
+	}
+	if strings.HasPrefix(candidate, "/") {
+		return candidate
+	}
+
+	parsed, err := url.Parse(candidate)
+	if err != nil || !parsed.IsAbs() {
+		return ""
+	}
+
+	requestOrigin := requestOriginURL(r)
+	if requestOrigin == nil {
+		return ""
+	}
+	if !sameURLOrigin(requestOrigin, parsed) {
+		return ""
+	}
+
+	result := parsed.RequestURI()
+	if parsed.Fragment != "" {
+		result += "#" + parsed.Fragment
+	}
+	return result
+}
+
+func requestOriginURL(r *http.Request) *url.URL {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
+		scheme = strings.Split(forwarded, ",")[0]
+	}
+	if r.Host == "" {
+		return nil
+	}
+	return &url.URL{Scheme: scheme, Host: r.Host}
+}
+
+func sameURLOrigin(left, right *url.URL) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.EqualFold(left.Scheme, right.Scheme) && strings.EqualFold(left.Host, right.Host)
+}
+
+func claimBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(typed, "true")
+	case float64:
+		return typed != 0
+	default:
+		return false
 	}
 }
 

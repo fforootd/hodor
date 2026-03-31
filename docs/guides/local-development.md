@@ -11,6 +11,7 @@ That starts:
 - the Go API on `http://localhost:8080`
 - the Vite dev server on `http://localhost:5173`
 - mock OIDC for local SSO testing
+- stdout-backed email and SMS notification channels
 - the default `frontend` seed pack
 
 ## Which Command To Use
@@ -86,3 +87,20 @@ go run ./cmd/zitadel start
 ```
 
 That keeps the original DX promise: SQLite-first startup with no Docker or external services required.
+
+## Notifications In Local Dev
+
+Local notification delivery is zero-config by default:
+
+- email resolves to the `dev_stdout` channel
+- SMS resolves to the `dev_stdout` channel
+- rendered output is written to the server log instead of requiring SMTP or an SMS gateway
+
+You can inspect and override both through the Console at [`/console/notifications`](/Users/ffo/git/hodor/zitadel/web/src/console/views/NotificationsView.vue).
+
+If you want to try a real integration locally, add an instance or org override for:
+
+- `smtp` channels for providers such as SendGrid or Amazon SES
+- `custom_http` channels for SMS/webhook delivery such as Twilio or an internal HTTP bridge
+
+Mailpit or an HTTP inspector can still be useful, but they are optional. Local startup should work without any extra services.

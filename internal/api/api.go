@@ -20,6 +20,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/notify"
 	"github.com/zitadel/zitadel/internal/risk"
 
 	"github.com/zitadel/zitadel/internal/schema"
@@ -30,12 +31,13 @@ import (
 
 // API holds the REST handlers and their dependencies.
 type API struct {
-	db      *database.DB
-	bus     *eventbus.Bus
-	cookies *session.CookieConfig
-	spec    *OpenAPIRegistry
-	catalog *catalog.Service
-	risk    risk.Evaluator
+	db       *database.DB
+	bus      *eventbus.Bus
+	cookies  *session.CookieConfig
+	spec     *OpenAPIRegistry
+	catalog  *catalog.Service
+	risk     risk.Evaluator
+	notifier *notify.Service
 }
 
 // New creates a new API handler.
@@ -56,6 +58,10 @@ func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API
 
 func (a *API) SetCatalogService(svc *catalog.Service) {
 	a.catalog = svc
+}
+
+func (a *API) SetNotificationService(svc *notify.Service) {
+	a.notifier = svc
 }
 
 // RegisterRoutes mounts all REST API routes on the given mux.
@@ -103,6 +109,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Hierarchical settings CRUD (ADR-009)
 	a.RegisterSettingsRoutes(mux)
+	a.RegisterNotificationRoutes(mux)
 
 	// Mount generic Telemetry routes under /v1/telemetry
 	a.RegisterTelemetryRoutes(mux)
@@ -733,6 +740,11 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"metadata": req.Metadata},
 		)
 	}
+	data, err = schema.ObjectMap(data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	name := stringFromAny(data["client_name"])
 	if name == "" {
@@ -764,6 +776,15 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 	clientID := req.ClientID
 	if clientID == "" {
 		clientID = id.New()
+	}
+
+	clientSecret := ""
+	if req.ClientSecret != "" {
+		clientSecret, err = auth.HashSecret(req.ClientSecret)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "hash client secret failed")
+			return
+		}
 	}
 
 	redirectList := stringSliceFromAny(data["redirect_uris"])
@@ -807,7 +828,7 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO apps (id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-		appID, orgID, name, appType, clientID, req.ClientSecret,
+		appID, orgID, name, appType, clientID, clientSecret,
 		string(redirectBytes), string(grantBytes), string(responseBytes), schemaRec.ID, metadataJSON, now, now,
 	)
 	if err != nil {
@@ -879,11 +900,11 @@ func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var current AppResponse
-	var redirectURIs, grantTypes, responseTypes, metadataStr string
+	var redirectURIs, grantTypes, responseTypes, metadataStr, currentClientSecret string
 	err = a.db.SQL().QueryRowContext(r.Context(),
 		`SELECT id, org_id, name, app_type, client_id,
 		        COALESCE(redirect_uris,'[]'), COALESCE(grant_types,'[]'), COALESCE(response_types,'[]'),
-		        state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at
+		        state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), COALESCE(client_secret,''), created_at, updated_at
 		 FROM apps
 		 WHERE id = ?`,
 		appID,
@@ -899,6 +920,7 @@ func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
 		&current.State,
 		&current.SchemaID,
 		&metadataStr,
+		&currentClientSecret,
 		&current.CreatedAt,
 		&current.UpdatedAt,
 	)
@@ -962,6 +984,11 @@ func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
 			data["metadata"] = req.Metadata
 		}
 	}
+	data, err = schema.ObjectMap(data)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if stringFromAny(data["client_name"]) == "" {
 		data["client_name"] = current.Name
 	}
@@ -991,12 +1018,22 @@ func (a *API) updateApp(w http.ResponseWriter, r *http.Request) {
 		responseJSON = []byte(`["code"]`)
 	}
 
+	nextClientSecret := currentClientSecret
+	if req.ClientSecret != "" {
+		nextClientSecret, err = auth.HashSecret(req.ClientSecret)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "hash client secret failed")
+			return
+		}
+	}
+
 	result, err := a.db.SQL().ExecContext(r.Context(),
 		`UPDATE apps
-		 SET name = ?, app_type = ?, redirect_uris = ?, grant_types = ?, response_types = ?, state = ?, metadata = ?, updated_at = ?
+		 SET name = ?, app_type = ?, client_secret = ?, redirect_uris = ?, grant_types = ?, response_types = ?, state = ?, metadata = ?, updated_at = ?
 		 WHERE id = ?`,
 		stringFromAny(data["client_name"]),
 		normalizeAppType(stringFromAny(data["app_type"])),
+		nextClientSecret,
 		string(redirectJSON),
 		string(grantJSON),
 		string(responseJSON),

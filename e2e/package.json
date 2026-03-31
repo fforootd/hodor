@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug"
   },

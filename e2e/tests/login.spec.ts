@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Login Flow', () => {
-  test('shows login form', async ({ page }) => {
+  test('shows login form @full', async ({ page }) => {
     await page.goto('/login')
     await expect(page.locator('input[name="identifier"], input[type="text"]')).toBeVisible()
   })
 
-  test('rejects invalid credentials', async ({ page }) => {
+  test('rejects invalid credentials @full', async ({ page }) => {
     await page.goto('/login')
     await page.fill('input[name="identifier"], input[type="text"]', 'bad@user.com')
     await page.click('button[type="submit"]')
@@ -14,11 +14,13 @@ test.describe('Login Flow', () => {
     await expect(page).toHaveURL(/\/login/)
   })
 
-  test('admin login redirects to console', async ({ page }) => {
+  test('admin login redirects to console @smoke', async ({ page }) => {
     await page.goto('/login')
-    await page.fill('input[name="identifier"], input[type="text"]', 'admin@zitadel.local')
+    await page.fill('input[name="identifier"], input[type="text"]', 'admin')
     await page.click('button[type="submit"]')
-    // After identifier step, password step should appear.
     await expect(page.locator('input[type="password"]')).toBeVisible({ timeout: 5000 })
+    await page.fill('input[name="password"], input[type="password"]', 'admin123')
+    await page.click('button[type="submit"]')
+    await page.waitForURL(/\/console/, { timeout: 15000 })
   })
 })

@@ -5,10 +5,7 @@ project_name: zitadel
 
 before:
   hooks:
-    - npm ci
-    - npm run build
-    - rm -rf internal/server/webdist
-    - cp -r web/dist internal/server/webdist
+    - sh -c 'if [ "${GORELEASER_PREBUILT_WEBDIST:-0}" = "1" ]; then test -d internal/server/webdist; else npm ci && npm run build && rm -rf internal/server/webdist && cp -r web/dist internal/server/webdist; fi'
 
 builds:
   - id: zitadel

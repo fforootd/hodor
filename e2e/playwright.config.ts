@@ -1,5 +1,8 @@
 import { defineConfig } from '@playwright/test'
 
+const baseURL = process.env.BASE_URL || 'http://127.0.0.1:18080'
+process.env.BASE_URL = baseURL
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
@@ -8,13 +11,14 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:8080',
+    baseURL,
     trace: 'on-first-retry',
   },
-  // Start the server before running tests (optional, uncomment to auto-start).
-  // webServer: {
-  //   command: 'cd .. && make dev',
-  //   url: 'http://localhost:8080/healthz',
-  //   reuseExistingServer: !process.env.CI,
-  // },
+  webServer: {
+    command: './e2e/scripts/start-zitadel-e2e.sh',
+    cwd: '..',
+    url: `${baseURL}/healthz`,
+    reuseExistingServer: false,
+    timeout: 120_000,
+  },
 })

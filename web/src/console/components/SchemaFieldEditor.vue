@@ -1,16 +1,17 @@
 <template>
-  <div class="space-y-4">
-    <div v-for="field in visibleFields" :key="field.path" class="space-y-2">
-      <div class="flex items-center gap-2">
-        <Label :for="field.path" class="text-sm font-medium">
-          {{ field.label }}
-          <span v-if="field.required" class="text-destructive">*</span>
+  <div class="space-y-2">
+    <div v-for="field in visibleFields" :key="field.path">
+      <!-- Label row — always visible -->
+      <div v-if="field.type !== 'boolean'" class="mb-0.5 flex items-center gap-1.5">
+        <Label :for="field.path" class="text-[11px] font-medium text-muted-foreground">
+          {{ field.label }}<span v-if="field.required" class="text-destructive">*</span>
         </Label>
-        <Badge v-if="field.identifier" variant="outline" class="text-[10px] uppercase tracking-wide">Identifier</Badge>
-        <Badge v-if="field.sensitive" variant="secondary" class="text-[10px] uppercase tracking-wide">Sensitive</Badge>
-        <Badge v-if="!field.editable" variant="outline" class="text-[10px] uppercase tracking-wide">Read only</Badge>
+        <Badge v-if="field.identifier" variant="outline" class="h-4 px-1 text-[9px] uppercase tracking-wide">Identifier</Badge>
+        <Badge v-if="field.sensitive" variant="secondary" class="h-4 px-1 text-[9px] uppercase tracking-wide">Sensitive</Badge>
+        <Badge v-if="!field.editable" variant="outline" class="h-4 px-1 text-[9px] uppercase tracking-wide">Read only</Badge>
       </div>
 
+      <!-- Object with properties: nested card -->
       <template v-if="field.type === 'object' && field.properties?.length">
         <Card class="border-dashed">
           <CardContent class="pt-4">
@@ -23,20 +24,23 @@
         </Card>
       </template>
 
+      <!-- Object without properties: raw JSON textarea -->
       <template v-else-if="field.type === 'object'">
         <textarea
           :id="field.path"
           :value="objectDraft(field)"
-          class="min-h-32 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          class="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           :disabled="!field.editable"
+          :placeholder="field.description || field.label"
           @input="setObjectDraft(field, $event)"
           @change="commitObjectField(field)"
         />
-        <p v-if="jsonErrors[field.path]" class="text-xs text-destructive">{{ jsonErrors[field.path] }}</p>
+        <p v-if="jsonErrors[field.path]" class="mt-0.5 text-xs text-destructive">{{ jsonErrors[field.path] }}</p>
       </template>
 
+      <!-- Array fields -->
       <template v-else-if="field.type === 'array'">
-        <div class="space-y-2">
+        <div class="space-y-1.5">
           <template v-if="isPrimitiveArray(field)">
             <div
               v-for="(item, index) in arrayValue(field.name)"
@@ -47,19 +51,21 @@
                 :model-value="String(item ?? '')"
                 :type="inputType(field.item)"
                 :disabled="!field.editable"
+                :placeholder="field.description || field.label"
                 @update:model-value="(value) => updateArrayItem(field, index, String(value ?? ''))"
               />
               <Button
                 v-if="field.editable"
-                variant="outline"
+                variant="ghost"
                 size="sm"
+                class="shrink-0 text-muted-foreground"
                 @click="removeArrayItem(field.name, index)"
               >
                 Remove
               </Button>
             </div>
             <Button v-if="field.editable" variant="outline" size="sm" @click="addArrayItem(field)">
-              Add {{ field.label }}
+              + {{ field.label }}
             </Button>
           </template>
 
@@ -67,16 +73,18 @@
             <textarea
               :id="field.path"
               :value="objectDraft(field)"
-              class="min-h-32 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              class="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               :disabled="!field.editable"
+              :placeholder="field.description || field.label"
               @input="setObjectDraft(field, $event)"
               @change="commitArrayField(field)"
             />
-            <p v-if="jsonErrors[field.path]" class="text-xs text-destructive">{{ jsonErrors[field.path] }}</p>
+            <p v-if="jsonErrors[field.path]" class="mt-0.5 text-xs text-destructive">{{ jsonErrors[field.path] }}</p>
           </template>
         </div>
       </template>
 
+      <!-- Enum select -->
       <template v-else-if="field.enum?.length">
         <Select
           :model-value="enumValue(field.name)"
@@ -84,7 +92,7 @@
           @update:model-value="(value) => updateField(field.name, value || undefined)"
         >
           <SelectTrigger :id="field.path">
-            <SelectValue placeholder="Select value" />
+            <SelectValue :placeholder="field.description || field.label" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem
@@ -98,18 +106,20 @@
         </Select>
       </template>
 
+      <!-- Boolean checkbox -->
       <template v-else-if="field.type === 'boolean'">
-        <div class="flex items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
+        <div class="flex items-center gap-2.5 py-0.5">
           <Checkbox
             :id="field.path"
             :checked="Boolean(modelValue[field.name])"
             :disabled="!field.editable"
             @update:checked="(value: boolean | 'indeterminate') => updateField(field.name, value === true)"
           />
-          <Label :for="field.path" class="text-sm font-normal">{{ field.description || field.label }}</Label>
+          <Label :for="field.path" class="text-sm font-normal leading-none">{{ field.description || field.label }}</Label>
         </div>
       </template>
 
+      <!-- Scalar input (string, number, etc.) -->
       <template v-else>
         <div class="flex items-center gap-2">
           <Input
@@ -117,22 +127,20 @@
             :model-value="stringValue(field.name)"
             :type="inputType(field)"
             :disabled="!field.editable"
+            :placeholder="field.description || field.label"
             @update:model-value="(value) => updateScalarField(field, String(value ?? ''))"
           />
           <Button
             v-if="field.sensitive"
-            variant="outline"
+            variant="ghost"
             size="sm"
+            class="shrink-0 text-muted-foreground"
             @click="toggleSensitive(field.path)"
           >
             {{ showSensitive[field.path] ? 'Hide' : 'Show' }}
           </Button>
         </div>
       </template>
-
-      <p v-if="field.description && field.type !== 'boolean'" class="text-xs text-muted-foreground">
-        {{ field.description }}
-      </p>
     </div>
   </div>
 </template>

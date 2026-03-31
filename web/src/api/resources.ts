@@ -206,7 +206,7 @@ export const catalogApi = {
 // Session API
 // ------------------------------------------------------------------
 export const sessionApi = {
-  list: (): Promise<SessionResponse[]> => unwrapItems<SessionResponse>(listSessions()),
+  list: (params?: { user_id?: string }): Promise<SessionResponse[]> => unwrapItems<SessionResponse>(listSessions({ query: params as any })),
   revoke: (id: string): Promise<void> => unwrap<void>(revokeSession({ path: { id } })),
 }
 
@@ -235,12 +235,13 @@ export interface Event {
 }
 
 export const eventApi = {
-  list: (params?: { type?: string; limit?: number; session_id?: string; fingerprint?: string }): Promise<Event[]> => {
+  list: (params?: { type?: string; limit?: number; session_id?: string; fingerprint?: string; aggregate_id?: string }): Promise<Event[]> => {
     const query: Record<string, string> = {}
     if (params?.type) query.types = params.type
     if (params?.limit) query.limit = String(params.limit)
     if (params?.session_id) query.session_id = params.session_id
     if (params?.fingerprint) query.fingerprint = params.fingerprint
+    if (params?.aggregate_id) query.aggregate_id = params.aggregate_id
     return unwrapItems<Event>(listEvents({ query: query as any }))
   },
 }
@@ -642,4 +643,94 @@ export const moduleApi = {
     api.post<void>(`/v1/modules/${encodeURIComponent(name)}/enable`, {}),
   disable: (name: string): Promise<void> =>
     api.post<void>(`/v1/modules/${encodeURIComponent(name)}/disable`, {}),
+}
+
+// ------------------------------------------------------------------
+// Notifications API
+// ------------------------------------------------------------------
+export interface NotificationSettingsEnvelope {
+  type: string
+  scope: string
+  scope_id: string
+  data?: Record<string, unknown>
+  effective?: Record<string, unknown>
+  inherited?: boolean
+}
+
+export interface NotificationPreset {
+  id: string
+  label: string
+  medium: string
+  driver: string
+  description: string
+  config: Record<string, unknown>
+}
+
+export interface NotificationRender {
+  medium: string
+  channel_id?: string
+  template_key: string
+  locale: string
+  subject?: string
+  text_body: string
+  html_body?: string
+  metadata?: Record<string, string>
+}
+
+export interface NotificationPreviewRequest {
+  org_id?: string
+  medium: string
+  template_key: string
+  locale?: string
+  payload?: Record<string, unknown>
+}
+
+export interface NotificationTestRequest extends NotificationPreviewRequest {
+  channel_id?: string
+  recipient: string
+}
+
+export const notificationApi = {
+  getSettings(scope = 'instance', scopeId = ''): Promise<NotificationSettingsEnvelope> {
+    const query = new URLSearchParams({ scope, raw: 'true' })
+    if (scopeId) query.set('scope_id', scopeId)
+    return api.get<NotificationSettingsEnvelope>(`/v1/settings/notification?${query.toString()}`)
+  },
+  getEffectiveSettings(scope = 'instance', scopeId = ''): Promise<NotificationSettingsEnvelope> {
+    const query = new URLSearchParams({ scope })
+    if (scopeId) query.set('scope_id', scopeId)
+    return api.get<NotificationSettingsEnvelope>(`/v1/settings/notification?${query.toString()}`)
+  },
+  saveSettings(
+    data: Record<string, unknown>,
+    scope = 'instance',
+    scopeId = '',
+  ): Promise<NotificationSettingsEnvelope> {
+    const query = new URLSearchParams({ scope })
+    if (scopeId) query.set('scope_id', scopeId)
+    return api.put<NotificationSettingsEnvelope>(`/v1/settings/notification?${query.toString()}`, data)
+  },
+  getTemplates(scope = 'instance', scopeId = ''): Promise<NotificationSettingsEnvelope> {
+    const query = new URLSearchParams({ scope, raw: 'true' })
+    if (scopeId) query.set('scope_id', scopeId)
+    return api.get<NotificationSettingsEnvelope>(`/v1/settings/notification_templates?${query.toString()}`)
+  },
+  saveTemplates(
+    data: Record<string, unknown>,
+    scope = 'instance',
+    scopeId = '',
+  ): Promise<NotificationSettingsEnvelope> {
+    const query = new URLSearchParams({ scope })
+    if (scopeId) query.set('scope_id', scopeId)
+    return api.put<NotificationSettingsEnvelope>(`/v1/settings/notification_templates?${query.toString()}`, data)
+  },
+  listPresets(): Promise<{ presets: NotificationPreset[] }> {
+    return api.get<{ presets: NotificationPreset[] }>('/v1/notifications/presets')
+  },
+  preview(body: NotificationPreviewRequest): Promise<NotificationRender> {
+    return api.post<NotificationRender>('/v1/notifications/preview', body)
+  },
+  sendTest(body: NotificationTestRequest): Promise<NotificationRender> {
+    return api.post<NotificationRender>('/v1/notifications/test', body)
+  },
 }

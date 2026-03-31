@@ -339,6 +339,23 @@ func (a *API) registerOpenAPIOperations() {
 		PathParams: []OpenAPIParam{typeParam}, StatusCode: 204,
 		Security: true,
 	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "GET", Path: "/v1/notifications/presets", ID: "listNotificationPresets",
+		Summary: "List notification presets", Tags: []string{"Notifications"},
+		Response: NotificationPresetsResponse{}, Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "POST", Path: "/v1/notifications/preview", ID: "previewNotification",
+		Summary: "Preview a notification template", Tags: []string{"Notifications"},
+		Request: NotificationPreviewRequest{}, Response: NotificationRenderResponse{},
+		Security: true,
+	})
+	a.spec.Add(OpenAPIOperation{
+		Method: "POST", Path: "/v1/notifications/test", ID: "testNotification",
+		Summary: "Send a test notification", Tags: []string{"Notifications"},
+		Request: NotificationTestRequest{}, Response: NotificationRenderResponse{},
+		Security: true,
+	})
 
 	// ─── Catalog ───────────────────────────────────────────────
 	a.spec.Add(OpenAPIOperation{

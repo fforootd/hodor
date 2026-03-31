@@ -166,10 +166,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, h } from 'vue'
+import { ref, computed, h, watch, onUnmounted } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { eventApi, type Event } from '@/api/resources'
+import { getEventRouteFilters } from '@/console/utils/route-filters'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
 import { Input } from '@/components/ui/input'
@@ -192,6 +193,7 @@ const isSearchOpen = ref(false)
 const eventTypes = ref<string[]>([])
 const isLive = ref(false)
 let eventSource: EventSource | null = null
+const routeFilters = computed(() => getEventRouteFilters(route.query))
 
 function toggleLive() {
   if (isLive.value) {
@@ -204,10 +206,12 @@ function toggleLive() {
   // Build SSE URL with current filter context
   const params = new URLSearchParams()
   params.set('cursor', 'now')
-  const fp = route.query.fingerprint as string
+  const fp = routeFilters.value.fingerprint
   if (fp) params.set('fingerprint', fp)
-  const sid = route.query.session_id as string
+  const sid = routeFilters.value.sessionId
   if (sid) params.set('session_id', sid)
+  const aggregateId = routeFilters.value.aggregateId
+  if (aggregateId) params.set('aggregate_id', aggregateId)
 
   eventSource = new EventSource(`/v1/events/stream?${params.toString()}`)
   isLive.value = true
@@ -225,8 +229,6 @@ function toggleLive() {
     isLive.value = false
   }
 }
-
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
   eventSource?.close()
 })
@@ -333,32 +335,40 @@ function applySearchQuery(query: string, table: any) {
   }
 }
 
-onMounted(async () => {
+async function loadEvents() {
   try { 
-    const session_id = route.query.session_id as string | undefined
-    const fingerprint = route.query.fingerprint as string | undefined
-    const actor = route.query.actor as string | undefined
-    const res = await eventApi.list({ limit: 500, session_id, fingerprint }) as Event[]
+    const res = await eventApi.list({
+      limit: 500,
+      session_id: routeFilters.value.sessionId || undefined,
+      fingerprint: routeFilters.value.fingerprint || undefined,
+      aggregate_id: routeFilters.value.aggregateId || undefined,
+    }) as Event[]
     events.value = res
     eventTypes.value = [...new Set(res.map(e => e.event_type))]
     
     // Auto-apply filters to the UI if present
-    if (session_id) {
-       globalSearch.value = `session:${session_id} `
+    if (routeFilters.value.aggregateId) {
+       globalSearch.value = `aggregate:${routeFilters.value.aggregateId} `
        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
-    } else if (fingerprint) {
-       globalSearch.value = `fingerprint:${fingerprint} `
+    } else if (routeFilters.value.sessionId) {
+       globalSearch.value = `session:${routeFilters.value.sessionId} `
        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
-    } else if (actor) {
-       globalSearch.value = `actor:${actor} `
+    } else if (routeFilters.value.fingerprint) {
+       globalSearch.value = `fingerprint:${routeFilters.value.fingerprint} `
        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+    } else if (routeFilters.value.actor) {
+       globalSearch.value = `actor:${routeFilters.value.actor} `
+       if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+    } else {
+       globalSearch.value = ''
+       if (activeTable) activeTable.setColumnFilters([])
     }
   } catch (err) {
     console.error('Failed to load events', err)
   }
 
   // Auto-expand event by permalink (?id=xxx)
-  const eventId = route.query.id as string | undefined
+  const eventId = routeFilters.value.eventId
   if (eventId && activeTable) {
     const idx = events.value.findIndex(e => e.id === eventId)
     if (idx >= 0) {
@@ -367,7 +377,21 @@ onMounted(async () => {
       }, 100)
     }
   }
-})
+}
+
+watch(
+  () => [
+    routeFilters.value.actor,
+    routeFilters.value.aggregateId,
+    routeFilters.value.eventId,
+    routeFilters.value.fingerprint,
+    routeFilters.value.sessionId,
+  ],
+  () => {
+    loadEvents()
+  },
+  { immediate: true },
+)
 
 function formatDateOnly(ts?: string) { 
   if (!ts) return '—'

@@ -148,6 +148,9 @@ dev-status:
 	echo "Seed pack:      $(SEED)"; \
 	echo "Seed file:      $$seed_file"; \
 	echo "Mock OIDC:      enabled"; \
+	echo "Email channel:  stdout (default local dev)"; \
+	echo "SMS channel:    stdout (default local dev)"; \
+	echo "Notification UI:http://localhost:8080/console/notifications"; \
 	echo "Admin login:    admin / admin123"; \
 	echo "Admin PAT:      zitadel-dev-pat-do-not-use-in-production"
 	@go run ./cmd/zitadel seed validate --file "$(DEV_SEED_FILE)"
@@ -169,7 +172,7 @@ test-web: node_modules
 	npm test -w web
 
 # Run E2E browser tests (Playwright).
-test-e2e: build
+test-e2e: webdist node_modules
 	npm test -w e2e
 
 # TypeScript typecheck (vue-tsc).

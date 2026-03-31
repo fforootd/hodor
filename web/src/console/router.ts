@@ -213,6 +213,11 @@ const router = createRouter({
       name: 'login-flow-detail',
       component: () => import('./views/LoginFlowDetailView.vue'),
     },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: () => import('./views/NotificationsView.vue'),
+    },
     // Custom Endpoints (domain → component routing)
   ],
 })

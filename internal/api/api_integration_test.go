@@ -1,9 +1,11 @@
 package api_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/testutil"
 )
 
@@ -224,6 +226,61 @@ func TestAdmin_AppCanonicalDataRoundTrip(t *testing.T) {
 	data, _ := body["data"].(map[string]any)
 	if data["client_name"] != "Schema App" {
 		t.Fatalf("client_name = %v, want Schema App", data["client_name"])
+	}
+}
+
+func TestAdmin_AppClientSecretIsHashedAndUpdatable(t *testing.T) {
+	srv := testutil.NewTestServer(t)
+	token := srv.LoginAdmin()
+
+	createCode, created := srv.RequestWithHeaders("POST", "/v1/apps", map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"schema_id":     "app_v1",
+		"client_id":     "secret-app",
+		"client_secret": "first-secret",
+		"data": map[string]any{
+			"client_name":    "Secret App",
+			"app_type":       "web",
+			"redirect_uris":  []string{"https://example.com/callback"},
+			"grant_types":    []string{"authorization_code"},
+			"response_types": []string{"code"},
+		},
+	})
+	if createCode != 200 && createCode != 201 {
+		t.Fatalf("create app: expected 200/201, got %d: %v", createCode, created)
+	}
+
+	var storedSecret string
+	if err := srv.DB.SQL().QueryRow(`SELECT client_secret FROM apps WHERE client_id = 'secret-app'`).Scan(&storedSecret); err != nil {
+		t.Fatalf("load client secret: %v", err)
+	}
+	if storedSecret == "" || storedSecret == "first-secret" {
+		t.Fatalf("expected hashed client secret, got %q", storedSecret)
+	}
+
+	storage := oidcop.NewStorage(srv.DB, nil)
+	if err := storage.AuthorizeClientIDSecret(context.Background(), "secret-app", "first-secret"); err != nil {
+		t.Fatalf("AuthorizeClientIDSecret(first-secret) error = %v", err)
+	}
+
+	appID, _ := created["id"].(string)
+	updateCode, updated := srv.RequestWithHeaders("PATCH", "/v1/apps/"+appID, map[string]string{
+		"Authorization": "Bearer " + token,
+		"X-Org-Id":      srv.OrgID,
+	}, map[string]any{
+		"client_secret": "second-secret",
+	})
+	if updateCode != 200 {
+		t.Fatalf("update app: expected 200, got %d: %v", updateCode, updated)
+	}
+
+	if err := storage.AuthorizeClientIDSecret(context.Background(), "secret-app", "first-secret"); err == nil {
+		t.Fatal("expected first-secret to stop working after update")
+	}
+	if err := storage.AuthorizeClientIDSecret(context.Background(), "secret-app", "second-secret"); err != nil {
+		t.Fatalf("AuthorizeClientIDSecret(second-secret) error = %v", err)
 	}
 }
 

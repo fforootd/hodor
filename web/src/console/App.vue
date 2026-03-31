@@ -404,6 +404,7 @@
     Server,
     Plus,
     Link,
+    BellRing,
   } from 'lucide-vue-next'
 
   const route = useRoute()
@@ -633,6 +634,7 @@
     authz_modules: Package,
     marketplace: Package,
     endpoint: Link,
+    notification: BellRing,
   }
 
   function getIcon(type: string) {
@@ -667,6 +669,18 @@
         countable: !!entry.countable,
         navGroup: entry.nav_group,
         aggregates: entry.aggregates,
+      })
+    }
+
+    if (!items.find((item) => item.type === 'notification')) {
+      items.push({
+        type: 'notification',
+        label: 'Notifications',
+        sortOrder: 68,
+        storage: 'settings',
+        route: '/notifications',
+        countable: false,
+        navGroup: 'system',
       })
     }
 
@@ -744,6 +758,7 @@
       'obs-explore': 'Explore',
       traces: 'Traces',
       authorization: 'System Authorization',
+      notifications: 'Notifications',
     }
     return titles[route.name as string] || 'Console'
   })
@@ -764,6 +779,7 @@
     'provider-detail': { label: 'Providers', path: '/providers' },
     'provider-create': { label: 'Providers', path: '/providers' },
     'login-flow-detail': { label: 'Login Flows', path: '/login-flows' },
+    notifications: { label: 'Notifications', path: '/notifications' },
     'schema-detail-item': { label: 'Schema Items', path: '/' },
   }
 

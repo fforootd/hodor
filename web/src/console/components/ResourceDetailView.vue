@@ -1,5 +1,5 @@
 <template>
-  <div v-if="resource" class="space-y-6">
+  <div v-if="resource" class="mx-auto max-w-2xl space-y-5">
     <!-- Header -->
     <div class="flex items-start justify-between gap-4">
       <div class="flex items-start gap-3">
@@ -89,36 +89,16 @@
     <!-- Extra content slot -->
     <slot name="after-form" />
 
-    <!-- System Information -->
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle class="text-sm">System Information</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <dl class="grid grid-cols-[100px_1fr] gap-x-4 gap-y-2 text-sm">
-          <dt class="text-muted-foreground">ID</dt>
-          <dd class="font-mono text-xs break-all">{{ resource.id }}</dd>
-          <template v-if="resource.org_id">
-            <dt class="text-muted-foreground">Org</dt>
-            <dd>{{ resource.org_id }}</dd>
-          </template>
-          <template v-if="resource.schema_id">
-            <dt class="text-muted-foreground">Schema</dt>
-            <dd>{{ resource.schema_id }}</dd>
-          </template>
-          <dt class="text-muted-foreground">Created</dt>
-          <dd>{{ formatDateTime(resource.created_at) }}</dd>
-          <dt class="text-muted-foreground">Updated</dt>
-          <dd>{{ formatDateTime(resource.updated_at) }}</dd>
-        </dl>
-      </CardContent>
-    </Card>
+    <!-- System metadata -->
+    <div class="flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
+      <span>ID: <code class="font-mono">{{ resource.id }}</code></span>
+      <span v-if="resource.schema_id">Schema: {{ resource.schema_id }}</span>
+      <span>Created {{ formatDateTime(resource.created_at) }}</span>
+      <span>Updated {{ formatDateTime(resource.updated_at) }}</span>
+    </div>
 
     <!-- Error -->
-    <Alert v-if="loadError" variant="destructive">
-      <AlertTriangleIcon class="size-4" />
-      <AlertDescription>{{ loadError }}</AlertDescription>
-    </Alert>
+    <FormError :error="loadError" />
 
     <!-- Delete Dialog -->
     <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
@@ -190,12 +170,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { FormError } from '@/components/ui/form-error'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
-import { ArrowLeft, Trash2, UserPlus, AlertTriangle as AlertTriangleIcon } from 'lucide-vue-next'
+import { ArrowLeft, Trash2, UserPlus } from 'lucide-vue-next'
 
 interface MemberItem {
   user_id: string

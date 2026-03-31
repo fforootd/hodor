@@ -17,9 +17,7 @@
       </div>
 
       <!-- Error -->
-      <div v-else-if="error" class="flex h-32 items-center justify-center text-destructive text-sm">
-        {{ error }}
-      </div>
+      <FormError v-else-if="error" :error="error" />
 
       <!-- Main form -->
       <div v-else-if="detail" class="space-y-4">
@@ -253,7 +251,6 @@
 
 <script setup lang="ts">
   import { ref, computed, watch } from 'vue'
-  import { toast } from 'vue-sonner'
   import { catalogApi, type CatalogTemplateDetail } from '@/api/resources'
   import {
     Dialog,
@@ -268,8 +265,10 @@
   import { Input } from '@/components/ui/input'
   import { Label } from '@/components/ui/label'
   import { Switch } from '@/components/ui/switch'
+  import { FormError } from '@/components/ui/form-error'
   import { Spinner } from '@/components/ui/spinner'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+  import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
   import { Download, ChevronRight } from 'lucide-vue-next'
 
   const props = defineProps<{
@@ -480,13 +479,9 @@
           props.templateId,
       )
       if (isProviderTemplate.value) {
-        toast.success('Provider created', {
-          description: `"${providerName}" is now available in Providers.`,
-        })
+        notifyMutationSuccess('Provider', 'create', `"${providerName}" is now available in Providers.`)
       } else {
-        toast.success(`Installed "${detail.value?.template?.name || props.templateId}"`, {
-          description: `Entity ${result.id} created`,
-        })
+        notifyMutationSuccess(detail.value?.template?.name || props.templateId, 'install', `Entity ${result.id} created`)
       }
       emit('installed', {
         id: result.id,
@@ -495,9 +490,11 @@
       })
       emit('update:open', false)
     } catch (e: any) {
-      toast.error(isProviderTemplate.value ? 'Provider creation failed' : 'Install failed', {
-        description: e.message,
-      })
+      notifyMutationError(
+        isProviderTemplate.value ? 'Provider' : (detail.value?.template?.name || props.templateId),
+        isProviderTemplate.value ? 'create' : 'install',
+        e,
+      )
     } finally {
       installing.value = false
     }

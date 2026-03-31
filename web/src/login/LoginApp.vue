@@ -1,6 +1,6 @@
 <template>
   <AppBootstrapScreen
-    v-if="initState !== 'ready' || !flowStep"
+    v-if="initState !== 'ready' || (!flowStep && !isExitMode)"
     app-name="login"
     :state="initState"
     :error="initError"
@@ -17,7 +17,34 @@
     :cover-image-override="props.coverImageOverride"
     :primary-color-override="props.primaryColorOverride"
   >
+    <div v-if="isExitMode" data-testid="login-exit-state" class="space-y-4 text-center">
+      <div
+        class="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary"
+      >
+        <CircleCheckBig class="size-6" />
+      </div>
+      <div class="space-y-2">
+        <h1 data-testid="login-exit-title" class="text-xl font-semibold">
+          {{ exitCopy.title }}
+        </h1>
+        <p class="text-sm text-muted-foreground">
+          {{ exitCopy.description }}
+        </p>
+      </div>
+
+      <Button
+        v-if="sanitizedContinueTo"
+        data-testid="login-exit-continue"
+        type="button"
+        class="w-full"
+        @click="goToContinueTarget"
+      >
+        Continue
+      </Button>
+    </div>
+
     <LoginNodeRenderer
+      v-else
       :flow-step="flowStep"
       :submit-error="submitError"
       :loading="loading"
@@ -25,7 +52,7 @@
       :confirm-passwords="confirmPasswords"
       :captcha-solving="captchaSolving"
       :captcha-solved="captchaSolved"
-      :captcha-required="flowStep.captcha_required === true"
+      :captcha-required="flowStep?.captcha_required === true"
       @submit="onSubmit"
       @action="handleRendererAction"
       @solve-captcha="solveCaptcha"
@@ -68,8 +95,10 @@
   import { createReadyzWaiter, useAppBootstrap } from '@/bootstrap/app-bootstrap'
   import { toLoginErrorDetail, type LoginErrorDetail } from './init-state'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
+  import { Button } from '@/components/ui/button'
   import LoginShell from './components/LoginShell.vue'
   import LoginNodeRenderer from './components/LoginNodeRenderer.vue'
+  import { CircleCheckBig } from 'lucide-vue-next'
 
   const props = withDefaults(
     defineProps<{
@@ -110,9 +139,33 @@
   const captchaSolving = ref(false)
   const fingerprintCollected = ref(false)
   const currentUrlParams = computed(() => new URLSearchParams(window.location.search))
-  const effectiveRedirectUri = computed(() => props.redirectUri || currentUrlParams.value.get('redirect_uri') || '')
+  const effectiveRedirectUri = computed(
+    () => props.redirectUri || currentUrlParams.value.get('redirect_uri') || '',
+  )
   const effectiveState = computed(() => props.state || currentUrlParams.value.get('state') || '')
-  const effectiveAuthRequestId = computed(() => props.authRequestId || currentUrlParams.value.get('auth_request_id') || '')
+  const effectiveAuthRequestId = computed(
+    () => props.authRequestId || currentUrlParams.value.get('auth_request_id') || '',
+  )
+  const exitState = computed(() => currentUrlParams.value.get('exit') || '')
+  const continueTo = computed(() => currentUrlParams.value.get('continue_to') || '')
+  const isExitMode = computed(() => exitState.value !== '')
+  const sanitizedContinueTo = computed(() => sanitizeContinueTo(continueTo.value))
+  const exitCopy = computed(() => {
+    switch (exitState.value) {
+      case 'device_complete':
+        return {
+          title: 'Device sign-in complete',
+          description: 'You can return to the device that requested access and continue there.',
+        }
+      case 'sso_success':
+      default:
+        return {
+          title: 'Sign-in complete',
+          description:
+            'Your identity provider sign-in succeeded. You can continue or close this page.',
+        }
+    }
+  })
 
   const {
     state: initState,
@@ -124,6 +177,9 @@
   } = useAppBootstrap(
     async () => {
       resetFormState()
+      if (isExitMode.value) {
+        return
+      }
       const resp = await flowApi.create(
         props.apiBaseUrl || '',
         effectiveRedirectUri.value,
@@ -241,6 +297,18 @@
     })
     window.location.href = complete.redirect_uri
     return true
+  }
+
+  function sanitizeContinueTo(value: string) {
+    if (!value || !value.startsWith('/') || value.startsWith('//')) {
+      return ''
+    }
+    return value
+  }
+
+  function goToContinueTarget() {
+    if (!sanitizedContinueTo.value) return
+    window.location.href = sanitizedContinueTo.value
   }
 
   onMounted(async () => {

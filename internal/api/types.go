@@ -290,6 +290,53 @@ type PutSettingsRequest struct {
 	Data    map[string]any `json:"data"`
 }
 
+// NotificationRenderResponse is returned from notification preview/test endpoints.
+type NotificationRenderResponse struct {
+	Medium      string            `json:"medium"`
+	ChannelID   string            `json:"channel_id,omitempty"`
+	TemplateKey string            `json:"template_key"`
+	Locale      string            `json:"locale"`
+	Subject     string            `json:"subject,omitempty"`
+	TextBody    string            `json:"text_body"`
+	HTMLBody    string            `json:"html_body,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// NotificationPreviewRequest renders a notification without delivering it.
+type NotificationPreviewRequest struct {
+	OrgID       string         `json:"org_id,omitempty"`
+	Medium      string         `json:"medium"`
+	TemplateKey string         `json:"template_key"`
+	Locale      string         `json:"locale,omitempty"`
+	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+// NotificationTestRequest renders and delivers a notification immediately.
+type NotificationTestRequest struct {
+	OrgID       string         `json:"org_id,omitempty"`
+	Medium      string         `json:"medium"`
+	ChannelID   string         `json:"channel_id,omitempty"`
+	Recipient   string         `json:"recipient"`
+	TemplateKey string         `json:"template_key"`
+	Locale      string         `json:"locale,omitempty"`
+	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+// NotificationPreset describes a built-in preset channel pack.
+type NotificationPreset struct {
+	ID          string         `json:"id"`
+	Label       string         `json:"label"`
+	Medium      string         `json:"medium"`
+	Driver      string         `json:"driver"`
+	Description string         `json:"description"`
+	Config      map[string]any `json:"config"`
+}
+
+// NotificationPresetsResponse is returned from GET /v1/notifications/presets.
+type NotificationPresetsResponse struct {
+	Presets []NotificationPreset `json:"presets"`
+}
+
 // --- Catalog ---
 
 // CatalogTemplateResponse is a single catalog template.
@@ -364,7 +411,8 @@ type LoginPasswordRequest struct {
 
 // MagicLinkRequest is the body for POST /v1/auth/magic-link.
 type MagicLinkRequest struct {
-	Email string `json:"email"`
+	Email   string `json:"email"`
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // MagicLinkResponse is returned from POST /v1/auth/magic-link.

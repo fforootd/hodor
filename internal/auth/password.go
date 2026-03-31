@@ -62,6 +62,13 @@ func (p *Passwords) Hash(plain string) (string, error) {
 	return encoded, nil
 }
 
+// HashSecret hashes an opaque credential secret such as an OIDC client secret.
+// It uses the same verifier-compatible encoding as password credentials, but
+// does not require database access.
+func HashSecret(plain string) (string, error) {
+	return NewPasswords(nil).Hash(plain)
+}
+
 // Verify checks a plaintext password against an encoded hash.
 // Returns (true, updatedHash) if the password matches. If updatedHash is
 // non-empty, the caller should persist it (algorithm upgrade occurred).

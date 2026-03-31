@@ -206,3 +206,30 @@ func TestResolveConfigRelativePath(t *testing.T) {
 		t.Fatalf("resolved path = %q, want %q", got, want)
 	}
 }
+
+func TestResolveConfigRelativePath_PrefersExistingWorkingDirPath(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "zitadel.toml")
+
+	origDir, _ := os.Getwd()
+	wd := t.TempDir()
+	_ = os.Chdir(wd)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	if err := os.MkdirAll(filepath.Join(wd, "fixtures", "seeds"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(wd, "fixtures", "seeds", "frontend.yaml")
+	if err := os.WriteFile(target, []byte("users: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ResolveConfigRelativePath(cfgPath, "fixtures/seeds/frontend.yaml")
+	if err != nil {
+		t.Fatalf("ResolveConfigRelativePath: %v", err)
+	}
+
+	if got := canonicalPath(t, got); got != canonicalPath(t, target) {
+		t.Fatalf("resolved path = %q, want %q", got, canonicalPath(t, target))
+	}
+}

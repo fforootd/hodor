@@ -32,6 +32,7 @@ import (
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/loginflow"
 	"github.com/zitadel/zitadel/internal/mgmt"
+	"github.com/zitadel/zitadel/internal/notify"
 	"github.com/zitadel/zitadel/internal/oidcop"
 	"github.com/zitadel/zitadel/internal/ratelimit"
 	"github.com/zitadel/zitadel/internal/session"
@@ -49,6 +50,7 @@ type Server struct {
 	fga       *fga.Service
 	analytics *analytics.Engine
 	tlsMgr    *ztls.Manager
+	notifier  *notify.Service
 	ready     atomic.Bool
 }
 
@@ -88,8 +90,26 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Create hardened cookie config.
 	cookieCfg := session.NewCookieConfig(cfg.Server.CookieSecrets, cfg.Server.ExternalDomain)
 
+	// --- Initialize Application-Level Encryption (ALE) ---
+	// SecretBox provides AES-256-GCM envelope encryption for all secrets at rest.
+	secretBox, err := zcrypto.NewSecretBox(cfg.Encryption.ActiveKeyID, cfg.Encryption.KeyMap())
+	if err != nil {
+		logging.Fatalf("encryption init: %v", err)
+	}
+	if secretBox.Plaintext() {
+		logging.Println("[WARN] encryption: no keys configured — secrets stored in plaintext (dev mode)")
+	} else {
+		logging.Printf("[encryption] active_key=%s, ring_size=%d", cfg.Encryption.ActiveKeyID, len(cfg.Encryption.Keys))
+	}
+	secretStore := zcrypto.NewSecretStore(db.SQL(), secretBox)
+
 	// Mount REST API — identity, schema, session, event CRUD + dynamic OpenAPI.
 	restAPI := api.New(db, bus, cookieCfg)
+	notifier := notify.NewService(db.SQL(), db.Dialect(), bus, secretBox, issuerURL(cfg))
+	if err := notifier.EnsureSchema(context.Background()); err != nil {
+		logging.Fatalf("notification schema init: %v", err)
+	}
+	restAPI.SetNotificationService(notifier)
 	restAPI.RegisterRoutes(mux)
 
 	// Mount template catalog API (ADR-015).
@@ -111,7 +131,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	} else {
 		passwords = auth.NewPasswords(db)
 	}
-	loginAPI := login.New(db, passwords, restAPI, cookieCfg, loginflow.NewResolver(db))
+	loginAPI := login.New(db, passwords, restAPI, cookieCfg, loginflow.NewResolver(db), notifier, issuerURL(cfg))
 	loginAPI.Register(mux)
 
 	// Serve web assets (JS/CSS) from go:embed.
@@ -176,20 +196,6 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Mount UI routes — login, logout, admin console.
 	uiHandlers := ui.New(db, bus, restAPI, cookieCfg)
 	uiHandlers.RegisterRoutes(mux)
-
-	// --- Initialize Application-Level Encryption (ALE) ---
-	// SecretBox provides AES-256-GCM envelope encryption for all secrets at rest.
-	// In dev mode with no keys configured, operates in plaintext passthrough.
-	secretBox, err := zcrypto.NewSecretBox(cfg.Encryption.ActiveKeyID, cfg.Encryption.KeyMap())
-	if err != nil {
-		logging.Fatalf("encryption init: %v", err)
-	}
-	if secretBox.Plaintext() {
-		logging.Println("[WARN] encryption: no keys configured — secrets stored in plaintext (dev mode)")
-	} else {
-		logging.Printf("[encryption] active_key=%s, ring_size=%d", cfg.Encryption.ActiveKeyID, len(cfg.Encryption.Keys))
-	}
-	secretStore := zcrypto.NewSecretStore(db.SQL(), secretBox)
 
 	// Mount OIDC Provider (OP) — handles /.well-known/openid-configuration,
 	// /authorize, /oauth/token, /userinfo, /keys, /end_session etc.
@@ -341,6 +347,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	srv.fga = fgaSvc
 	srv.analytics = analyticsEngine
 	srv.tlsMgr = tlsMgr
+	srv.notifier = notifier
 	srv.ready.Store(true)
 
 	return srv
@@ -362,6 +369,9 @@ func (s *Server) ListenAndServe() error {
 	sched.Register("session_gc", jobs.SessionGC(s.db, s.bus))
 	sched.Register("event_gc", jobs.EventGC(s.db, s.bus))
 	go sched.Run(schedCtx)
+	if s.notifier != nil {
+		s.notifier.Start(schedCtx, s.cfg.Workers.NotificationWorkers)
+	}
 
 	// Graceful shutdown on signals — use a channel, not NotifyContext.
 	sigCh := make(chan os.Signal, 1)

@@ -170,11 +170,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, h } from 'vue'
+import { ref, onMounted, computed, h, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink, useRoute } from 'vue-router'
 import { sessionApi, userApi, orgApi, type Session } from '@/api/resources'
 import type { IdentityResponse } from '@zitadel/client-js'
+import { getSessionUserFilter } from '@/console/utils/route-filters'
 
 /** Session with a computed state field and optional server-side extras. */
 type SessionWithState = Session & { state: string } & Record<string, any>
@@ -201,6 +202,7 @@ const globalSearch = ref('')
 const isSearchOpen = ref(false)
 
 const route = useRoute()
+const routeUserFilter = computed(() => getSessionUserFilter(route.query))
 
 const searchInputRef = ref<any>(null)
 const searchContainerRef = ref<HTMLElement | null>(null)
@@ -310,21 +312,13 @@ function parseDevice(ua: string | undefined): { icon: any, label: string } {
   return { icon: Monitor, label: 'Web' }
 }
 
-onMounted(async () => {
+async function loadLookups() {
   try { 
-    const [sessRes, entitiesRes, orgsRes] = await Promise.all([
-      sessionApi.list(),
+    const [entitiesRes, orgsRes] = await Promise.all([
       userApi.list().catch(() => []),
       orgApi.list().catch(() => []),
     ])
-    
-    sessions.value = sessRes.map((s: Session) => {
-      let state = 'active'
-      if (s.revoked_at) state = 'revoked'
-      else if (s.expires_at && new Date(s.expires_at) < new Date()) state = 'expired'
-      return { ...s, state }
-    })
-    
+
     const dict: Record<string, {name: string, identifier: string}> = {}
     for (const ent of entitiesRes as IdentityResponse[]) {
       const profileEmail = (ent as any).profile?.email as string | undefined
@@ -341,16 +335,43 @@ onMounted(async () => {
       oDict[org.id] = org.name || org.id
     }
     orgDict.value = oDict
+  } catch (err) {
+    console.error('Failed to load session lookups', err)
+  }
+}
 
-    const user = route.query.user as string | undefined
-    if (user) {
-        globalSearch.value = `user:${user} `
-        if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+async function loadSessions() {
+  try {
+    const sessRes = await sessionApi.list(
+      routeUserFilter.value ? { user_id: routeUserFilter.value } : undefined,
+    )
+
+    sessions.value = sessRes.map((s: Session) => {
+      let state = 'active'
+      if (s.revoked_at) state = 'revoked'
+      else if (s.expires_at && new Date(s.expires_at) < new Date()) state = 'expired'
+      return { ...s, state }
+    })
+
+    if (routeUserFilter.value) {
+      globalSearch.value = `user:${routeUserFilter.value} `
+      if (activeTable) applySearchQuery(globalSearch.value, activeTable)
+    } else {
+      globalSearch.value = ''
+      if (activeTable) activeTable.setColumnFilters([])
     }
   } catch (err) {
     console.error('Failed to load sessions', err)
   }
+}
+
+onMounted(() => {
+  loadLookups()
 })
+
+watch(routeUserFilter, () => {
+  loadSessions()
+}, { immediate: true })
 
 async function revoke(id: string) {
   try {
@@ -368,7 +389,9 @@ async function revoke(id: string) {
   } catch (err) {
     console.error("Failed to revoke session", err)
     // Refresh to sync state if we got a 404 because it was already revoked
-    const sessRes = await sessionApi.list()
+    const sessRes = await sessionApi.list(
+      routeUserFilter.value ? { user_id: routeUserFilter.value } : undefined,
+    )
     sessions.value = sessRes.map((s: Session) => ({
       ...s,
       state: s.revoked_at ? 'revoked' : (s.expires_at && new Date(s.expires_at) < new Date() ? 'expired' : 'active')

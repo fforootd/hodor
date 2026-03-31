@@ -1,17 +1,20 @@
 <template>
-  <div class="space-y-6">
+  <div class="mx-auto max-w-2xl space-y-5">
     <!-- Header -->
     <div class="flex items-center gap-3">
       <Button variant="ghost" size="icon" as-child>
         <router-link :to="backRoute"><ArrowLeft class="size-4" /></router-link>
       </Button>
       <div>
-        <h1 class="text-2xl font-semibold tracking-tight">Create {{ singularTitle }}</h1>
+        <h1 class="text-xl font-semibold tracking-tight">Create {{ singularTitle }}</h1>
         <p class="text-sm text-muted-foreground">
           {{ description || `Define fields in the form, inspect canonical JSON, or copy the API request.` }}
         </p>
       </div>
     </div>
+
+    <!-- Error alert -->
+    <FormError :error="error" />
 
     <!-- Schema Form -->
     <SchemaTabsEditor
@@ -32,7 +35,7 @@
     <slot />
 
     <!-- Actions -->
-    <div class="flex justify-end gap-3">
+    <div class="flex items-center justify-end gap-3 border-t pt-4">
       <Button variant="outline" as-child>
         <router-link :to="backRoute">Cancel</router-link>
       </Button>
@@ -40,12 +43,6 @@
         {{ submitting ? 'Creating…' : `Create ${singularTitle}` }}
       </Button>
     </div>
-
-    <!-- Error alert -->
-    <Alert v-if="error" variant="destructive">
-      <AlertTriangleIcon class="size-4" />
-      <AlertDescription>{{ error }}</AlertDescription>
-    </Alert>
   </div>
 </template>
 
@@ -56,8 +53,8 @@ import SchemaTabsEditor from '@/console/components/SchemaTabsEditor.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ArrowLeft, AlertTriangle as AlertTriangleIcon } from 'lucide-vue-next'
+import { FormError } from '@/components/ui/form-error'
+import { ArrowLeft } from 'lucide-vue-next'
 
 defineProps<{
   singularTitle: string

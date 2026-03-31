@@ -1,6 +1,91 @@
 # E2E local seed pack.
 # Keeps deterministic identities for Playwright and browser debugging.
 
+providers:
+  - id: prov_mock_oidc
+    name: Mock OIDC (dev)
+    protocol: oidc
+    template: custom
+    config:
+      issuer: http://127.0.0.1:19998
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+  - id: prov_mock_oidc_existing_user
+    name: Mock OIDC Existing User
+    protocol: oidc
+    template: custom
+    config:
+      issuer: http://127.0.0.1:19998/scenarios/verified-email-existing-user
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+  - id: prov_mock_oidc_link_only
+    name: Mock OIDC Link Only
+    protocol: oidc
+    template: custom
+    auto_register: false
+    config:
+      issuer: http://127.0.0.1:19998/scenarios/link-only-failure
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+  - id: prov_mock_oidc_userinfo_only
+    name: Mock OIDC UserInfo Only
+    protocol: oidc
+    template: custom
+    config:
+      issuer: http://127.0.0.1:19998/scenarios/userinfo-only
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+  - id: prov_mock_oidc_nonce_mismatch
+    name: Mock OIDC Nonce Mismatch
+    protocol: oidc
+    template: custom
+    config:
+      issuer: http://127.0.0.1:19998/scenarios/nonce-mismatch
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+  - id: prov_mock_oidc_token_failure
+    name: Mock OIDC Token Failure
+    protocol: oidc
+    template: custom
+    config:
+      issuer: http://127.0.0.1:19998/scenarios/token-failure
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+  - id: prov_mock_oidc_access_denied
+    name: Mock OIDC Access Denied
+    protocol: oidc
+    template: custom
+    config:
+      issuer: http://127.0.0.1:19998/scenarios/access-denied
+      client_id: mock-client-id
+      client_secret: mock-client-secret
+      scopes: openid email profile
+
+apps:
+  - name: E2E Browser Client
+    client_id: e2e-browser-client
+    client_secret: e2e-browser-secret
+    app_type: web
+    redirect_uris:
+      - http://127.0.0.1:9876/callback
+      - http://127.0.0.1:9877/callback
+      - http://localhost:9876/callback
+      - http://localhost:9877/callback
+    post_logout_redirect_uris:
+      - http://127.0.0.1:9876/logout
+      - http://127.0.0.1:9877/logout
+      - http://localhost:9876/logout
+      - http://localhost:9877/logout
+    grant_types: [authorization_code]
+    response_types: [code]
+    on_conflict: update
+
 users:
   - identifier: admin
     display_name: Admin

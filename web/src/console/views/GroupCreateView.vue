@@ -14,40 +14,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { groupApi } from '@/api/resources'
 import ResourceCreateView from '@/console/components/ResourceCreateView.vue'
-import { useOrgContext } from '@/console/composables/useOrgContext'
-import {
-  buildCurlSnippets, buildResourceWriteBody,
-  loadResourceSchemaContext, normalizeResourceData,
-  type ResourceSchemaContext,
-} from '@/console/utils/schema-resource'
-import { notifyMutationError, notifyMutationSuccess } from '@/lib/notify'
+import { useResourceCreate } from '@/console/composables/useResourceCreate'
 
-const router = useRouter()
-const { currentOrgId } = useOrgContext()
-const submitting = ref(false)
-const error = ref('')
-const jsonValid = ref(true)
-const formData = ref<Record<string, any>>({})
-const schemaContext = ref<ResourceSchemaContext>({
-  display: {}, schema: null, schemaId: '', schemaType: 'group', versions: [],
-})
-
-const payload = computed(() => buildResourceWriteBody('group', schemaContext.value.schemaId, normalizeResourceData(formData.value)))
-const curlSnippets = computed(() => buildCurlSnippets({ path: '/v1/groups', body: payload.value, includeOrgHeader: true, orgId: currentOrgId.value, methods: ['POST'] }))
-
-onMounted(async () => { schemaContext.value = await loadResourceSchemaContext('group') })
-
-async function submit() {
-  submitting.value = true
-  try {
-    const created = await groupApi.create(payload.value)
-    notifyMutationSuccess('Group', 'create')
-    router.push(`/groups/${created.id}`)
-  } catch (err: any) { notifyMutationError('Group', 'create', err) }
-  finally { submitting.value = false }
-}
+const { schemaContext, formData, jsonValid, submitting, error, curlSnippets, submit } =
+  useResourceCreate({
+    schemaType: 'group',
+    apiPath: '/v1/groups',
+    resourceName: 'Group',
+    listRoute: '/groups',
+    createFn: groupApi.create,
+    includeOrgHeader: true,
+  })
 </script>

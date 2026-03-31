@@ -324,12 +324,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, Workflow, AlertCircle, Zap, Loader2, Clock, Globe, Key, FileJson, Server, Activity, User, Fingerprint, ExternalLink } from 'lucide-vue-next'
 import { api } from '@/api/client'
 import { userApi, type Identity } from '@/api/resources'
+import {
+  buildTraceRouteQuery,
+  buildTraceWhereClause,
+  escapeSqlLiteral,
+  getTraceRouteFilter,
+  type TraceRouteFilterMode,
+} from '@/console/utils/route-filters'
 import type { AcceptableValue } from 'reka-ui'
 
 const route = useRoute()
 const router = useRouter()
 
-const queryInput = ref(route.query.id as string || '')
+const initialRouteFilter = getTraceRouteFilter(route.query)
+const queryInput = ref(initialRouteFilter?.value || '')
+const searchMode = ref<TraceRouteFilterMode>(initialRouteFilter?.mode || 'generic')
 const timeRange = ref<AcceptableValue>('24h')
 const groupBy = ref<AcceptableValue>('trace')
 const loading = ref(false)
@@ -401,12 +410,15 @@ const groupExpr = computed(() => {
   }
 })
 
-watch(() => route.query.id, (newId) => {
-  if (newId && newId !== queryInput.value) {
-    queryInput.value = newId as string
+watch(() => [route.query.actor_id, route.query.id], () => {
+  const nextFilter = getTraceRouteFilter(route.query)
+  if (nextFilter && (nextFilter.value !== queryInput.value || nextFilter.mode !== searchMode.value)) {
+    queryInput.value = nextFilter.value
+    searchMode.value = nextFilter.mode
     fetchFilteredTraces()
-  } else if (!newId && queryInput.value) {
+  } else if (!nextFilter && queryInput.value) {
     queryInput.value = ''
+    searchMode.value = 'generic'
     expandedTrace.value = null
     fetchRecentTraces()
   }
@@ -414,10 +426,12 @@ watch(() => route.query.id, (newId) => {
 
 function applySearch() {
   if (queryInput.value.trim()) {
-    router.replace({ query: { ...route.query, id: queryInput.value.trim() } }).catch(() => {})
+    router.replace({
+      query: buildTraceRouteQuery(route.query, queryInput.value.trim(), searchMode.value),
+    }).catch(() => {})
     fetchFilteredTraces()
   } else {
-    router.replace({ query: {} }).catch(() => {})
+    router.replace({ query: buildTraceRouteQuery(route.query, '', searchMode.value) }).catch(() => {})
     fetchRecentTraces()
   }
 }
@@ -525,7 +539,7 @@ async function fetchFilteredTraces() {
       MAX(payload) as sample_payload
     FROM events 
     WHERE created_at >= '${cutoff}'
-      AND (request_id = '${val}' OR session_id = '${val}' OR actor_id = '${val}' OR flow_id = '${val}' OR fingerprint = '${val}' OR client_id = '${val}')
+      AND ${buildTraceWhereClause(val, searchMode.value)}
     GROUP BY ${ge}
     ORDER BY started_at DESC 
     LIMIT 50
@@ -597,19 +611,20 @@ async function toggleExpand(trace: TraceGroup) {
 
   const val = trace.trace_group
   const gb = String(groupBy.value)
+  const safeVal = escapeSqlLiteral(val)
   let whereClause: string
   if (gb === 'identity') {
-    whereClause = `actor_id = '${val}'`
+    whereClause = `actor_id = '${safeVal}'`
   } else if (gb === 'session') {
-    whereClause = `session_id = '${val}'`
+    whereClause = `session_id = '${safeVal}'`
   } else if (gb === 'flow') {
-    whereClause = `flow_id = '${val}'`
+    whereClause = `flow_id = '${safeVal}'`
   } else if (gb === 'fingerprint') {
-    whereClause = `fingerprint = '${val}'`
+    whereClause = `fingerprint = '${safeVal}'`
   } else if (gb === 'client') {
-    whereClause = `client_id = '${val}'`
+    whereClause = `client_id = '${safeVal}'`
   } else {
-    whereClause = `request_id = '${val}' OR session_id = '${val}' OR flow_id = '${val}' OR fingerprint = '${val}'`
+    whereClause = `request_id = '${safeVal}' OR session_id = '${safeVal}' OR flow_id = '${safeVal}' OR fingerprint = '${safeVal}'`
   }
   const sql = `SELECT * FROM events WHERE ${whereClause} ORDER BY created_at ASC LIMIT 500`
 
@@ -639,7 +654,8 @@ function selectSpan(span: any) {
 function jumpToTrace(requestId: string) {
   if (!requestId) return
   queryInput.value = requestId
-  router.replace({ query: { ...route.query, id: requestId } }).catch(() => {})
+  searchMode.value = 'generic'
+  router.replace({ query: buildTraceRouteQuery(route.query, requestId, 'generic') }).catch(() => {})
   fetchFilteredTraces()
 }
 

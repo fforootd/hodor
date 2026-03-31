@@ -117,6 +117,8 @@ func TestIsExempt(t *testing.T) {
 	}{
 		{"/healthz", true},
 		{"/readyz", true},
+		{"/assets/login-BY9f5_2_.js", true},
+		{"/assets/login/logo.svg", true},
 		{"/v1/users", false},
 		{"/", false},
 	}
@@ -177,6 +179,15 @@ func TestMiddleware_ExemptPaths(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("healthz should be exempt, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/assets/login-BY9f5_2_.js", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("assets should be exempt, got %d", rec.Code)
 	}
 }
 

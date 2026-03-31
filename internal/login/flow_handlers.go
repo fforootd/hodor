@@ -298,11 +298,21 @@ func (h *Handler) handleFlowSubmit(w http.ResponseWriter, r *http.Request) {
 		flow.Errors = nil
 		h.renderFlowStep(w, r, flow)
 	case "send_reset":
-		// Reuse magic link infrastructure with password reset messaging.
+		if flow.Identifier == "" {
+			flow.Errors = append(flow.Errors, FlowError{Code: "no_identifier", Message: "No identifier set"})
+			h.renderFlowStep(w, r, flow)
+			return
+		}
+		if _, _, err := h.queueMagicLink(r.Context(), flow.Identifier, "reset"); err != nil {
+			logging.Printf("[flow] %s failed to queue password reset for %s: %v", flow.ID, flow.Identifier, err)
+			flow.Errors = append(flow.Errors, FlowError{Code: "reset_failed", Message: "We couldn't send a reset link right now. Please try again."})
+			h.renderFlowStep(w, r, flow)
+			return
+		}
 		flow.transitionToStep(StepMagicLink)
+		flow.Errors = nil
 		flow.Messages = []FlowMessage{{Type: "info", Text: "Password reset link sent to " + flow.Identifier}}
-		// TODO: actually send recovery email (reuse magic link sender with purpose="reset")
-		logging.Printf("[flow] %s sent password reset to %s", flow.ID, flow.Identifier)
+		logging.Printf("[flow] %s queued password reset to %s", flow.ID, flow.Identifier)
 		h.renderFlowStep(w, r, flow)
 	case "back":
 		flow.clearCaptchaState()
@@ -578,8 +588,14 @@ func (h *Handler) flowSubmitMagicLink(w http.ResponseWriter, r *http.Request, fl
 		return
 	}
 
-	// Delegate to existing magic link infrastructure.
-	logging.Printf("[flow] %s sending magic link to %s", flow.ID, flow.Identifier)
+	if _, _, err := h.queueMagicLink(r.Context(), flow.Identifier, "login"); err != nil {
+		logging.Printf("[flow] %s failed to queue magic link to %s: %v", flow.ID, flow.Identifier, err)
+		flow.Errors = append(flow.Errors, FlowError{Code: "magic_link_failed", Message: "We couldn't send a sign-in link right now. Please try again."})
+		h.renderFlowStep(w, r, flow)
+		return
+	}
+
+	logging.Printf("[flow] %s queued magic link to %s", flow.ID, flow.Identifier)
 	flow.transitionToStep(StepMagicLink)
 	flow.Errors = nil
 	flow.Messages = append(flow.Messages, FlowMessage{Type: "success", Text: "Sign-in link sent!"})

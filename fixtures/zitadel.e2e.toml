@@ -1,0 +1,18 @@
+# Dedicated config for Playwright OIDC end-to-end tests.
+# Uses isolated ports and SQLite files so the suite never reuses a local dev server.
+
+[server]
+port = 18080
+external_domain = "127.0.0.1"
+cookie_secrets = ["zitadel-e2e-cookie-secret-do-not-use-in-production"]
+
+[database]
+url = "sqlite://../data/zitadel-e2e.db"
+
+[observability]
+cache_path = "../data/zitadel-e2e-cache.db"
+
+[dev]
+mock_oidc = true
+mock_oidc_port = 19998
+seed_file = "./seeds/e2e.yaml"

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/settings"
@@ -188,6 +189,9 @@ var exemptPaths = map[string]bool{
 
 // IsExempt returns true if the given path should skip rate limiting.
 func IsExempt(path string) bool {
+	if strings.HasPrefix(path, "/assets/") {
+		return true
+	}
 	return exemptPaths[path]
 }
 

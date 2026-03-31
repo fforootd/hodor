@@ -97,6 +97,13 @@ func ResolveConfigRelativePath(configPath, path string) (string, error) {
 		return path, nil
 	}
 
+	if wd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(wd, path)
+		if fileExists(candidate) {
+			return candidate, nil
+		}
+	}
+
 	baseDir, err := resolveStorageBaseDir(configPath)
 	if err != nil {
 		return "", err

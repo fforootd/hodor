@@ -20,6 +20,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/mockoidc"
+	providers "github.com/zitadel/zitadel/internal/provider"
 	"github.com/zitadel/zitadel/internal/seed"
 	"github.com/zitadel/zitadel/internal/server"
 )
@@ -176,20 +177,36 @@ func startCmd() *cobra.Command {
 				mock := mockoidc.New(mockCfg)
 				mock.Start()
 
-				// Auto-provision mock provider if not exists.
+				// Auto-provision the default mock provider when the dedicated providers
+				// table does not already contain it. The e2e seed pack can override or
+				// update this same stable provider ID.
 				var count int
-				db.SQL().QueryRow(`SELECT COUNT(*) FROM users WHERE id = 'prov_mock_oidc'`).Scan(&count)
+				db.SQL().QueryRow(`SELECT COUNT(*) FROM providers WHERE id = 'prov_mock_oidc'`).Scan(&count)
 				if count == 0 {
-					mockConfig := fmt.Sprintf(`{"issuer":"%s","client_id":"%s","client_secret":"%s","scopes":"openid email profile"}`,
-						mock.Issuer(), mock.ClientID(), mock.ClientSecret())
-					data := fmt.Sprintf(`{"protocol":"oidc","template":"custom","config":%s,"claim_overrides":{},"auto_register":true,"enabled":true,"display_order":99}`,
-						mockConfig)
-					db.SQL().Exec(
-						`INSERT INTO users (id, org_id, schema_id, identifier, display_name, state, data, created_at, updated_at)
-						 VALUES ('prov_mock_oidc', '1', 'provider_v1', 'Mock OIDC (dev)', 'Mock OIDC (dev)', 'active', ?, datetime('now'), datetime('now'))`,
-						data,
-					)
-					logging.Printf("[mock-oidc] provider auto-provisioned (id: prov_mock_oidc)")
+					repo := providers.NewRepository(db.SQL())
+					_, err := repo.Create(context.Background(), "prov_mock_oidc", providers.Provider{
+						ID:          "prov_mock_oidc",
+						OrgID:       "1",
+						DisplayName: "Mock OIDC (dev)",
+						Protocol:    "oidc",
+						Connection: map[string]any{
+							"issuer":        mock.Issuer(),
+							"client_id":     mock.ClientID(),
+							"client_secret": mock.ClientSecret(),
+							"scopes":        "openid email profile",
+						},
+						Enabled: true,
+						UI: map[string]any{
+							"display_order": 99,
+						},
+						CatalogRef: providers.CatalogRef{
+							TemplateID: "custom",
+						},
+					})
+					if err != nil {
+						return fmt.Errorf("auto-provision mock oidc provider: %w", err)
+					}
+					logging.Printf("[mock-oidc] provider auto-provisioned in providers table (id: prov_mock_oidc)")
 				}
 			}
 
@@ -405,6 +422,7 @@ func seedValidateCmd() *cobra.Command {
 			summary := parsed.Summary()
 			fmt.Printf("Seed file: %s\n", targetSeed)
 			fmt.Printf("Providers: %d\n", summary.Providers)
+			fmt.Printf("Apps:      %d\n", summary.Apps)
 			fmt.Printf("Users:     %d\n", summary.Users)
 			fmt.Println("Status:    valid")
 			return nil

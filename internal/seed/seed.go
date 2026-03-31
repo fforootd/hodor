@@ -22,6 +22,7 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/id"
+	providers "github.com/zitadel/zitadel/internal/provider"
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/uniqueness"
 )
@@ -29,6 +30,7 @@ import (
 // SeedFile represents the top-level structure of a seed YAML file.
 type SeedFile struct {
 	Providers  []SeedProvider `yaml:"providers"`
+	Apps       []SeedApp      `yaml:"apps"`
 	Identities []SeedIdentity `yaml:"users"`
 }
 
@@ -36,6 +38,7 @@ type SeedFile struct {
 func (s SeedFile) Summary() SeedSummary {
 	return SeedSummary{
 		Providers: len(s.Providers),
+		Apps:      len(s.Apps),
 		Users:     len(s.Identities),
 	}
 }
@@ -43,6 +46,7 @@ func (s SeedFile) Summary() SeedSummary {
 // SeedSummary is a compact summary of a seed file's contents.
 type SeedSummary struct {
 	Providers int
+	Apps      int
 	Users     int
 }
 
@@ -55,6 +59,22 @@ type SeedProvider struct {
 	Config         map[string]any    `yaml:"config"`
 	ClaimOverrides map[string]string `yaml:"claim_overrides"`
 	AutoRegister   *bool             `yaml:"auto_register"`
+}
+
+// SeedApp defines an app/OIDC client to seed.
+type SeedApp struct {
+	Name                   string         `yaml:"name"`
+	ClientID               string         `yaml:"client_id"`
+	ClientSecret           string         `yaml:"client_secret"`
+	AppType                string         `yaml:"app_type"`
+	RedirectURIs           []string       `yaml:"redirect_uris"`
+	PostLogoutRedirectURIs []string       `yaml:"post_logout_redirect_uris"`
+	GrantTypes             []string       `yaml:"grant_types"`
+	ResponseTypes          []string       `yaml:"response_types"`
+	SchemaID               string         `yaml:"schema_id"`
+	State                  string         `yaml:"state"`
+	Metadata               map[string]any `yaml:"metadata"`
+	OnConflict             string         `yaml:"on_conflict"`
 }
 
 // SeedIdentity defines an identity to seed.
@@ -147,7 +167,14 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 		}
 	}
 
-	// Phase 2: Identities (with inline linked accounts, capabilities, PATs).
+	// Phase 2: Apps.
+	for _, app := range seed.Apps {
+		if err := seedApp(ctx, tx, app, defaultOrgID); err != nil {
+			return fmt.Errorf("seed app %q: %w", app.ClientID, err)
+		}
+	}
+
+	// Phase 3: Identities (with inline linked accounts, capabilities, PATs).
 	for _, ident := range seed.Identities {
 		if err := seedIdentity(ctx, tx, ident, defaultOrgID); err != nil {
 			return fmt.Errorf("seed identity %q: %w", ident.Identifier, err)
@@ -158,7 +185,7 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 		return fmt.Errorf("commit: %w", err)
 	}
 
-	totalItems := len(seed.Providers) + len(seed.Identities)
+	totalItems := len(seed.Providers) + len(seed.Apps) + len(seed.Identities)
 	logging.Printf("[seed] applied %d items from %s", totalItems, path)
 	return nil
 }
@@ -166,6 +193,7 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string) error {
 func validate(seed SeedFile) error {
 	providerIDs := map[string]struct{}{}
 	providerNames := map[string]struct{}{}
+	appClientIDs := map[string]struct{}{}
 	userIdentifiers := map[string]struct{}{}
 	validConflictModes := []string{"", "skip", "warn", "update"}
 
@@ -199,6 +227,21 @@ func validate(seed SeedFile) error {
 		}
 	}
 
+	for _, app := range seed.Apps {
+		clientID := strings.TrimSpace(app.ClientID)
+		if clientID == "" {
+			return fmt.Errorf("validate seed file: app client_id is required")
+		}
+		if _, exists := appClientIDs[clientID]; exists {
+			return fmt.Errorf("validate seed file: duplicate app client_id %q", clientID)
+		}
+		appClientIDs[clientID] = struct{}{}
+
+		if !slices.Contains(validConflictModes, app.OnConflict) {
+			return fmt.Errorf("validate seed file: unsupported on_conflict %q for app %q", app.OnConflict, clientID)
+		}
+	}
+
 	return nil
 }
 
@@ -222,41 +265,329 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider, orgID string)
 	if p.Template == "" {
 		p.Template = "custom"
 	}
-	configMap := map[string]any{}
-	if p.Config != nil {
-		configMap = p.Config
-	}
-	overrideMap := map[string]string{}
-	if p.ClaimOverrides != nil {
-		overrideMap = p.ClaimOverrides
-	}
 	autoReg := true
 	if p.AutoRegister != nil {
 		autoReg = *p.AutoRegister
 	}
 
-	// Build entity data JSONB.
-	data := map[string]any{
-		"protocol":        p.Protocol,
-		"template":        p.Template,
-		"config":          configMap,
-		"claim_overrides": overrideMap,
-		"auto_register":   autoReg,
-		"enabled":         true,
-		"display_order":   0,
+	prov := providers.Provider{
+		ID:          provID,
+		OrgID:       orgID,
+		DisplayName: p.Name,
+		Protocol:    p.Protocol,
+		Connection:  map[string]any{},
+		Mapping: providers.Mapping{
+			Claims: map[string]string{},
+		},
+		Enabled: true,
+		CatalogRef: providers.CatalogRef{
+			TemplateID: p.Template,
+		},
 	}
-	dataJSON, _ := json.Marshal(data)
+	if p.Config != nil {
+		prov.Connection = p.Config
+	}
+	if p.ClaimOverrides != nil {
+		prov.Mapping.Claims = p.ClaimOverrides
+	}
+	if !autoReg {
+		prov.Linking.Mode = providers.LinkModeLinkOnly
+	}
+	prov = providers.Normalize(prov)
+
+	configJSON, _ := json.Marshal(prov.Connection)
+	overridesJSON, _ := json.Marshal(prov.Mapping.Claims)
+	metadataJSON, _ := json.Marshal(prov)
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE, 0, '{}', datetime('now'), datetime('now'))`,
-		provID, orgID, p.Name, p.Protocol, p.Template, string(dataJSON), "{}", autoReg)
+		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		provID,
+		orgID,
+		prov.DisplayName,
+		prov.Protocol,
+		providers.LegacyTemplateID(prov),
+		string(configJSON),
+		string(overridesJSON),
+		providers.LegacyAutoRegister(prov),
+		prov.Enabled,
+		providers.DisplayOrder(prov),
+		prov.Target.SchemaID,
+		string(metadataJSON),
+	)
 	if err != nil {
 		return err
 	}
 
 	logging.Printf("[seed] created provider %q (id: %s)", p.Name, provID)
 	return nil
+}
+
+func seedApp(ctx context.Context, tx *sql.Tx, app SeedApp, orgID string) error {
+	onConflict := app.OnConflict
+	if onConflict == "" {
+		onConflict = "skip"
+	}
+
+	var existingID string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM apps WHERE client_id = ?`, app.ClientID).Scan(&existingID)
+	if err == nil {
+		switch onConflict {
+		case "update":
+			logging.Printf("[seed] app %q already exists, updating (on_conflict: update)", app.ClientID)
+			return updateExistingApp(ctx, tx, existingID, app, orgID)
+		case "warn":
+			logging.Printf("[seed] WARN: app %q already exists, skipping (on_conflict: warn)", app.ClientID)
+			return nil
+		default:
+			logging.Printf("[seed] app %q already exists, skipping", app.ClientID)
+			return nil
+		}
+	}
+
+	appID := id.New()
+	state := app.State
+	if state == "" {
+		state = "active"
+	}
+
+	schemaRec, err := resolveSeedAppSchema(ctx, tx, app.SchemaID)
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]any{
+		"client_name": app.Name,
+		"app_type":    normalizeSeedAppType(app.AppType),
+	}
+	if len(app.RedirectURIs) > 0 {
+		payload["redirect_uris"] = append([]string(nil), app.RedirectURIs...)
+	}
+	if len(app.PostLogoutRedirectURIs) > 0 {
+		payload["post_logout_redirect_uris"] = append([]string(nil), app.PostLogoutRedirectURIs...)
+	}
+	if len(app.GrantTypes) > 0 {
+		payload["grant_types"] = append([]string(nil), app.GrantTypes...)
+	}
+	if len(app.ResponseTypes) > 0 {
+		payload["response_types"] = append([]string(nil), app.ResponseTypes...)
+	}
+	if app.Metadata != nil {
+		payload["metadata"] = app.Metadata
+	}
+	payload, err = schema.ObjectMap(payload)
+	if err != nil {
+		return err
+	}
+	if err := schema.ValidateData(schemaRec.Schema, payload); err != nil {
+		return err
+	}
+
+	redirectURIs := payload["redirect_uris"]
+	if redirectURIs == nil {
+		redirectURIs = []string{}
+	}
+	grantTypes := payload["grant_types"]
+	if grantTypes == nil {
+		grantTypes = []string{"authorization_code"}
+	}
+	responseTypes := payload["response_types"]
+	if responseTypes == nil {
+		responseTypes = []string{"code"}
+	}
+
+	redirectJSON, _ := json.Marshal(redirectURIs)
+	grantJSON, _ := json.Marshal(grantTypes)
+	responseJSON, _ := json.Marshal(responseTypes)
+
+	clientSecret := ""
+	if app.ClientSecret != "" {
+		clientSecret, err = auth.HashSecret(app.ClientSecret)
+		if err != nil {
+			return fmt.Errorf("hash client secret: %w", err)
+		}
+	}
+
+	metadataJSON := map[string]any{}
+	if len(app.PostLogoutRedirectURIs) > 0 {
+		metadataJSON["post_logout_redirect_uris"] = append([]string(nil), app.PostLogoutRedirectURIs...)
+	}
+	if app.Metadata != nil {
+		metadataJSON["metadata"] = app.Metadata
+	}
+	encodedMetadata, _ := json.Marshal(metadataJSON)
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO apps (id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		appID,
+		orgID,
+		app.Name,
+		normalizeSeedAppType(app.AppType),
+		app.ClientID,
+		clientSecret,
+		string(redirectJSON),
+		string(grantJSON),
+		string(responseJSON),
+		state,
+		schemaRec.ID,
+		string(encodedMetadata),
+	)
+	if err != nil {
+		return err
+	}
+
+	logging.Printf("[seed] created app %q (id: %s)", app.ClientID, appID)
+	return nil
+}
+
+func updateExistingApp(ctx context.Context, tx *sql.Tx, appID string, app SeedApp, orgID string) error {
+	schemaRec, err := resolveSeedAppSchema(ctx, tx, app.SchemaID)
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]any{
+		"client_name": app.Name,
+		"app_type":    normalizeSeedAppType(app.AppType),
+	}
+	if len(app.RedirectURIs) > 0 {
+		payload["redirect_uris"] = append([]string(nil), app.RedirectURIs...)
+	}
+	if len(app.PostLogoutRedirectURIs) > 0 {
+		payload["post_logout_redirect_uris"] = append([]string(nil), app.PostLogoutRedirectURIs...)
+	}
+	if len(app.GrantTypes) > 0 {
+		payload["grant_types"] = append([]string(nil), app.GrantTypes...)
+	}
+	if len(app.ResponseTypes) > 0 {
+		payload["response_types"] = append([]string(nil), app.ResponseTypes...)
+	}
+	if app.Metadata != nil {
+		payload["metadata"] = app.Metadata
+	}
+	payload, err = schema.ObjectMap(payload)
+	if err != nil {
+		return err
+	}
+	if err := schema.ValidateData(schemaRec.Schema, payload); err != nil {
+		return err
+	}
+
+	redirectURIs := payload["redirect_uris"]
+	if redirectURIs == nil {
+		redirectURIs = []string{}
+	}
+	redirectJSON, _ := json.Marshal(redirectURIs)
+	grantTypes := payload["grant_types"]
+	if grantTypes == nil {
+		grantTypes = []string{"authorization_code"}
+	}
+	responseTypes := payload["response_types"]
+	if responseTypes == nil {
+		responseTypes = []string{"code"}
+	}
+	grantJSON, _ := json.Marshal(grantTypes)
+	responseJSON, _ := json.Marshal(responseTypes)
+
+	clientSecret := ""
+	if app.ClientSecret != "" {
+		clientSecret, err = auth.HashSecret(app.ClientSecret)
+		if err != nil {
+			return fmt.Errorf("hash client secret: %w", err)
+		}
+	} else {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(client_secret, '') FROM apps WHERE id = ?`, appID).Scan(&clientSecret); err != nil {
+			return err
+		}
+	}
+
+	state := app.State
+	if state == "" {
+		state = "active"
+	}
+
+	metadataJSON := map[string]any{}
+	if len(app.PostLogoutRedirectURIs) > 0 {
+		metadataJSON["post_logout_redirect_uris"] = append([]string(nil), app.PostLogoutRedirectURIs...)
+	}
+	if app.Metadata != nil {
+		metadataJSON["metadata"] = app.Metadata
+	}
+	encodedMetadata, _ := json.Marshal(metadataJSON)
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE apps
+		 SET org_id = ?, name = ?, app_type = ?, client_secret = ?, redirect_uris = ?, grant_types = ?, response_types = ?, state = ?, schema_id = ?, metadata = ?, updated_at = datetime('now')
+		 WHERE id = ?`,
+		orgID,
+		app.Name,
+		normalizeSeedAppType(app.AppType),
+		clientSecret,
+		string(redirectJSON),
+		string(grantJSON),
+		string(responseJSON),
+		state,
+		schemaRec.ID,
+		string(encodedMetadata),
+		appID,
+	)
+	return err
+}
+
+func resolveSeedAppSchema(ctx context.Context, tx *sql.Tx, schemaID string) (*schema.SchemaRecord, error) {
+	if strings.TrimSpace(schemaID) != "" {
+		var rec schema.SchemaRecord
+		err := tx.QueryRowContext(ctx,
+			`SELECT id, type, schema FROM schemas WHERE id = ?`,
+			schemaID,
+		).Scan(&rec.ID, &rec.Type, &rec.Schema)
+		if err != nil {
+			return nil, err
+		}
+		if rec.Type != "app" {
+			return nil, fmt.Errorf("schema %q is type %q, not an app schema", rec.ID, rec.Type)
+		}
+		return &rec, nil
+	}
+
+	var rec schema.SchemaRecord
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, type, schema
+		 FROM schemas
+		 WHERE type = 'app' AND is_default = true
+		 ORDER BY created_at ASC
+		 LIMIT 1`,
+	).Scan(&rec.ID, &rec.Type, &rec.Schema)
+	if err == nil {
+		return &rec, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, type, schema
+		 FROM schemas
+		 WHERE type = 'app'
+		 ORDER BY version DESC, created_at ASC
+		 LIMIT 1`,
+	).Scan(&rec.ID, &rec.Type, &rec.Schema)
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func normalizeSeedAppType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", "oidc":
+		return "web"
+	case "api":
+		return "m2m"
+	default:
+		return strings.TrimSpace(value)
+	}
 }
 
 func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID string) error {

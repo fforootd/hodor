@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net"
 	"net/http"
@@ -33,7 +34,7 @@ type Handler struct {
 	db             *database.DB
 	passwords      *auth.Passwords
 	api            SessionCreator
-	notify         notify.Channel
+	notifier       *notify.Service
 	baseURL        string
 	flows          *FlowStore
 	cookies        *session.CookieConfig
@@ -44,7 +45,7 @@ type Handler struct {
 }
 
 // New creates a new login API handler.
-func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, cookies *session.CookieConfig, resolver *loginflow.Resolver) *Handler {
+func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, cookies *session.CookieConfig, resolver *loginflow.Resolver, notifier *notify.Service, baseURL string) *Handler {
 	// Generate a random HMAC key for Altcha PoW challenges.
 	// In production, this should come from config/secrets.
 	hmacKey, _ := captcha.GenerateHMACKey()
@@ -53,8 +54,8 @@ func New(db *database.DB, passwords *auth.Passwords, restAPI SessionCreator, coo
 		db:             db,
 		passwords:      passwords,
 		api:            restAPI,
-		notify:         notify.NewStdout(),
-		baseURL:        "http://localhost:8080",
+		notifier:       notifier,
+		baseURL:        baseURL,
 		flows:          NewFlowStore(),
 		cookies:        cookies,
 		captchaHMACKey: hmacKey,
@@ -376,7 +377,8 @@ func (h *Handler) getResolvedConfigStrict(r *http.Request, flowIDOverride string
 
 func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email string `json:"email"`
+		Email   string `json:"email"`
+		Purpose string `json:"purpose,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
@@ -388,109 +390,127 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 		httputil.WriteError(w, http.StatusBadRequest, "email is required")
 		return
 	}
-
-	// Look up existing identity.
-	var userID string
-	var purpose string
-	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id FROM users WHERE identifier = ?`, email,
-	).Scan(&userID)
-
-	if err == sql.ErrNoRows {
-		// REGISTRATION: create identity in pending state.
-		purpose = "register"
-		newID := id.New()
-		schemaRec, schemaErr := schema.ResolveDefaultHumanUserSchema(r.Context(), h.db.SQL())
-		if schemaErr != nil {
-			logging.Printf("[magic-link] default human user schema unavailable: %v", schemaErr)
-			httputil.WriteError(w, http.StatusInternalServerError, "registration is not available")
-			return
-		}
-
-		payload := schema.MaterializeUserData(schemaRec.Schema, email, email, map[string]any{})
-		if validateErr := schema.ValidateData(schemaRec.Schema, payload); validateErr != nil {
-			logging.Printf("[magic-link] default schema rejected pending identity for %s: %v", email, validateErr)
-			httputil.WriteError(w, http.StatusInternalServerError, "registration is not available")
-			return
-		}
-
-		tx, txErr := h.db.SQL().BeginTx(r.Context(), nil)
-		if txErr != nil {
-			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
-			return
-		}
-		defer tx.Rollback()
-
-		_, err = tx.ExecContext(r.Context(),
-			`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, 1, ?, ?, 'pending', ?, '{}', datetime('now'), datetime('now'))`,
-			newID, email, email, schemaRec.ID,
-		)
-		if err != nil {
-			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
-			return
-		}
-		if err := uniqueness.EnforceFromIdentifier(r.Context(), tx, newID, "1", email); err != nil {
-			httputil.WriteError(w, http.StatusConflict, "identifier already exists")
-			return
-		}
-		if err := uniqueness.Enforce(r.Context(), tx, newID, "1", uniqueness.ExtractConstraints(schemaRec.Schema), payload); err != nil {
-			httputil.WriteError(w, http.StatusConflict, "identifier already exists")
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			httputil.WriteError(w, http.StatusInternalServerError, "failed to create identity")
-			return
-		}
-
-		userID = newID
-		logging.Printf("[magic-link] created pending identity %s for %s", userID, email)
-	} else if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
-		return
-	} else {
-		purpose = "login"
+	purpose := strings.TrimSpace(req.Purpose)
+	if purpose == "" {
+		purpose = "auto"
 	}
 
-	// Generate token.
-	token, err := crypto.RandomBase64URL(32)
+	userID, resolvedPurpose, err := h.queueMagicLink(r.Context(), email, purpose)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "token generation failed")
+		httputil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	expiresAt := time.Now().Add(15 * time.Minute)
-
-	// Store token.
-	_, err = h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO tokens (id, type, token_hash, user_id, expires_at) VALUES (?, 'magic_link', ?, ?, ?)`,
-		token, token, userID, expiresAt.Format(time.RFC3339),
-	)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to store token")
-		return
-	}
-
-	// Send notification via channel (stdout by default).
-	subject := "Sign in to Zitadel"
-	if purpose == "register" {
-		subject = "Complete your Zitadel registration"
-	}
-	body := notify.FormatMagicLink(h.baseURL, token, expiresAt)
-	if err := h.notify.Send(email, subject, body); err != nil {
-		logging.Printf("[magic-link] notification send error: %v", err)
-	}
-
-	// Emit event.
 	h.api.EmitAuthEvent(r.Context(), "auth.magic_link_sent", userID, map[string]any{
 		"email":   email,
-		"purpose": purpose,
+		"purpose": resolvedPurpose,
 	})
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":  "sent",
-		"purpose": purpose,
+		"purpose": resolvedPurpose,
 		"message": "Check your email for a sign-in link.",
 	})
+}
+
+func (h *Handler) queueMagicLink(ctx context.Context, email, requestedPurpose string) (string, string, error) {
+	var userID string
+	err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ?`, email).Scan(&userID)
+	if err != nil && err != sql.ErrNoRows {
+		return "", "", errors.New("internal error")
+	}
+
+	purpose := requestedPurpose
+	if purpose == "" || purpose == "auto" {
+		if err == sql.ErrNoRows {
+			purpose = "register"
+		} else {
+			purpose = "login"
+		}
+	}
+
+	tx, txErr := h.db.SQL().BeginTx(ctx, nil)
+	if txErr != nil {
+		return "", "", errors.New("failed to create notification request")
+	}
+	defer tx.Rollback()
+
+	if err == sql.ErrNoRows {
+		newID := id.New()
+		schemaRec, schemaErr := schema.ResolveDefaultHumanUserSchema(ctx, h.db.SQL())
+		if schemaErr != nil {
+			logging.Printf("[magic-link] default human user schema unavailable: %v", schemaErr)
+			return "", "", errors.New("registration is not available")
+		}
+		payload := schema.MaterializeUserData(schemaRec.Schema, email, email, map[string]any{})
+		if validateErr := schema.ValidateData(schemaRec.Schema, payload); validateErr != nil {
+			logging.Printf("[magic-link] default schema rejected pending identity for %s: %v", email, validateErr)
+			return "", "", errors.New("registration is not available")
+		}
+		if _, execErr := tx.ExecContext(ctx,
+			`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, 1, ?, ?, 'pending', ?, '{}', datetime('now'), datetime('now'))`,
+			newID, email, email, schemaRec.ID,
+		); execErr != nil {
+			return "", "", errors.New("failed to create identity")
+		}
+		if uniqErr := uniqueness.EnforceFromIdentifier(ctx, tx, newID, "1", email); uniqErr != nil {
+			return "", "", errors.New("identifier already exists")
+		}
+		if uniqErr := uniqueness.Enforce(ctx, tx, newID, "1", uniqueness.ExtractConstraints(schemaRec.Schema), payload); uniqErr != nil {
+			return "", "", errors.New("identifier already exists")
+		}
+		userID = newID
+		logging.Printf("[magic-link] created pending identity %s for %s", userID, email)
+	}
+
+	token, err := crypto.RandomBase64URL(32)
+	if err != nil {
+		return "", "", errors.New("token generation failed")
+	}
+	expiresAt := time.Now().UTC().Add(15 * time.Minute)
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO tokens (id, type, token_hash, user_id, expires_at) VALUES (?, 'magic_link', ?, ?, ?)`,
+		token, token, userID, expiresAt.Format(time.RFC3339),
+	); err != nil {
+		return "", "", errors.New("failed to store token")
+	}
+
+	if h.notifier != nil {
+		templateKey := "magic_link_login"
+		switch purpose {
+		case "register":
+			templateKey = "magic_link_register"
+		case "invite":
+			templateKey = "invite"
+		case "reset":
+			templateKey = "password_reset"
+		case "verification":
+			templateKey = "email_verification"
+		}
+		link := fmt.Sprintf("%s/v1/auth/magic-link/verify?token=%s", strings.TrimRight(h.baseURL, "/"), token)
+		if _, err := h.notifier.EnqueueTx(ctx, tx, notify.RequestSpec{
+			OrgID:         "1",
+			AggregateID:   userID,
+			AggregateType: "user",
+			Medium:        notify.MediumEmail,
+			Recipient:     email,
+			TemplateKey:   templateKey,
+			Payload: map[string]any{
+				"email":      email,
+				"identifier": email,
+				"purpose":    purpose,
+				"link":       link,
+				"expires_at": expiresAt.Format(time.RFC3339),
+			},
+		}); err != nil {
+			return "", "", errors.New("failed to queue notification")
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", "", errors.New("failed to create notification request")
+	}
+	return userID, purpose, nil
 }
 
 func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) {

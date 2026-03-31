@@ -22,6 +22,7 @@ func PublicRoutes() map[string][]string {
 			"/openapi.json",
 			"/v1/branding",
 			"/v1/auth/settings",
+			"/v1/auth/sso/",
 			"/v1/login/",
 			"/v1/providers/templates",
 			"/v1/schemas",
