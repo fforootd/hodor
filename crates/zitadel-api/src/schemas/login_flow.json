@@ -1,0 +1,338 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "x-table": "login_flows",
+  "description": "Login Flow — a schema-driven login UX configuration that defines steps, captcha, fingerprinting, rate limits, audience targeting, and layout behavior. Supports gradual rollout via schema_id and user_id targeting. Inherits from the instance default and can currently be overridden at the instance or org level.",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable flow name (e.g. 'Passkey-First Login', 'High-Security MFA')"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional longer description of this flow's purpose"
+    },
+    "is_default": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, this flow is the default for its scope (instance or org)"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["draft", "testing", "active", "archived"],
+      "default": "draft",
+      "description": "Lifecycle state. 'active' = served to all matching users. 'testing' = served only to audience.user_ids. 'draft'/'archived' = never served."
+    },
+    "priority": {
+      "type": "integer",
+      "default": 0,
+      "description": "Higher priority flows are evaluated first. Most-precise-match-wins: user_id > schema_id > org_id > default."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["instance", "org"],
+      "default": "instance",
+      "description": "Level at which this flow applies. Current runtime support is limited to instance and org targeting."
+    },
+    "audience": {
+      "type": "object",
+      "description": "Who sees this flow. Empty = everyone (when is_default=true). Most-precise-match-wins resolution.",
+      "properties": {
+        "schema_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Users with these schema_ids see this flow (specificity level 3)"
+        },
+        "user_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Explicit user allowlist for testing (specificity level 4, highest)"
+        },
+        "org_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Only users in these orgs (specificity level 2)"
+        },
+        "metadata_filter": {
+          "type": "object",
+          "description": "Match against user metadata key-values (e.g. {\"cohort\": \"beta\"})",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "auth_methods": {
+      "type": "object",
+      "description": "Auth method overrides for this flow (passkey, password, magic_link, sso). Same shape as x-auth-methods.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "position": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "sso": {
+      "type": "object",
+      "description": "SSO provider selection for this flow. Controls which providers appear; provider secrets and mappings still live on provider resources.",
+      "properties": {
+        "providers": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["all_enabled", "allowlist"],
+              "default": "all_enabled"
+            },
+            "ids": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "captcha": {
+      "type": "object",
+      "description": "Captcha configuration (x-captcha)",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["altcha", "hcaptcha", "recaptcha", "turnstile", "none"],
+          "default": "altcha"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["always", "risk_based", "never"],
+          "default": "risk_based"
+        },
+        "difficulty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 3
+        },
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["identifier", "password"],
+          "description": "Which login steps require captcha"
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "description": "Browser fingerprinting configuration (x-fingerprint)",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["thumbmarkjs", "built_in"],
+          "default": "thumbmarkjs"
+        },
+        "persist": {
+          "type": "boolean",
+          "default": true,
+          "description": "Store fingerprint across sessions for returning-user detection"
+        },
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["identifier"],
+          "description": "Which login steps trigger fingerprint collection"
+        }
+      }
+    },
+    "rate_limit": {
+      "type": "object",
+      "description": "Rate limiting configuration (x-rate-limit)",
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "default": 5
+        },
+        "window_seconds": {
+          "type": "integer",
+          "default": 300
+        },
+        "lockout_seconds": {
+          "type": "integer",
+          "default": 900
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["ip", "identifier", "fingerprint"],
+          "default": "ip"
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "OTel telemetry configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Collect browser telemetry (page load, interactions)"
+        },
+        "sample_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1.0,
+          "description": "Client-side sampling rate (1.0 = all, 0.1 = 10%)"
+        }
+      }
+    },
+    "registration": {
+      "type": "object",
+      "description": "Registration form configuration — controls which user schema fields appear on the sign-up form.",
+      "properties": {
+        "user_schema": {
+          "type": "string",
+          "description": "User schema type to create from (e.g. 'human_user'). If absent, uses the default user schema."
+        },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Whitelist of user schema property names to show on registration. Empty = show all non-hidden fields."
+        },
+        "field_order": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Rendering order of fields. If absent, uses schema property order."
+        }
+      }
+    },
+    "branding": {
+      "type": "object",
+      "description": "Layout and branding configuration for the login UI.",
+      "properties": {
+        "heading": {
+          "type": "string",
+          "description": "Login page heading text"
+        },
+        "description": {
+          "type": "string",
+          "description": "Login page description/subtitle text"
+        },
+        "logo_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Logo URL for the login page"
+        },
+        "layout": {
+          "type": "string",
+          "enum": ["centered", "split", "muted", "card_image", "minimal"],
+          "default": "centered",
+          "description": "Login page layout style"
+        },
+        "dark_mode": {
+          "type": "string",
+          "enum": ["light", "dark", "auto"],
+          "default": "light"
+        },
+        "cover_image": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL for split/card_image layouts"
+        },
+        "colors": {
+          "type": "object",
+          "description": "Brand colors",
+          "properties": {
+            "primary": { "type": "string" },
+            "primary_foreground": { "type": "string" },
+            "background": { "type": "string" },
+            "surface": { "type": "string" },
+            "text": { "type": "string" },
+            "muted": { "type": "string" },
+            "error": { "type": "string" }
+          },
+          "additionalProperties": { "type": "string" }
+        },
+        "font_family": {
+          "type": "string",
+          "description": "CSS font-family value"
+        },
+        "font_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Google Fonts or custom font URL"
+        },
+        "custom_css": {
+          "type": "string",
+          "description": "Custom CSS injected into the login shadow DOM"
+        },
+        "terms_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "privacy_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "social_position": {
+          "type": "string",
+          "enum": ["top", "bottom"],
+          "default": "bottom",
+          "description": "Position of SSO/social buttons relative to the form"
+        },
+        "consent": {
+          "type": "array",
+          "description": "Consent checkboxes for registration",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string", "description": "Supports markdown links" },
+              "required": { "type": "boolean", "default": false }
+            },
+            "required": ["id", "label"]
+          }
+        },
+        "hide_registration": {
+          "type": "boolean",
+          "default": false
+        },
+        "hide_zitadel_branding": {
+          "type": "boolean",
+          "default": false
+        },
+        "border_radius": {
+          "type": "string",
+          "enum": ["sm", "md", "lg", "xl", "full"],
+          "default": "md"
+        }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "description": "Per-step overrides (keyed by step name)",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "skip": { "type": "boolean", "default": false },
+          "captcha_required": { "type": "boolean" },
+          "mfa_required": { "type": "boolean" },
+          "custom_heading": { "type": "string" },
+          "custom_description": { "type": "string" }
+        }
+      }
+    },
+    "template_id": {
+      "type": "string",
+      "description": "Marketplace template this flow was installed from"
+    },
+    "template_version": {
+      "type": "string",
+      "description": "Version of the marketplace template"
+    }
+  },
+  "required": [
+    "display_name"
+  ]
+}

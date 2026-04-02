@@ -4,94 +4,78 @@
 
 ```bash
 # Full-stack with hot reload (recommended):
-npm ci && make dev-hot
-# → Vite on http://localhost:5173 (HMR) + Go on http://localhost:8080
+npm ci && make dev
+# → Vite on http://localhost:5173 (HMR) + Rust on http://localhost:8080
 # → Open http://localhost:5173 for the UI
 
-# Go-only (no frontend needed):
-go run -tags devweb ./cmd/zitadel start -c fixtures/zitadel.dev.toml
+# Backend-only (no frontend needed):
+cargo build && ./target/debug/zitadel start -c fixtures/zitadel.dev.toml
 ```
 
 **Dev credentials:** admin / admin123
-**Dev PAT:** `zit_pat_zitadel-dev-pat-do-not-use-in-production`
+**Dev PAT:** `zitadel-dev-pat-do-not-use-in-production`
 (Defined in `fixtures/zitadel.dev.toml`)
-
-## The `-tags devweb` Build Tag
-
-The Go binary embeds the built frontend via `//go:embed all:webdist` in `internal/server/webdist_prod.go`. The `internal/server/webdist/` directory is gitignored and only produced by `make webdist` (requires npm ci + full Vite build).
-
-**For local Go commands, always use `-tags devweb`** to skip the embed requirement:
-
-```bash
-go build -tags devweb ./...
-go test -tags devweb ./...
-go test -tags devweb -v ./internal/api/...
-go vet -tags devweb ./...
-```
-
-Without the tag, you need `make webdist` first (or `make ensure-webdist` for placeholders).
 
 ## Project Structure
 
 ```
-cmd/zitadel/main.go          Cobra CLI entry point (start, migrate, openapi-export)
-internal/
-  server/server.go            HTTP mux — all route registration happens here
-  server/webdist_prod.go      Production: embeds built frontend assets
-  server/webdist_dev.go       Dev: empty FS (Vite serves assets instead)
-  api/api.go                  REST API handlers with OpenAPI annotations
-  oidcop/                     OIDC provider (discovery, token, authorize)
-  login/                      Login flow, SSO, password auth
-  database/                   DB layer (SQLite + Postgres)
-    migrations/sqlite/        SQLite migration files (00001_initial.sql, ...)
-    migrations/postgres/       Postgres migration files
-  fga/                        OpenFGA authorization model and middleware
-  session/                    Cookie/session management
-  config/config.go            TOML config loading with env var overrides
-  catalog/                    Template catalog (actions, providers, schemas)
-  auth/                       Password hashing (argon2id)
-  schema/                     JSON Schema validation
+Cargo.toml                        Workspace root
+crates/
+  zitadel/src/main.rs             CLI entry point (start, migrate, seed, openapi-export)
+  zitadel-server/                 HTTP mux — all route registration happens here
+  zitadel-api/                    REST API handlers with auth middleware
+  zitadel-db/                     DB layer (SQLite + Postgres via sqlx)
+  zitadel-oidc/                   OIDC provider (discovery, token, authorize)
+  zitadel-login/                  Login flow, password auth, branding
+  zitadel-auth/                   Password hashing (argon2id), session cookies
+  zitadel-crypto/                 AES-256-GCM envelope encryption
+  zitadel-config/                 TOML config loading with env var overrides
+  zitadel-cedar/                  Cedar authorization model (POC)
+  zitadel-catalog/                Template catalog (stub)
+  zitadel-events/                 Event system (stub)
+  zitadel-notify/                 Notification service (stub)
+  zitadel-schema/                 JSON Schema validation (stub)
+  zitadel-risk/                   Risk assessment (stub)
+  zitadel-ratelimit/              Rate limiting (stub)
+migrations/
+  sqlite/                         SQLite migration files (00001_initial.sql, ...)
+  postgres/                       Postgres migration files
 web/
-  src/login/                  Vue SPA — login/auth UI
-  src/console/                Vue SPA — admin console
-  src/account/                Vue SPA — account self-service
-  vite.config.ts              Vite config with backend proxy (:5173 → :8080)
+  src/login/                      Vue SPA — login/auth UI
+  src/console/                    Vue SPA — admin console
+  src/account/                    Vue SPA — account self-service
+  vite.config.ts                  Vite config with backend proxy (:5173 → :8080)
 fixtures/
-  zitadel.dev.toml            Dev config (mock OIDC, seed data, SQLite)
-  dev-seed.yaml               Seed data loaded on startup
+  zitadel.dev.toml                Dev config (SQLite, mock OIDC, seed data)
+  seeds/frontend.yaml             Default seed pack (admin + 3 test users)
 docs/
-  000-index.md                ADR index — check before proposing structural changes
-  GLOSSARY.md                 Domain vocabulary (Projects=Groups, Apps=Identity Schemas)
-  design/developer-experience.md  Zero-config philosophy
+  000-index.md                    ADR index
+  GLOSSARY.md                     Domain vocabulary
 ```
 
 ## Key Make Targets
 
 | Command | Purpose |
 |---------|---------|
-| `make dev-hot` | Vite HMR + Go server (uses `-tags devweb`) |
-| `make dev-full` | Same as dev-hot + mock OIDC + seed data |
-| `make dev-clean` | Wipe DB and restart fresh |
-| `make dev` | Run with embedded assets (requires `make webdist` first) |
-| `make test` | Go tests (requires webdist) |
+| `make dev` | Vite HMR + Rust server (recommended for development) |
+| `make dev-embed` | Embedded assets + Rust server (production-like) |
+| `make dev-web` | Frontend-only on :5173 (needs backend at :8080) |
+| `make dev-reset` | Wipe DB and restart fresh |
+| `make test` | Rust tests (`cargo test --workspace`) |
 | `make test-web` | Vitest unit tests |
 | `make test-e2e` | Playwright E2E tests |
-| `make quality` | Full CI gate (fmt, vet, lint, typecheck, tests) |
-| `make ensure-webdist` | Create placeholder webdist for Go compilation |
-| `make generate` | Regenerate TypeScript SDK from OpenAPI spec |
+| `make quality` | Full CI gate (fmt, clippy, test, typecheck, vitest) |
+| `make build` | Release build (`cargo build --release`) |
+| `make ensure-webdist` | Create placeholder web/dist for compilation |
 
-## Testing
+## Building & Testing
 
 ```bash
-# Go unit tests (fast, no webdist needed):
-go test -tags devweb -v ./internal/api/...
-go test -tags devweb -v ./internal/server/...
+# Rust tests:
+cargo test --workspace
 
-# All Go tests:
-go test -tags devweb ./...
-
-# Go tests with race detector (CI parity):
-go test -tags devweb -race ./...
+# Rust with clippy:
+cargo clippy --workspace -- -D warnings
 
 # Web (Vitest):
 npm test -w web
@@ -99,37 +83,35 @@ npm test -w web
 # TypeScript typecheck:
 npm run typecheck -w web
 
-# ESLint:
-npm run lint -w web
-
 # Full CI-equivalent gate:
 make quality
 ```
 
 ## Conventions
 
-- **Pure Go** single binary — no CGO, no external processes by default (Level 0). Uses `modernc.org/sqlite` for local/dev; scales to Postgres + Redis + queues at higher deployment profiles. See `docs/design/storage-architecture.md`.
-- **REST API** with OpenAPI 3.1 spec generated from Go type annotations. Not gRPC.
+- **Pure Rust** single binary — no CGO, no external processes. Uses sqlx with SQLite (default) or Postgres.
+- **REST API** with plans for OpenAPI 3.1 spec generation.
 - **Frontend:** Vue 3 + shadcn-vue + Tailwind CSS. Three separate SPAs (login, console, account).
 - **ADRs** in `docs/adr/` govern architectural decisions — check before proposing structural changes.
 - **Domain vocabulary** in `docs/GLOSSARY.md` — use correct terminology.
 - **Config cascade:** CLI flags > env vars > TOML config > defaults. Every field is optional.
 - **Database:** SQLite default, Postgres supported. Migrations in both dialects.
-- **Authorization:** Embedded OpenFGA (Zanzibar-style). Root instance has implicit wildcard access.
+- **Authorization:** Cedar-based (POC) replacing OpenFGA. Root instance has implicit wildcard access.
 
 ## Common Patterns
 
 **Adding a REST endpoint:**
-1. Add handler function in `internal/api/`
-2. Register route in `internal/api/api.go` (or relevant sub-file)
-3. Add OpenAPI annotation struct for auto-generated docs
+1. Add handler function in `crates/zitadel-api/src/`
+2. Register route in the module's `routes()` function
+3. Register module in `crates/zitadel-api/src/lib.rs`
 
 **Adding a DB migration:**
-1. Create next numbered `.sql` file in `internal/database/migrations/sqlite/`
-2. Create matching file in `internal/database/migrations/postgres/`
-3. Migrations run automatically on startup (default `migrate = "auto"`)
+1. Create next numbered `.sql` file in `migrations/sqlite/`
+2. Create matching file in `migrations/postgres/`
+3. Add `include_str!` entry in `crates/zitadel-db/src/migrate.rs`
+4. Migrations run automatically on startup (default `migrate = "auto"`)
 
 **Adding a frontend route:**
 1. Add route to the relevant SPA router: `web/src/{login,console,account}/router.ts`
 2. Create Vue component in the corresponding directory
-3. If it's a new top-level path, add SPA fallback in `web/vite.config.ts` and handler in `server.go`
+3. If it's a new top-level path, add SPA fallback in `crates/zitadel-server/src/assets.rs`

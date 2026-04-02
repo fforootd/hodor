@@ -11,6 +11,9 @@ pub mod search;
 pub mod settings;
 pub mod providers;
 pub mod console;
+pub mod schemas;
+pub mod login_flows;
+pub mod fga;
 pub mod response;
 
 use axum::Router;
@@ -54,6 +57,12 @@ pub fn routes(state: ApiState) -> Router {
         .merge(providers::routes())
         // Console bootstrap + counts
         .merge(console::routes())
+        // Schemas + meta-schema
+        .merge(schemas::routes())
+        // Login flows
+        .merge(login_flows::routes())
+        // FGA / authorization
+        .merge(fga::routes())
         // Auth middleware — validates Bearer token or session cookie.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

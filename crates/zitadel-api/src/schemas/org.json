@@ -1,0 +1,41 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "x-table": "orgs",
+
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Organization display name"
+    },
+    "description": {
+      "type": "string"
+    },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "primary_color": { "type": "string", "description": "Primary brand color" },
+        "logo_url":      { "type": "string", "format": "uri" },
+        "logo_dark_url": { "type": "string", "format": "uri" },
+        "font_family":   { "type": "string" },
+        "favicon_url":   { "type": "string", "format": "uri" }
+      }
+    },
+    "notification_channels": {
+      "type": "object",
+      "properties": {
+        "email_from":    { "type": "string", "format": "email" },
+        "smtp_host":     { "type": "string" },
+        "smtp_port":     { "type": "integer" },
+        "smtp_user":     { "type": "string" },
+        "sms_provider":  { "type": "string", "enum": ["twilio", "custom"] },
+        "webhook_url":   { "type": "string", "format": "uri" }
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "required": ["display_name"]
+}

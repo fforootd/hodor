@@ -1,0 +1,84 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "x-table": "actions",
+  "description": "Pipeline action — an expr program bound to a pipeline hook that triggers on a condition.",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Action display name"
+    },
+    "description": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "hook": {
+      "type": "string",
+      "enum": [
+        "on_request",
+        "pre_auth",
+        "auth",
+        "post_auth",
+        "on_token",
+        "on_event"
+      ],
+      "description": "Pipeline hook (attachment point)"
+    },
+    "priority": {
+      "type": "integer",
+      "default": 50,
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Execution order within hook (lower = earlier)"
+    },
+    "trigger": {
+      "type": "string",
+      "default": "true",
+      "description": "Expr condition — action only fires if this evaluates to true"
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "expr",
+        "rate_limit",
+        "captcha",
+        "risk",
+        "webhook",
+        "fga",
+        "built-in"
+      ],
+      "description": "Action type (engine)"
+    },
+    "config": {
+      "type": "object",
+      "description": "Type-specific configuration"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "default": 5000,
+      "description": "Max execution time in milliseconds"
+    },
+    "fail_open": {
+      "type": "boolean",
+      "default": false,
+      "description": "Allow request if action errors (true) or block (false)"
+    },
+    "template_id": {
+      "type": "string",
+      "description": "Catalog template this action was installed from (for update tracking)"
+    },
+    "template_version": {
+      "type": "string",
+      "description": "Version of the catalog template when installed"
+    }
+  },
+  "required": [
+    "display_name",
+    "hook",
+    "action_type"
+  ]
+}

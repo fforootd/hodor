@@ -1,0 +1,104 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "x-table": "sessions",
+  "description": "Active user session. Ephemeral, high-write.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "readOnly": true
+    },
+    "user_id": {
+      "type": "string",
+      "description": "Authenticated user",
+      "x-ref": {
+        "resource": "users",
+        "display": "display_name",
+        "path": "/console/s/users/{id}",
+        "inverse": "sessions?user_id={id}"
+      }
+    },
+    "org_id": {
+      "type": "string"
+    },
+    "token_hash": {
+      "type": "string",
+      "description": "Session token identifier hash",
+      "x-sensitive": true
+    },
+    "auth_method": {
+      "type": "string",
+      "enum": [
+        "password",
+        "passkey",
+        "magic_link",
+        "sso",
+        "registration",
+        "pat",
+        "client_secret"
+      ],
+      "description": "How the session was created"
+    },
+    "provider_id": {
+      "type": "string",
+      "description": "Identity provider used to create the session, when auth_method=sso"
+    },
+    "provider_kind": {
+      "type": "string",
+      "description": "Provider family such as google, github, gitlab, entra, or custom"
+    },
+    "login_flow_id": {
+      "type": "string",
+      "description": "Login flow that created this session, when applicable"
+    },
+    "mfa_verified": {
+      "type": "boolean",
+      "default": false
+    },
+    "ip_address": {
+      "type": "string"
+    },
+    "user_agent": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Contextual session metadata"
+    },
+    "geo": {
+      "type": "object",
+      "properties": {
+        "country": {
+          "type": "string"
+        },
+        "city": {
+          "type": "string"
+        },
+        "lat": {
+          "type": "number"
+        },
+        "lng": {
+          "type": "number"
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "readOnly": true
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revoked_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "user_id",
+    "token_hash"
+  ]
+}

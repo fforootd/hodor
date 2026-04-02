@@ -1,0 +1,31 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "x-table": "groups",
+  "x-display": {
+    "alias": "Groups",
+    "singular": "Group",
+    "group": "access",
+    "path": "groups",
+    "icon": "👥",
+    "sort_order": 60
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "x-identifier": true
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": ["name"]
+}

@@ -1,0 +1,827 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zitadel.com/schemas/v1/entity-meta-schema",
+  "title": "Zitadel Entity Meta-Schema",
+  "description": "Catalog of entity types and annotation validation.",
+  "x-groups": {
+    "configure": {
+      "label": "Configure",
+      "sort_order": 2,
+      "display": "flat"
+    },
+    "marketplace": {
+      "label": "Marketplace",
+      "sort_order": 3,
+      "display": "flat"
+    },
+    "authorization": {
+      "label": "Authorization",
+      "sort_order": 4,
+      "display": "collapsible",
+      "icon": "shield-check"
+    },
+    "observability": {
+      "label": "Observability",
+      "sort_order": 5,
+      "display": "collapsible",
+      "icon": "activity"
+    },
+    "system": {
+      "label": "System",
+      "sort_order": 6,
+      "display": "collapsible",
+      "icon": "settings"
+    }
+  },
+  "x-catalog": {
+    "users": {
+      "group": "nav",
+      "alias": "Users",
+      "singular": "User",
+      "path": "users",
+      "icon": "👤",
+      "sort_order": 1,
+      "storage": "virtual",
+      "route": "/users",
+      "countable": true,
+      "aggregates": ["human_user", "service_user", "ai_agent"],
+      "fga_type": "entity",
+      "fga_scope": "instance"
+    },
+    "applications": {
+      "group": "nav",
+      "alias": "Applications",
+      "singular": "Application",
+      "path": "applications",
+      "icon": "📱",
+      "sort_order": 2,
+      "storage": "virtual",
+      "route": "/applications",
+      "countable": true,
+      "aggregates": ["app"],
+      "fga_type": "app",
+      "fga_scope": "org"
+    },
+    "human_user": {
+      "$ref": "schemas/human_user.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Users",
+      "singular": "User",
+      "path": "users",
+      "icon": "👤",
+      "sort_order": 1,
+      "required": true,
+      "storage": "dedicated",
+      "nav": "hidden",
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["member", "owner", "viewer"]
+        },
+        "claims": {
+          "model": "expr",
+          "direction": "outbound"
+        },
+        "login": {
+          "model": "built-in"
+        }
+      },
+      "fga_type": "entity",
+      "fga_scope": "instance"
+    },
+    "service_user": {
+      "$ref": "schemas/service_user.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Service Accounts",
+      "singular": "Service Account",
+      "path": "users",
+      "icon": "🔑",
+      "sort_order": 2,
+      "storage": "dedicated",
+      "nav": "hidden",
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["member", "owner"]
+        }
+      },
+      "fga_type": "entity",
+      "fga_scope": "instance"
+    },
+    "ai_agent": {
+      "$ref": "schemas/ai_agent.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "AI Agents",
+      "singular": "AI Agent",
+      "path": "users",
+      "icon": "🤖",
+      "sort_order": 3,
+      "storage": "dedicated",
+      "nav": "hidden",
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["owner", "viewer"]
+        }
+      },
+      "fga_type": "entity",
+      "fga_scope": "instance"
+    },
+    "app": {
+      "$ref": "schemas/app.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "OIDC Clients",
+      "singular": "OIDC Client",
+      "path": "apps",
+      "icon": "📱",
+      "sort_order": 1,
+      "storage": "dedicated",
+      "nav": "hidden",
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["owner", "viewer"]
+        },
+        "claims": {
+          "model": "expr",
+          "direction": "outbound"
+        }
+      },
+      "fga_type": "app",
+      "fga_scope": "org"
+    },
+    "org": {
+      "$ref": "schemas/org.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Organizations",
+      "singular": "Organization",
+      "path": "orgs",
+      "icon": "🏢",
+      "sort_order": 3,
+      "storage": "dedicated",
+      "route": "/orgs",
+      "countable": true,
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["member", "owner", "admin"]
+        }
+      },
+      "fga_type": "org",
+      "fga_scope": "instance"
+    },
+    "group": {
+      "$ref": "schemas/group.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Groups",
+      "singular": "Group",
+      "path": "groups",
+      "icon": "👥",
+      "sort_order": 4,
+      "storage": "dedicated",
+      "route": "/groups",
+      "countable": true,
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["member", "admin", "owner"]
+        }
+      },
+      "fga_type": "group",
+      "fga_scope": "org"
+    },
+    "project": {
+      "$ref": "schemas/project.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Projects",
+      "singular": "Project",
+      "path": "projects",
+      "icon": "📦",
+      "sort_order": 5,
+      "storage": "dedicated",
+      "route": "/projects",
+      "countable": true,
+      "engines": {
+        "authorization": {
+          "model": "fga",
+          "relations": ["member", "admin", "owner"]
+        }
+      },
+      "fga_type": "project",
+      "fga_scope": "org"
+    },
+    "action": {
+      "$ref": "schemas/action.json",
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "configure",
+      "alias": "Actions",
+      "singular": "Action",
+      "path": "actions",
+      "icon": "⚡",
+      "sort_order": 10,
+      "storage": "dedicated",
+      "installable": true,
+      "marketplace_category": "automation",
+      "fga_type": "action",
+      "fga_scope": "org"
+    },
+    "login_flow": {
+      "$ref": "schemas/login_flow.json",
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "configure",
+      "alias": "Login Flows",
+      "singular": "Login Flow",
+      "path": "login-flows",
+      "icon": "🔐",
+      "sort_order": 11,
+      "storage": "dedicated",
+      "countable": true,
+      "installable": true,
+      "marketplace_category": "login",
+      "engines": {
+        "login": {
+          "model": "schema-driven"
+        }
+      },
+      "fga_type": "login_flow",
+      "fga_scope": "instance"
+    },
+    "provider": {
+      "$ref": "schemas/provider.json",
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "configure",
+      "alias": "Providers",
+      "singular": "Provider",
+      "path": "providers",
+      "icon": "🔗",
+      "sort_order": 12,
+      "storage": "dedicated",
+      "installable": true,
+      "marketplace_category": "identity",
+      "route": "/providers",
+      "fga_type": "provider",
+      "fga_scope": "instance"
+    },
+    "endpoint": {
+      "group": "nav",
+      "nav_group": "configure",
+      "alias": "API & Protocols",
+      "singular": "API & Protocols",
+      "path": "api-protocols",
+      "icon": "🌐",
+      "sort_order": 13,
+      "storage": "dedicated",
+      "route": "/api-protocols",
+      "fga_type": "endpoint",
+      "fga_scope": "instance"
+    },
+    "schema": {
+      "group": "nav",
+      "nav_group": "system",
+      "alias": "Schemas",
+      "singular": "Schema",
+      "path": "schemas",
+      "icon": "📐",
+      "sort_order": 200,
+      "storage": "dedicated",
+      "route": "/schemas",
+      "fga_type": "schema",
+      "fga_scope": "instance"
+    },
+    "marketplace": {
+      "group": "nav",
+      "nav_group": "marketplace",
+      "alias": "Marketplace",
+      "singular": "Marketplace",
+      "path": "marketplace",
+      "icon": "📦",
+      "sort_order": 50,
+      "storage": "virtual",
+      "route": "/marketplace"
+    },
+    "overview": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Overview",
+      "singular": "Overview",
+      "path": "observability",
+      "icon": "📊",
+      "sort_order": 100,
+      "storage": "virtual",
+      "route": "/observability"
+    },
+    "explore": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Explore",
+      "singular": "Explore",
+      "path": "explore",
+      "icon": "🔍",
+      "sort_order": 101,
+      "storage": "virtual",
+      "route": "/observability/explore"
+    },
+    "event": {
+      "$ref": "schemas/event.json",
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Events",
+      "singular": "Event",
+      "path": "events",
+      "icon": "📋",
+      "sort_order": 102,
+      "storage": "dedicated",
+      "route": "/events"
+    },
+    "trace": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Traces",
+      "singular": "Trace",
+      "path": "traces",
+      "icon": "🔗",
+      "sort_order": 103,
+      "storage": "virtual",
+      "route": "/traces"
+    },
+    "session": {
+      "$ref": "schemas/session.json",
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Sessions",
+      "singular": "Session",
+      "path": "sessions",
+      "icon": "🔑",
+      "sort_order": 104,
+      "storage": "dedicated",
+      "route": "/sessions",
+      "fga_type": "session",
+      "fga_scope": "instance"
+    },
+    "fingerprint": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "observability",
+      "alias": "Fingerprints",
+      "singular": "Fingerprint",
+      "path": "fingerprints",
+      "icon": "🔍",
+      "sort_order": 105,
+      "storage": "dedicated",
+      "route": "/fingerprints"
+    },
+    "job": {
+      "$ref": "schemas/job.json",
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "system",
+      "alias": "Jobs",
+      "singular": "Job",
+      "path": "jobs",
+      "icon": "⚙️",
+      "sort_order": 201,
+      "storage": "dedicated",
+      "route": "/jobs"
+    },
+    "authz_overview": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Overview",
+      "singular": "Overview",
+      "path": "authorization",
+      "icon": "🛡️",
+      "sort_order": 200,
+      "storage": "virtual",
+      "route": "/authorization"
+    },
+    "authz_permissions": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Permissions",
+      "singular": "Permission",
+      "path": "authorization/permissions",
+      "icon": "✅",
+      "sort_order": 201,
+      "storage": "virtual",
+      "route": "/authorization/permissions"
+    },
+    "authz_relationships": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Relationships",
+      "singular": "Relationship",
+      "path": "authorization/relationships",
+      "icon": "🔗",
+      "sort_order": 202,
+      "storage": "virtual",
+      "route": "/authorization/relationships"
+    },
+    "authz_model": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Model",
+      "singular": "Model",
+      "path": "authorization/model",
+      "icon": "📐",
+      "sort_order": 203,
+      "storage": "virtual",
+      "route": "/authorization/model"
+    },
+    "authz_modules": {
+      "version": "1.0",
+      "group": "nav",
+      "nav_group": "authorization",
+      "alias": "Modules",
+      "singular": "Module",
+      "path": "authorization/modules",
+      "icon": "📦",
+      "sort_order": 204,
+      "storage": "virtual",
+      "route": "/authorization/modules"
+    },
+    "password_policy": {
+      "$ref": "schemas/password_policy.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Password Policy",
+      "singular": "Password Policy",
+      "path": "settings/password-policy",
+      "icon": "🔒",
+      "sort_order": 1,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    },
+    "identifier_policy": {
+      "$ref": "schemas/identifier_policy.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Identifier Policy",
+      "singular": "Identifier Policy",
+      "path": "settings/identifier-policy",
+      "icon": "🆔",
+      "sort_order": 2,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    },
+
+    "lockout_policy": {
+      "$ref": "schemas/lockout_policy.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Lockout Policy",
+      "singular": "Lockout Policy",
+      "path": "settings/lockout-policy",
+      "icon": "🔐",
+      "sort_order": 4,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    },
+    "rate_limit": {
+      "$ref": "schemas/rate_limit.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Rate Limit",
+      "singular": "Rate Limit",
+      "path": "settings/rate-limit",
+      "icon": "⏱️",
+      "sort_order": 5,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    },
+    "session_policy": {
+      "$ref": "schemas/session_policy.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Session Policy",
+      "singular": "Session Policy",
+      "path": "settings/session-policy",
+      "icon": "⏳",
+      "sort_order": 6,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    },
+    "notification": {
+      "$ref": "schemas/notification.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Notification",
+      "singular": "Notification Settings",
+      "path": "settings/notification",
+      "icon": "🔔",
+      "sort_order": 7,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    },
+    "notification_templates": {
+      "$ref": "schemas/notification_templates.json",
+      "version": "1.0",
+      "group": "nav",
+      "alias": "Notification Templates",
+      "singular": "Notification Templates",
+      "path": "settings/notification-templates",
+      "icon": "📝",
+      "sort_order": 8,
+      "storage": "settings",
+      "nav": "hidden",
+      "fga_type": "settings",
+      "fga_scope": "instance"
+    }
+  },
+  "type": "object",
+  "properties": {
+    "x-auth-methods": {
+      "type": "object",
+      "description": "Auth methods available for identities of this schema type.",
+      "additionalProperties": {
+        "$ref": "#/$defs/AuthMethodEntry"
+      },
+      "propertyNames": {
+        "enum": [
+          "password",
+          "passkey",
+          "magic_link",
+          "sso",
+          "pat",
+          "api_key",
+          "client_cert",
+          "client_secret"
+        ]
+      }
+    },
+    "x-login": {
+      "type": "object",
+      "description": "DEPRECATED on user schemas — use login flow config instead. Interactive login flow configuration (default, overridable via settings). Retained for backward compatibility; if present, used as fallback when no login flow is resolved.",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["identifier_first", "passkey_first", "sso_only", "custom"],
+          "default": "identifier_first"
+        },
+        "mfa_required": {
+          "type": "boolean",
+          "default": false
+        },
+        "registration_allowed": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "x-branding": {
+      "type": "object",
+      "description": "DEPRECATED on user schemas — use login flow branding instead. Visual customization for the login UI. Retained for backward compatibility; if present, used as fallback when no login flow is resolved.",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "logo_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "org_name": {
+          "type": "string"
+        },
+        "colors": {
+          "type": "object",
+          "properties": {
+            "primary": {
+              "type": "string"
+            },
+            "primary_foreground": {
+              "type": "string"
+            },
+            "background": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "muted": {
+              "type": "string"
+            },
+            "accent": {
+              "type": "string"
+            },
+            "border": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "font_family": {
+          "type": "string"
+        },
+        "font_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "texts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "custom_css": {
+          "type": "string"
+        },
+        "hide_zitadel_branding": {
+          "type": "boolean"
+        },
+        "layout": {
+          "type": "string",
+          "enum": ["centered", "split", "muted", "card_image", "minimal"],
+          "default": "centered"
+        },
+        "dark_mode": {
+          "type": "string",
+          "enum": ["light", "dark", "auto"],
+          "default": "light"
+        },
+        "cover_image": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL for cover/hero image (used by split and card_image layouts)"
+        },
+        "logo_dark": {
+          "type": "string",
+          "format": "uri",
+          "description": "Alternative logo for dark mode"
+        },
+        "favicon": {
+          "type": "string",
+          "format": "uri"
+        },
+        "border_radius": {
+          "type": "string",
+          "enum": ["sm", "md", "lg", "xl", "full"],
+          "default": "md"
+        },
+        "terms_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "privacy_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "social_position": {
+          "type": "string",
+          "enum": ["top", "bottom"],
+          "default": "bottom"
+        },
+        "consent": {
+          "type": "array",
+          "description": "Consent checkboxes shown during registration/login (e.g. terms acceptance, marketing opt-in).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique key for the consent item"
+              },
+              "label": {
+                "type": "string",
+                "description": "Display label, supports markdown links: I agree to the [Terms](https://...)"
+              },
+              "required": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": ["id", "label"]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "x-identifier": {
+            "type": "boolean",
+            "description": "Field can be used as a login identifier"
+          },
+          "x-verify": {
+            "type": "string",
+            "enum": ["email", "sms"],
+            "description": "Verification channel"
+          },
+          "x-recover": {
+            "type": "string",
+            "enum": ["email", "sms"],
+            "description": "Recovery channel"
+          },
+          "x-mfa": {
+            "type": "string",
+            "enum": ["sms", "totp"],
+            "description": "MFA method via this field"
+          },
+          "x-claim": {
+            "type": "string",
+            "description": "Expr mapping to OIDC claims"
+          },
+          "x-sensitive": {
+            "type": "boolean"
+          },
+          "x-hidden": {
+            "type": "boolean"
+          },
+          "x-editable": {
+            "type": "boolean"
+          },
+          "x-source": {
+            "type": "string",
+            "enum": ["admin", "user", "system", "sso"]
+          },
+          "x-unique": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": ["instance", "org"]
+              },
+              {
+                "type": "boolean",
+                "const": false
+              }
+            ],
+            "description": "Uniqueness scope: 'instance' = globally unique, 'org' = unique per org. Orthogonal to x-identifier."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "AuthMethodEntry": {
+      "type": "object",
+      "description": "Configuration for a single auth method.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interactive": {
+          "type": "boolean",
+          "description": "true = browser-based login, false = API/token-based"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Display order for interactive methods"
+        },
+        "preferred": {
+          "type": "boolean"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max tokens for PAT/API key methods"
+        }
+      },
+      "required": ["enabled", "interactive"]
+    }
+  }
+}

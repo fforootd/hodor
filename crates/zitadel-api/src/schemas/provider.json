@@ -1,0 +1,112 @@
+{
+  "$schema": "https://zitadel.com/schemas/v1/entity",
+  "$version": "1.0",
+  "type": "object",
+  "description": "External identity provider (OIDC, OAuth2, SAML).",
+  "x-table": "providers",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Provider display name shown in the login UI"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Marketplace/provider family identifier such as google, github, gitlab, entra, discord, linkedin, or custom"
+    },
+    "protocol": {
+      "type": "string",
+      "enum": ["oidc", "oauth2", "saml", "ldap"],
+      "description": "Runtime adapter used to connect to the provider"
+    },
+    "connection": {
+      "type": "object",
+      "description": "Protocol-specific connection settings such as issuer, authorization_url, token_url, userinfo_url, client_id, client_secret, scopes, and tenant knobs"
+    },
+    "mapping": {
+      "type": "object",
+      "description": "Inbound claim mapping from provider claims to Zitadel schema fields",
+      "properties": {
+        "claims": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "description": "User schema target for first-login create/link behavior",
+      "properties": {
+        "schema_type": {
+          "type": "string"
+        },
+        "schema_id": {
+          "type": "string"
+        }
+      }
+    },
+    "linking": {
+      "type": "object",
+      "description": "Controls whether the provider can create users, link existing users, or both",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["create_or_link", "link_only"]
+        },
+        "match_by": {
+          "type": "string",
+          "enum": ["verified_email", "identifier", "none"]
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "description": "Session-related provider defaults and future knobs"
+    },
+    "ui": {
+      "type": "object",
+      "description": "Login UI settings for this provider",
+      "properties": {
+        "display_order": {
+          "type": "integer",
+          "default": 0
+        }
+      }
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "catalog_ref": {
+      "type": "object",
+      "description": "Marketplace origin metadata for installed providers",
+      "properties": {
+        "template_id": {
+          "type": "string"
+        },
+        "template_version": {
+          "type": "string"
+        },
+        "official": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "logo_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "docs_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    }
+  },
+  "required": ["display_name", "protocol"]
+}
