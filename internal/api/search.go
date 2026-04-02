@@ -26,12 +26,14 @@ type searchDef struct {
 }
 
 // searchDefs returns all configured search definitions.
+// Queries use "?" for instance_id as the FIRST arg, then pattern args + limit.
+// The schema search is global (no instance_id scoping).
 func searchDefs() []searchDef {
 	return []searchDef{
 		{
 			resourceType: "user",
 			query: `SELECT id, identifier, display_name, state FROM users
-				WHERE identifier LIKE ? OR display_name LIKE ?
+				WHERE instance_id = ? AND (identifier LIKE ? OR display_name LIKE ?)
 				ORDER BY id DESC LIMIT ?`,
 			scan: func(rows *sql.Rows) (SearchResult, error) {
 				var id, ident, state string
@@ -48,7 +50,7 @@ func searchDefs() []searchDef {
 		},
 		{
 			resourceType: "org",
-			query:        `SELECT id, name FROM orgs WHERE name LIKE ? ORDER BY name LIMIT ?`,
+			query:        `SELECT id, name FROM orgs WHERE instance_id = ? AND name LIKE ? ORDER BY name LIMIT ?`,
 			scan: func(rows *sql.Rows) (SearchResult, error) {
 				var id, name string
 				if err := rows.Scan(&id, &name); err != nil {
@@ -70,7 +72,7 @@ func searchDefs() []searchDef {
 		},
 		{
 			resourceType: "event",
-			query:        `SELECT id, event_type, created_at FROM events WHERE event_type LIKE ? ORDER BY id DESC LIMIT ?`,
+			query:        `SELECT id, event_type, created_at FROM events WHERE instance_id = ? AND event_type LIKE ? ORDER BY id DESC LIMIT ?`,
 			scan: func(rows *sql.Rows) (SearchResult, error) {
 				var id, evtType, createdAt string
 				if err := rows.Scan(&id, &evtType, &createdAt); err != nil {
@@ -82,7 +84,7 @@ func searchDefs() []searchDef {
 		{
 			resourceType: "provider",
 			query: `SELECT id, name, protocol, COALESCE(metadata,'{}') FROM providers
-				WHERE name LIKE ?
+				WHERE instance_id = ? AND name LIKE ?
 				ORDER BY name LIMIT ?`,
 			scan: func(rows *sql.Rows) (SearchResult, error) {
 				var id, name, protocol, metadataJSON string
@@ -108,19 +110,32 @@ func searchDefs() []searchDef {
 
 // searchResource runs a single search definition against the database.
 func (a *API) searchResource(r *http.Request, def searchDef, pattern string, limit int) []SearchResult {
-	// Determine arg count: queries with 2 LIKE columns need pattern twice + limit.
+	scoped := a.db.Scoped(r.Context())
+
+	// Determine arg count. Schema queries have no instance_id scoping.
 	var args []any
 	argCount := strings.Count(def.query, "?")
-	switch argCount {
-	case 3:
-		args = []any{pattern, pattern, limit}
-	case 2:
-		args = []any{pattern, limit}
-	default:
-		args = []any{pattern, limit}
+	if def.resourceType == "schema" {
+		// Schema is global — no instance_id arg.
+		switch argCount {
+		case 3:
+			args = []any{pattern, pattern, limit}
+		default:
+			args = []any{pattern, limit}
+		}
+	} else {
+		// Instance-scoped: first arg is always instance_id.
+		switch argCount {
+		case 4:
+			args = []any{scoped.InstanceID(), pattern, pattern, limit}
+		case 3:
+			args = []any{scoped.InstanceID(), pattern, limit}
+		default:
+			args = []any{scoped.InstanceID(), pattern, limit}
+		}
 	}
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), def.query, args...)
+	rows, err := scoped.QueryContext(r.Context(), scoped.Rebind(def.query), args...)
 	if err != nil {
 		return nil
 	}

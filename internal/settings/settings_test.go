@@ -18,14 +18,15 @@ func testDB(t *testing.T) *sql.DB {
 	// Create settings table matching the migration.
 	_, err = db.Exec(`
 		CREATE TABLE settings (
-			id         TEXT PRIMARY KEY,
-			type       TEXT NOT NULL,
-			scope      TEXT NOT NULL DEFAULT 'instance',
-			scope_id   TEXT NOT NULL DEFAULT '',
-			data       TEXT NOT NULL DEFAULT '{}',
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-			UNIQUE(type, scope, scope_id)
+			id          TEXT PRIMARY KEY,
+			instance_id TEXT NOT NULL DEFAULT 'default',
+			type        TEXT NOT NULL,
+			scope       TEXT NOT NULL DEFAULT 'instance',
+			scope_id    TEXT NOT NULL DEFAULT '',
+			data        TEXT NOT NULL DEFAULT '{}',
+			created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(instance_id, type, scope, scope_id)
 		)`)
 	if err != nil {
 		t.Fatal(err)

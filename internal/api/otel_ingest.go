@@ -196,13 +196,14 @@ func (a *API) ingestOTelTraces(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// Write to event store (Tier 2 — goes through Logger → cache → drain).
-				tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+				scoped := a.db.Scoped(r.Context())
+				stx, err := scoped.BeginTx(r.Context(), nil)
 				if err != nil {
 					continue
 				}
-				emitEvent(r.Context(), tx, "signal.session_trace", actorID, flowID, "signal", payload)
-				if err := tx.Commit(); err != nil {
-					tx.Rollback()
+				emitEvent(r.Context(), stx, "signal.session_trace", actorID, flowID, "signal", payload)
+				if err := stx.Commit(); err != nil {
+					stx.Rollback()
 					continue
 				}
 				storedCount++

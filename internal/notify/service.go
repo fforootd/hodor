@@ -11,6 +11,7 @@ import (
 
 	zcrypto "github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/telemetry"
@@ -39,6 +40,7 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
 		ddl = append(ddl,
 			`CREATE TABLE IF NOT EXISTS notification_requests (
 				id TEXT PRIMARY KEY,
+				instance_id TEXT NOT NULL DEFAULT 'default',
 				org_id TEXT NOT NULL DEFAULT '0',
 				aggregate_id TEXT DEFAULT '',
 				aggregate_type TEXT DEFAULT '',
@@ -66,6 +68,7 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
 		ddl = append(ddl,
 			`CREATE TABLE IF NOT EXISTS notification_requests (
 				id TEXT PRIMARY KEY,
+				instance_id TEXT NOT NULL DEFAULT 'default',
 				org_id TEXT NOT NULL DEFAULT '0',
 				aggregate_id TEXT DEFAULT '',
 				aggregate_type TEXT DEFAULT '',
@@ -138,11 +141,12 @@ func (s *Service) EnqueueTx(ctx context.Context, tx *sql.Tx, spec RequestSpec) (
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	requestID := id.New()
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO notification_requests
-		 (id, org_id, aggregate_id, aggregate_type, event_type, medium, channel_id, recipient, template_key, locale, state, attempts, max_attempts, payload_ciphertext, payload_nonce, payload_key_id, next_attempt_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-		requestID, defaultOrg(spec.OrgID), spec.AggregateID, spec.AggregateType, spec.EventType, spec.Medium, spec.ChannelID, spec.Recipient, spec.TemplateKey, spec.Locale, requestStatePending, spec.MaxAttempts, sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, now, now,
+		 (instance_id, id, org_id, aggregate_id, aggregate_type, event_type, medium, channel_id, recipient, template_key, locale, state, attempts, max_attempts, payload_ciphertext, payload_nonce, payload_key_id, next_attempt_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+		instanceID, requestID, defaultOrg(spec.OrgID), spec.AggregateID, spec.AggregateType, spec.EventType, spec.Medium, spec.ChannelID, spec.Recipient, spec.TemplateKey, spec.Locale, requestStatePending, spec.MaxAttempts, sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, now, now,
 	); err != nil {
 		return "", fmt.Errorf("notify: insert request: %w", err)
 	}
@@ -219,13 +223,14 @@ func (s *Service) runWorker(ctx context.Context, consumer *eventbus.Consumer) {
 }
 
 func (s *Service) processDueRequests(ctx context.Context) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, org_id, aggregate_id, aggregate_type, event_type, medium, channel_id, recipient, template_key, locale, state, attempts, max_attempts, last_error, payload_ciphertext, payload_nonce, payload_key_id
 		 FROM notification_requests
-		 WHERE state IN (?, ?) AND next_attempt_at <= ?
+		 WHERE instance_id = ? AND state IN (?, ?) AND next_attempt_at <= ?
 		 ORDER BY created_at ASC
 		 LIMIT 25`,
-		requestStatePending, requestStateRetry, time.Now().UTC().Format(time.RFC3339),
+		instanceID, requestStatePending, requestStateRetry, time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("notify: query due requests: %w", err)
@@ -252,11 +257,12 @@ func (s *Service) processDueRequests(ctx context.Context) error {
 }
 
 func (s *Service) processOne(ctx context.Context, row requestRow) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE notification_requests
 		 SET state = ?, last_attempt_at = ?, updated_at = ?
-		 WHERE id = ? AND state IN (?, ?)`,
-		requestStateProcessing, nowRFC3339(), nowRFC3339(), row.ID, requestStatePending, requestStateRetry,
+		 WHERE instance_id = ? AND id = ? AND state IN (?, ?)`,
+		requestStateProcessing, nowRFC3339(), nowRFC3339(), instanceID, row.ID, requestStatePending, requestStateRetry,
 	)
 	if err != nil {
 		return err
@@ -290,8 +296,8 @@ func (s *Service) processOne(ctx context.Context, row requestRow) error {
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE notification_requests
 		 SET state = ?, sent_at = ?, last_error = '', updated_at = ?
-		 WHERE id = ?`,
-		requestStateSent, nowRFC3339(), nowRFC3339(), row.ID,
+		 WHERE instance_id = ? AND id = ?`,
+		requestStateSent, nowRFC3339(), nowRFC3339(), instanceID, row.ID,
 	); err != nil {
 		return err
 	}
@@ -308,12 +314,13 @@ func (s *Service) processOne(ctx context.Context, row requestRow) error {
 func (s *Service) markFailed(ctx context.Context, row requestRow, cause error) error {
 	attempts := row.Attempts + 1
 	now := nowRFC3339()
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	if attempts >= maxInt(row.MaxAttempts, 1) {
 		if _, err := s.db.ExecContext(ctx,
 			`UPDATE notification_requests
 			 SET state = ?, attempts = ?, last_error = ?, updated_at = ?
-			 WHERE id = ?`,
-			requestStateFailed, attempts, cause.Error(), now, row.ID,
+			 WHERE instance_id = ? AND id = ?`,
+			requestStateFailed, attempts, cause.Error(), now, instanceID, row.ID,
 		); err != nil {
 			return err
 		}
@@ -331,8 +338,8 @@ func (s *Service) markFailed(ctx context.Context, row requestRow, cause error) e
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE notification_requests
 		 SET state = ?, attempts = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
-		 WHERE id = ?`,
-		requestStateRetry, attempts, cause.Error(), nextAttempt, now, row.ID,
+		 WHERE instance_id = ? AND id = ?`,
+		requestStateRetry, attempts, cause.Error(), nextAttempt, now, instanceID, row.ID,
 	); err != nil {
 		return err
 	}
@@ -364,10 +371,11 @@ func (s *Service) emitEvent(ctx context.Context, db execer, eventType, aggregate
 	delegationType := telemetry.DelegationTypeFromContext(ctx)
 	sdkName := telemetry.SDKNameFromContext(ctx)
 	sdkVersion := telemetry.SDKVersionFromContext(ctx)
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
-		 VALUES (?, ?, ?, '0', '', '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		eventID, eventType, eventCategory(eventType), aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion); err != nil {
+		`INSERT INTO events (instance_id, id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
+		 VALUES (?, ?, ?, ?, '0', '', '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		instanceID, eventID, eventType, eventCategory(eventType), aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion); err != nil {
 		logging.Printf("notify: emit event %s failed: %v", eventType, err)
 	}
 }

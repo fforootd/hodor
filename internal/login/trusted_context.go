@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/crypto"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/session"
 )
 
@@ -43,6 +44,7 @@ func extractBearerToken(r *http.Request) string {
 }
 
 func (h *Handler) resolveTrustedUserIDFromOIDCState(ctx context.Context, oidcState string) (string, bool) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var userID string
 	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT user_id
@@ -51,9 +53,10 @@ func (h *Handler) resolveTrustedUserIDFromOIDCState(ctx context.Context, oidcSta
 		   AND state = ?
 		   AND user_id != ''
 		   AND expires_at > datetime('now')
+		   AND instance_id = ?
 		 ORDER BY created_at DESC
 		 LIMIT 1`,
-		oidcState,
+		oidcState, instanceID,
 	).Scan(&userID)
 	if err != nil || userID == "" {
 		return "", false
@@ -62,6 +65,7 @@ func (h *Handler) resolveTrustedUserIDFromOIDCState(ctx context.Context, oidcSta
 }
 
 func (h *Handler) resolveTrustedUserIDFromToken(ctx context.Context, rawToken string) (string, bool) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	hash := crypto.HashTokenHex(rawToken)
 
 	var (
@@ -75,8 +79,9 @@ func (h *Handler) resolveTrustedUserIDFromToken(ctx context.Context, rawToken st
 		 WHERE token_hash = ?
 		   AND revoked_at IS NULL
 		   AND (expires_at IS NULL OR expires_at > datetime('now'))
+		   AND instance_id = ?
 		 LIMIT 1`,
-		hash,
+		hash, instanceID,
 	).Scan(&userID, &tokenType, &sessionID)
 	if err == nil && userID != "" {
 		if tokenType != "session" {
@@ -84,7 +89,7 @@ func (h *Handler) resolveTrustedUserIDFromToken(ctx context.Context, rawToken st
 		}
 		if sessionID.Valid && sessionID.String != "" {
 			if h.sessionIsActive(ctx, sessionID.String) {
-				_, _ = h.db.SQL().ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ?`, time.Now().UTC().Format(time.RFC3339), hash)
+				_, _ = h.db.SQL().ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, time.Now().UTC().Format(time.RFC3339), hash, instanceID)
 				return userID, true
 			}
 			return "", false
@@ -99,27 +104,31 @@ func (h *Handler) resolveTrustedUserIDFromToken(ctx context.Context, rawToken st
 }
 
 func (h *Handler) sessionIsActive(ctx context.Context, sessionID string) bool {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var active string
 	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT id
 		 FROM sessions
 		 WHERE id = ?
 		   AND revoked_at IS NULL
-		   AND expires_at > datetime('now')`,
-		sessionID,
+		   AND expires_at > datetime('now')
+		   AND instance_id = ?`,
+		sessionID, instanceID,
 	).Scan(&active)
 	return err == nil && active != ""
 }
 
 func (h *Handler) legacySessionIsActive(ctx context.Context, hash string, userID *string) bool {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var sessionID string
 	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT user_id, id
 		 FROM sessions
 		 WHERE token_hash = ?
 		   AND revoked_at IS NULL
-		   AND expires_at > datetime('now')`,
-		hash,
+		   AND expires_at > datetime('now')
+		   AND instance_id = ?`,
+		hash, instanceID,
 	).Scan(userID, &sessionID)
 	return err == nil && *userID != "" && sessionID != ""
 }

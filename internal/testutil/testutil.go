@@ -54,6 +54,72 @@ func NewTestServerWithDatabaseURL(t *testing.T, databaseURL string) *TestServer 
 	return newTestServer(t, databaseURL)
 }
 
+// NewTestServerMultiTenant creates a test server with multi-tenant mode enabled.
+// This makes the server respect X-Instance-Id headers for instance scoping.
+func NewTestServerMultiTenant(t *testing.T) *TestServer {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	t.Logf("TestServer (multi-tenant) dbPath: %s", dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.URL = "sqlite://" + dbPath
+	cfg.Server.MultiTenant = true
+
+	db, err := database.Open(cfg.Database.URL)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := database.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// Bootstrap creates admin user and captures the password.
+	if err := bootstrap.EnsureAdmin(t.Context(), db, ""); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	disableDefaultLoginFlowCaptcha(t, db)
+
+	var adminPwd string
+	db.SQL().QueryRow(`SELECT password_hash FROM passwords LIMIT 1`).Scan(&adminPwd)
+
+	bus := eventbus.New()
+
+	srv := server.New(cfg, db, bus)
+	handler := srv.Handler()
+	ts := httptest.NewServer(handler)
+
+	t.Cleanup(func() {
+		ts.Close()
+		if db.IsSQLiteCompat() {
+			db.SQL().Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		}
+		db.Close()
+	})
+
+	var orgID string
+	db.SQL().QueryRow(`SELECT org_id FROM users WHERE identifier = 'admin' LIMIT 1`).Scan(&orgID)
+
+	if fgaSvc := api.FGAService; fgaSvc != nil {
+		var adminID string
+		db.SQL().QueryRow(`SELECT id FROM users WHERE identifier = 'admin' LIMIT 1`).Scan(&adminID)
+		if adminID != "" {
+			_ = fgaSvc.OnBootstrap(t.Context(), adminID)
+		}
+	}
+
+	return &TestServer{
+		Server:   ts,
+		DB:       db,
+		Config:   cfg,
+		Bus:      bus,
+		AdminPwd: adminPwd,
+		OrgID:    orgID,
+		t:        t,
+	}
+}
+
 func newTestServer(t *testing.T, databaseURL string) *TestServer {
 	t.Helper()
 

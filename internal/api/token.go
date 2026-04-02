@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zitadel/zitadel/internal/crypto"
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // Token type constants.
@@ -56,34 +57,36 @@ func hashToken(raw string) string {
 //   - zit_opq_ → opaque token (validates via tokens table)
 //   - no prefix → legacy token (validates via sessions.token_hash)
 func resolveToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenInfo, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	switch {
 	case strings.HasPrefix(rawToken, PrefixSession):
-		return resolveSessionToken(ctx, db, rawToken)
+		return resolveSessionToken(ctx, db, rawToken, instanceID)
 	case strings.HasPrefix(rawToken, PrefixPAT):
-		return resolvePATToken(ctx, db, rawToken)
+		return resolvePATToken(ctx, db, rawToken, instanceID)
 	case strings.HasPrefix(rawToken, PrefixOpaque):
-		return resolveOpaqueToken(ctx, db, rawToken)
+		return resolveOpaqueToken(ctx, db, rawToken, instanceID)
 	default:
-		return resolveLegacyToken(ctx, db, rawToken)
+		return resolveLegacyToken(ctx, db, rawToken, instanceID)
 	}
 }
 
 // resolveSessionToken validates a session token via the tokens + sessions tables.
-func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenInfo, error) {
+func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
 		`SELECT t.user_id, t.session_id, COALESCE(u.org_id, '0') FROM tokens t
-		 JOIN sessions s ON t.session_id = s.id
-		 LEFT JOIN users u ON t.user_id = u.id
+		 JOIN sessions s ON t.session_id = s.id AND s.instance_id = ?
+		 LEFT JOIN users u ON t.user_id = u.id AND u.instance_id = ?
 		 WHERE t.token_hash = ?
+		   AND t.instance_id = ?
 		   AND t.type = 'session'
 		   AND t.revoked_at IS NULL
 		   AND s.revoked_at IS NULL
 		   AND s.expires_at > datetime('now')
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
-		h,
+		instanceID, instanceID, h, instanceID,
 	).Scan(&info.UserID, &info.SessionID, &info.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid session token")
@@ -92,24 +95,25 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string) (*Tok
 
 	// Update last_used (best-effort, inline — cheap single-row UPDATE).
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ?`, now, h)
+	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, now, h, instanceID)
 
 	return &info, nil
 }
 
 // resolvePATToken validates a personal access token via the tokens table.
-func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenInfo, error) {
+func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
 		`SELECT t.user_id, COALESCE(u.org_id, '0') FROM tokens t
-		 LEFT JOIN users u ON t.user_id = u.id
+		 LEFT JOIN users u ON t.user_id = u.id AND u.instance_id = ?
 		 WHERE t.token_hash = ?
+		   AND t.instance_id = ?
 		   AND t.type = 'pat'
 		   AND t.revoked_at IS NULL
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
-		h,
+		instanceID, h, instanceID,
 	).Scan(&info.UserID, &info.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid PAT")
@@ -118,23 +122,24 @@ func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenIn
 
 	// Update last_used (best-effort, inline — cheap single-row UPDATE).
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ?`, now, h)
+	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, now, h, instanceID)
 
 	return &info, nil
 }
 
 // resolveOpaqueToken validates an opaque token via the tokens table.
-func resolveOpaqueToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenInfo, error) {
+func resolveOpaqueToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
 
 	var info TokenInfo
 	err := db.QueryRowContext(ctx,
 		`SELECT user_id FROM tokens
 		 WHERE token_hash = ?
+		   AND instance_id = ?
 		   AND type = 'opaque'
 		   AND revoked_at IS NULL
 		   AND (expires_at IS NULL OR expires_at > datetime('now'))`,
-		h,
+		h, instanceID,
 	).Scan(&info.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid opaque token")
@@ -146,7 +151,7 @@ func resolveOpaqueToken(ctx context.Context, db *sql.DB, rawToken string) (*Toke
 
 // resolveLegacyToken validates a token against the old sessions.token_hash column.
 // This provides backward compatibility during migration.
-func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenInfo, error) {
+func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
 
 	// First try the new tokens table (for migrated tokens).
@@ -154,9 +159,10 @@ func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string) (*Toke
 	err := db.QueryRowContext(ctx,
 		`SELECT t.user_id, COALESCE(t.session_id, ''), t.type FROM tokens t
 		 WHERE t.token_hash = ?
+		   AND t.instance_id = ?
 		   AND t.revoked_at IS NULL
 		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
-		h,
+		h, instanceID,
 	).Scan(&info.UserID, &info.SessionID, &info.TokenType)
 	if err == nil {
 		return &info, nil
@@ -165,8 +171,8 @@ func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string) (*Toke
 	// Fall back to the old sessions table.
 	err = db.QueryRowContext(ctx,
 		`SELECT user_id, id FROM sessions
-		 WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > datetime('now')`,
-		h,
+		 WHERE token_hash = ? AND instance_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')`,
+		h, instanceID,
 	).Scan(&info.UserID, &info.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token")

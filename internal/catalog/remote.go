@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/logging"
 )
 
 // StartBackground begins the async remote catalog refresh loop.
@@ -54,9 +56,10 @@ func (s *Service) FetchTemplate(ctx context.Context, tpl *Template) (*TemplatePa
 	}
 
 	// Try DB cache first.
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var cached string
 	err := s.db.QueryRow(
-		`SELECT data FROM cache WHERE namespace = 'catalog' AND key = ?`, "template:"+tpl.ID,
+		`SELECT data FROM cache WHERE instance_id = ? AND namespace = 'catalog' AND key = ?`, instanceID, "template:"+tpl.ID,
 	).Scan(&cached)
 	if err == nil {
 		var payload TemplatePayload

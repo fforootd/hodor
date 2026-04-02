@@ -22,6 +22,7 @@ import (
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	providers "github.com/zitadel/zitadel/internal/provider"
 	"github.com/zitadel/zitadel/internal/resourcedata"
@@ -160,8 +161,9 @@ func LoadAndApply(ctx context.Context, db *sql.DB, path string, dialect ...strin
 	defer tx.Rollback()
 
 	// Look up any org ID to assign seeded entities to (may be empty if no orgs exist yet).
+	instanceID := httputil.DefaultInstanceID
 	var defaultOrgID string
-	_ = tx.QueryRowContext(ctx, `SELECT id FROM orgs LIMIT 1`).Scan(&defaultOrgID)
+	_ = tx.QueryRowContext(ctx, `SELECT id FROM orgs WHERE instance_id = ? LIMIT 1`, instanceID).Scan(&defaultOrgID)
 
 	// Phase 1: Providers.
 	for _, p := range seed.Providers {
@@ -264,10 +266,11 @@ func validate(seed SeedFile) error {
 }
 
 func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider, orgID, dialect string) error {
+	instanceID := httputil.DefaultInstanceID
 	// Skip if exists by name in providers table.
 	var existing string
 	err := tx.QueryRowContext(ctx,
-		bindSeedQuery(`SELECT id FROM providers WHERE name = ?`, dialect), p.Name).Scan(&existing)
+		bindSeedQuery(`SELECT id FROM providers WHERE name = ? AND instance_id = ?`, dialect), p.Name, instanceID).Scan(&existing)
 	if err == nil {
 		logging.Printf("[seed] provider %q already exists, skipping", p.Name)
 		return nil
@@ -338,9 +341,10 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider, orgID, dialec
 	now := seedNow()
 
 	_, err = tx.ExecContext(ctx,
-		bindSeedQuery(`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, target_schema_id, target_schema_type, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, dialect),
+		bindSeedQuery(`INSERT INTO providers (id, instance_id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, target_schema_id, target_schema_type, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, dialect),
 		provID,
+		instanceID,
 		orgID,
 		prov.DisplayName,
 		prov.Protocol,
@@ -366,13 +370,14 @@ func seedProvider(ctx context.Context, tx *sql.Tx, p SeedProvider, orgID, dialec
 }
 
 func seedApp(ctx context.Context, tx *sql.Tx, app SeedApp, orgID, dialect string) error {
+	instanceID := httputil.DefaultInstanceID
 	onConflict := app.OnConflict
 	if onConflict == "" {
 		onConflict = "skip"
 	}
 
 	var existingID string
-	err := tx.QueryRowContext(ctx, bindSeedQuery(`SELECT id FROM apps WHERE client_id = ?`, dialect), app.ClientID).Scan(&existingID)
+	err := tx.QueryRowContext(ctx, bindSeedQuery(`SELECT id FROM apps WHERE client_id = ? AND instance_id = ?`, dialect), app.ClientID, instanceID).Scan(&existingID)
 	if err == nil {
 		switch onConflict {
 		case "update":
@@ -456,9 +461,10 @@ func seedApp(ctx context.Context, tx *sql.Tx, app SeedApp, orgID, dialect string
 	now := seedNow()
 
 	_, err = tx.ExecContext(ctx,
-		bindSeedQuery(`INSERT INTO apps (id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, dialect),
+		bindSeedQuery(`INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, dialect),
 		appID,
+		instanceID,
 		orgID,
 		app.Name,
 		normalizeSeedAppType(app.AppType),
@@ -482,6 +488,7 @@ func seedApp(ctx context.Context, tx *sql.Tx, app SeedApp, orgID, dialect string
 }
 
 func updateExistingApp(ctx context.Context, tx *sql.Tx, appID string, app SeedApp, orgID, dialect string) error {
+	instanceID := httputil.DefaultInstanceID
 	schemaRec, err := resolveSeedAppSchema(ctx, tx, app.SchemaID, dialect)
 	if err != nil {
 		return err
@@ -532,7 +539,7 @@ func updateExistingApp(ctx context.Context, tx *sql.Tx, appID string, app SeedAp
 			return fmt.Errorf("hash client secret: %w", err)
 		}
 	} else {
-		if err := tx.QueryRowContext(ctx, bindSeedQuery(`SELECT COALESCE(client_secret, '') FROM apps WHERE id = ?`, dialect), appID).Scan(&clientSecret); err != nil {
+		if err := tx.QueryRowContext(ctx, bindSeedQuery(`SELECT COALESCE(client_secret, '') FROM apps WHERE id = ? AND instance_id = ?`, dialect), appID, instanceID).Scan(&clientSecret); err != nil {
 			return err
 		}
 	}
@@ -555,7 +562,7 @@ func updateExistingApp(ctx context.Context, tx *sql.Tx, appID string, app SeedAp
 	_, err = tx.ExecContext(ctx,
 		bindSeedQuery(`UPDATE apps
 		 SET org_id = ?, name = ?, app_type = ?, client_secret = ?, redirect_uris = ?, grant_types = ?, response_types = ?, state = ?, schema_id = ?, metadata = ?, updated_at = ?
-		 WHERE id = ?`, dialect),
+		 WHERE id = ? AND instance_id = ?`, dialect),
 		orgID,
 		app.Name,
 		normalizeSeedAppType(app.AppType),
@@ -568,6 +575,7 @@ func updateExistingApp(ctx context.Context, tx *sql.Tx, appID string, app SeedAp
 		string(encodedMetadata),
 		now,
 		appID,
+		instanceID,
 	)
 	return err
 }
@@ -588,6 +596,7 @@ func normalizeSeedAppType(value string) string {
 }
 
 func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, dialect string) error {
+	instanceID := httputil.DefaultInstanceID
 	onConflict := ident.OnConflict
 	if onConflict == "" {
 		onConflict = "skip"
@@ -595,7 +604,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 
 	// Check if exists by identifier.
 	var existingID string
-	err := tx.QueryRowContext(ctx, bindSeedQuery(`SELECT id FROM users WHERE identifier = ?`, dialect), ident.Identifier).Scan(&existingID)
+	err := tx.QueryRowContext(ctx, bindSeedQuery(`SELECT id FROM users WHERE identifier = ? AND instance_id = ?`, dialect), ident.Identifier, instanceID).Scan(&existingID)
 	if err == nil {
 		// Entity already exists — handle according to on_conflict.
 		switch onConflict {
@@ -610,7 +619,8 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 			// Ensure org membership exists even on skip.
 			if orgID != "" {
 				tx.ExecContext(ctx,
-					bindSeedQuery(`INSERT INTO memberships (resource_type, resource_id, user_id, role, added_at) VALUES ('org', ?, ?, 'member', ?) ON CONFLICT(resource_type, resource_id, user_id) DO NOTHING`, dialect),
+					bindSeedQuery(`INSERT INTO memberships (instance_id, resource_type, resource_id, user_id, role, added_at) VALUES (?, 'org', ?, ?, 'member', ?) ON CONFLICT(resource_type, resource_id, user_id) DO NOTHING`, dialect),
+					instanceID,
 					orgID, existingID, seedNow())
 			}
 			// Still process linked accounts for this existing identity.
@@ -646,9 +656,9 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 	now := seedNow()
 
 	_, err = tx.ExecContext(ctx,
-		bindSeedQuery(`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, dialect),
-		newID, orgID, ident.Identifier, ident.DisplayName, func() string {
+		bindSeedQuery(`INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, dialect),
+		newID, instanceID, orgID, ident.Identifier, ident.DisplayName, func() string {
 			if schemaRec.Type == "service_user" || schemaRec.Type == "ai_agent" {
 				return schemaRec.Type
 			}
@@ -672,8 +682,8 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
-				bindSeedQuery(`INSERT INTO credentials (id, user_id, type, data) VALUES (?, ?, 'password', ?)`, dialect),
-				credID, newID, credJSON)
+				bindSeedQuery(`INSERT INTO credentials (id, instance_id, user_id, type, data) VALUES (?, ?, ?, 'password', ?)`, dialect),
+				credID, instanceID, newID, credJSON)
 		}
 	}
 
@@ -686,7 +696,8 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 	// Insert org membership (only when a default org exists).
 	if orgID != "" {
 		tx.ExecContext(ctx,
-			bindSeedQuery(`INSERT INTO memberships (resource_type, resource_id, user_id, role, added_at) VALUES ('org', ?, ?, 'member', ?) ON CONFLICT(resource_type, resource_id, user_id) DO NOTHING`, dialect),
+			bindSeedQuery(`INSERT INTO memberships (instance_id, resource_type, resource_id, user_id, role, added_at) VALUES (?, 'org', ?, ?, 'member', ?) ON CONFLICT(resource_type, resource_id, user_id) DO NOTHING`, dialect),
+					instanceID,
 			orgID, newID, now)
 	}
 
@@ -702,18 +713,19 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 
 // updateExistingIdentity handles the on_conflict: update case.
 func updateExistingIdentity(ctx context.Context, tx *sql.Tx, userID string, ident SeedIdentity, dialect string) error {
+	instanceID := httputil.DefaultInstanceID
 	// Update password if provided.
 	if ident.Password != "" {
 		pw := auth.NewPasswordsDev(nil)
 		hash, err := pw.Hash(ident.Password)
 		if err == nil {
 			// Delete existing + re-insert.
-			tx.ExecContext(ctx, bindSeedQuery(`DELETE FROM credentials WHERE user_id = ? AND type = 'password'`, dialect), userID)
+			tx.ExecContext(ctx, bindSeedQuery(`DELETE FROM credentials WHERE user_id = ? AND type = 'password' AND instance_id = ?`, dialect), userID, instanceID)
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
 			tx.ExecContext(ctx,
-				bindSeedQuery(`INSERT INTO credentials (id, user_id, type, data) VALUES (?, ?, 'password', ?)`, dialect),
-				credID, userID, credJSON)
+				bindSeedQuery(`INSERT INTO credentials (id, instance_id, user_id, type, data) VALUES (?, ?, ?, 'password', ?)`, dialect),
+				credID, instanceID, userID, credJSON)
 			logging.Printf("[seed]   updated password for %q", ident.Identifier)
 		}
 	}
@@ -743,12 +755,13 @@ func seedCapabilities(_ context.Context, _ *sql.Tx, _ string, _ []string) {
 
 // seedPATs creates PAT tokens for an entity (idempotent via name check).
 func seedPATs(ctx context.Context, tx *sql.Tx, userID string, pats []SeedPAT, dialect string) {
+	instanceID := httputil.DefaultInstanceID
 	for _, pat := range pats {
 		// Skip if a PAT with this name already exists for this entity.
 		var existingID string
 		err := tx.QueryRowContext(ctx,
-			bindSeedQuery(`SELECT id FROM tokens WHERE user_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL`, dialect),
-			userID, pat.Name).Scan(&existingID)
+			bindSeedQuery(`SELECT id FROM tokens WHERE user_id = ? AND name = ? AND type = 'pat' AND revoked_at IS NULL AND instance_id = ?`, dialect),
+			userID, pat.Name, instanceID).Scan(&existingID)
 		if err == nil {
 			logging.Printf("[seed]   PAT %q already exists for entity %s, skipping", pat.Name, userID)
 			continue
@@ -772,9 +785,9 @@ func seedPATs(ctx context.Context, tx *sql.Tx, userID string, pats []SeedPAT, di
 		scopesJSON, _ := json.Marshal(scopes)
 
 		_, err = tx.ExecContext(ctx,
-			bindSeedQuery(`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, created_at)
-			 VALUES (?, 'pat', ?, ?, ?, ?, ?)`, dialect),
-			tokenID, tokenHash, userID, pat.Name, string(scopesJSON), seedNow())
+			bindSeedQuery(`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, name, scopes, created_at)
+			 VALUES (?, ?, 'pat', ?, ?, ?, ?, ?)`, dialect),
+			tokenID, instanceID, tokenHash, userID, pat.Name, string(scopesJSON), seedNow())
 		if err != nil {
 			logging.Printf("[seed]   failed to create PAT %q: %v", pat.Name, err)
 			continue
@@ -785,11 +798,12 @@ func seedPATs(ctx context.Context, tx *sql.Tx, userID string, pats []SeedPAT, di
 }
 
 func seedLinkedAccount(ctx context.Context, tx *sql.Tx, userID string, la SeedLinkedAccount, dialect string) {
+	instanceID := httputil.DefaultInstanceID
 	// Resolve provider by name or ID from providers table.
 	var providerID string
 	err := tx.QueryRowContext(ctx,
-		bindSeedQuery(`SELECT id FROM providers WHERE name = ? OR id = ?`, dialect),
-		la.Provider, la.Provider).Scan(&providerID)
+		bindSeedQuery(`SELECT id FROM providers WHERE (name = ? OR id = ?) AND instance_id = ?`, dialect),
+		la.Provider, la.Provider, instanceID).Scan(&providerID)
 	if err != nil {
 		logging.Printf("[seed] linked_account: provider %q not found, skipping", la.Provider)
 		return
@@ -798,17 +812,17 @@ func seedLinkedAccount(ctx context.Context, tx *sql.Tx, userID string, la SeedLi
 	// Skip if already linked.
 	var existingLink int64
 	err = tx.QueryRowContext(ctx,
-		bindSeedQuery(`SELECT id FROM linked_identities WHERE provider_id = ? AND external_sub = ?`, dialect),
-		providerID, la.ExternalSub).Scan(&existingLink)
+		bindSeedQuery(`SELECT id FROM linked_identities WHERE provider_id = ? AND external_sub = ? AND instance_id = ?`, dialect),
+		providerID, la.ExternalSub, instanceID).Scan(&existingLink)
 	if err == nil {
 		return // already linked
 	}
 
 	linkID := id.New()
 	tx.ExecContext(ctx,
-		bindSeedQuery(`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
-		 VALUES (?, ?, ?, ?, ?, '{}', ?)`, dialect),
-		linkID, userID, providerID, la.ExternalSub, la.ExternalEmail, seedNow())
+		bindSeedQuery(`INSERT INTO linked_identities (id, instance_id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, '{}', ?)`, dialect),
+		linkID, instanceID, userID, providerID, la.ExternalSub, la.ExternalEmail, seedNow())
 
 	logging.Printf("[seed] linked identity %s → provider %s (sub: %s)", userID, providerID, la.ExternalSub)
 }

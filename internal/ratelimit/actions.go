@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"sync"
 	"time"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
+	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/logging"
 )
 
 // ActionEngine evaluates expr actions at pipeline hooks (ADR-015).
@@ -136,10 +137,13 @@ func (e *ActionEngine) loadActions(ctx context.Context, hook string) ([]*compile
 
 // refreshActions queries the database for all enabled actions and recompiles them.
 func (e *ActionEngine) refreshActions(ctx context.Context, hook string) ([]*compiledAction, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := e.db.QueryContext(ctx,
 		`SELECT id, name, hook, action_type, COALESCE(trigger_expr, 'true'),
 		        priority, config, fail_open, timeout_ms, enabled
-		 FROM actions`,
+		 FROM actions
+		 WHERE instance_id = ?`,
+		instanceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query actions: %w", err)

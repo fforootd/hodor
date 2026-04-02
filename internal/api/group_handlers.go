@@ -29,9 +29,12 @@ func (a *API) RegisterGroupRoutes(mux *http.ServeMux) {
 func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
 	limit, cursor := parsePagination(r)
 	orgID := r.URL.Query().Get("org_id")
+	scoped := a.db.Scoped(r.Context())
 
 	var where []string
 	var args []any
+	where = append(where, "g.instance_id = ?")
+	args = append(args, scoped.InstanceID())
 	where = append(where, "g.id > ?")
 	args = append(args, cursor)
 	if orgID != "" {
@@ -41,12 +44,12 @@ func (a *API) listGroups(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT g.id, g.org_id, g.name, g.description, g.state,
 		COALESCE(g.schema_id,''), COALESCE(g.metadata,'{}'), g.created_at, g.updated_at,
-		(SELECT COUNT(*) FROM memberships m WHERE m.resource_type='group' AND m.resource_id = g.id) as member_count
+		(SELECT COUNT(*) FROM memberships m WHERE m.instance_id = g.instance_id AND m.resource_type='group' AND m.resource_id = g.id) as member_count
 		FROM groups g WHERE %s ORDER BY g.id ASC LIMIT ?`,
 		strings.Join(where, " AND "))
 	args = append(args, limit+1)
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), a.bindQuery(query), args...)
+	rows, err := scoped.QueryContext(r.Context(), scoped.Rebind(query), args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -122,17 +125,18 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 
 	metadataJSON := encodeObjectString(stripKeys(data, "name", "description"))
 
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	scoped := a.db.Scoped(r.Context())
+	stx, err := scoped.BeginTx(r.Context(), nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	defer tx.Rollback()
+	defer stx.Rollback()
 
-	_, err = tx.ExecContext(r.Context(),
-		a.bindQuery(`INSERT INTO groups (id, org_id, name, description, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`),
-		groupID, orgID, name, description, schemaRec.ID, metadataJSON, now, now,
+	_, err = stx.ExecContext(r.Context(),
+		stx.Rebind(`INSERT INTO groups (instance_id, id, org_id, name, description, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`),
+		stx.InstanceID(), groupID, orgID, name, description, schemaRec.ID, metadataJSON, now, now,
 	)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusConflict, map[string]any{
@@ -141,7 +145,7 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), tx, "group.created", groupID, groupID, "group", map[string]any{
+	emitEvent(r.Context(), stx, "group.created", groupID, groupID, "group", map[string]any{
 		"name": name, "org_id": orgID,
 	})
 
@@ -156,7 +160,7 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := stx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
@@ -185,13 +189,14 @@ func (a *API) getGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	var g GroupResponse
 	var metaStr string
-	err = a.db.SQL().QueryRowContext(r.Context(),
-		a.bindQuery(`SELECT g.id, g.org_id, g.name, g.description, g.state,
+	err = scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT g.id, g.org_id, g.name, g.description, g.state,
 		 COALESCE(g.schema_id,''), COALESCE(g.metadata,'{}'), g.created_at, g.updated_at,
-		 (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='group' AND m.resource_id = g.id) as member_count
-		 FROM groups g WHERE g.id = ?`), groupID,
+		 (SELECT COUNT(*) FROM memberships m WHERE m.instance_id = g.instance_id AND m.resource_type='group' AND m.resource_id = g.id) as member_count
+		 FROM groups g WHERE g.instance_id = ? AND g.id = ?`), scoped.InstanceID(), groupID,
 	).Scan(&g.ID, &g.OrgID, &g.Name, &g.Description, &g.State, &g.SchemaID,
 		&metaStr, &g.CreatedAt, &g.UpdatedAt, &g.MemberCount)
 	if err != nil {
@@ -215,15 +220,16 @@ func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	var current GroupResponse
 	var currentSchemaID string
 	var metadataStr string
-	err = a.db.SQL().QueryRowContext(r.Context(),
-		a.bindQuery(`SELECT id, org_id, name, description, state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at,
-		        (SELECT COUNT(*) FROM memberships m WHERE m.resource_type='group' AND m.resource_id = groups.id) as member_count
+	err = scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT id, org_id, name, description, state, COALESCE(schema_id,''), COALESCE(metadata,'{}'), created_at, updated_at,
+		        (SELECT COUNT(*) FROM memberships m WHERE m.instance_id = ? AND m.resource_type='group' AND m.resource_id = groups.id) as member_count
 		 FROM groups
-		 WHERE id = ?`),
-		groupID,
+		 WHERE instance_id = ? AND id = ?`),
+		scoped.InstanceID(), scoped.InstanceID(), groupID,
 	).Scan(&current.ID, &current.OrgID, &current.Name, &current.Description, &current.State, &currentSchemaID, &metadataStr, &current.CreatedAt, &current.UpdatedAt, &current.MemberCount)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "group not found")
@@ -267,16 +273,17 @@ func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) {
 		nextState = strings.TrimSpace(req.State)
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		a.bindQuery(`UPDATE groups
+	result, err := scoped.ExecContext(r.Context(),
+		scoped.Rebind(`UPDATE groups
 		 SET name = ?, description = ?, state = ?, schema_id = ?, metadata = ?, updated_at = ?
-		 WHERE id = ?`),
+		 WHERE instance_id = ? AND id = ?`),
 		stringFromAny(data["name"]),
 		stringFromAny(data["description"]),
 		nextState,
 		schemaRec.ID,
 		encodeObjectString(stripKeys(data, "name", "description")),
 		timeNow(),
+		scoped.InstanceID(),
 		groupID,
 	)
 	if err != nil {
@@ -300,7 +307,8 @@ func (a *API) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(), a.bindQuery(`DELETE FROM groups WHERE id = ?`), groupID)
+	scoped := a.db.Scoped(r.Context())
+	result, err := scoped.ExecContext(r.Context(), scoped.Rebind(`DELETE FROM groups WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), groupID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

@@ -103,14 +103,16 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 
-	tx, err := a.db.SQL().BeginTx(ctx, nil)
+	scoped := a.db.Scoped(ctx)
+	instanceID := scoped.InstanceID()
+	tx, err := scoped.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ?`, userID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ? AND instance_id = ?`, userID, instanceID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("identity %s not found", userID)
 	}
@@ -124,9 +126,9 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, fingerprint)
-		 VALUES (?, ?, '_global', ?, ?, ?, ?, ?, ?, ?)`,
-		sessionID, userID, tokenHash,
+		`INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, fingerprint)
+		 VALUES (?, ?, ?, '_global', ?, ?, ?, ?, ?, ?, ?)`,
+		sessionID, instanceID, userID, tokenHash,
 		userAgent, ipAddress, string(metadataJSON),
 		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339), sessionFingerprint,
 	)
@@ -136,9 +138,9 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 
 	tokenID := id.New()
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO tokens (id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
-		 VALUES (?, 'session', ?, ?, ?, '[]', ?, ?)`,
-		tokenID, tokenHash, userID, sessionID,
+		`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
+		 VALUES (?, ?, 'session', ?, ?, ?, '[]', ?, ?)`,
+		tokenID, instanceID, tokenHash, userID, sessionID,
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {

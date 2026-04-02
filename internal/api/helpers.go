@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -54,21 +53,22 @@ func requireID(w http.ResponseWriter, r *http.Request, name string) (string, boo
 
 // ── Transaction helpers ─────────────────────────────────────────────────────
 
-// beginTx opens a database transaction with standard error handling.
-// Returns the tx and true on success; writes a 500 error on failure.
-func (a *API) beginTx(w http.ResponseWriter, r *http.Request) (*sql.Tx, bool) {
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+// beginTx opens a scoped database transaction with standard error handling.
+// Returns the ScopedTx and true on success; writes a 500 error on failure.
+func (a *API) beginTx(w http.ResponseWriter, r *http.Request) (*database.ScopedTx, bool) {
+	scoped := a.db.Scoped(r.Context())
+	stx, err := scoped.BeginTx(r.Context(), nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "database error")
 		return nil, false
 	}
-	return tx, true
+	return stx, true
 }
 
-// commitTx commits a transaction with standard error handling.
+// commitTx commits a scoped transaction with standard error handling.
 // Returns true on success; writes a 500 error on failure.
-func commitTx(w http.ResponseWriter, tx *sql.Tx) bool {
-	if err := tx.Commit(); err != nil {
+func commitTx(w http.ResponseWriter, stx *database.ScopedTx) bool {
+	if err := stx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return false
 	}
@@ -164,7 +164,7 @@ func (a *API) bindQuery(query string) string {
 //	p := newPatch()
 //	p.Set("name", req.Name)            // only appends if non-empty
 //	p.SetJSON("metadata", req.Metadata) // marshals to JSON string
-//	query, args := p.Build("orgs", orgID)
+//	query, args := p.Build("orgs", orgID, instanceID)
 //	result, err := db.ExecContext(ctx, query, args...)
 type patchBuilder struct {
 	clauses []string
@@ -217,10 +217,10 @@ func (p *patchBuilder) SetInt(col string, val int) {
 	p.args = append(p.args, val)
 }
 
-// Build returns the full UPDATE query and args (including the trailing WHERE id = ?).
-func (p *patchBuilder) Build(table, id string) (string, []any) {
-	p.args = append(p.args, id)
-	query := "UPDATE " + table + " SET " + strings.Join(p.clauses, ", ") + " WHERE id = ?"
+// Build returns the full UPDATE query and args (including the trailing WHERE id = ? AND instance_id = ?).
+func (p *patchBuilder) Build(table, id, instanceID string) (string, []any) {
+	p.args = append(p.args, id, instanceID)
+	query := "UPDATE " + table + " SET " + strings.Join(p.clauses, ", ") + " WHERE id = ? AND instance_id = ?"
 	return bindQueryForDialect(query, p.dialect), p.args
 }
 

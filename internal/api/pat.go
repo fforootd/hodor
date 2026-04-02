@@ -64,10 +64,12 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 		req.Scopes = []string{"admin"}
 	}
 
+	scoped := a.db.Scoped(r.Context())
+
 	// Verify entity exists.
 	var exists int
-	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT 1 FROM users WHERE id = ?`, req.UserID).Scan(&exists)
+	err := scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT 1 FROM users WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), req.UserID).Scan(&exists)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "entity not found")
 		return
@@ -84,10 +86,10 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	scopesJSON, _ := json.Marshal(req.Scopes)
 
-	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO tokens (id, type, token_hash, user_id, name, scopes, created_at)
-		 VALUES (?, 'pat', ?, ?, ?, ?, ?)`,
-		tokenID, tokenHash, req.UserID, req.Name, string(scopesJSON), now,
+	_, err = scoped.ExecContext(r.Context(),
+		scoped.Rebind(`INSERT INTO tokens (instance_id, id, type, token_hash, user_id, name, scopes, created_at)
+		 VALUES (?, ?, 'pat', ?, ?, ?, ?, ?)`),
+		scoped.InstanceID(), tokenID, tokenHash, req.UserID, req.Name, string(scopesJSON), now,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to create PAT: "+err.Error())
@@ -112,21 +114,23 @@ func (a *API) createPAT(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listPATs(w http.ResponseWriter, r *http.Request) {
 	entityFilter := r.URL.Query().Get("user_id")
+	scoped := a.db.Scoped(r.Context())
 
 	var query string
 	var args []any
 	if entityFilter != "" {
-		query = `SELECT id, name, user_id, scopes, last_used, created_at
-		         FROM tokens WHERE type = 'pat' AND revoked_at IS NULL AND user_id = ?
-		         ORDER BY created_at DESC`
-		args = []any{entityFilter}
+		query = scoped.Rebind(`SELECT id, name, user_id, scopes, last_used, created_at
+		         FROM tokens WHERE instance_id = ? AND type = 'pat' AND revoked_at IS NULL AND user_id = ?
+		         ORDER BY created_at DESC`)
+		args = []any{scoped.InstanceID(), entityFilter}
 	} else {
-		query = `SELECT id, name, user_id, scopes, last_used, created_at
-		         FROM tokens WHERE type = 'pat' AND revoked_at IS NULL
-		         ORDER BY created_at DESC`
+		query = scoped.Rebind(`SELECT id, name, user_id, scopes, last_used, created_at
+		         FROM tokens WHERE instance_id = ? AND type = 'pat' AND revoked_at IS NULL
+		         ORDER BY created_at DESC`)
+		args = []any{scoped.InstanceID()}
 	}
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	rows, err := scoped.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -160,10 +164,11 @@ func (a *API) revokePAT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		`UPDATE tokens SET revoked_at = ? WHERE id = ? AND type = 'pat' AND revoked_at IS NULL`,
-		now, tokenID)
+	result, err := scoped.ExecContext(r.Context(),
+		scoped.Rebind(`UPDATE tokens SET revoked_at = ? WHERE instance_id = ? AND id = ? AND type = 'pat' AND revoked_at IS NULL`),
+		now, scoped.InstanceID(), tokenID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "revoke failed")
 		return

@@ -36,6 +36,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE users (
 		id            TEXT PRIMARY KEY,
+		instance_id   TEXT NOT NULL DEFAULT 'default',
 		org_id        TEXT NOT NULL DEFAULT '1',
 		identifier    TEXT NOT NULL DEFAULT '',
 		display_name  TEXT DEFAULT '',
@@ -45,10 +46,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 		metadata      TEXT DEFAULT '{}',
 		created_at    TEXT NOT NULL DEFAULT (datetime('now')),
 		updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-		UNIQUE(org_id, identifier)
+		UNIQUE(instance_id, org_id, identifier)
 	)`)
 	db.Exec(`CREATE TABLE orgs (
 		id           TEXT PRIMARY KEY,
+		instance_id  TEXT NOT NULL DEFAULT 'default',
 		name         TEXT NOT NULL DEFAULT '',
 		state        TEXT NOT NULL DEFAULT 'active',
 		schema_id    TEXT DEFAULT '',
@@ -58,6 +60,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE apps (
 		id             TEXT PRIMARY KEY,
+		instance_id    TEXT NOT NULL DEFAULT 'default',
 		org_id         TEXT NOT NULL DEFAULT '1',
 		name           TEXT NOT NULL DEFAULT '',
 		app_type       TEXT NOT NULL DEFAULT 'web',
@@ -74,6 +77,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE actions (
 		id           TEXT PRIMARY KEY,
+		instance_id  TEXT NOT NULL DEFAULT 'default',
 		org_id       TEXT NOT NULL DEFAULT '1',
 		name         TEXT NOT NULL DEFAULT '',
 		hook         TEXT NOT NULL DEFAULT 'on_event',
@@ -91,6 +95,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE groups (
 		id          TEXT PRIMARY KEY,
+		instance_id TEXT NOT NULL DEFAULT 'default',
 		org_id      TEXT NOT NULL DEFAULT '1',
 		name        TEXT NOT NULL DEFAULT '',
 		description TEXT DEFAULT '',
@@ -102,6 +107,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE projects (
 		id          TEXT PRIMARY KEY,
+		instance_id TEXT NOT NULL DEFAULT 'default',
 		org_id      TEXT NOT NULL DEFAULT '1',
 		name        TEXT NOT NULL DEFAULT '',
 		description TEXT DEFAULT '',
@@ -113,6 +119,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE login_flows (
 		id          TEXT PRIMARY KEY,
+		instance_id TEXT NOT NULL DEFAULT 'default',
 		org_id      TEXT NOT NULL DEFAULT '1',
 		name        TEXT NOT NULL DEFAULT '',
 		strategy      TEXT DEFAULT 'identifier_first',
@@ -131,6 +138,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	)`)
 	db.Exec(`CREATE TABLE providers (
 		id              TEXT PRIMARY KEY,
+		instance_id     TEXT NOT NULL DEFAULT 'default',
 		org_id          TEXT NOT NULL DEFAULT '1',
 		name            TEXT NOT NULL DEFAULT '',
 		protocol        TEXT NOT NULL DEFAULT 'oidc',
@@ -146,15 +154,16 @@ func setupTestDB(t *testing.T) *sql.DB {
 		metadata        TEXT DEFAULT '{}',
 		created_at      TEXT NOT NULL DEFAULT (datetime('now')),
 		updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-		UNIQUE(org_id, name)
+		UNIQUE(instance_id, org_id, name)
 	)`)
 	db.Exec(`CREATE TABLE cache (
+		instance_id TEXT NOT NULL DEFAULT 'default',
 		namespace TEXT NOT NULL DEFAULT 'default',
 		key TEXT NOT NULL,
 		data TEXT NOT NULL,
 		expires_at TEXT,
 		fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
-		PRIMARY KEY (namespace, key)
+		PRIMARY KEY (instance_id, namespace, key)
 	)`)
 
 	// Seed schemas for common types.

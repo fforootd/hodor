@@ -27,25 +27,27 @@ func setupTestDB(t *testing.T) *sql.DB {
 			org_id        TEXT NOT NULL DEFAULT '1',
 			identifier    TEXT NOT NULL,
 			display_name  TEXT DEFAULT '',
+			instance_id   TEXT NOT NULL DEFAULT 'default',
 			user_type     TEXT NOT NULL DEFAULT 'human',
 			state         TEXT NOT NULL DEFAULT 'active',
 			schema_id     TEXT DEFAULT '',
 			metadata      TEXT DEFAULT '{}',
 			created_at    TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-			UNIQUE(org_id, identifier)
+			UNIQUE(instance_id, org_id, identifier)
 		);
 		CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
 		CREATE INDEX IF NOT EXISTS idx_users_type ON users(user_type);
 		CREATE INDEX IF NOT EXISTS idx_users_state ON users(state);
 
 		CREATE TABLE unique_fields (
+			instance_id      TEXT NOT NULL DEFAULT 'default',
 			scope_id         TEXT NOT NULL DEFAULT '',
 			field_name       TEXT NOT NULL,
 			normalized_value TEXT NOT NULL,
 			resource_type    TEXT NOT NULL DEFAULT '',
 			user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			UNIQUE(scope_id, field_name, normalized_value)
+			UNIQUE(instance_id, scope_id, field_name, normalized_value)
 		);
 		CREATE INDEX IF NOT EXISTS idx_unique_fields_resource ON unique_fields(user_id);
 		CREATE INDEX IF NOT EXISTS idx_unique_fields_lookup ON unique_fields(normalized_value, field_name);

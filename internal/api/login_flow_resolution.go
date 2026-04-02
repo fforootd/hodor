@@ -18,9 +18,10 @@ func (a *API) promoteLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	var currentState string
-	err := a.db.SQL().QueryRowContext(r.Context(),
-		a.bindQuery(`SELECT state FROM login_flows WHERE id = ?`), flowID,
+	err := scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT state FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID,
 	).Scan(&currentState)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "login flow not found")
@@ -45,9 +46,9 @@ func (a *API) promoteLoginFlow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = a.db.SQL().ExecContext(r.Context(),
-		a.bindQuery(`UPDATE login_flows SET state = ?, updated_at = ? WHERE id = ?`),
-		nextState, now, flowID,
+	_, err = scoped.ExecContext(r.Context(),
+		scoped.Rebind(`UPDATE login_flows SET state = ?, updated_at = ? WHERE instance_id = ? AND id = ?`),
+		nextState, now, scoped.InstanceID(), flowID,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "promote failed")
@@ -70,10 +71,11 @@ func (a *API) archiveLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		a.bindQuery(`UPDATE login_flows SET state = 'archived', updated_at = ? WHERE id = ?`),
-		now, flowID,
+	result, err := scoped.ExecContext(r.Context(),
+		scoped.Rebind(`UPDATE login_flows SET state = 'archived', updated_at = ? WHERE instance_id = ? AND id = ?`),
+		now, scoped.InstanceID(), flowID,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "archive failed")
@@ -179,13 +181,14 @@ func (a *API) loadLoginFlow(ctx context.Context, flowID string) (LoginFlowRespon
 	var configStr, audienceStr, authMethodsStr, metadataStr string
 	var isDefault, enabled int
 
-	err := a.db.SQL().QueryRowContext(ctx,
-		a.bindQuery(`SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), name, strategy, config,
+	scoped := a.db.Scoped(ctx)
+	err := scoped.QueryRowContext(ctx,
+		scoped.Rebind(`SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), name, strategy, config,
 		        CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END,
 		        CASE WHEN COALESCE(enabled, true) THEN 1 ELSE 0 END, state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 		        COALESCE(metadata,'{}'), created_at, updated_at
-		 FROM login_flows WHERE id = ?`), flowID,
+		 FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID,
 	).Scan(&resp.ID, &resp.OrgID, &resp.SchemaID, &resp.Name, &resp.Strategy, &configStr,
 		&isDefault, &enabled, &resp.State, &resp.Priority,
 		&audienceStr, &authMethodsStr, &metadataStr,

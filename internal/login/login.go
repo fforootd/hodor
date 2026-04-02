@@ -246,9 +246,10 @@ func remoteIPFromAddr(addr string) string {
 func (h *Handler) loadFlowConfigStrict(ctx context.Context, flowID string, r *http.Request) (*SchemaAuthConfig, error) {
 	var configJSON, authMethodsJSON string
 	var strategy string
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT COALESCE(strategy,'identifier_first'), COALESCE(config,'{}'), COALESCE(auth_methods,'{}')
-		 FROM login_flows WHERE id = ?`, flowID,
+		 FROM login_flows WHERE id = ? AND instance_id = ?`, flowID, instanceID,
 	).Scan(&strategy, &configJSON, &authMethodsJSON)
 	if err != nil {
 		return nil, err
@@ -413,8 +414,9 @@ func (h *Handler) handleMagicLinkRequest(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) queueMagicLink(ctx context.Context, email, requestedPurpose string) (string, string, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var userID string
-	err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ?`, email).Scan(&userID)
+	err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ? AND instance_id = ?`, email, instanceID).Scan(&userID)
 	if err != nil && err != sql.ErrNoRows {
 		return "", "", errors.New("internal error")
 	}
@@ -447,9 +449,9 @@ func (h *Handler) queueMagicLink(ctx context.Context, email, requestedPurpose st
 			return "", "", errors.New("registration is not available")
 		}
 		if _, execErr := tx.ExecContext(ctx,
-			`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, 1, ?, ?, 'pending', ?, '{}', datetime('now'), datetime('now'))`,
-			newID, email, email, schemaRec.ID,
+			`INSERT INTO users (id, instance_id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, ?, 1, ?, ?, 'pending', ?, '{}', datetime('now'), datetime('now'))`,
+			newID, instanceID, email, email, schemaRec.ID,
 		); execErr != nil {
 			return "", "", errors.New("failed to create identity")
 		}
@@ -469,8 +471,8 @@ func (h *Handler) queueMagicLink(ctx context.Context, email, requestedPurpose st
 	}
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO tokens (id, type, token_hash, user_id, expires_at) VALUES (?, 'magic_link', ?, ?, ?)`,
-		token, token, userID, expiresAt.Format(time.RFC3339),
+		`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, expires_at) VALUES (?, ?, 'magic_link', ?, ?, ?)`,
+		token, instanceID, token, userID, expiresAt.Format(time.RFC3339),
 	); err != nil {
 		return "", "", errors.New("failed to store token")
 	}
@@ -521,14 +523,15 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Load and validate token.
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var userID string
 	var expiresAt, identifier string
 	var usedAt sql.NullString
 	err := h.db.SQL().QueryRowContext(r.Context(),
 		`SELECT t.user_id, t.expires_at, t.last_used, u.identifier
 		 FROM tokens t
-		 JOIN users u ON u.id = t.user_id
-		 WHERE t.token_hash = ? AND t.type = 'magic_link'`, token,
+		 JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id
+		 WHERE t.token_hash = ? AND t.type = 'magic_link' AND t.instance_id = ?`, token, instanceID,
 	).Scan(&userID, &expiresAt, &usedAt, &identifier)
 
 	if err == sql.ErrNoRows {
@@ -572,11 +575,11 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Mark as used.
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE tokens SET last_used = datetime('now') WHERE token_hash = ? AND type = 'magic_link'`, token)
+		`UPDATE tokens SET last_used = datetime('now') WHERE token_hash = ? AND type = 'magic_link' AND instance_id = ?`, token, instanceID)
 
 	// Activate identity if pending (registration flow).
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE users SET state = 'active' WHERE id = ? AND state = 'pending'`, userID)
+		`UPDATE users SET state = 'active' WHERE id = ? AND state = 'pending' AND instance_id = ?`, userID, instanceID)
 
 	// Create session.
 	sessResp, err := h.api.CreateSessionForLogin(r.Context(), userID, r.UserAgent(), r.RemoteAddr, nil, &SessionProvenance{
@@ -589,7 +592,7 @@ func (h *Handler) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request) 
 
 	// Link session to token.
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`UPDATE tokens SET session_id = ? WHERE token_hash = ? AND type = 'magic_link'`, sessResp.Session.ID, token)
+		`UPDATE tokens SET session_id = ? WHERE token_hash = ? AND type = 'magic_link' AND instance_id = ?`, sessResp.Session.ID, token, instanceID)
 
 	// Set session cookie (HMAC-signed).
 	session.SetSessionCookie(w, sessResp.Token, h.cookies)

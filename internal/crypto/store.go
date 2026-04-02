@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // SecretMeta holds non-sensitive metadata about a stored secret.
@@ -75,10 +77,11 @@ func (s *SecretStore) Put(ctx context.Context, id, secretType string, plaintext 
 		expiresAt = &t
 	}
 
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO secrets (id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, secretType, o.algorithm,
+		`INSERT OR REPLACE INTO secrets (instance_id, id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		instanceID, id, secretType, o.algorithm,
 		sealed.KeyID, sealed.Ciphertext, sealed.Nonce,
 		o.publicKey, expiresAt,
 	)
@@ -93,8 +96,9 @@ func (s *SecretStore) Get(ctx context.Context, id string) ([]byte, error) {
 	var ciphertext, nonce []byte
 	var keyID string
 
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE id = ?`, id,
+		`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE instance_id = ? AND id = ?`, instanceID, id,
 	).Scan(&ciphertext, &nonce, &keyID)
 	if err != nil {
 		return nil, fmt.Errorf("secretstore: get %s: %w", id, err)
@@ -110,10 +114,11 @@ func (s *SecretStore) GetByType(ctx context.Context, secretType string) (string,
 	var ciphertext, nonce []byte
 	var keyID string
 
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, ciphertext, nonce, encryption_key_id
-		 FROM secrets WHERE secret_type = ?
-		 ORDER BY created_at DESC LIMIT 1`, secretType,
+		 FROM secrets WHERE instance_id = ? AND secret_type = ?
+		 ORDER BY created_at DESC LIMIT 1`, instanceID, secretType,
 	).Scan(&id, &ciphertext, &nonce, &keyID)
 	if err != nil {
 		return "", nil, fmt.Errorf("secretstore: getByType %s: %w", secretType, err)
@@ -129,16 +134,18 @@ func (s *SecretStore) GetByType(ctx context.Context, secretType string) (string,
 
 // Delete removes a secret by ID.
 func (s *SecretStore) Delete(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM secrets WHERE id = ?`, id)
+	instanceID := httputil.InstanceIDFromContext(ctx)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM secrets WHERE instance_id = ? AND id = ?`, instanceID, id)
 	return err
 }
 
 // List returns metadata (no decryption) for all secrets of a given type.
 func (s *SecretStore) List(ctx context.Context, secretType string) ([]SecretMeta, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, secret_type, algorithm, encryption_key_id, expires_at, created_at
-		 FROM secrets WHERE secret_type = ?
-		 ORDER BY created_at DESC`, secretType,
+		 FROM secrets WHERE instance_id = ? AND secret_type = ?
+		 ORDER BY created_at DESC`, instanceID, secretType,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("secretstore: list %s: %w", secretType, err)
@@ -175,11 +182,12 @@ func (s *SecretStore) ReEncryptAll(ctx context.Context) (int, error) {
 	}
 
 	activeID := s.box.ActiveKeyID()
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, ciphertext, nonce, encryption_key_id
 		 FROM secrets
-		 WHERE encryption_key_id != ? AND encryption_key_id != ''`,
-		activeID,
+		 WHERE instance_id = ? AND encryption_key_id != ? AND encryption_key_id != ''`,
+		instanceID, activeID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("secretstore: re-encrypt query: %w", err)
@@ -220,8 +228,8 @@ func (s *SecretStore) ReEncryptAll(ctx context.Context) (int, error) {
 		}
 
 		_, err = s.db.ExecContext(ctx,
-			`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ? WHERE id = ?`,
-			sealed.Ciphertext, sealed.Nonce, sealed.KeyID, r.id,
+			`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ? WHERE instance_id = ? AND id = ?`,
+			sealed.Ciphertext, sealed.Nonce, sealed.KeyID, instanceID, r.id,
 		)
 		if err != nil {
 			return rotated, fmt.Errorf("secretstore: re-encrypt update %s: %w", r.id, err)

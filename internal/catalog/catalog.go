@@ -11,16 +11,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
-	providers "github.com/zitadel/zitadel/internal/provider"
-	"github.com/zitadel/zitadel/internal/resourcedata"
-	"github.com/zitadel/zitadel/internal/schema"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/config"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/logging"
+	providers "github.com/zitadel/zitadel/internal/provider"
+	"github.com/zitadel/zitadel/internal/resourcedata"
+	"github.com/zitadel/zitadel/internal/schema"
 )
 
 //go:embed embedded/catalog.json
@@ -194,6 +195,7 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 	if ctxOrg, ok := ctx.Value("org_id").(string); ok && ctxOrg != "" {
 		orgID = ctxOrg
 	}
+	instanceID := httputil.InstanceIDFromContext(ctx)
 
 	switch payload.Type {
 	case "provider":
@@ -255,9 +257,9 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		storedAction := withCatalogMeta(actionData, catalogMeta)
 		metadataJSON := resourcedata.EncodeObjectString(storedAction)
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO actions (id, org_id, name, hook, action_type, trigger_expr, config, priority, enabled, fail_open, timeout_ms, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			resourceID, orgID, displayName, hook, actionType, triggerExpr,
+			`INSERT INTO actions (instance_id, id, org_id, name, hook, action_type, trigger_expr, config, priority, enabled, fail_open, timeout_ms, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			instanceID, resourceID, orgID, displayName, hook, actionType, triggerExpr,
 			configJSON, priority, enabled, failOpen, timeoutMS, schemaRec.ID, metadataJSON, timeNow(), timeNow(),
 		)
 	case "login_flow":
@@ -283,9 +285,9 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		}
 		storedFlow := withCatalogMeta(flowData, catalogMeta)
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO login_flows (id, org_id, name, strategy, auth_methods, config, enabled, state, priority, audience, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			resourceID, orgID, displayName, strategy,
+			`INSERT INTO login_flows (instance_id, id, org_id, name, strategy, auth_methods, config, enabled, state, priority, audience, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			instanceID, resourceID, orgID, displayName, strategy,
 			resourcedata.EncodeObjectString(authMethods), resourcedata.EncodeObjectString(configMap), true, state, priority,
 			resourcedata.EncodeObjectString(audience), schemaRec.ID, resourcedata.EncodeObjectString(storedFlow), timeNow(), timeNow(),
 		)
@@ -304,9 +306,9 @@ func (s *Service) Install(ctx context.Context, templateID string, variables map[
 		}
 		metadataJSON := resourcedata.EncodeObjectString(withCatalogMeta(resourcedata.CloneObjectMap(resolved), catalogMeta))
 		_, err = s.db.ExecContext(ctx,
-			`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, 'human', 'active', ?, ?, ?, ?)`,
-			resourceID, orgID, templateID, displayName, schemaID, metadataJSON, timeNow(), timeNow(),
+			`INSERT INTO users (instance_id, id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, 'human', 'active', ?, ?, ?, ?)`,
+			instanceID, resourceID, orgID, templateID, displayName, schemaID, metadataJSON, timeNow(), timeNow(),
 		)
 	}
 	if err != nil {
@@ -321,11 +323,12 @@ func (s *Service) resolveSchema(ctx context.Context, schemaType, schemaID string
 }
 
 func (s *Service) upsertCache(ctx context.Context, key, data string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO cache (namespace, key, data, fetched_at)
-		 VALUES ('catalog', ?, ?, ?)
-		 ON CONFLICT(namespace, key) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at`,
-		key, data, timeNow(),
+		`INSERT INTO cache (instance_id, namespace, key, data, fetched_at)
+		 VALUES (?, 'catalog', ?, ?, ?)
+		 ON CONFLICT(instance_id, namespace, key) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at`,
+		instanceID, key, data, timeNow(),
 	)
 	return err
 }
@@ -465,7 +468,7 @@ func (s *Service) loadTemplatePayload(tpl *Template) (*TemplatePayload, error) {
 		// Try DB cache first.
 		var cached string
 		err = s.db.QueryRow(
-			`SELECT data FROM cache WHERE namespace = 'catalog' AND key = ?`, "template:"+tpl.ID,
+			`SELECT data FROM cache WHERE instance_id = ? AND namespace = 'catalog' AND key = ?`, httputil.DefaultInstanceID, "template:"+tpl.ID,
 		).Scan(&cached)
 		if err == nil {
 			data = []byte(cached)
@@ -498,7 +501,8 @@ func (s *Service) loadFromDBCache() *Index {
 
 	var data string
 	err := s.db.QueryRow(
-		`SELECT data FROM cache WHERE namespace = 'catalog' AND key = 'remote_index'`,
+		`SELECT data FROM cache WHERE instance_id = ? AND namespace = 'catalog' AND key = 'remote_index'`,
+		httputil.DefaultInstanceID,
 	).Scan(&data)
 	if err != nil {
 		return nil

@@ -1,11 +1,11 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
+	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/httputil"
 
 	"github.com/zitadel/zitadel/internal/auth"
@@ -79,16 +79,17 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 	var results []ImportResult
 	var created, skipped, errors int
 
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	scoped := a.db.Scoped(r.Context())
+	stx, err := scoped.BeginTx(r.Context(), nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "begin transaction: "+err.Error())
 		return
 	}
-	defer tx.Rollback()
+	defer stx.Rollback()
 
 	// Phase 1: Providers (no dependencies).
 	for i, p := range req.Providers {
-		res := a.importProvider(r, tx, p, i, req.OnConflict)
+		res := a.importProvider(r, stx, p, i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {
 		case "created":
@@ -106,7 +107,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	// Phase 2: Identities (may reference schemas).
 	for i, ident := range req.Entities {
-		res := a.importIdentity(r, tx, ident, len(req.Providers)+i, req.OnConflict)
+		res := a.importIdentity(r, stx, ident, len(req.Providers)+i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {
 		case "created":
@@ -124,7 +125,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	// Phase 3: Linked accounts (depends on entities + providers).
 	for i, la := range req.LinkedAccounts {
-		res := a.importLinkedAccount(r, tx, la, len(req.Providers)+len(req.Entities)+i, req.OnConflict)
+		res := a.importLinkedAccount(r, stx, la, len(req.Providers)+len(req.Entities)+i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {
 		case "created":
@@ -140,7 +141,7 @@ func (a *API) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := stx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
@@ -161,15 +162,15 @@ func importResponse(results []ImportResult, created, skipped, errors int) map[st
 
 // --- Import Helpers ---
 
-func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx int, onConflict string) ImportResult {
+func (a *API) importProvider(r *http.Request, stx *database.ScopedTx, p ImportProvider, idx int, onConflict string) ImportResult {
 	if p.Name == "" {
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: "name required"}
 	}
 
 	// Check conflict in providers table.
 	var existing string
-	err := tx.QueryRowContext(r.Context(),
-		`SELECT id FROM providers WHERE name = ?`, p.Name).Scan(&existing)
+	err := stx.QueryRowContext(r.Context(),
+		stx.Rebind(`SELECT id FROM providers WHERE instance_id = ? AND name = ?`), stx.InstanceID(), p.Name).Scan(&existing)
 	if err == nil {
 		if onConflict == "skip" {
 			return ImportResult{Index: idx, Resource: "provider", Status: "skipped", ID: existing, Reason: "name exists"}
@@ -205,10 +206,10 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 	overrideJSON, _ := json.Marshal(overrideMap)
 
 	orgID := "_global" // Bulk import defaults to global org for now.
-	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'provider_v1', '{}', datetime('now'), datetime('now'))`,
-		provID, orgID, p.Name, p.Protocol, p.Template,
+	_, err = stx.ExecContext(r.Context(),
+		stx.Rebind(`INSERT INTO providers (instance_id, id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'provider_v1', '{}', datetime('now'), datetime('now'))`),
+		stx.InstanceID(), provID, orgID, p.Name, p.Protocol, p.Template,
 		string(configJSON), string(overrideJSON), autoReg)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "provider", Status: "error", Reason: err.Error()}
@@ -217,20 +218,20 @@ func (a *API) importProvider(r *http.Request, tx *sql.Tx, p ImportProvider, idx 
 	return ImportResult{Index: idx, Resource: "provider", Status: "created", ID: provID}
 }
 
-func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, idx int, onConflict string) ImportResult {
+func (a *API) importIdentity(r *http.Request, stx *database.ScopedTx, ident ImportEntity, idx int, onConflict string) ImportResult {
 	if ident.Identifier == "" {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: "identifier required"}
 	}
 
 	// Check conflict.
 	var existingID string
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE identifier = ?`, ident.Identifier).Scan(&existingID)
+	err := stx.QueryRowContext(r.Context(), stx.Rebind(`SELECT id FROM users WHERE instance_id = ? AND identifier = ?`), stx.InstanceID(), ident.Identifier).Scan(&existingID)
 	if err == nil {
 		if onConflict == "update" {
 			var currentSchemaID, orgID string
-			err := tx.QueryRowContext(r.Context(),
-				`SELECT COALESCE(schema_id,''), COALESCE(org_id,'') FROM users WHERE id = ?`,
-				existingID,
+			err := stx.QueryRowContext(r.Context(),
+				stx.Rebind(`SELECT COALESCE(schema_id,''), COALESCE(org_id,'') FROM users WHERE instance_id = ? AND id = ?`),
+				stx.InstanceID(), existingID,
 			).Scan(&currentSchemaID, &orgID)
 			if err != nil {
 				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
@@ -239,12 +240,12 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 			if err != nil {
 				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 			}
-			if _, err := tx.ExecContext(r.Context(),
-				`UPDATE users SET display_name = ?, metadata = ?, updated_at = datetime('now') WHERE id = ?`,
-				ident.DisplayName, write.MetadataJSON, existingID); err != nil {
+			if _, err := stx.ExecContext(r.Context(),
+				stx.Rebind(`UPDATE users SET display_name = ?, metadata = ?, updated_at = datetime('now') WHERE instance_id = ? AND id = ?`),
+				ident.DisplayName, write.MetadataJSON, stx.InstanceID(), existingID); err != nil {
 				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 			}
-			if err := reindexUserUniqueness(r.Context(), tx, existingID, orgID, ident.Identifier, write); err != nil {
+			if err := reindexUserUniqueness(r.Context(), stx.Tx(), existingID, orgID, ident.Identifier, write); err != nil {
 				return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 			}
 			return ImportResult{Index: idx, Resource: "identity", Status: "updated", ID: existingID}
@@ -267,10 +268,10 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	}
 
 	orgID := "_global"
-	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		newID, orgID, ident.Identifier, ident.DisplayName, func() string {
+	_, err = stx.ExecContext(r.Context(),
+		stx.Rebind(`INSERT INTO users (instance_id, id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`),
+		stx.InstanceID(), newID, orgID, ident.Identifier, ident.DisplayName, func() string {
 			if write.Schema.Type == "service_user" || write.Schema.Type == "ai_agent" {
 				return write.Schema.Type
 			}
@@ -279,7 +280,7 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}
-	if err := enforceUserUniqueness(r.Context(), tx, newID, orgID, ident.Identifier, write); err != nil {
+	if err := enforceUserUniqueness(r.Context(), stx.Tx(), newID, orgID, ident.Identifier, write); err != nil {
 		return ImportResult{Index: idx, Resource: "identity", Status: "error", Reason: err.Error()}
 	}
 
@@ -290,36 +291,36 @@ func (a *API) importIdentity(r *http.Request, tx *sql.Tx, ident ImportEntity, id
 		if err == nil {
 			credID := id.New()
 			credJSON := auth.EncodeCredentialJSON(hash)
-			tx.ExecContext(r.Context(),
-				`INSERT INTO credentials (id, user_id, type, data) VALUES (?, ?, 'password', ?)`,
-				credID, newID, credJSON)
+			stx.ExecContext(r.Context(),
+				stx.Rebind(`INSERT INTO credentials (instance_id, id, user_id, type, data) VALUES (?, ?, ?, 'password', ?)`),
+				stx.InstanceID(), credID, newID, credJSON)
 		}
 	}
 
 	return ImportResult{Index: idx, Resource: "identity", Status: "created", ID: newID}
 }
 
-func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAccount, idx int, onConflict string) ImportResult {
+func (a *API) importLinkedAccount(r *http.Request, stx *database.ScopedTx, la ImportLinkedAccount, idx int, onConflict string) ImportResult {
 	// Resolve identity by identifier.
 	var userID string
-	err := tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE identifier = ?`, la.IdentityIdentifier).Scan(&userID)
+	err := stx.QueryRowContext(r.Context(), stx.Rebind(`SELECT id FROM users WHERE instance_id = ? AND identifier = ?`), stx.InstanceID(), la.IdentityIdentifier).Scan(&userID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "identity not found: " + la.IdentityIdentifier}
 	}
 
 	// Resolve provider by name from providers table.
 	var providerID string
-	err = tx.QueryRowContext(r.Context(),
-		`SELECT id FROM providers WHERE name = ?`, la.ProviderName).Scan(&providerID)
+	err = stx.QueryRowContext(r.Context(),
+		stx.Rebind(`SELECT id FROM providers WHERE instance_id = ? AND name = ?`), stx.InstanceID(), la.ProviderName).Scan(&providerID)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: "provider not found: " + la.ProviderName}
 	}
 
 	// Check conflict.
 	var existingLinkID string
-	err = tx.QueryRowContext(r.Context(),
-		`SELECT id FROM linked_identities WHERE provider_id = ? AND external_sub = ?`,
-		providerID, la.ExternalSub).Scan(&existingLinkID)
+	err = stx.QueryRowContext(r.Context(),
+		stx.Rebind(`SELECT id FROM linked_identities WHERE instance_id = ? AND provider_id = ? AND external_sub = ?`),
+		stx.InstanceID(), providerID, la.ExternalSub).Scan(&existingLinkID)
 	if err == nil {
 		if onConflict == "skip" {
 			return ImportResult{Index: idx, Resource: "linked_account", Status: "skipped", ID: existingLinkID, Reason: "already linked"}
@@ -328,10 +329,10 @@ func (a *API) importLinkedAccount(r *http.Request, tx *sql.Tx, la ImportLinkedAc
 	}
 
 	linkID := id.New()
-	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
-		 VALUES (?, ?, ?, ?, ?, '{}', datetime('now'))`,
-		linkID, userID, providerID, la.ExternalSub, la.ExternalEmail)
+	_, err = stx.ExecContext(r.Context(),
+		stx.Rebind(`INSERT INTO linked_identities (instance_id, id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, '{}', datetime('now'))`),
+		stx.InstanceID(), linkID, userID, providerID, la.ExternalSub, la.ExternalEmail)
 	if err != nil {
 		return ImportResult{Index: idx, Resource: "linked_account", Status: "error", Reason: err.Error()}
 	}
@@ -355,17 +356,18 @@ func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delegate to import handler logic.
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	scoped := a.db.Scoped(r.Context())
+	stx, err := scoped.BeginTx(r.Context(), nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "begin transaction: "+err.Error())
 		return
 	}
-	defer tx.Rollback()
+	defer stx.Rollback()
 
 	var results []ImportResult
 	var created, skipped, errors int
 	for i, ident := range req.Entities {
-		res := a.importIdentity(r, tx, ident, i, req.OnConflict)
+		res := a.importIdentity(r, stx, ident, i, req.OnConflict)
 		results = append(results, res)
 		switch res.Status {
 		case "created", "updated":
@@ -381,7 +383,7 @@ func (a *API) handleEntitiesBulk(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := stx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}

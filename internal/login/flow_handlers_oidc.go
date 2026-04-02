@@ -19,15 +19,16 @@ type oidcAuthRequestContext struct {
 }
 
 func (h *Handler) lookupOIDCAuthRequest(ctx context.Context, requestID string) (*oidcAuthRequestContext, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var authReq oidcAuthRequestContext
 	var dataJSON string
 	err := h.db.SQL().QueryRowContext(ctx,
 		`SELECT redirect_uri, state, COALESCE(data, '{}')
 		 FROM auth_states
-		 WHERE id = ?
+		 WHERE id = ? AND instance_id = ?
 			   AND type = 'oidc_auth'
 			   AND expires_at > datetime('now')`,
-		requestID,
+		requestID, instanceID,
 	).Scan(&authReq.RedirectURI, &authReq.State, &dataJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -48,11 +49,12 @@ func (h *Handler) lookupOIDCAuthRequest(ctx context.Context, requestID string) (
 }
 
 func (h *Handler) completeOIDCAuthRequest(ctx context.Context, requestID, userID string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	result, err := h.db.SQL().ExecContext(ctx,
 		`UPDATE auth_states
 		 SET user_id = ?, done = 1, auth_time = datetime('now')
-		 WHERE id = ? AND type = 'oidc_auth'`,
-		userID, requestID,
+		 WHERE id = ? AND type = 'oidc_auth' AND instance_id = ?`,
+		userID, requestID, instanceID,
 	)
 	if err != nil {
 		return err
@@ -100,11 +102,12 @@ func requireSilentTrustedSession(prompts []string) bool {
 }
 
 func (h *Handler) loadTrustedIdentitySummary(ctx context.Context, userID string) (identifier, displayName string) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_ = h.db.SQL().QueryRowContext(ctx,
 		`SELECT COALESCE(identifier, ''), COALESCE(display_name, '')
 		 FROM users
-		 WHERE id = ?`,
-		userID,
+		 WHERE id = ? AND instance_id = ?`,
+		userID, instanceID,
 	).Scan(&identifier, &displayName)
 	return identifier, displayName
 }

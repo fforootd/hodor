@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	providers "github.com/zitadel/zitadel/internal/provider"
 	"github.com/zitadel/zitadel/internal/schema"
@@ -15,16 +16,17 @@ import (
 )
 
 func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers.Provider, externalSub, externalEmail string, claims map[string]any) (string, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var userID string
 	err := h.db.SQL().QueryRowContext(ctx,
-		`SELECT user_id FROM linked_identities WHERE provider_id = ? AND external_sub = ?`,
-		prov.ID, externalSub,
+		`SELECT user_id FROM linked_identities WHERE provider_id = ? AND external_sub = ? AND instance_id = ?`,
+		prov.ID, externalSub, instanceID,
 	).Scan(&userID)
 	if err == nil {
 		claimsJSON, _ := json.Marshal(claims)
 		_, _ = h.db.SQL().ExecContext(ctx,
-			`UPDATE linked_identities SET last_used_at = datetime('now'), raw_claims = ?, external_email = ? WHERE provider_id = ? AND external_sub = ?`,
-			string(claimsJSON), externalEmail, prov.ID, externalSub,
+			`UPDATE linked_identities SET last_used_at = datetime('now'), raw_claims = ?, external_email = ? WHERE provider_id = ? AND external_sub = ? AND instance_id = ?`,
+			string(claimsJSON), externalEmail, prov.ID, externalSub, instanceID,
 		)
 		return userID, nil
 	}
@@ -33,9 +35,9 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 		claimsJSON, _ := json.Marshal(claims)
 		linkID := id.New()
 		if _, linkErr := h.db.SQL().ExecContext(ctx,
-			`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
-			 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-			linkID, linkedUserID, prov.ID, externalSub, externalEmail, string(claimsJSON),
+			`INSERT INTO linked_identities (id, instance_id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+			linkID, instanceID, linkedUserID, prov.ID, externalSub, externalEmail, string(claimsJSON),
 		); linkErr == nil {
 			return linkedUserID, nil
 		}
@@ -90,9 +92,9 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, 1, ?, ?, 'active', ?, ?, datetime('now'), datetime('now'))`,
-		newID, identifier, displayName, schemaRec.ID, string(profileJSON),
+		`INSERT INTO users (id, instance_id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, 1, ?, ?, 'active', ?, ?, datetime('now'), datetime('now'))`,
+		newID, instanceID, identifier, displayName, schemaRec.ID, string(profileJSON),
 	)
 	if err != nil {
 		return "", fmt.Errorf("create identity: %w", err)
@@ -107,9 +109,9 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 	linkID := id.New()
 	claimsJSON, _ := json.Marshal(claims)
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO linked_identities (id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-		linkID, newID, prov.ID, externalSub, externalEmail, string(claimsJSON),
+		`INSERT INTO linked_identities (id, instance_id, user_id, provider_id, external_sub, external_email, raw_claims, linked_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		linkID, instanceID, newID, prov.ID, externalSub, externalEmail, string(claimsJSON),
 	)
 	if err != nil {
 		return "", fmt.Errorf("create linked account: %w", err)
@@ -122,13 +124,14 @@ func (h *Handler) findOrCreateLinkedIdentity(ctx context.Context, prov providers
 }
 
 func (h *Handler) findLinkableIdentity(ctx context.Context, linking providers.Linking, externalEmail, externalSub string, claims map[string]any) (string, bool) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	switch linking.MatchBy {
 	case providers.LinkMatchVerifiedEmail:
 		if externalEmail == "" || !claimBool(claims["email_verified"]) {
 			return "", false
 		}
 		var userID string
-		err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ?`, externalEmail).Scan(&userID)
+		err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ? AND instance_id = ?`, externalEmail, instanceID).Scan(&userID)
 		return userID, err == nil
 	case providers.LinkMatchIdentifier:
 		candidate := externalEmail
@@ -139,7 +142,7 @@ func (h *Handler) findLinkableIdentity(ctx context.Context, linking providers.Li
 			return "", false
 		}
 		var userID string
-		err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ?`, candidate).Scan(&userID)
+		err := h.db.SQL().QueryRowContext(ctx, `SELECT id FROM users WHERE identifier = ? AND instance_id = ?`, candidate, instanceID).Scan(&userID)
 		return userID, err == nil
 	default:
 		return "", false

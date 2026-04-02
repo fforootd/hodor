@@ -15,6 +15,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/uniqueness"
 )
@@ -69,8 +70,9 @@ func SeedSystem(ctx context.Context, db *database.DB) error {
 }
 
 func HasAnyUsers(ctx context.Context, db *database.DB) (bool, error) {
+	instanceID := httputil.DefaultInstanceID
 	var count int
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE instance_id = %s`, db.Placeholder(1)), instanceID).Scan(&count); err != nil {
 		return false, fmt.Errorf("count users: %w", err)
 	}
 	return count > 0, nil
@@ -240,13 +242,14 @@ func insertAdminUser(ctx context.Context, db *database.DB, username, email, disp
 		return "", err
 	}
 
+	instanceID := httputil.DefaultInstanceID
 	userID := id.New()
 	query := fmt.Sprintf(
-		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (%s, %s, %s, %s, 'human', 'active', 'human_user_v1', %s, %s, %s)`,
-		db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.Placeholder(4), db.Placeholder(5), db.TimestampNow(), db.TimestampNow(),
+		`INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (%s, %s, %s, %s, %s, 'human', 'active', 'human_user_v1', %s, %s, %s)`,
+		db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.Placeholder(4), db.Placeholder(5), db.Placeholder(6), db.TimestampNow(), db.TimestampNow(),
 	)
-	if _, err := tx.ExecContext(ctx, query, userID, "", username, displayName, metadataJSON); err != nil {
+	if _, err := tx.ExecContext(ctx, query, userID, instanceID, "", username, displayName, metadataJSON); err != nil {
 		return "", fmt.Errorf("insert admin user: %w", err)
 	}
 	if err := uniqueness.EnforceFromIdentifier(ctx, tx, userID, "", username); err != nil {
@@ -265,17 +268,18 @@ func insertAdminUser(ctx context.Context, db *database.DB, username, email, disp
 }
 
 func lookupAdminRecord(ctx context.Context, db *database.DB, userID, identifier string) (*AdminRecord, error) {
+	instanceID := httputil.DefaultInstanceID
 	var (
 		query string
-		arg   string
+		args  []any
 	)
 	switch {
 	case strings.TrimSpace(userID) != "":
-		query = fmt.Sprintf(`SELECT id, identifier, metadata FROM users WHERE id = %s LIMIT 1`, db.Placeholder(1))
-		arg = strings.TrimSpace(userID)
+		query = fmt.Sprintf(`SELECT id, identifier, metadata FROM users WHERE id = %s AND instance_id = %s LIMIT 1`, db.Placeholder(1), db.Placeholder(2))
+		args = []any{strings.TrimSpace(userID), instanceID}
 	case strings.TrimSpace(identifier) != "":
-		query = fmt.Sprintf(`SELECT id, identifier, metadata FROM users WHERE identifier = %s LIMIT 1`, db.Placeholder(1))
-		arg = strings.TrimSpace(identifier)
+		query = fmt.Sprintf(`SELECT id, identifier, metadata FROM users WHERE identifier = %s AND instance_id = %s LIMIT 1`, db.Placeholder(1), db.Placeholder(2))
+		args = []any{strings.TrimSpace(identifier), instanceID}
 	default:
 		return nil, fmt.Errorf("either user ID or identifier is required")
 	}
@@ -285,7 +289,7 @@ func lookupAdminRecord(ctx context.Context, db *database.DB, userID, identifier 
 		identifierValue string
 		metadataRaw     []byte
 	)
-	if err := db.SQL().QueryRowContext(ctx, query, arg).Scan(&idValue, &identifierValue, &metadataRaw); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, query, args...).Scan(&idValue, &identifierValue, &metadataRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -300,18 +304,20 @@ func lookupAdminRecord(ctx context.Context, db *database.DB, userID, identifier 
 }
 
 func activateUser(ctx context.Context, db *database.DB, userID string) error {
-	query := fmt.Sprintf(`UPDATE users SET state = 'active', updated_at = %s WHERE id = %s`, db.TimestampNow(), db.Placeholder(1))
-	if _, err := db.SQL().ExecContext(ctx, query, userID); err != nil {
+	instanceID := httputil.DefaultInstanceID
+	query := fmt.Sprintf(`UPDATE users SET state = 'active', updated_at = %s WHERE id = %s AND instance_id = %s`, db.TimestampNow(), db.Placeholder(1), db.Placeholder(2))
+	if _, err := db.SQL().ExecContext(ctx, query, userID, instanceID); err != nil {
 		return fmt.Errorf("reactivate user: %w", err)
 	}
 	return nil
 }
 
 func checkIdentifierConflict(ctx context.Context, db *database.DB, tx *sql.Tx, username string) error {
+	instanceID := httputil.DefaultInstanceID
 	var count int
-	query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE org_id = '' AND identifier = %s`, db.Placeholder(1))
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE org_id = '' AND identifier = %s AND instance_id = %s`, db.Placeholder(1), db.Placeholder(2))
 	if err := tx.QueryRowContext(ctx, query,
-		username,
+		username, instanceID,
 	).Scan(&count); err != nil {
 		return fmt.Errorf("check identifier conflict: %w", err)
 	}
@@ -326,10 +332,11 @@ func checkIdentifierConflict(ctx context.Context, db *database.DB, tx *sql.Tx, u
 }
 
 func checkEmailConflict(ctx context.Context, db *database.DB, tx *sql.Tx, email string) error {
+	instanceID := httputil.DefaultInstanceID
 	var count int
-	query := fmt.Sprintf(`SELECT COUNT(*) FROM unique_fields WHERE scope_id = '' AND field_name = 'email' AND normalized_value = %s`, db.Placeholder(1))
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM unique_fields WHERE scope_id = '' AND field_name = 'email' AND normalized_value = %s AND instance_id = %s`, db.Placeholder(1), db.Placeholder(2))
 	if err := tx.QueryRowContext(ctx, query,
-		uniqueness.Normalize(email),
+		uniqueness.Normalize(email), instanceID,
 	).Scan(&count); err != nil {
 		return fmt.Errorf("check email conflict: %w", err)
 	}

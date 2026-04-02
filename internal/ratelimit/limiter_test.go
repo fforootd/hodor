@@ -307,12 +307,12 @@ func BenchmarkMiddleware(b *testing.B) {
 
 	db.Exec(`
 		CREATE TABLE settings (
-			id TEXT PRIMARY KEY, type TEXT NOT NULL,
+			id TEXT PRIMARY KEY, instance_id TEXT NOT NULL DEFAULT 'default', type TEXT NOT NULL,
 			scope TEXT NOT NULL DEFAULT 'instance', scope_id TEXT NOT NULL DEFAULT '',
 			data TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-			UNIQUE(type, scope, scope_id)
+			UNIQUE(instance_id, type, scope, scope_id)
 		)`)
 	db.Exec(`
 		CREATE TABLE schemas (
@@ -361,7 +361,7 @@ func BenchmarkMiddleware_Exempt(b *testing.B) {
 	}
 	defer db.Close()
 
-	db.Exec(`CREATE TABLE settings (id TEXT PRIMARY KEY, type TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'instance', scope_id TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', created_at TEXT, updated_at TEXT, UNIQUE(type, scope, scope_id))`)
+	db.Exec(`CREATE TABLE settings (id TEXT PRIMARY KEY, instance_id TEXT NOT NULL DEFAULT 'default', type TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'instance', scope_id TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', created_at TEXT, updated_at TEXT, UNIQUE(instance_id, type, scope, scope_id))`)
 	db.Exec(`CREATE TABLE schemas (id TEXT PRIMARY KEY, type TEXT NOT NULL, org_id TEXT DEFAULT '1', schema TEXT DEFAULT '{}', version INTEGER DEFAULT 1, is_default BOOLEAN DEFAULT false, visibility TEXT DEFAULT 'private', message TEXT DEFAULT '', created_by TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`)
 	db.Exec(`INSERT INTO schemas (id, type, is_default) VALUES ('action_v1', 'action', true)`)
 	db.Exec(`CREATE TABLE entities (id TEXT PRIMARY KEY, schema_id TEXT DEFAULT '', identifier TEXT NOT NULL DEFAULT '', org_id TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', created_at TEXT, updated_at TEXT)`)
@@ -387,7 +387,7 @@ func BenchmarkConfigResolve(b *testing.B) {
 	}
 	defer db.Close()
 
-	db.Exec(`CREATE TABLE settings (id TEXT PRIMARY KEY, type TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'instance', scope_id TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', created_at TEXT, updated_at TEXT, UNIQUE(type, scope, scope_id))`)
+	db.Exec(`CREATE TABLE settings (id TEXT PRIMARY KEY, instance_id TEXT NOT NULL DEFAULT 'default', type TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'instance', scope_id TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', created_at TEXT, updated_at TEXT, UNIQUE(instance_id, type, scope, scope_id))`)
 	db.Exec(`INSERT INTO settings (id, type, scope, scope_id, data) VALUES ('i', 'rate_limit', 'instance', '', '{"requests_per_minute": 1000, "burst": 50}')`)
 	db.Exec(`INSERT INTO settings (id, type, scope, scope_id, data) VALUES ('o', 'rate_limit', 'org', 'org1', '{"requests_per_minute": 200}')`)
 
@@ -415,14 +415,15 @@ func testDB(t *testing.T) *sql.DB {
 	// Settings table.
 	_, err = db.Exec(`
 		CREATE TABLE settings (
-			id         TEXT PRIMARY KEY,
-			type       TEXT NOT NULL,
-			scope      TEXT NOT NULL DEFAULT 'instance',
-			scope_id   TEXT NOT NULL DEFAULT '',
-			data       TEXT NOT NULL DEFAULT '{}',
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-			UNIQUE(type, scope, scope_id)
+			id          TEXT PRIMARY KEY,
+			instance_id TEXT NOT NULL DEFAULT 'default',
+			type        TEXT NOT NULL,
+			scope       TEXT NOT NULL DEFAULT 'instance',
+			scope_id    TEXT NOT NULL DEFAULT '',
+			data        TEXT NOT NULL DEFAULT '{}',
+			created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(instance_id, type, scope, scope_id)
 		)`)
 	if err != nil {
 		t.Fatal(err)

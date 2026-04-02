@@ -55,6 +55,7 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	newID := id.New()
 	schemaID := schemaRec.ID
 	orgID := httputil.ResolveOrgID(r, "1")
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 
 	tx, err := h.db.SQL().BeginTx(r.Context(), nil)
 	if err != nil {
@@ -65,9 +66,9 @@ func (h *Handler) flowSubmitRegister(w http.ResponseWriter, r *http.Request, flo
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`INSERT INTO users (id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'active', ?, ?, datetime('now'), datetime('now'))`,
-		newID, orgID, identifier, displayName, schemaID, profileJSON,
+		`INSERT INTO users (id, instance_id, org_id, identifier, display_name, state, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, datetime('now'), datetime('now'))`,
+		newID, instanceID, orgID, identifier, displayName, schemaID, profileJSON,
 	)
 	if err != nil {
 		logging.Printf("[flow] %s registration failed: %v", flow.ID, err)

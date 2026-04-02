@@ -148,13 +148,14 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	// Start catalog background refresh (after boot, non-blocking).
 	catalogSvc.StartBackground()
 
-	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → RateLimit → AuthGate → FGAGate → RequestLog → OTel.
+	// Wrap the mux with middleware: RealIP → SecurityHeaders → AppGate → InstanceGate → RateLimit → AuthGate → FGAGate → RequestLog → OTel.
 	mgmtCfg := &mgmt.Config{Secret: cfg.Server.ManagementSecret}
 	var handler http.Handler = mux
 	handler = api.RequestLogMiddleware()(handler)
 	handler = fgaMiddleware.Gate(handler)
 	handler = api.AuthGate(cookieCfg, db.SQL(), mgmtCfg)(handler)
 	handler = ratelimit.Middleware(rateLimiter, FromContext)(handler)
+	handler = InstanceGate(cfg.Server.MultiTenant)(handler)
 	handler = AppGate(paths, &cfg.Server.AppAccess)(handler)
 	handler = SecurityHeaders(cfg.Server.SecurityHeaders, isSecure)(handler)
 	handler = RealIP(realIPCfg)(handler)

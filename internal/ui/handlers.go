@@ -14,6 +14,7 @@ import (
 	"github.com/zitadel/zitadel/internal/crypto"
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/session"
 )
 
@@ -88,10 +89,11 @@ func (u *UI) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up identity by identifier.
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var userID string
 	err := u.db.SQL().QueryRowContext(r.Context(),
-		`SELECT id FROM users WHERE identifier = ? AND state = 'active'`,
-		identifier,
+		`SELECT id FROM users WHERE instance_id = ? AND identifier = ? AND state = 'active'`,
+		instanceID, identifier,
 	).Scan(&userID)
 	if err == sql.ErrNoRows {
 		u.api.EmitAuthEvent(r.Context(), "auth.login_failure", "", map[string]any{
@@ -161,9 +163,10 @@ func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 		tokenHash := crypto.HashTokenHex(rawToken)
 
+		instanceID := httputil.InstanceIDFromContext(r.Context())
 		var sessionID string
 		err := u.db.SQL().QueryRowContext(r.Context(),
-			`SELECT id FROM sessions WHERE token_hash = ? AND revoked_at IS NULL`, tokenHash,
+			`SELECT id FROM sessions WHERE instance_id = ? AND token_hash = ? AND revoked_at IS NULL`, instanceID, tokenHash,
 		).Scan(&sessionID)
 		if err == nil && sessionID != "" {
 			_ = u.api.RevokeSessionInternal(r.Context(), sessionID)
@@ -180,10 +183,11 @@ func (u *UI) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (u *UI) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var identityCount, sessionCount, eventCount int
-	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&identityCount)
-	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL`).Scan(&sessionCount)
-	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM events`).Scan(&eventCount)
+	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE instance_id = ?`, instanceID).Scan(&identityCount)
+	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM sessions WHERE instance_id = ? AND revoked_at IS NULL`, instanceID).Scan(&sessionCount)
+	u.db.SQL().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM events WHERE instance_id = ?`, instanceID).Scan(&eventCount)
 
 	renderAdminDashboard(w, ident, identityCount, sessionCount, eventCount)
 }
@@ -191,9 +195,10 @@ func (u *UI) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT u.id, u.identifier, u.display_name, u.state, u.created_at
-		 FROM users u ORDER BY u.id ASC LIMIT 100`)
+		 FROM users u WHERE u.instance_id = ? ORDER BY u.id ASC LIMIT 100`, instanceID)
 	if err != nil {
 		http.Error(w, "Failed to load entities", http.StatusInternalServerError)
 		return
@@ -230,10 +235,11 @@ func (u *UI) handleAdminIdentities(w http.ResponseWriter, r *http.Request) {
 func (u *UI) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
 	ident := r.Context().Value(ctxKeyIdentity).(*UserContext)
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	rows, err := u.db.SQL().QueryContext(r.Context(),
 		`SELECT s.id, u.identifier, s.user_agent, s.ip_address, s.created_at, s.expires_at
 		 FROM sessions s JOIN users u ON s.user_id = u.id
-		 WHERE s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 100`)
+		 WHERE s.instance_id = ? AND s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 100`, instanceID)
 	if err != nil {
 		http.Error(w, "Failed to load sessions", http.StatusInternalServerError)
 		return
@@ -272,12 +278,13 @@ func (u *UI) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
 
 	typeFilter := r.URL.Query().Get("type")
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	query := `SELECT id, event_type, actor_id, aggregate_id, aggregate_type, payload, trace_id, session_id, created_at
-		 FROM events`
-	var args []any
+		 FROM events WHERE instance_id = ?`
+	args := []any{instanceID}
 
 	if typeFilter != "" {
-		query += ` WHERE event_type LIKE ?`
+		query += ` AND event_type LIKE ?`
 		args = append(args, typeFilter+"%")
 	}
 	query += ` ORDER BY id DESC LIMIT 100`
@@ -332,12 +339,13 @@ func (u *UI) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 		LastError   string
 		RunCount    int64
 	}
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var jobRows []JobRow
 	rows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT name, display_name, description, cron, enabled, 
-		        COALESCE(last_run_at,'—'), COALESCE(next_run_at,'—'), 
+		`SELECT name, display_name, description, cron, enabled,
+		        COALESCE(last_run_at,'—'), COALESCE(next_run_at,'—'),
 		        last_status, last_error, run_count
-		 FROM jobs ORDER BY name`)
+		 FROM jobs WHERE instance_id = ? ORDER BY name`, instanceID)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -363,7 +371,7 @@ func (u *UI) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	var policies []PolicyRow
 	pRows, err := u.db.SQL().QueryContext(r.Context(),
-		`SELECT event_pattern, oltp_ttl, lake_ttl, priority FROM retention_policies ORDER BY priority DESC`)
+		`SELECT event_pattern, oltp_ttl, lake_ttl, priority FROM retention_policies WHERE instance_id = ? ORDER BY priority DESC`, instanceID)
 	if err == nil {
 		defer pRows.Close()
 		for pRows.Next() {
@@ -383,8 +391,9 @@ func (u *UI) handleAdminJobs(w http.ResponseWriter, r *http.Request) {
 
 func (u *UI) handleAdminJobToggle(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	u.db.SQL().ExecContext(r.Context(),
-		`UPDATE jobs SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE name = ?`, name)
+		`UPDATE jobs SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE instance_id = ? AND name = ?`, instanceID, name)
 	http.Redirect(w, r, "/admin/jobs", http.StatusSeeOther)
 }
 
@@ -598,14 +607,15 @@ func (u *UI) getSession(r *http.Request) (*UserContext, bool) {
 
 	tokenHash := crypto.HashTokenHex(rawToken)
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var userID string
 	var identifier string
 	var displayName sql.NullString
 	err := u.db.SQL().QueryRowContext(r.Context(),
 		`SELECT s.user_id, u.identifier, u.display_name
 		 FROM sessions s JOIN users u ON s.user_id = u.id
-		 WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
-		tokenHash,
+		 WHERE s.instance_id = ? AND s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > datetime('now')`,
+		instanceID, tokenHash,
 	).Scan(&userID, &identifier, &displayName)
 	if err != nil {
 		return nil, false

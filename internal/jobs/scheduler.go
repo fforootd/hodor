@@ -8,12 +8,13 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/logging"
 )
 
 // JobFunc is the signature for a job implementation.
@@ -64,8 +65,10 @@ func (s *Scheduler) Run(ctx context.Context) {
 // initNextRun sets next_run_at for jobs that don't have one yet.
 func (s *Scheduler) initNextRun() {
 	now := time.Now().UTC()
+	instanceID := httputil.DefaultInstanceID
 	rows, err := s.db.SQL().Query(
-		`SELECT name, cron FROM jobs WHERE enabled = 1 AND (next_run_at IS NULL OR next_run_at = '')`,
+		`SELECT name, cron FROM jobs WHERE instance_id = ? AND enabled = 1 AND (next_run_at IS NULL OR next_run_at = '')`,
+		instanceID,
 	)
 	if err != nil {
 		logging.Printf("[scheduler] init error: %v", err)
@@ -80,8 +83,8 @@ func (s *Scheduler) initNextRun() {
 		}
 		next := nextCronTime(now, cron)
 		_, _ = s.db.SQL().Exec(
-			`UPDATE jobs SET next_run_at = ? WHERE name = ?`,
-			next.Format(time.RFC3339), name,
+			`UPDATE jobs SET next_run_at = ? WHERE instance_id = ? AND name = ?`,
+			next.Format(time.RFC3339), instanceID, name,
 		)
 	}
 	if err := rows.Err(); err != nil {
@@ -93,10 +96,11 @@ func (s *Scheduler) initNextRun() {
 func (s *Scheduler) checkAndRun(ctx context.Context) {
 	now := time.Now().UTC()
 
+	instanceID := httputil.DefaultInstanceID
 	rows, err := s.db.SQL().QueryContext(ctx,
 		`SELECT name, cron FROM jobs
-		 WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`,
-		now.Format(time.RFC3339),
+		 WHERE instance_id = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`,
+		instanceID, now.Format(time.RFC3339),
 	)
 	if err != nil {
 		logging.Printf("[scheduler] check error: %v", err)
@@ -130,8 +134,8 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 
 		// Mark as running.
 		_, _ = s.db.SQL().ExecContext(ctx,
-			`UPDATE jobs SET last_status = 'running', last_run_at = ? WHERE name = ?`,
-			now.Format(time.RFC3339), j.name,
+			`UPDATE jobs SET last_status = 'running', last_run_at = ? WHERE instance_id = ? AND name = ?`,
+			now.Format(time.RFC3339), instanceID, j.name,
 		)
 
 		// Run the job.
@@ -150,8 +154,8 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 
 		next := nextCronTime(time.Now().UTC(), j.cron)
 		_, _ = s.db.SQL().ExecContext(ctx,
-			`UPDATE jobs SET last_status = ?, last_error = ?, run_count = run_count + 1, next_run_at = ? WHERE name = ?`,
-			status, errMsg, next.Format(time.RFC3339), j.name,
+			`UPDATE jobs SET last_status = ?, last_error = ?, run_count = run_count + 1, next_run_at = ? WHERE instance_id = ? AND name = ?`,
+			status, errMsg, next.Format(time.RFC3339), instanceID, j.name,
 		)
 	}
 }

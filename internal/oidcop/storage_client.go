@@ -13,9 +13,11 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 
 	"github.com/zitadel/zitadel/internal/auth"
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.Client, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var appType, redirectURIsJSON, grantTypesJSON, responseTypesJSON, metadataJSON, schemaJSON sql.NullString
 	err := s.db.SQL().QueryRowContext(ctx,
 		`SELECT COALESCE(a.app_type, 'web'),
@@ -26,8 +28,8 @@ func (s *Storage) GetClientByClientID(ctx context.Context, clientID string) (op.
 		        COALESCE(sc.schema, '{}')
 		 FROM apps a
 		 LEFT JOIN schemas sc ON a.schema_id = sc.id
-		 WHERE a.client_id = ? AND a.state = 'active'`,
-		clientID,
+		 WHERE a.client_id = ? AND a.state = 'active' AND a.instance_id = ?`,
+		clientID, instanceID,
 	).Scan(&appType, &redirectURIsJSON, &grantTypesJSON, &responseTypesJSON, &metadataJSON, &schemaJSON)
 	if err != nil {
 		return nil, fmt.Errorf("client not found: %w", err)
@@ -83,10 +85,11 @@ func buildClientDataJSON(metadataJSON, appType, redirectURIsJSON, grantTypesJSON
 }
 
 func (s *Storage) AuthorizeClientIDSecret(ctx context.Context, clientID, clientSecret string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var storedHash string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT client_secret FROM apps WHERE client_id = ? AND state = 'active'`,
-		clientID,
+		`SELECT client_secret FROM apps WHERE client_id = ? AND state = 'active' AND instance_id = ?`,
+		clientID, instanceID,
 	).Scan(&storedHash)
 	if err != nil {
 		return fmt.Errorf("client not found or no secret configured")

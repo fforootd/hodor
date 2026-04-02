@@ -76,10 +76,11 @@ func (h *Handler) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 	pkceChallenge := crypto.HashTokenBase64URL(pkceVerifier)
 	stateDataJSON, _ := json.Marshal(map[string]any{"flow_id": flowID})
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	_, _ = h.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO auth_states (id, type, state, provider_id, pkce_verifier, nonce, redirect_uri, data, expires_at, created_at)
-		 VALUES (?, 'sso', ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'), datetime('now'))`,
-		state, state, providerID, pkceVerifier, nonce, h.baseURL+"/v1/auth/sso/callback", string(stateDataJSON),
+		`INSERT INTO auth_states (id, instance_id, type, state, provider_id, pkce_verifier, nonce, redirect_uri, data, expires_at, created_at)
+		 VALUES (?, ?, 'sso', ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'), datetime('now'))`,
+		state, instanceID, state, providerID, pkceVerifier, nonce, h.baseURL+"/v1/auth/sso/callback", string(stateDataJSON),
 	)
 
 	params := url.Values{
@@ -114,16 +115,17 @@ func (h *Handler) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var providerID, pkceVerifier, nonce, stateDataJSON string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT provider_id, pkce_verifier, nonce, COALESCE(data,'{}') FROM auth_states WHERE state = ?`, state,
+		`SELECT provider_id, pkce_verifier, nonce, COALESCE(data,'{}') FROM auth_states WHERE state = ? AND instance_id = ?`, state, instanceID,
 	).Scan(&providerID, &pkceVerifier, &nonce, &stateDataJSON)
 	if err != nil {
 		logging.Printf("[sso] state lookup failed: %v", err)
 		http.Redirect(w, r, "/login?error=sso_expired", http.StatusFound)
 		return
 	}
-	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM auth_states WHERE state = ?`, state)
+	_, _ = h.db.SQL().ExecContext(r.Context(), `DELETE FROM auth_states WHERE state = ? AND instance_id = ?`, state, instanceID)
 
 	var stateData map[string]any
 	_ = json.Unmarshal([]byte(stateDataJSON), &stateData)

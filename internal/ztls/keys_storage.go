@@ -11,6 +11,7 @@ import (
 	"github.com/caddyserver/certmagic"
 
 	zcrypto "github.com/zitadel/zitadel/internal/crypto"
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // secretsStorage implements certmagic.Storage using the `secrets` table
@@ -51,12 +52,13 @@ func (s *secretsStorage) Store(ctx context.Context, key string, value []byte) er
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	instanceID := httputil.InstanceIDFromContext(ctx)
 
 	// Upsert: try update first, then insert.
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ?, expires_at = ?
-		 WHERE id = ? AND secret_type = 'certmagic'`,
-		sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, key)
+		 WHERE instance_id = ? AND id = ? AND secret_type = 'certmagic'`,
+		sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, instanceID, key)
 	if err != nil {
 		return fmt.Errorf("certmagic store update: %w", err)
 	}
@@ -66,16 +68,16 @@ func (s *secretsStorage) Store(ctx context.Context, key string, value []byte) er
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO secrets (id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, expires_at, created_at)
-		 VALUES (?, 'certmagic', 'none', ?, ?, ?, ?, ?)`,
-		key, sealed.KeyID, sealed.Ciphertext, sealed.Nonce, now, now)
+		`INSERT INTO secrets (instance_id, id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, expires_at, created_at)
+		 VALUES (?, ?, 'certmagic', 'none', ?, ?, ?, ?, ?)`,
+		instanceID, key, sealed.KeyID, sealed.Ciphertext, sealed.Nonce, now, now)
 	if err != nil {
 		// If it was a race and the row now exists, try update again.
 		if strings.Contains(err.Error(), "UNIQUE") {
 			_, err = s.db.ExecContext(ctx,
 				`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ?, expires_at = ?
-				 WHERE id = ? AND secret_type = 'certmagic'`,
-				sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, key)
+				 WHERE instance_id = ? AND id = ? AND secret_type = 'certmagic'`,
+				sealed.Ciphertext, sealed.Nonce, sealed.KeyID, now, instanceID, key)
 		}
 		if err != nil {
 			return fmt.Errorf("certmagic store insert: %w", err)
@@ -87,8 +89,9 @@ func (s *secretsStorage) Store(ctx context.Context, key string, value []byte) er
 func (s *secretsStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	var ciphertext, nonce []byte
 	var keyID string
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key,
+		`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE instance_id = ? AND id = ? AND secret_type = 'certmagic'`, instanceID, key,
 	).Scan(&ciphertext, &nonce, &keyID)
 	if err == sql.ErrNoRows {
 		return nil, fs.ErrNotExist
@@ -105,8 +108,9 @@ func (s *secretsStorage) Load(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (s *secretsStorage) Delete(ctx context.Context, key string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key)
+		`DELETE FROM secrets WHERE instance_id = ? AND id = ? AND secret_type = 'certmagic'`, instanceID, key)
 	if err != nil {
 		return fmt.Errorf("certmagic delete: %w", err)
 	}
@@ -114,17 +118,19 @@ func (s *secretsStorage) Delete(ctx context.Context, key string) error {
 }
 
 func (s *secretsStorage) Exists(ctx context.Context, key string) bool {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key,
+		`SELECT COUNT(*) FROM secrets WHERE instance_id = ? AND id = ? AND secret_type = 'certmagic'`, instanceID, key,
 	).Scan(&count)
 	return err == nil && count > 0
 }
 
 func (s *secretsStorage) List(ctx context.Context, prefix string, recursive bool) ([]string, error) {
-	query := `SELECT id FROM secrets WHERE secret_type = 'certmagic' AND id LIKE ? ORDER BY id`
+	instanceID := httputil.InstanceIDFromContext(ctx)
+	query := `SELECT id FROM secrets WHERE instance_id = ? AND secret_type = 'certmagic' AND id LIKE ? ORDER BY id`
 
-	rows, err := s.db.QueryContext(ctx, query, prefix+"%")
+	rows, err := s.db.QueryContext(ctx, query, instanceID, prefix+"%")
 	if err != nil {
 		return nil, fmt.Errorf("certmagic list: %w", err)
 	}
@@ -161,10 +167,11 @@ func (s *secretsStorage) List(ctx context.Context, prefix string, recursive bool
 }
 
 func (s *secretsStorage) Stat(ctx context.Context, key string) (certmagic.KeyInfo, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var ciphertext []byte
 	var modifiedStr string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT ciphertext, COALESCE(expires_at, created_at) FROM secrets WHERE id = ? AND secret_type = 'certmagic'`, key,
+		`SELECT ciphertext, COALESCE(expires_at, created_at) FROM secrets WHERE instance_id = ? AND id = ? AND secret_type = 'certmagic'`, instanceID, key,
 	).Scan(&ciphertext, &modifiedStr)
 	if err == sql.ErrNoRows {
 		return certmagic.KeyInfo{}, fs.ErrNotExist

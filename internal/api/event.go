@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/httputil"
 
 	"strconv"
@@ -62,9 +63,10 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 		cursor = c
 	}
 
-	query, args := a.buildEventsQuery(r, cursor, limit)
+	scoped := a.db.Scoped(r.Context())
+	query, args := a.buildEventsQuery(r, scoped, cursor, limit)
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	rows, err := scoped.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -93,13 +95,13 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: events, NextCursor: nextCursor})
 }
 
-func (a *API) buildEventsQuery(r *http.Request, cursor string, limit int) (string, []any) {
+func (a *API) buildEventsQuery(r *http.Request, scoped *database.ScopedDB, cursor string, limit int) (string, []any) {
 	query := `SELECT id, event_type, org_id, actor_id, actor_type,
 	                 aggregate_id, aggregate_type, payload, metadata, created_at,
 	                 request_id, session_id, flow_id, fingerprint,
 	                 client_id, token_id, delegation_type, sdk_name, sdk_version
-	          FROM events WHERE id > ?`
-	args := []any{cursor}
+	          FROM events WHERE instance_id = ? AND id > ?`
+	args := []any{scoped.InstanceID(), cursor}
 
 	params := map[string]string{
 		"org_id":          r.URL.Query().Get("org_id"),
@@ -136,7 +138,7 @@ func (a *API) buildEventsQuery(r *http.Request, cursor string, limit int) (strin
 
 	query += ` ORDER BY id ASC LIMIT ?`
 	args = append(args, limit+1)
-	return query, args
+	return scoped.Rebind(query), args
 }
 
 func (a *API) scanEventRow(rows *sql.Rows) (EventResponse, error) {
@@ -188,6 +190,7 @@ func (a *API) scanEventRow(rows *sql.Rows) (EventResponse, error) {
 
 func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 	queryName := r.URL.Query().Get("query")
+	scoped := a.db.Scoped(r.Context())
 
 	var query string
 	var args []any
@@ -195,14 +198,14 @@ func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 	switch queryName {
 	case "event_counts":
 		orgID := r.URL.Query().Get("org_id")
-		query = `SELECT event_type, COUNT(*) as cnt FROM events WHERE org_id = ? GROUP BY event_type`
-		args = []any{orgID}
+		query = scoped.Rebind(`SELECT event_type, COUNT(*) as cnt FROM events WHERE instance_id = ? AND org_id = ? GROUP BY event_type`)
+		args = []any{scoped.InstanceID(), orgID}
 	default:
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown aggregate query: %s", queryName))
 		return
 	}
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	rows, err := scoped.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "aggregate query failed")
 		return
@@ -243,6 +246,7 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	scoped := a.db.Scoped(r.Context())
 	consumer := a.bus.Register(id.NewSSEConsumer())
 
 	// Determine starting cursor.
@@ -250,7 +254,7 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 	if c := r.URL.Query().Get("cursor"); c != "" && c != "now" {
 		cursor = c
 	} else {
-		a.db.SQL().QueryRowContext(r.Context(), `SELECT COALESCE(MAX(id), '') FROM events`).Scan(&cursor)
+		scoped.QueryRowContext(r.Context(), scoped.Rebind(`SELECT COALESCE(MAX(id), '') FROM events WHERE instance_id = ?`), scoped.InstanceID()).Scan(&cursor)
 	}
 
 	typeFilter := r.URL.Query().Get("types")
@@ -269,12 +273,12 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 			return // Client disconnected.
 		}
 
-		rows, err := a.db.SQL().QueryContext(r.Context(),
-			`SELECT id, event_type, org_id, actor_id, actor_type,
+		rows, err := scoped.QueryContext(r.Context(),
+			scoped.Rebind(`SELECT id, event_type, org_id, actor_id, actor_type,
 			        aggregate_id, aggregate_type, payload, metadata, created_at,
 			        request_id, session_id, flow_id, fingerprint,
 			        client_id, token_id, delegation_type, sdk_name, sdk_version
-			 FROM events WHERE id > ? ORDER BY id ASC LIMIT 100`, cursor)
+			 FROM events WHERE instance_id = ? AND id > ? ORDER BY id ASC LIMIT 100`), scoped.InstanceID(), cursor)
 		if err != nil {
 			return
 		}

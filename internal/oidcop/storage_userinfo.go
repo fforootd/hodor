@@ -12,6 +12,7 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 	"golang.org/x/text/language"
 
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/login"
 )
 
@@ -24,10 +25,11 @@ func (s *Storage) SetUserinfoFromRequest(ctx context.Context, userinfo *oidc.Use
 }
 
 func (s *Storage) SetUserinfoFromToken(ctx context.Context, userinfo *oidc.UserInfo, tokenID, subject, origin string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var expirationStr string
 	var scopesStr string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT scopes, expires_at FROM tokens WHERE id = ? AND type = 'oidc_access'`, tokenID,
+		`SELECT scopes, expires_at FROM tokens WHERE id = ? AND type = 'oidc_access' AND instance_id = ?`, tokenID, instanceID,
 	).Scan(&scopesStr, &expirationStr)
 	if err != nil {
 		return fmt.Errorf("token invalid")
@@ -40,6 +42,7 @@ func (s *Storage) SetUserinfoFromToken(ctx context.Context, userinfo *oidc.UserI
 }
 
 func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, userID string, scopes []string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var identifier string
 	var dataJSON, schemaJSON sql.NullString
 
@@ -47,8 +50,8 @@ func (s *Storage) setUserinfo(ctx context.Context, userinfo *oidc.UserInfo, user
 		`SELECT u.identifier, COALESCE(u.metadata, '{}'), COALESCE(sc.schema, '{}')
 		 FROM users u
 		 LEFT JOIN schemas sc ON u.schema_id = sc.id
-		 WHERE u.identifier = ? OR u.id = ?`,
-		userID, userID,
+		 WHERE (u.identifier = ? OR u.id = ?) AND u.instance_id = ?`,
+		userID, userID, instanceID,
 	).Scan(&identifier, &dataJSON, &schemaJSON)
 	if err != nil {
 		return fmt.Errorf("user not found: %w", err)
@@ -123,9 +126,10 @@ func parseLocale(s string) language.Tag {
 }
 
 func (s *Storage) SetIntrospectionFromToken(ctx context.Context, introspection *oidc.IntrospectionResponse, tokenID, subject, clientID string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var expirationStr, scopesStr, applicationID string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT scopes, expires_at, application_id FROM tokens WHERE id = ? AND type = 'oidc_access'`, tokenID,
+		`SELECT scopes, expires_at, application_id FROM tokens WHERE id = ? AND type = 'oidc_access' AND instance_id = ?`, tokenID, instanceID,
 	).Scan(&scopesStr, &expirationStr, &applicationID)
 	if err != nil {
 		return fmt.Errorf("token invalid")

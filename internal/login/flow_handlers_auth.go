@@ -92,10 +92,11 @@ func (h *Handler) flowSubmitPassword(w http.ResponseWriter, r *http.Request, flo
 		return
 	}
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	var credData string
 	err := h.db.SQL().QueryRowContext(r.Context(),
-		`SELECT data FROM credentials WHERE user_id = ? AND type = 'password'`,
-		flow.IduserID,
+		`SELECT data FROM credentials WHERE user_id = ? AND type = 'password' AND instance_id = ?`,
+		flow.IduserID, instanceID,
 	).Scan(&credData)
 	if err != nil {
 		logging.Printf("[flow] %s password lookup failed for identity=%s: %v", flow.ID, flow.IduserID, err)

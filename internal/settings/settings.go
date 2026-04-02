@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // ErrNotFound is returned when no settings exist at the requested scope.
@@ -59,9 +60,10 @@ func Resolve(ctx context.Context, db *sql.DB, settingsType string, orgID string,
 // Returns nil, nil if no override exists at that scope.
 func Get(ctx context.Context, db *sql.DB, settingsType, scope, scopeID string) (map[string]any, error) {
 	var dataJSON string
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := db.QueryRowContext(ctx,
-		`SELECT data FROM settings WHERE type = ? AND scope = ? AND scope_id = ?`,
-		settingsType, scope, scopeID,
+		`SELECT data FROM settings WHERE instance_id = ? AND type = ? AND scope = ? AND scope_id = ?`,
+		instanceID, settingsType, scope, scopeID,
 	).Scan(&dataJSON)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -87,13 +89,14 @@ func Put(ctx context.Context, db *sql.DB, settingsType, scope, scopeID string, d
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := uuid.New().String()
+	instanceID := httputil.InstanceIDFromContext(ctx)
 
 	// UPSERT: insert or update on conflict.
 	_, err = db.ExecContext(ctx,
-		`INSERT INTO settings (id, type, scope, scope_id, data, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(type, scope, scope_id) DO UPDATE SET data = ?, updated_at = ?`,
-		id, settingsType, scope, scopeID, string(dataJSON), now, now,
+		`INSERT INTO settings (instance_id, id, type, scope, scope_id, data, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(instance_id, type, scope, scope_id) DO UPDATE SET data = ?, updated_at = ?`,
+		instanceID, id, settingsType, scope, scopeID, string(dataJSON), now, now,
 		string(dataJSON), now,
 	)
 	if err != nil {
@@ -106,9 +109,10 @@ func Put(ctx context.Context, db *sql.DB, settingsType, scope, scopeID string, d
 // Delete removes a settings override at a specific scope.
 // The scope inherits from its parent after deletion.
 func Delete(ctx context.Context, db *sql.DB, settingsType, scope, scopeID string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err := db.ExecContext(ctx,
-		`DELETE FROM settings WHERE type = ? AND scope = ? AND scope_id = ?`,
-		settingsType, scope, scopeID,
+		`DELETE FROM settings WHERE instance_id = ? AND type = ? AND scope = ? AND scope_id = ?`,
+		instanceID, settingsType, scope, scopeID,
 	)
 	return err
 }

@@ -158,12 +158,13 @@ func (b *OLTPBackend) Tables(ctx context.Context) ([]TableInfo, error) {
 	analyticsTable := []string{"events", "users", "sessions"}
 	tables := make([]TableInfo, 0, len(analyticsTable))
 
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	for _, name := range analyticsTable {
 		info := TableInfo{Name: name}
 
 		// Row count.
 		var count int64
-		if err := b.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", name)).Scan(&count); err == nil {
+		if err := b.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE instance_id = ?", name), instanceID).Scan(&count); err == nil {
 			info.RowCount = count
 		}
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 )
@@ -179,17 +180,19 @@ func (a *API) deleteLoginFlowAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	scoped := a.db.Scoped(r.Context())
+	stx, err := scoped.BeginTx(r.Context(), nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	defer tx.Rollback()
+	defer stx.Rollback()
 
 	var slot string
-	err = tx.QueryRowContext(
+	err = stx.QueryRowContext(
 		r.Context(),
-		fmt.Sprintf("SELECT slot FROM login_flow_assets WHERE id = %s AND login_flow_id = %s", a.db.Placeholder(1), a.db.Placeholder(2)),
+		stx.Rebind("SELECT slot FROM login_flow_assets WHERE instance_id = ? AND id = ? AND login_flow_id = ?"),
+		stx.InstanceID(),
 		assetID,
 		flowID,
 	).Scan(&slot)
@@ -202,9 +205,10 @@ func (a *API) deleteLoginFlowAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err = tx.ExecContext(
+	if _, err = stx.ExecContext(
 		r.Context(),
-		fmt.Sprintf("DELETE FROM login_flow_assets WHERE id = %s AND login_flow_id = %s", a.db.Placeholder(1), a.db.Placeholder(2)),
+		stx.Rebind("DELETE FROM login_flow_assets WHERE instance_id = ? AND id = ? AND login_flow_id = ?"),
+		stx.InstanceID(),
 		assetID,
 		flowID,
 	); err != nil {
@@ -212,11 +216,11 @@ func (a *API) deleteLoginFlowAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = a.clearLoginFlowBrandingField(r.Context(), tx, flowID, slot); err != nil {
+	if err = a.clearLoginFlowBrandingField(r.Context(), stx, flowID, slot); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "failed to update login flow config")
 		return
 	}
-	if err = tx.Commit(); err != nil {
+	if err = stx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
@@ -231,11 +235,13 @@ func (a *API) serveLoginFlowAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	var contentType, etag string
 	var payload []byte
-	err := a.db.SQL().QueryRowContext(
+	err := scoped.QueryRowContext(
 		r.Context(),
-		fmt.Sprintf("SELECT content_type, etag, data FROM login_flow_assets WHERE id = %s", a.db.Placeholder(1)),
+		scoped.Rebind("SELECT content_type, etag, data FROM login_flow_assets WHERE instance_id = ? AND id = ?"),
+		scoped.InstanceID(),
 		assetID,
 	).Scan(&contentType, &etag, &payload)
 	if err != nil {
@@ -259,13 +265,14 @@ func (a *API) serveLoginFlowAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) replaceLoginFlowAsset(ctx context.Context, flowID, slot, filename, contentType string, payload []byte) (loginFlowAssetResponse, error) {
-	tx, err := a.db.SQL().BeginTx(ctx, nil)
+	scoped := a.db.Scoped(ctx)
+	stx, err := scoped.BeginTx(ctx, nil)
 	if err != nil {
 		return loginFlowAssetResponse{}, fmt.Errorf("database error")
 	}
-	defer tx.Rollback()
+	defer stx.Rollback()
 
-	orgID, config, err := a.loadLoginFlowConfigForAsset(ctx, tx, flowID)
+	orgID, config, err := a.loadLoginFlowConfigForAsset(ctx, stx, flowID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return loginFlowAssetResponse{}, fmt.Errorf("login flow not found")
@@ -273,9 +280,10 @@ func (a *API) replaceLoginFlowAsset(ctx context.Context, flowID, slot, filename,
 		return loginFlowAssetResponse{}, fmt.Errorf("query failed")
 	}
 
-	if _, err = tx.ExecContext(
+	if _, err = stx.ExecContext(
 		ctx,
-		fmt.Sprintf("DELETE FROM login_flow_assets WHERE login_flow_id = %s AND slot = %s", a.db.Placeholder(1), a.db.Placeholder(2)),
+		stx.Rebind("DELETE FROM login_flow_assets WHERE instance_id = ? AND login_flow_id = ? AND slot = ?"),
+		stx.InstanceID(),
 		flowID,
 		slot,
 	); err != nil {
@@ -287,15 +295,12 @@ func (a *API) replaceLoginFlowAsset(ctx context.Context, flowID, slot, filename,
 	etag := fmt.Sprintf(`"%s"`, hex.EncodeToString(sum[:]))
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	insertQuery := `INSERT INTO login_flow_assets (id, org_id, login_flow_id, slot, filename, content_type, size_bytes, sha256, etag, data, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	if a.db.Dialect() == "postgres" {
-		insertQuery = `INSERT INTO login_flow_assets (id, org_id, login_flow_id, slot, filename, content_type, size_bytes, sha256, etag, data, metadata, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
-	}
-	if _, err = tx.ExecContext(
+	insertQuery := stx.Rebind(`INSERT INTO login_flow_assets (instance_id, id, org_id, login_flow_id, slot, filename, content_type, size_bytes, sha256, etag, data, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if _, err = stx.ExecContext(
 		ctx,
 		insertQuery,
+		stx.InstanceID(),
 		assetID,
 		orgID,
 		flowID,
@@ -317,10 +322,10 @@ func (a *API) replaceLoginFlowAsset(ctx context.Context, flowID, slot, filename,
 	if err = setLoginFlowBrandingField(config, slot, assetURL); err != nil {
 		return loginFlowAssetResponse{}, fmt.Errorf("failed to update login flow config")
 	}
-	if err = a.updateLoginFlowConfig(ctx, tx, flowID, config); err != nil {
+	if err = a.updateLoginFlowConfig(ctx, stx.Tx(), flowID, config); err != nil {
 		return loginFlowAssetResponse{}, fmt.Errorf("failed to update login flow config")
 	}
-	if err = tx.Commit(); err != nil {
+	if err = stx.Commit(); err != nil {
 		return loginFlowAssetResponse{}, fmt.Errorf("commit failed")
 	}
 
@@ -336,12 +341,13 @@ func (a *API) replaceLoginFlowAsset(ctx context.Context, flowID, slot, filename,
 	}, nil
 }
 
-func (a *API) loadLoginFlowConfigForAsset(ctx context.Context, tx *sql.Tx, flowID string) (string, map[string]any, error) {
+func (a *API) loadLoginFlowConfigForAsset(ctx context.Context, stx *database.ScopedTx, flowID string) (string, map[string]any, error) {
 	var orgID string
 	var configJSON string
-	err := tx.QueryRowContext(
+	err := stx.QueryRowContext(
 		ctx,
-		fmt.Sprintf("SELECT COALESCE(org_id, '1'), COALESCE(config, '{}') FROM login_flows WHERE id = %s", a.db.Placeholder(1)),
+		stx.Rebind("SELECT COALESCE(org_id, '1'), COALESCE(config, '{}') FROM login_flows WHERE instance_id = ? AND id = ?"),
+		stx.InstanceID(),
 		flowID,
 	).Scan(&orgID, &configJSON)
 	if err != nil {
@@ -356,29 +362,31 @@ func (a *API) loadLoginFlowConfigForAsset(ctx context.Context, tx *sql.Tx, flowI
 }
 
 func (a *API) updateLoginFlowConfig(ctx context.Context, tx *sql.Tx, flowID string, config map[string]any) error {
+	scoped := a.db.Scoped(ctx)
 	configBytes, err := json.Marshal(config)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(
 		ctx,
-		fmt.Sprintf("UPDATE login_flows SET config = %s, updated_at = %s WHERE id = %s", a.db.Placeholder(1), a.db.Placeholder(2), a.db.Placeholder(3)),
+		scoped.Rebind("UPDATE login_flows SET config = ?, updated_at = ? WHERE instance_id = ? AND id = ?"),
 		string(configBytes),
 		time.Now().UTC().Format(time.RFC3339),
+		scoped.InstanceID(),
 		flowID,
 	)
 	return err
 }
 
-func (a *API) clearLoginFlowBrandingField(ctx context.Context, tx *sql.Tx, flowID, slot string) error {
-	_, config, err := a.loadLoginFlowConfigForAsset(ctx, tx, flowID)
+func (a *API) clearLoginFlowBrandingField(ctx context.Context, stx *database.ScopedTx, flowID, slot string) error {
+	_, config, err := a.loadLoginFlowConfigForAsset(ctx, stx, flowID)
 	if err != nil {
 		return err
 	}
 	if err := setLoginFlowBrandingField(config, slot, ""); err != nil {
 		return err
 	}
-	return a.updateLoginFlowConfig(ctx, tx, flowID, config)
+	return a.updateLoginFlowConfig(ctx, stx.Tx(), flowID, config)
 }
 
 func setLoginFlowBrandingField(config map[string]any, field, value string) error {

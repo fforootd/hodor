@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/schema"
 )
 
@@ -100,13 +101,15 @@ type persistenceRecord struct {
 }
 
 func (r *Repository) List(ctx context.Context) ([]Provider, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
 		        COALESCE(claim_overrides,'{}'), COALESCE(auto_register,1), COALESCE(enabled,1),
 		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(target_schema_id,''), COALESCE(target_schema_type,''), COALESCE(metadata,'{}'),
 		        created_at, updated_at
 		 FROM providers
-		 ORDER BY display_order, name`)
+		 WHERE instance_id = ?
+		 ORDER BY display_order, name`, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -124,14 +127,15 @@ func (r *Repository) List(ctx context.Context) ([]Provider, error) {
 }
 
 func (r *Repository) ListEnabled(ctx context.Context) ([]Provider, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
 		        COALESCE(claim_overrides,'{}'), COALESCE(auto_register,1), COALESCE(enabled,1),
 		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(target_schema_id,''), COALESCE(target_schema_type,''), COALESCE(metadata,'{}'),
 		        created_at, updated_at
 		 FROM providers
-		 WHERE enabled = 1 OR enabled = true
-		 ORDER BY display_order, name`)
+		 WHERE instance_id = ? AND (enabled = 1 OR enabled = true)
+		 ORDER BY display_order, name`, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,14 +167,15 @@ func (r *Repository) Create(ctx context.Context, id string, prov Provider) (stri
 	if err != nil {
 		return "", err
 	}
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err = r.db.ExecContext(ctx,
-		fmt.Sprintf(`INSERT INTO providers (id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, target_schema_id, target_schema_type, metadata, created_at, updated_at)
-		 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)`,
+		fmt.Sprintf(`INSERT INTO providers (instance_id, id, org_id, name, protocol, template, config, claim_overrides, auto_register, enabled, display_order, schema_id, target_schema_id, target_schema_type, metadata, created_at, updated_at)
+		 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)`,
 			r.placeholder(1), r.placeholder(2), r.placeholder(3), r.placeholder(4),
 			r.placeholder(5), r.placeholder(6), r.placeholder(7), r.placeholder(8),
 			r.placeholder(9), r.placeholder(10), r.placeholder(11), r.placeholder(12),
-			r.placeholder(13), r.placeholder(14), r.timeExpr(), r.timeExpr()),
-		rec.ID, rec.OrgID, rec.Name, rec.Protocol, rec.Template, rec.ConfigJSON,
+			r.placeholder(13), r.placeholder(14), r.placeholder(15), r.timeExpr(), r.timeExpr()),
+		instanceID, rec.ID, rec.OrgID, rec.Name, rec.Protocol, rec.Template, rec.ConfigJSON,
 		rec.OverridesJSON, rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.ResourceSchemaID, rec.TargetSchemaID, rec.TargetSchemaType, rec.MetadataJSON,
 	)
 	if err != nil {
@@ -188,23 +193,25 @@ func (r *Repository) Save(ctx context.Context, prov Provider) error {
 	if err != nil {
 		return err
 	}
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err = r.db.ExecContext(ctx,
 		fmt.Sprintf(`UPDATE providers
 		 SET org_id = %s, name = %s, protocol = %s, template = %s, config = %s, claim_overrides = %s,
 		     auto_register = %s, enabled = %s, display_order = %s, schema_id = %s, target_schema_id = %s, target_schema_type = %s, metadata = %s, updated_at = %s
-		 WHERE id = %s`,
+		 WHERE instance_id = %s AND id = %s`,
 			r.placeholder(1), r.placeholder(2), r.placeholder(3), r.placeholder(4),
 			r.placeholder(5), r.placeholder(6), r.placeholder(7), r.placeholder(8),
 			r.placeholder(9), r.placeholder(10), r.placeholder(11), r.placeholder(12),
-			r.placeholder(13), r.timeExpr(), r.placeholder(14)),
+			r.placeholder(13), r.timeExpr(), r.placeholder(14), r.placeholder(15)),
 		rec.OrgID, rec.Name, rec.Protocol, rec.Template, rec.ConfigJSON, rec.OverridesJSON,
-		rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.ResourceSchemaID, rec.TargetSchemaID, rec.TargetSchemaType, rec.MetadataJSON, rec.ID,
+		rec.AutoRegister, rec.Enabled, rec.DisplayOrder, rec.ResourceSchemaID, rec.TargetSchemaID, rec.TargetSchemaType, rec.MetadataJSON, instanceID, rec.ID,
 	)
 	return err
 }
 
 func (r *Repository) Delete(ctx context.Context, id string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM providers WHERE id = %s`, r.placeholder(1)), id)
+	instanceID := httputil.InstanceIDFromContext(ctx)
+	result, err := r.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM providers WHERE instance_id = %s AND id = %s`, r.placeholder(1), r.placeholder(2)), instanceID, id)
 	if err != nil {
 		return 0, err
 	}
@@ -213,13 +220,14 @@ func (r *Repository) Delete(ctx context.Context, id string) (int64, error) {
 
 func (r *Repository) getRecord(ctx context.Context, id string) (persistenceRecord, error) {
 	var rec persistenceRecord
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := r.db.QueryRowContext(ctx,
 		fmt.Sprintf(`SELECT id, COALESCE(org_id,''), name, protocol, COALESCE(template,''), COALESCE(config,'{}'),
 		        COALESCE(claim_overrides,'{}'), COALESCE(auto_register,1), COALESCE(enabled,1),
 		        COALESCE(display_order,0), COALESCE(schema_id,''), COALESCE(target_schema_id,''), COALESCE(target_schema_type,''), COALESCE(metadata,'{}'),
 		        created_at, updated_at
-		 FROM providers WHERE id = %s`, r.placeholder(1)),
-		id,
+		 FROM providers WHERE instance_id = %s AND id = %s`, r.placeholder(1), r.placeholder(2)),
+		instanceID, id,
 	).Scan(&rec.ID, &rec.OrgID, &rec.Name, &rec.Protocol, &rec.Template, &rec.ConfigJSON,
 		&rec.OverridesJSON, &rec.AutoRegister, &rec.Enabled, &rec.DisplayOrder, &rec.ResourceSchemaID, &rec.TargetSchemaID, &rec.TargetSchemaType,
 		&rec.MetadataJSON, &rec.CreatedAt, &rec.UpdatedAt)

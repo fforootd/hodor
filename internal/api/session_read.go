@@ -30,16 +30,19 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	userID, _ := r.URL.Query().Get("user_id"), ""
 	limit := 50
 
+	scoped := a.db.Scoped(r.Context())
+	instanceID := scoped.InstanceID()
+
 	query := `SELECT id, user_id, org_id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at, revoked_at
-	          FROM sessions ORDER BY created_at DESC LIMIT ?`
-	args := []any{limit}
+	          FROM sessions WHERE instance_id = ? ORDER BY created_at DESC LIMIT ?`
+	args := []any{instanceID, limit}
 	if userID != "" {
 		query = `SELECT id, user_id, org_id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at, revoked_at
-		         FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
-		args = []any{userID, limit}
+		         FROM sessions WHERE instance_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?`
+		args = []any{instanceID, userID, limit}
 	}
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, args...)
+	rows, err := scoped.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -79,7 +82,9 @@ func (a *API) revokeSession(w http.ResponseWriter, r *http.Request) {
 
 // RevokeSessionInternal revokes a session programmatically (used by UI logout).
 func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error {
-	tx, err := a.db.SQL().BeginTx(ctx, nil)
+	scoped := a.db.Scoped(ctx)
+	instanceID := scoped.InstanceID()
+	tx, err := scoped.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
@@ -87,8 +92,8 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := tx.ExecContext(ctx,
-		`UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
-		now, sessionID)
+		`UPDATE sessions SET revoked_at = ? WHERE id = ? AND instance_id = ? AND revoked_at IS NULL`,
+		now, sessionID, instanceID)
 	if err != nil {
 		return fmt.Errorf("revoke: %w", err)
 	}
@@ -98,11 +103,11 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 	}
 
 	tx.ExecContext(ctx,
-		`UPDATE tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`,
-		now, sessionID)
+		`UPDATE tokens SET revoked_at = ? WHERE session_id = ? AND instance_id = ? AND revoked_at IS NULL`,
+		now, sessionID, instanceID)
 
 	var revokedIduserID string
-	tx.QueryRowContext(ctx, `SELECT user_id FROM sessions WHERE id = ?`, sessionID).Scan(&revokedIduserID)
+	tx.QueryRowContext(ctx, `SELECT user_id FROM sessions WHERE id = ? AND instance_id = ?`, sessionID, instanceID).Scan(&revokedIduserID)
 
 	emitEvent(ctx, tx, "session.revoked", revokedIduserID, sessionID, "session", map[string]any{
 		"user_id": revokedIduserID,
@@ -118,11 +123,13 @@ func (a *API) RevokeSessionInternal(ctx context.Context, sessionID string) error
 }
 
 func (a *API) loadSession(ctx context.Context, sessionID string) (SessionResponse, error) {
+	scoped := a.db.Scoped(ctx)
+	instanceID := scoped.InstanceID()
 	var s SessionResponse
 	var metadataJSON string
-	err := a.db.SQL().QueryRowContext(ctx,
+	err := scoped.QueryRowContext(ctx,
 		`SELECT id, user_id, org_id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at, revoked_at
-		 FROM sessions WHERE id = ?`, sessionID,
+		 FROM sessions WHERE id = ? AND instance_id = ?`, sessionID, instanceID,
 	).Scan(&s.ID, &s.IduserID, &s.OrgID, &s.UserAgent, &s.IPAddress, &metadataJSON, &s.CreatedAt, &s.ExpiresAt, &s.RevokedAt)
 	applySessionMetadata(&s, metadataJSON)
 	return s, err

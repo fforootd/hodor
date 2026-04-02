@@ -15,6 +15,7 @@ import (
 	"github.com/zitadel/zitadel/internal/api"
 	"github.com/zitadel/zitadel/internal/auth"
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/schema"
@@ -171,8 +172,9 @@ func createAdmin(ctx context.Context, db *database.DB, username, email, password
 
 // seedConsoleClient creates the default console OIDC client in the apps table.
 func seedConsoleClient(ctx context.Context, db *database.DB) error {
+	instanceID := httputil.DefaultInstanceID
 	var exists int
-	err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM apps WHERE client_id = 'console'`).Scan(&exists)
+	err := db.SQL().QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM apps WHERE client_id = 'console' AND instance_id = %s`, db.Placeholder(1)), instanceID).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check console client: %w", err)
 	}
@@ -183,12 +185,12 @@ func seedConsoleClient(ctx context.Context, db *database.DB) error {
 	consoleID := id.New()
 	redirectURIs := `["http://localhost:5173/console", "http://localhost:8080/console"]`
 
-	query := fmt.Sprintf(`INSERT INTO apps (id, org_id, name, app_type, client_id, redirect_uris, state, schema_id, created_at, updated_at)
-		 VALUES (%s, '', 'Zitadel Console', 'oidc', 'console', %s, 'active', 'app_v1', %s, %s)`,
-		db.Placeholder(1), db.Placeholder(2), db.TimestampNow(), db.TimestampNow())
+	query := fmt.Sprintf(`INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, redirect_uris, state, schema_id, created_at, updated_at)
+		 VALUES (%s, %s, '', 'Zitadel Console', 'oidc', 'console', %s, 'active', 'app_v1', %s, %s)`,
+		db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.TimestampNow(), db.TimestampNow())
 
 	_, err = db.SQL().ExecContext(ctx, query,
-		consoleID, redirectURIs,
+		consoleID, instanceID, redirectURIs,
 	)
 	if err != nil {
 		return fmt.Errorf("insert console app: %w", err)
@@ -252,9 +254,10 @@ func seedSchemas(ctx context.Context, db *database.DB) error {
 // seedDefaultLoginFlow creates the default login flow if none exists.
 // This is the bootstrap seed for the instance-level default flow.
 func seedDefaultLoginFlow(ctx context.Context, db *database.DB) error {
+	instanceID := httputil.DefaultInstanceID
 	var exists int
 	err := db.SQL().QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM login_flows WHERE is_default = 1 OR is_default = true`).Scan(&exists)
+		fmt.Sprintf(`SELECT COUNT(*) FROM login_flows WHERE (is_default = 1 OR is_default = true) AND instance_id = %s`, db.Placeholder(1)), instanceID).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check default login flow: %w", err)
 	}
@@ -266,10 +269,10 @@ func seedDefaultLoginFlow(ctx context.Context, db *database.DB) error {
 	defaultConfig := `{"captcha":{"provider":"altcha","mode":"never","difficulty":3},"fingerprint":{"enabled":true,"provider":"thumbmarkjs"},"rate_limit":{"max_attempts":5,"window_seconds":300,"scope":"ip"},"telemetry":{"enabled":true,"sample_rate":1.0}}`
 
 	_, err = db.SQL().ExecContext(ctx,
-		fmt.Sprintf(`INSERT INTO login_flows (id, name, strategy, is_default, enabled, state, priority, config, audience, auth_methods, schema_id, created_at, updated_at)
-		 VALUES (%s, 'Default Login', 'identifier_first', true, true, 'active', 0, %s, '{}', '{}', 'login_flow_v1', %s, %s)`,
-			db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.Placeholder(4)),
-		flowID, defaultConfig, time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
+		fmt.Sprintf(`INSERT INTO login_flows (id, instance_id, name, strategy, is_default, enabled, state, priority, config, audience, auth_methods, schema_id, created_at, updated_at)
+		 VALUES (%s, %s, 'Default Login', 'identifier_first', true, true, 'active', 0, %s, '{}', '{}', 'login_flow_v1', %s, %s)`,
+			db.Placeholder(1), db.Placeholder(2), db.Placeholder(3), db.Placeholder(4), db.Placeholder(5)),
+		flowID, instanceID, defaultConfig, time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("insert default login flow: %w", err)

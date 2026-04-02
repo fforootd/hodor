@@ -20,6 +20,17 @@ import (
 type DB struct {
 	sql     *sql.DB
 	dialect string // "sqlite", "postgres", "d1", or "libsql"
+	// onWrite is called after successful write operations (for turso+sync push).
+	onWrite func()
+}
+
+// NotifyWrite signals that a write has occurred.
+// For turso+sync, this triggers an immediate push to remote.
+// No-op for other backends.
+func (d *DB) NotifyWrite() {
+	if d.onWrite != nil {
+		d.onWrite()
+	}
 }
 
 // SQL returns the underlying *sql.DB.
@@ -46,7 +57,8 @@ func (d *DB) Close() error {
 
 // Open connects to a database based on the connection string.
 // Empty string or "sqlite://..." opens SQLite; "postgres://..." opens Postgres;
-// "d1://..." opens a Cloudflare D1 database via the HTTP proxy driver; and
+// "d1://..." opens a Cloudflare D1 database via the HTTP proxy driver;
+// "turso+sync://..." opens a Turso synced database with local replica; and
 // libSQL-compatible URLs open a remote libSQL/Turso database.
 func Open(connStr string) (*DB, error) {
 	switch {
@@ -56,6 +68,12 @@ func Open(connStr string) (*DB, error) {
 		return openPostgres(connStr)
 	case strings.HasPrefix(connStr, "d1://"):
 		return openD1(connStr)
+	case isTursoSyncURL(connStr):
+		ts, err := openTursoSync(connStr)
+		if err != nil {
+			return nil, err
+		}
+		return ts.DB, nil
 	case isLibSQLURL(connStr):
 		return openLibSQL(connStr)
 	default:
@@ -74,11 +92,27 @@ func OpenForFGA(connStr string) (*DB, error) {
 		return openPostgres(connStr)
 	case strings.HasPrefix(connStr, "d1://"):
 		return openD1(connStr)
+	case isTursoSyncURL(connStr):
+		ts, err := openTursoSyncForFGA(connStr)
+		if err != nil {
+			return nil, err
+		}
+		return ts.DB, nil
 	case isLibSQLURL(connStr):
 		return openLibSQLForFGA(connStr)
 	default:
 		return nil, fmt.Errorf("unsupported database URL scheme: %s", connStr)
 	}
+}
+
+// OpenTursoSync opens a Turso synced database with local replica and
+// returns the wrapper that exposes Push/Pull/Stats methods.
+// Only works with turso+sync:// URLs.
+func OpenTursoSync(connStr string) (*TursoSyncDB, error) {
+	if !isTursoSyncURL(connStr) {
+		return nil, fmt.Errorf("OpenTursoSync requires turso+sync:// URL, got: %s", connStr)
+	}
+	return openTursoSync(connStr)
 }
 
 // PoolConfig holds connection pool settings for Postgres.
@@ -98,6 +132,12 @@ func OpenWithConfig(connStr string, pool PoolConfig) (*DB, error) {
 		return openPostgresWithPool(connStr, pool.MaxOpenConns, pool.MaxIdleConns, pool.ConnMaxLifetime)
 	case strings.HasPrefix(connStr, "d1://"):
 		return openD1(connStr)
+	case isTursoSyncURL(connStr):
+		ts, err := openTursoSync(connStr)
+		if err != nil {
+			return nil, err
+		}
+		return ts.DB, nil
 	case isLibSQLURL(connStr):
 		return openLibSQLWithPool(connStr, pool.MaxOpenConns, pool.MaxIdleConns, pool.ConnMaxLifetime)
 	default:

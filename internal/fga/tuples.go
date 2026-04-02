@@ -12,7 +12,7 @@ import (
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
 )
 
-// WriteTuples writes multiple relationship tuples to the system store in a single request.
+// WriteTuples writes multiple relationship tuples to the current instance's store in a single request.
 // On D1 (which doesn't support transactions), falls back to direct SQL inserts.
 func (s *Service) WriteTuples(ctx context.Context, tuples ...[3]string) error {
 	if len(tuples) == 0 {
@@ -25,6 +25,11 @@ func (s *Service) WriteTuples(ctx context.Context, tuples ...[3]string) error {
 		return s.writeTuplesDirect(ctx, tuples...)
 	}
 
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store: %w", err)
+	}
+
 	keys := make([]*openfgav1.TupleKey, len(tuples))
 	for i, t := range tuples {
 		keys[i] = &openfgav1.TupleKey{
@@ -34,8 +39,8 @@ func (s *Service) WriteTuples(ctx context.Context, tuples ...[3]string) error {
 		}
 	}
 
-	_, err := s.srv.Write(ctx, &openfgav1.WriteRequest{
-		StoreId: s.storeID,
+	_, err = s.srv.Write(ctx, &openfgav1.WriteRequest{
+		StoreId: storeID,
 		Writes: &openfgav1.WriteRequestWrites{
 			TupleKeys: keys,
 		},
@@ -50,6 +55,11 @@ func (s *Service) WriteTuples(ctx context.Context, tuples ...[3]string) error {
 // bypassing OpenFGA's transactional Write method. Used for D1 which lacks
 // transaction support.
 func (s *Service) writeTuplesDirect(ctx context.Context, tuples ...[3]string) error {
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store for direct write: %w", err)
+	}
+
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	for _, t := range tuples {
 		user, relation, object := t[0], t[1], t[2]
@@ -66,7 +76,7 @@ func (s *Service) writeTuplesDirect(ctx context.Context, tuples ...[3]string) er
 			  user_object_type, user_object_id, user_relation, user_type,
 			  ulid, inserted_at, condition_name, condition_context)
 			 VALUES (?, ?, ?, ?, ?, ?, '', 'user', ?, ?, '', NULL)`,
-			s.storeID, objectType, objectID, relation,
+			storeID, objectType, objectID, relation,
 			userType, userID,
 			ulid, now,
 		)
@@ -85,10 +95,15 @@ func splitTypeID(s string) (string, string) {
 	return "", s
 }
 
-// DeleteTuples removes multiple relationship tuples from the system store.
+// DeleteTuples removes multiple relationship tuples from the current instance's store.
 func (s *Service) DeleteTuples(ctx context.Context, tuples ...[3]string) error {
 	if len(tuples) == 0 {
 		return nil
+	}
+
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store: %w", err)
 	}
 
 	keys := make([]*openfgav1.TupleKeyWithoutCondition, len(tuples))
@@ -100,8 +115,8 @@ func (s *Service) DeleteTuples(ctx context.Context, tuples ...[3]string) error {
 		}
 	}
 
-	_, err := s.srv.Write(ctx, &openfgav1.WriteRequest{
-		StoreId: s.storeID,
+	_, err = s.srv.Write(ctx, &openfgav1.WriteRequest{
+		StoreId: storeID,
 		Deletes: &openfgav1.WriteRequestDeletes{
 			TupleKeys: keys,
 		},
@@ -114,8 +129,12 @@ func (s *Service) DeleteTuples(ctx context.Context, tuples ...[3]string) error {
 
 // ListObjects returns all objects of a given type that the user has a relation to.
 func (s *Service) ListObjects(ctx context.Context, user, relation, objectType string) ([]string, error) {
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fga: resolve store: %w", err)
+	}
 	resp, err := s.srv.ListObjects(ctx, &openfgav1.ListObjectsRequest{
-		StoreId:  s.storeID,
+		StoreId:  storeID,
 		User:     user,
 		Relation: relation,
 		Type:     objectType,

@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/zitadel/zitadel/internal/logging"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/database"
 	"github.com/zitadel/zitadel/internal/eventbus"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
+	"github.com/zitadel/zitadel/internal/logging"
 )
 
 // emitGCEvent emits an audit event for GC operations.
@@ -21,10 +22,11 @@ func emitGCEvent(ctx context.Context, db *database.DB, bus *eventbus.Bus, eventT
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
+	instanceID := httputil.DefaultInstanceID
 	_, _ = db.SQL().ExecContext(ctx,
-		`INSERT INTO events (id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, created_at)
-		 VALUES (?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', datetime('now'))`,
-		eventID, eventType, payloadJSON)
+		`INSERT INTO events (instance_id, id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, created_at)
+		 VALUES (?, ?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', datetime('now'))`,
+		instanceID, eventID, eventType, payloadJSON)
 	bus.Signal()
 }
 
@@ -38,8 +40,9 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 
 		cutoff := time.Now().UTC().Add(-ttl).Format(time.RFC3339)
 
+		instanceID := httputil.DefaultInstanceID
 		res, err := db.SQL().ExecContext(ctx,
-			`DELETE FROM sessions WHERE revoked_at IS NOT NULL AND revoked_at < ?`, cutoff,
+			`DELETE FROM sessions WHERE instance_id = ? AND revoked_at IS NOT NULL AND revoked_at < ?`, instanceID, cutoff,
 		)
 		if err != nil {
 			return fmt.Errorf("gc revoked sessions: %w", err)
@@ -47,7 +50,7 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 		revokedCount, _ := res.RowsAffected()
 
 		res, err = db.SQL().ExecContext(ctx,
-			`DELETE FROM sessions WHERE expires_at < ?`, cutoff,
+			`DELETE FROM sessions WHERE instance_id = ? AND expires_at < ?`, instanceID, cutoff,
 		)
 		if err != nil {
 			return fmt.Errorf("gc expired sessions: %w", err)
@@ -73,9 +76,11 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 // EventGC returns a job function that deletes OLTP events past their retention period.
 func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 	return func(ctx context.Context) error {
+		instanceID := httputil.DefaultInstanceID
 		var lakeCursor string
 		err := db.SQL().QueryRowContext(ctx,
-			`SELECT last_event_id FROM consumer_cursors WHERE consumer_name = 'lake_writer'`,
+			`SELECT last_event_id FROM consumer_cursors WHERE instance_id = ? AND consumer_name = 'lake_writer'`,
+			instanceID,
 		).Scan(&lakeCursor)
 		if err == sql.ErrNoRows {
 			return nil
@@ -101,10 +106,11 @@ func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 
 			res, err := db.SQL().ExecContext(ctx,
 				`DELETE FROM events
-				 WHERE event_type GLOB ?
+				 WHERE instance_id = ?
+				   AND event_type GLOB ?
 				   AND created_at < ?
 				   AND id <= ?`,
-				p.EventPattern, cutoff, lakeCursor,
+				instanceID, p.EventPattern, cutoff, lakeCursor,
 			)
 			if err != nil {
 				logging.Printf("[event_gc] pattern %q error: %v", p.EventPattern, err)
@@ -139,9 +145,11 @@ type retentionPolicy struct {
 }
 
 func loadRetentionPolicies(ctx context.Context, db *database.DB) ([]retentionPolicy, error) {
+	instanceID := httputil.DefaultInstanceID
 	rows, err := db.SQL().QueryContext(ctx,
 		`SELECT event_pattern, oltp_ttl, lake_ttl, priority
-		 FROM retention_policies ORDER BY priority DESC`,
+		 FROM retention_policies WHERE instance_id = ? ORDER BY priority DESC`,
+		instanceID,
 	)
 	if err != nil {
 		return nil, err
@@ -163,12 +171,13 @@ func loadRetentionPolicies(ctx context.Context, db *database.DB) ([]retentionPol
 }
 
 func getRetentionTTL(ctx context.Context, db *database.DB, pattern string) time.Duration {
+	instanceID := httputil.DefaultInstanceID
 	var ttl string
 	err := db.SQL().QueryRowContext(ctx,
 		`SELECT oltp_ttl FROM retention_policies
-		 WHERE ? GLOB event_pattern
+		 WHERE instance_id = ? AND ? GLOB event_pattern
 		 ORDER BY priority DESC LIMIT 1`,
-		pattern,
+		instanceID, pattern,
 	).Scan(&ttl)
 	if err != nil {
 		return 14 * 24 * time.Hour

@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"github.com/zitadel/oidc/v3/pkg/op"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 func (s *Storage) CreateAuthRequest(ctx context.Context, authReq *oidc.AuthRequest, userID string) (op.AuthRequest, error) {
@@ -23,10 +25,11 @@ func (s *Storage) CreateAuthRequest(ctx context.Context, authReq *oidc.AuthReque
 	}
 	dataJSON := encodeAuthRequestData(authReq)
 
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err := s.db.SQL().ExecContext(ctx,
-		`INSERT INTO auth_states (id, type, client_id, redirect_uri, scopes, state, nonce, response_type, code_challenge, code_challenge_method, user_id, data, expires_at)
-		 VALUES (?, 'oidc_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'))`,
-		id, authReq.ClientID, authReq.RedirectURI,
+		`INSERT INTO auth_states (id, instance_id, type, client_id, redirect_uri, scopes, state, nonce, response_type, code_challenge, code_challenge_method, user_id, data, expires_at)
+		 VALUES (?, ?, 'oidc_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'))`,
+		id, instanceID, authReq.ClientID, authReq.RedirectURI,
 		strings.Join(authReq.Scopes, " "),
 		authReq.State, authReq.Nonce,
 		string(authReq.ResponseType),
@@ -63,9 +66,10 @@ func (s *Storage) AuthRequestByID(ctx context.Context, id string) (op.AuthReques
 }
 
 func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRequest, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	var requestID string
 	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT id FROM auth_states WHERE code = ? AND type = 'oidc_auth'`, code,
+		`SELECT id FROM auth_states WHERE code = ? AND type = 'oidc_auth' AND instance_id = ?`, code, instanceID,
 	).Scan(&requestID)
 	if err != nil {
 		return nil, fmt.Errorf("code invalid or expired")
@@ -74,22 +78,25 @@ func (s *Storage) AuthRequestByCode(ctx context.Context, code string) (op.AuthRe
 }
 
 func (s *Storage) SaveAuthCode(ctx context.Context, id string, code string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err := s.db.SQL().ExecContext(ctx,
-		`UPDATE auth_states SET code = ? WHERE id = ?`, code, id,
+		`UPDATE auth_states SET code = ? WHERE id = ? AND instance_id = ?`, code, id, instanceID,
 	)
 	return err
 }
 
 func (s *Storage) DeleteAuthRequest(ctx context.Context, id string) error {
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM auth_states WHERE id = ?`, id)
+	instanceID := httputil.InstanceIDFromContext(ctx)
+	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM auth_states WHERE id = ? AND instance_id = ?`, id, instanceID)
 	return nil
 }
 
 // CompleteAuthRequest is called by the login flow after successful authentication.
 func (s *Storage) CompleteAuthRequest(ctx context.Context, requestID, userID string) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, err := s.db.SQL().ExecContext(ctx,
-		`UPDATE auth_states SET user_id = ?, done = 1, auth_time = datetime('now') WHERE id = ?`,
-		userID, requestID,
+		`UPDATE auth_states SET user_id = ?, done = 1, auth_time = datetime('now') WHERE id = ? AND instance_id = ?`,
+		userID, requestID, instanceID,
 	)
 	return err
 }
@@ -102,10 +109,11 @@ func (s *Storage) authRequestFromRow(ctx context.Context, id string) (*AuthReque
 		done                                           int
 	)
 
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	err := s.db.SQL().QueryRowContext(ctx,
 		`SELECT client_id, redirect_uri, scopes, state, nonce, response_type,
 		        code_challenge, code_challenge_method, user_id, auth_time, done
-		 FROM auth_states WHERE id = ?`, id,
+		 FROM auth_states WHERE id = ? AND instance_id = ?`, id, instanceID,
 	).Scan(&clientID, &redirectURI, &scopesStr, &state, &nonce, &responseType,
 		&cc, &ccm, &userID, &authTimeStr, &done)
 	if err != nil {

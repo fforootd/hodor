@@ -38,12 +38,14 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 	userID := callerIduserID(r)
 
 	// Load identity.
+	scoped := a.db.Scoped(r.Context())
+
 	var identifier, displayName, state, metadata, schemaID, createdAt, updatedAt string
 	var orgID string
-	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT identifier, COALESCE(display_name,''), state, COALESCE(metadata,'{}'),
+	err := scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT identifier, COALESCE(display_name,''), state, COALESCE(metadata,'{}'),
 		        org_id, COALESCE(schema_id,''), created_at, updated_at
-		 FROM users WHERE id = ?`, userID,
+		 FROM users WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), userID,
 	).Scan(&identifier, &displayName, &state, &metadata, &orgID, &schemaID, &createdAt, &updatedAt)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
@@ -54,10 +56,10 @@ func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
 	var profileMap map[string]any
 	json.Unmarshal([]byte(metadata), &profileMap)
 
-	// Load schema to get field permissions.
+	// Load schema to get field permissions (schemas are global — no instance_id scoping).
 	var schemaJSON, schemaType string
-	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(schema,'{}'), type FROM schemas WHERE id = ?`, schemaID,
+	err = scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT COALESCE(schema,'{}'), type FROM schemas WHERE id = ?`), schemaID,
 	).Scan(&schemaJSON, &schemaType)
 	if err != nil {
 		schemaJSON = "{}"
@@ -106,21 +108,23 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
+
 	// Load current identity data.
 	var currentMetadata, schemaID, identifier, currentDisplayName, orgID string
-	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(metadata,'{}'), COALESCE(schema_id,''), identifier, COALESCE(display_name,''), COALESCE(org_id,'')
-		 FROM users WHERE id = ?`, userID,
+	err := scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT COALESCE(metadata,'{}'), COALESCE(schema_id,''), identifier, COALESCE(display_name,''), COALESCE(org_id,'')
+		 FROM users WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), userID,
 	).Scan(&currentMetadata, &schemaID, &identifier, &currentDisplayName, &orgID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "identity not found")
 		return
 	}
 
-	// Load schema.
+	// Load schema (schemas are global — no instance_id scoping).
 	var schemaJSON, schemaType string
-	err = a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT COALESCE(schema,'{}'), type FROM schemas WHERE id = ?`, schemaID,
+	err = scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT COALESCE(schema,'{}'), type FROM schemas WHERE id = ?`), schemaID,
 	).Scan(&schemaJSON, &schemaType)
 	if err != nil {
 		schemaJSON = "{}"
@@ -174,27 +178,27 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update.
-	tx, err := a.db.SQL().BeginTx(r.Context(), nil)
+	stx, err := scoped.BeginTx(r.Context(), nil)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
-	defer tx.Rollback()
+	defer stx.Rollback()
 
-	query := "UPDATE users SET updated_at = datetime('now'), metadata = ? WHERE id = ?"
-	args := []any{write.MetadataJSON, userID}
+	query := stx.Rebind("UPDATE users SET updated_at = datetime('now'), metadata = ? WHERE instance_id = ? AND id = ?")
+	args := []any{write.MetadataJSON, stx.InstanceID(), userID}
 	if req.DisplayName != nil {
-		query = "UPDATE users SET updated_at = datetime('now'), display_name = ?, metadata = ? WHERE id = ?"
-		args = []any{nextDisplayName, write.MetadataJSON, userID}
+		query = stx.Rebind("UPDATE users SET updated_at = datetime('now'), display_name = ?, metadata = ? WHERE instance_id = ? AND id = ?")
+		args = []any{nextDisplayName, write.MetadataJSON, stx.InstanceID(), userID}
 		changedFields = append(changedFields, "display_name")
 	}
 
-	_, err = tx.ExecContext(r.Context(), query, args...)
+	_, err = stx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
-	if err := reindexUserUniqueness(r.Context(), tx, userID, orgID, identifier, write); err != nil {
+	if err := reindexUserUniqueness(r.Context(), stx.Tx(), userID, orgID, identifier, write); err != nil {
 		if v, ok := err.(*uniqueness.ViolationError); ok {
 			httputil.WriteError(w, http.StatusConflict, fmt.Sprintf("field %q value %q already exists", v.Field, v.Value))
 			return
@@ -202,7 +206,7 @@ func (a *API) updateProfile(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusConflict, "update failed")
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := stx.Commit(); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
@@ -223,10 +227,11 @@ func (a *API) listOwnSessions(w http.ResponseWriter, r *http.Request) {
 	userID := callerIduserID(r)
 	currentSessionID := callerSessionID(r)
 
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at
-		 FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
-		 ORDER BY created_at DESC`, userID,
+	scoped := a.db.Scoped(r.Context())
+	rows, err := scoped.QueryContext(r.Context(),
+		scoped.Rebind(`SELECT id, user_agent, ip_address, COALESCE(metadata,'{}'), created_at, expires_at
+		 FROM sessions WHERE instance_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')
+		 ORDER BY created_at DESC`), scoped.InstanceID(), userID,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
@@ -271,20 +276,22 @@ func (a *API) revokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	userID := callerIduserID(r)
 	sessionID := r.PathValue("id")
 
+	scoped := a.db.Scoped(r.Context())
+
 	// Only allow revoking own sessions.
 	var ownerID string
 	var userAgent, ipAddress string
-	err := a.db.SQL().QueryRowContext(r.Context(),
-		`SELECT user_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
-		 FROM sessions WHERE id = ? AND revoked_at IS NULL`, sessionID,
+	err := scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT user_id, COALESCE(user_agent,''), COALESCE(ip_address,'')
+		 FROM sessions WHERE instance_id = ? AND id = ? AND revoked_at IS NULL`), scoped.InstanceID(), sessionID,
 	).Scan(&ownerID, &userAgent, &ipAddress)
 	if err != nil || ownerID != userID {
 		httputil.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	_, _ = a.db.SQL().ExecContext(r.Context(),
-		`UPDATE sessions SET revoked_at = datetime('now') WHERE id = ?`, sessionID)
+	_, _ = scoped.ExecContext(r.Context(),
+		scoped.Rebind(`UPDATE sessions SET revoked_at = datetime('now') WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), sessionID)
 
 	a.EmitAuthEvent(r.Context(), "account.session_revoked", userID, map[string]any{
 		"session_id": sessionID,
@@ -301,10 +308,11 @@ func (a *API) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 	userID := callerIduserID(r)
 	currentSessionID := callerSessionID(r)
 
-	result, err := a.db.SQL().ExecContext(r.Context(),
-		`UPDATE sessions SET revoked_at = datetime('now')
-		 WHERE user_id = ? AND id != ? AND revoked_at IS NULL`,
-		userID, currentSessionID,
+	scoped := a.db.Scoped(r.Context())
+	result, err := scoped.ExecContext(r.Context(),
+		scoped.Rebind(`UPDATE sessions SET revoked_at = datetime('now')
+		 WHERE instance_id = ? AND user_id = ? AND id != ? AND revoked_at IS NULL`),
+		scoped.InstanceID(), userID, currentSessionID,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "revocation failed")
@@ -334,10 +342,11 @@ func (a *API) listOwnActivity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, err := a.db.SQL().QueryContext(r.Context(),
-		`SELECT id, event_type, COALESCE(aggregate_type,''), COALESCE(payload,'{}'), created_at
-		 FROM events WHERE actor_id = ?
-		 ORDER BY id DESC LIMIT ?`, userID, limit,
+	scoped := a.db.Scoped(r.Context())
+	rows, err := scoped.QueryContext(r.Context(),
+		scoped.Rebind(`SELECT id, event_type, COALESCE(aggregate_type,''), COALESCE(payload,'{}'), created_at
+		 FROM events WHERE instance_id = ? AND actor_id = ?
+		 ORDER BY id DESC LIMIT ?`), scoped.InstanceID(), userID, limit,
 	)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")

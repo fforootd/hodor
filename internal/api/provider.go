@@ -63,14 +63,15 @@ func (a *API) createProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
-	if tx != nil {
-		emitEvent(r.Context(), tx, "provider.created", "", providerID, "provider", map[string]any{
+	scoped := a.db.Scoped(r.Context())
+	stx, _ := scoped.BeginTx(r.Context(), nil)
+	if stx != nil {
+		emitEvent(r.Context(), stx, "provider.created", "", providerID, "provider", map[string]any{
 			"display_name": created.DisplayName,
 			"kind":         created.Kind,
 			"protocol":     created.Protocol,
 		})
-		_ = tx.Commit()
+		_ = stx.Commit()
 	}
 	a.bus.Signal()
 
@@ -152,10 +153,11 @@ func (a *API) deleteProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, _ := a.db.SQL().BeginTx(r.Context(), nil)
-	if tx != nil {
-		emitEvent(r.Context(), tx, "provider.deleted", "", r.PathValue("id"), "provider", map[string]any{"provider_id": r.PathValue("id")})
-		_ = tx.Commit()
+	scoped := a.db.Scoped(r.Context())
+	stx, _ := scoped.BeginTx(r.Context(), nil)
+	if stx != nil {
+		emitEvent(r.Context(), stx, "provider.deleted", "", r.PathValue("id"), "provider", map[string]any{"provider_id": r.PathValue("id")})
+		_ = stx.Commit()
 	}
 	a.bus.Signal()
 

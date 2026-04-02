@@ -81,10 +81,11 @@ func (a *API) createLoginFlow(w http.ResponseWriter, r *http.Request) {
 		orgID = "1"
 	}
 
-	_, err = a.db.SQL().ExecContext(r.Context(),
-		a.bindQuery(`INSERT INTO login_flows (id, org_id, name, strategy, config, is_default, enabled, state, priority, audience, auth_methods, schema_id, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`),
-		flowID, orgID, name, strategy, configJSON,
+	scoped := a.db.Scoped(r.Context())
+	_, err = scoped.ExecContext(r.Context(),
+		scoped.Rebind(`INSERT INTO login_flows (instance_id, id, org_id, name, strategy, config, is_default, enabled, state, priority, audience, auth_methods, schema_id, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`),
+		scoped.InstanceID(), flowID, orgID, name, strategy, configJSON,
 		req.IsDefault, true, state, req.Priority,
 		audienceJSON, authMethodsJSON, schemaRec.ID, now, now,
 	)
@@ -131,23 +132,25 @@ func (a *API) getLoginFlow(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listLoginFlows(w http.ResponseWriter, r *http.Request) {
 	stateFilter := r.URL.Query().Get("state")
+	scoped := a.db.Scoped(r.Context())
 
 	var args []any
+	args = append(args, scoped.InstanceID())
 
 	query := `SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), name, strategy, config,
 	                  CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END,
 	                  CASE WHEN COALESCE(enabled, true) THEN 1 ELSE 0 END, state, priority,
 	                  COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
 	                  COALESCE(metadata,'{}'), created_at, updated_at
-	           FROM login_flows `
+	           FROM login_flows WHERE instance_id = ?`
 
 	if stateFilter != "" {
-		query += ` WHERE state = ?`
+		query += ` AND state = ?`
 		args = append(args, stateFilter)
 	}
 	query += ` ORDER BY CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END DESC, priority DESC, created_at DESC`
 
-	rows, err := a.db.SQL().QueryContext(r.Context(), a.bindQuery(query), args...)
+	rows, err := scoped.QueryContext(r.Context(), scoped.Rebind(query), args...)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
@@ -250,13 +253,14 @@ func (a *API) updateLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	audienceJSON := marshalJSON(audienceValue)
 	authMethodsJSON := marshalJSON(authMethodsValue)
 	query := `UPDATE login_flows
 		SET name = ?, strategy = ?, config = ?, is_default = ?, state = ?, priority = ?, audience = ?, auth_methods = ?, schema_id = ?, updated_at = ?
-		WHERE id = ?`
-	result, err := a.db.SQL().ExecContext(r.Context(), a.bindQuery(query),
-		name, strategy, configJSON, isDefault, state, priority, audienceJSON, authMethodsJSON, schemaRec.ID, timeNow(), flowID)
+		WHERE instance_id = ? AND id = ?`
+	result, err := scoped.ExecContext(r.Context(), scoped.Rebind(query),
+		name, strategy, configJSON, isDefault, state, priority, audienceJSON, authMethodsJSON, schemaRec.ID, timeNow(), scoped.InstanceID(), flowID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "update failed: "+err.Error())
 		return
@@ -305,16 +309,17 @@ func (a *API) deleteLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scoped := a.db.Scoped(r.Context())
 	var isDefault int
-	_ = a.db.SQL().QueryRowContext(r.Context(),
-		a.bindQuery(`SELECT CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END FROM login_flows WHERE id = ?`), flowID,
+	_ = scoped.QueryRowContext(r.Context(),
+		scoped.Rebind(`SELECT CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID,
 	).Scan(&isDefault)
 	if isDefault != 0 {
 		httputil.WriteError(w, http.StatusBadRequest, "cannot delete the default login flow — edit it instead")
 		return
 	}
 
-	result, err := a.db.SQL().ExecContext(r.Context(), a.bindQuery(`DELETE FROM login_flows WHERE id = ?`), flowID)
+	result, err := scoped.ExecContext(r.Context(), scoped.Rebind(`DELETE FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 		return

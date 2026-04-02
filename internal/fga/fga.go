@@ -8,7 +8,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
+
 	"github.com/zitadel/zitadel/internal/fga/modules"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/logging"
 
 	openfgav1 "github.com/openfga/api/proto/openfga/v1"
@@ -23,9 +26,12 @@ type Service struct {
 	srv            *server.Server
 	db             *sql.DB
 	dialect        string          // "sqlite", "d1", "libsql", "postgres"
-	storeID        string          // internal _system store
+	storeID        string          // internal _system store (default instance)
 	modelID        string          // current authorization model ID
 	enabledModules map[string]bool // marketplace modules currently enabled
+
+	// Per-instance FGA store cache: instance_id → store_id.
+	instanceStores sync.Map
 }
 
 // New initialises the OpenFGA engine on the provided *sql.DB.
@@ -69,6 +75,11 @@ func New(ctx context.Context, db *sql.DB, dialect string) (*Service, error) {
 		return nil, fmt.Errorf("fga: ensure auth model: %w", err)
 	}
 
+	// 6. Seed the default instance → store mapping.
+	if err := svc.seedDefaultInstanceStore(ctx); err != nil {
+		return nil, fmt.Errorf("fga: seed default instance store: %w", err)
+	}
+
 	return svc, nil
 }
 
@@ -84,9 +95,20 @@ func (s *Service) SystemStoreID() string {
 
 // Check evaluates whether (user, relation, object) is authorised.
 func (s *Service) Check(ctx context.Context, user, relation, object string) (bool, error) {
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return false, fmt.Errorf("fga: resolve store: %w", err)
+	}
+	// For the default store we use the cached model ID. For per-instance
+	// stores the model was written at creation time; passing empty string
+	// tells OpenFGA to use the latest model in that store.
+	modelID := s.modelID
+	if storeID != s.storeID {
+		modelID = ""
+	}
 	resp, err := s.srv.Check(ctx, &openfgav1.CheckRequest{
-		StoreId:              s.storeID,
-		AuthorizationModelId: s.modelID,
+		StoreId:              storeID,
+		AuthorizationModelId: modelID,
 		TupleKey: &openfgav1.CheckRequestTupleKey{
 			User:     user,
 			Relation: relation,
@@ -99,10 +121,14 @@ func (s *Service) Check(ctx context.Context, user, relation, object string) (boo
 	return resp.GetAllowed(), nil
 }
 
-// WriteTuple adds a relationship tuple to the system store.
+// WriteTuple adds a relationship tuple to the current instance's store.
 func (s *Service) WriteTuple(ctx context.Context, user, relation, object string) error {
-	_, err := s.srv.Write(ctx, &openfgav1.WriteRequest{
-		StoreId: s.storeID,
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store: %w", err)
+	}
+	_, err = s.srv.Write(ctx, &openfgav1.WriteRequest{
+		StoreId: storeID,
 		Writes: &openfgav1.WriteRequestWrites{
 			TupleKeys: []*openfgav1.TupleKey{
 				{
@@ -116,10 +142,14 @@ func (s *Service) WriteTuple(ctx context.Context, user, relation, object string)
 	return err
 }
 
-// DeleteTuple removes a relationship tuple from the system store.
+// DeleteTuple removes a relationship tuple from the current instance's store.
 func (s *Service) DeleteTuple(ctx context.Context, user, relation, object string) error {
-	_, err := s.srv.Write(ctx, &openfgav1.WriteRequest{
-		StoreId: s.storeID,
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store: %w", err)
+	}
+	_, err = s.srv.Write(ctx, &openfgav1.WriteRequest{
+		StoreId: storeID,
 		Deletes: &openfgav1.WriteRequestDeletes{
 			TupleKeys: []*openfgav1.TupleKeyWithoutCondition{
 				{
@@ -136,6 +166,11 @@ func (s *Service) DeleteTuple(ctx context.Context, user, relation, object string
 // ReadTuples reads relationship tuples matching the given filter.
 // Any of user, relation, object can be empty to act as a wildcard.
 func (s *Service) ReadTuples(ctx context.Context, user, relation, object string) ([]map[string]string, error) {
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fga: resolve store: %w", err)
+	}
+
 	tupleKey := &openfgav1.ReadRequestTupleKey{}
 	if user != "" {
 		tupleKey.User = user
@@ -148,7 +183,7 @@ func (s *Service) ReadTuples(ctx context.Context, user, relation, object string)
 	}
 
 	resp, err := s.srv.Read(ctx, &openfgav1.ReadRequest{
-		StoreId:  s.storeID,
+		StoreId:  storeID,
 		TupleKey: tupleKey,
 	})
 	if err != nil {
@@ -166,13 +201,18 @@ func (s *Service) ReadTuples(ctx context.Context, user, relation, object string)
 	return result, nil
 }
 
-// ReadAllTuples returns all tuples in the system store by querying the
+// ReadAllTuples returns all tuples in the current instance's store by querying the
 // underlying OpenFGA tuple table directly. The OpenFGA Read API requires
 // at least one filter, so this bypasses it for the "show all" use case.
 func (s *Service) ReadAllTuples(ctx context.Context) ([]map[string]string, error) {
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fga: resolve store: %w", err)
+	}
+
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT user_object_type || ':' || user_object_id, relation, object_type || ':' || object_id
-		 FROM tuple WHERE store = ? ORDER BY object_type, object_id, relation LIMIT 500`, s.storeID)
+		 FROM tuple WHERE store = ? ORDER BY object_type, object_id, relation LIMIT 500`, storeID)
 	if err != nil {
 		return nil, fmt.Errorf("fga: read all tuples: %w", err)
 	}
@@ -198,8 +238,12 @@ func (s *Service) ReadAllTuples(ctx context.Context) ([]map[string]string, error
 
 // Expand returns the userset tree for a relation on an object.
 func (s *Service) Expand(ctx context.Context, relation, object string) (any, error) {
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fga: resolve store: %w", err)
+	}
 	resp, err := s.srv.Expand(ctx, &openfgav1.ExpandRequest{
-		StoreId: s.storeID,
+		StoreId: storeID,
 		TupleKey: &openfgav1.ExpandRequestTupleKey{
 			Relation: relation,
 			Object:   object,
@@ -209,6 +253,100 @@ func (s *Service) Expand(ctx context.Context, relation, object string) (any, err
 		return nil, fmt.Errorf("fga: expand: %w", err)
 	}
 	return resp.GetTree(), nil
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Per-instance store scoping
+// ──────────────────────────────────────────────────────────────────
+
+// StoreForInstance resolves the FGA store_id for the current instance
+// (extracted from ctx). It checks the in-memory cache first, then the
+// fga_instance_stores table, and creates a new store if none exists.
+func (s *Service) StoreForInstance(ctx context.Context) (string, error) {
+	instanceID := httputil.InstanceIDFromContext(ctx)
+
+	// Fast path: check in-memory cache.
+	if cached, ok := s.instanceStores.Load(instanceID); ok {
+		return cached.(string), nil
+	}
+
+	// Slow path: query the database.
+	var storeID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT store_id FROM fga_instance_stores WHERE instance_id = ?`, instanceID,
+	).Scan(&storeID)
+	if err == nil {
+		s.instanceStores.Store(instanceID, storeID)
+		return storeID, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("fga: query instance store: %w", err)
+	}
+
+	// Not found — create a new store for this instance.
+	return s.EnsureInstanceStore(ctx, instanceID)
+}
+
+// EnsureInstanceStore creates a new FGA store for the given instance,
+// loads the authorization model into it, persists the mapping, and
+// caches it. Returns the new store_id.
+func (s *Service) EnsureInstanceStore(ctx context.Context, instanceID string) (string, error) {
+	// Create a new FGA store named after the instance.
+	createResp, err := s.srv.CreateStore(ctx, &openfgav1.CreateStoreRequest{
+		Name: "instance_" + instanceID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("fga: create store for instance %q: %w", instanceID, err)
+	}
+	storeID := createResp.GetId()
+
+	// Load the authorization model into the new store.
+	modelResp, err := s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
+		StoreId:         storeID,
+		SchemaVersion:   "1.1",
+		TypeDefinitions: s.buildFullModel(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("fga: write auth model for instance %q: %w", instanceID, err)
+	}
+	_ = modelResp // model ID is per-store; the instance will use latest
+
+	// Persist the mapping.
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO fga_instance_stores (instance_id, store_id) VALUES (?, ?)
+		 ON CONFLICT (instance_id) DO NOTHING`, instanceID, storeID)
+	if err != nil {
+		return "", fmt.Errorf("fga: insert instance store mapping: %w", err)
+	}
+
+	// Cache it.
+	s.instanceStores.Store(instanceID, storeID)
+	logging.Printf("[fga] created store for instance %q (store=%s)", instanceID, storeID)
+	return storeID, nil
+}
+
+// seedDefaultInstanceStore ensures the "default" instance is mapped to
+// the _system store created at startup. Idempotent.
+func (s *Service) seedDefaultInstanceStore(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO fga_instance_stores (instance_id, store_id) VALUES (?, ?)
+		 ON CONFLICT (instance_id) DO NOTHING`, httputil.DefaultInstanceID, s.storeID)
+	if err != nil {
+		return fmt.Errorf("seed default instance store: %w", err)
+	}
+	s.instanceStores.Store(httputil.DefaultInstanceID, s.storeID)
+	return nil
+}
+
+// buildFullModel returns the full type definitions including any enabled modules.
+func (s *Service) buildFullModel() []*openfgav1.TypeDefinition {
+	typeDefs := ZitadelModel()
+	for name := range s.enabledModules {
+		if m, ok := modules.Registry[name]; ok {
+			typeDefs = append(typeDefs, m.Types()...)
+		}
+	}
+	return typeDefs
 }
 
 // ---- internal helpers ----
@@ -271,6 +409,16 @@ func runMigrations(db *sql.DB, dialect string) error {
 
 	if _, err := db.Exec(ddl); err != nil {
 		return fmt.Errorf("create openfga tables: %w", err)
+	}
+
+	// Per-instance store mapping table.
+	instanceStoreDDL := `
+	CREATE TABLE IF NOT EXISTS fga_instance_stores (
+		instance_id TEXT PRIMARY KEY,
+		store_id    TEXT NOT NULL
+	);`
+	if _, err := db.Exec(instanceStoreDDL); err != nil {
+		return fmt.Errorf("create fga_instance_stores table: %w", err)
 	}
 
 	// Create indexes if they don't already exist.
@@ -405,9 +553,13 @@ func (s *Service) EnableModule(ctx context.Context, moduleName string) error {
 		seen[td.GetType()] = true
 	}
 
-	// Write the compiled model to OpenFGA.
+	// Write the compiled model to the current instance's store.
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store for module enable: %w", err)
+	}
 	resp, err := s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
-		StoreId:         s.storeID,
+		StoreId:         storeID,
 		SchemaVersion:   "1.1",
 		TypeDefinitions: typeDefs,
 	})
@@ -440,8 +592,12 @@ func (s *Service) DisableModule(ctx context.Context, moduleName string) error {
 		}
 	}
 
+	storeID, err := s.StoreForInstance(ctx)
+	if err != nil {
+		return fmt.Errorf("fga: resolve store for module disable: %w", err)
+	}
 	resp, err := s.srv.WriteAuthorizationModel(ctx, &openfgav1.WriteAuthorizationModelRequest{
-		StoreId:         s.storeID,
+		StoreId:         storeID,
 		SchemaVersion:   "1.1",
 		TypeDefinitions: typeDefs,
 	})

@@ -11,6 +11,8 @@ import (
 	"github.com/zitadel/zitadel/internal/httputil"
 )
 
+// Note: saved_queries are scoped by instance_id for multi-tenant isolation.
+
 // SavedQuery represents a persisted analytics query.
 type SavedQuery struct {
 	ID          string `json:"id"`
@@ -44,9 +46,10 @@ func (e *Engine) handleListQueries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	rows, err := db.QueryContext(r.Context(),
 		`SELECT id, name, description, sql_text, created_by, created_at, updated_at
-		 FROM saved_queries ORDER BY updated_at DESC`)
+		 FROM saved_queries WHERE instance_id = ? ORDER BY updated_at DESC`, instanceID)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -94,11 +97,12 @@ func (e *Engine) handleCreateQuery(w http.ResponseWriter, r *http.Request) {
 
 	id := fmt.Sprintf("sq_%d", time.Now().UnixNano())
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 
 	_, err := db.ExecContext(r.Context(),
-		`INSERT INTO saved_queries (id, name, description, sql_text, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		id, req.Name, req.Description, req.SQL, now, now)
+		`INSERT INTO saved_queries (instance_id, id, name, description, sql_text, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		instanceID, id, req.Name, req.Description, req.SQL, now, now)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -138,9 +142,10 @@ func (e *Engine) handleUpdateQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	instanceID := httputil.InstanceIDFromContext(r.Context())
 	result, err := db.ExecContext(r.Context(),
-		`UPDATE saved_queries SET name = ?, description = ?, sql_text = ?, updated_at = ? WHERE id = ?`,
-		req.Name, req.Description, req.SQL, now, id)
+		`UPDATE saved_queries SET name = ?, description = ?, sql_text = ?, updated_at = ? WHERE instance_id = ? AND id = ?`,
+		req.Name, req.Description, req.SQL, now, instanceID, id)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -167,7 +172,8 @@ func (e *Engine) handleDeleteQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	result, err := db.ExecContext(r.Context(), `DELETE FROM saved_queries WHERE id = ?`, id)
+	instanceID := httputil.InstanceIDFromContext(r.Context())
+	result, err := db.ExecContext(r.Context(), `DELETE FROM saved_queries WHERE instance_id = ? AND id = ?`, instanceID, id)
 	if err != nil {
 		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

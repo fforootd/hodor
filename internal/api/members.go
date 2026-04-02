@@ -59,12 +59,13 @@ func (a *API) listMembers(resourceType string) http.HandlerFunc {
 			return
 		}
 
-		rows, err := a.db.SQL().QueryContext(r.Context(),
-			`SELECT m.user_id, COALESCE(u.display_name, u.identifier, ''), m.role, m.added_at
+		scoped := a.db.Scoped(r.Context())
+		rows, err := scoped.QueryContext(r.Context(),
+			scoped.Rebind(`SELECT m.user_id, COALESCE(u.display_name, u.identifier, ''), m.role, m.added_at
 			 FROM memberships m
-			 LEFT JOIN users u ON u.id = m.user_id
-			 WHERE m.resource_type = ? AND m.resource_id = ?
-			 ORDER BY m.added_at ASC`, resourceType, resourceID)
+			 LEFT JOIN users u ON u.id = m.user_id AND u.instance_id = ?
+			 WHERE m.instance_id = ? AND m.resource_type = ? AND m.resource_id = ?
+			 ORDER BY m.added_at ASC`), scoped.InstanceID(), scoped.InstanceID(), resourceType, resourceID)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 			return
@@ -113,15 +114,15 @@ func (a *API) addMember(resourceType string) http.HandlerFunc {
 
 		now := timeNow()
 
-		tx, ok := a.beginTx(w, r)
+		stx, ok := a.beginTx(w, r)
 		if !ok {
 			return
 		}
-		defer tx.Rollback()
+		defer stx.Rollback()
 
-		_, err := tx.ExecContext(r.Context(),
-			`INSERT OR REPLACE INTO memberships (resource_type, resource_id, user_id, role, added_at) VALUES (?, ?, ?, ?, ?)`,
-			resourceType, resourceID, req.UserID, req.Role, now)
+		_, err := stx.ExecContext(r.Context(),
+			stx.Rebind(`INSERT OR REPLACE INTO memberships (instance_id, resource_type, resource_id, user_id, role, added_at) VALUES (?, ?, ?, ?, ?, ?)`),
+			stx.InstanceID(), resourceType, resourceID, req.UserID, req.Role, now)
 		if err != nil {
 			httputil.WriteError(w, http.StatusConflict, "failed to add member")
 			return
@@ -152,7 +153,7 @@ func (a *API) addMember(resourceType string) http.HandlerFunc {
 		}
 		// org + member role: no FGA write needed (SQL is canonical)
 
-		if !commitTx(w, tx) {
+		if !commitTx(w, stx) {
 			return
 		}
 
@@ -177,15 +178,15 @@ func (a *API) removeMember(resourceType string) http.HandlerFunc {
 			return
 		}
 
-		tx, ok := a.beginTx(w, r)
+		stx, ok := a.beginTx(w, r)
 		if !ok {
 			return
 		}
-		defer tx.Rollback()
+		defer stx.Rollback()
 
-		result, err := tx.ExecContext(r.Context(),
-			`DELETE FROM memberships WHERE resource_type = ? AND resource_id = ? AND user_id = ?`,
-			resourceType, resourceID, userID)
+		result, err := stx.ExecContext(r.Context(),
+			stx.Rebind(`DELETE FROM memberships WHERE instance_id = ? AND resource_type = ? AND resource_id = ? AND user_id = ?`),
+			stx.InstanceID(), resourceType, resourceID, userID)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, "delete failed")
 			return
@@ -205,7 +206,7 @@ func (a *API) removeMember(resourceType string) http.HandlerFunc {
 			}
 		}
 
-		if !commitTx(w, tx) {
+		if !commitTx(w, stx) {
 			return
 		}
 

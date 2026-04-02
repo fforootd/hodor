@@ -61,11 +61,12 @@ func (a *API) ingestFingerprint(w http.ResponseWriter, r *http.Request) {
 	payloadBytes, _ := json.Marshal(payload)
 
 	// We use ON CONFLICT DO NOTHING to handle concurrent requests
-	_, err = a.db.SQL().ExecContext(r.Context(),
-		`INSERT INTO fingerprints (id, type, raw_data, created_at)
-		 VALUES (?, 'client_fingerprint', ?, datetime('now'))
-		 ON CONFLICT (id) DO NOTHING`,
-		fpVal, string(payloadBytes))
+	scoped := a.db.Scoped(r.Context())
+	_, err = scoped.ExecContext(r.Context(),
+		scoped.Rebind(`INSERT INTO fingerprints (instance_id, id, type, raw_data, created_at)
+		 VALUES (?, ?, 'client_fingerprint', ?, datetime('now'))
+		 ON CONFLICT (instance_id, id) DO NOTHING`),
+		scoped.InstanceID(), fpVal, string(payloadBytes))
 
 	if err != nil {
 		logging.Printf("[telemetry] failed to store fingerprint: %v", err)
@@ -94,8 +95,9 @@ func (a *API) listFingerprints(w http.ResponseWriter, r *http.Request) {
 		cursor = c
 	}
 
-	query := `SELECT id, type, raw_data, created_at FROM fingerprints WHERE id > ? ORDER BY id ASC LIMIT ?`
-	rows, err := a.db.SQL().QueryContext(r.Context(), query, cursor, limit+1)
+	scoped := a.db.Scoped(r.Context())
+	query := scoped.Rebind(`SELECT id, type, raw_data, created_at FROM fingerprints WHERE instance_id = ? AND id > ? ORDER BY id ASC LIMIT ?`)
+	rows, err := scoped.QueryContext(r.Context(), query, scoped.InstanceID(), cursor, limit+1)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return

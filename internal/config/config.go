@@ -50,6 +50,11 @@ type ServerConfig struct {
 	ProxyHeaderMode string   `toml:"proxy_header_mode"` // "standard" | "cloudflare" | "custom"
 	RealIPHeader    string   `toml:"real_ip_header"`    // custom header (e.g., "CF-Connecting-IP")
 
+	// Multi-tenant: when true, reads X-Instance-Id header to scope data per tenant.
+	// When false (default), all data is scoped to a single "default" instance.
+	// Self-hosters never set this. Cloud deployment enables it via the wrapper.
+	MultiTenant bool `toml:"multi_tenant"`
+
 	// Security response headers.
 	SecurityHeaders SecurityHeadersConfig `toml:"security_headers"`
 }

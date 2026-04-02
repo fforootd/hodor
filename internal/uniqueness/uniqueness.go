@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // Scope defines the uniqueness scope for a field.
@@ -100,6 +102,7 @@ func Normalize(value string) string {
 // normalizes them, and inserts into unique_fields.
 // Returns a *Violation error if a constraint is violated.
 func Enforce(ctx context.Context, tx *sql.Tx, userID, orgID string, constraints []FieldConstraint, data map[string]any) error {
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	for _, c := range constraints {
 		rawVal, ok := data[c.FieldName]
 		if !ok || rawVal == nil {
@@ -117,9 +120,9 @@ func Enforce(ctx context.Context, tx *sql.Tx, userID, orgID string, constraints 
 		}
 
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
-			 VALUES (?, ?, ?, ?)`,
-			scopeID, c.FieldName, value, userID,
+			`INSERT INTO unique_fields (instance_id, scope_id, field_name, normalized_value, user_id)
+			 VALUES (?, ?, ?, ?, ?)`,
+			instanceID, scopeID, c.FieldName, value, userID,
 		)
 		if err != nil {
 			return &ViolationError{
@@ -139,11 +142,12 @@ func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, userID, orgID, ident
 	if identifier == "" {
 		return nil
 	}
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	normalized := Normalize(identifier)
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO unique_fields (scope_id, field_name, normalized_value, user_id)
-		 VALUES ('', 'identifier', ?, ?)`,
-		normalized, userID,
+		`INSERT INTO unique_fields (instance_id, scope_id, field_name, normalized_value, user_id)
+		 VALUES (?, '', 'identifier', ?, ?)`,
+		instanceID, normalized, userID,
 	)
 	if err != nil {
 		return &ViolationError{
@@ -157,7 +161,8 @@ func EnforceFromIdentifier(ctx context.Context, tx *sql.Tx, userID, orgID, ident
 
 // Release removes all unique_fields rows for an entity (used before re-enforcement on update).
 func Release(ctx context.Context, tx *sql.Tx, userID string) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM unique_fields WHERE user_id = ?`, userID)
+	instanceID := httputil.InstanceIDFromContext(ctx)
+	_, err := tx.ExecContext(ctx, `DELETE FROM unique_fields WHERE instance_id = ? AND user_id = ?`, instanceID, userID)
 	return err
 }
 
@@ -172,6 +177,7 @@ type ResolvedEntity struct {
 // It tries instance-scoped matches first, then org-scoped matches if orgID is provided.
 func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string) (*ResolvedEntity, error) {
 	normalized := Normalize(identifier)
+	instanceID := httputil.InstanceIDFromContext(ctx)
 
 	// Phase 1: Instance-scoped match (globally unique identifiers).
 	var result ResolvedEntity
@@ -179,10 +185,12 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 		`SELECT uf.user_id, COALESCE(u.display_name, u.identifier), u.org_id
 		 FROM unique_fields uf
 		 JOIN users u ON u.id = uf.user_id
-		 WHERE uf.normalized_value = ?
+		 WHERE uf.instance_id = ?
+		   AND uf.normalized_value = ?
 		   AND uf.scope_id = ''
+		   AND u.instance_id = ?
 		   AND u.state = 'active'
-		 LIMIT 1`, normalized,
+		 LIMIT 1`, instanceID, normalized, instanceID,
 	).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 	if err == nil {
 		return &result, nil
@@ -197,10 +205,12 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 			`SELECT uf.user_id, COALESCE(u.display_name, u.identifier), u.org_id
 			 FROM unique_fields uf
 			 JOIN users u ON u.id = uf.user_id
-			 WHERE uf.normalized_value = ?
+			 WHERE uf.instance_id = ?
+			   AND uf.normalized_value = ?
 			   AND uf.scope_id = ?
+			   AND u.instance_id = ?
 			   AND u.state = 'active'
-			 LIMIT 1`, normalized, orgID,
+			 LIMIT 1`, instanceID, normalized, orgID, instanceID,
 		).Scan(&result.UserID, &result.DisplayName, &result.OrgID)
 		if err == nil {
 			return &result, nil
@@ -212,8 +222,8 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 
 	// Phase 3: Fall back to legacy entities.identifier column for backward compat.
 	query := `SELECT id, COALESCE(display_name, identifier), org_id
-	          FROM users WHERE LOWER(identifier) = ? AND state = 'active'`
-	args := []any{normalized}
+	          FROM users WHERE instance_id = ? AND LOWER(identifier) = ? AND state = 'active'`
+	args := []any{instanceID, normalized}
 	if orgID != "" {
 		query += ` AND org_id = ?`
 		args = append(args, orgID)
@@ -235,6 +245,7 @@ func ResolveIdentifier(ctx context.Context, db *sql.DB, identifier, orgID string
 // Returns a list of violations (duplicate values that would conflict).
 func ValidateSchemaChange(ctx context.Context, db *sql.DB, constraints []FieldConstraint) ([]map[string]any, error) {
 	var violations []map[string]any
+	instanceID := httputil.InstanceIDFromContext(ctx)
 
 	for _, c := range constraints {
 		var query string
@@ -242,18 +253,18 @@ func ValidateSchemaChange(ctx context.Context, db *sql.DB, constraints []FieldCo
 		case ScopeInstance:
 			query = `SELECT normalized_value, COUNT(*) as cnt
 			         FROM unique_fields
-			         WHERE field_name = ?
+			         WHERE instance_id = ? AND field_name = ?
 			         GROUP BY normalized_value
 			         HAVING cnt > 1`
 		case ScopeOrg:
 			query = `SELECT scope_id, normalized_value, COUNT(*) as cnt
 			         FROM unique_fields
-			         WHERE field_name = ?
+			         WHERE instance_id = ? AND field_name = ?
 			         GROUP BY scope_id, normalized_value
 			         HAVING cnt > 1`
 		}
 
-		rows, err := db.QueryContext(ctx, query, c.FieldName)
+		rows, err := db.QueryContext(ctx, query, instanceID, c.FieldName)
 		if err != nil {
 			return nil, fmt.Errorf("check duplicates for %s: %w", c.FieldName, err)
 		}
