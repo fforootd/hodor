@@ -1,4 +1,4 @@
-use axum::{Router, extract::State, response::IntoResponse, routing::get, Json};
+use axum::{Router, extract::State, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json};
 use serde::Serialize;
 use crate::OidcState;
 
@@ -22,8 +22,12 @@ struct Jwk {
     e: String,
 }
 
-async fn jwks(State(state): State<OidcState>) -> impl IntoResponse {
-    let keys = state.keys.read().await;
+async fn jwks(State(state): State<OidcState>) -> Response {
+    let guard = match state.signing_keys().await {
+        Ok(g) => g,
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, "signing keys not ready").into_response(),
+    };
+    let keys = guard.as_ref().unwrap();
     Json(JwksResponse {
         keys: vec![Jwk {
             kty: "RSA".into(),
@@ -33,5 +37,5 @@ async fn jwks(State(state): State<OidcState>) -> impl IntoResponse {
             n: keys.n.clone(),
             e: keys.e.clone(),
         }],
-    })
+    }).into_response()
 }

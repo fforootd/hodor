@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 pub struct OidcState {
     pub db: Db,
     pub issuer: String,
-    pub keys: Arc<RwLock<SigningKeys>>,
+    pub keys: Arc<RwLock<Option<SigningKeys>>>,
 }
 
 /// RSA signing key pair for JWT tokens.
@@ -62,14 +62,38 @@ impl SigningKeys {
 }
 
 impl OidcState {
-    pub async fn new(db: Db, issuer: String) -> anyhow::Result<Self> {
-        let keys = SigningKeys::generate()?;
-        tracing::info!(kid = %keys.kid, "OIDC signing key generated");
-        Ok(Self {
-            db,
-            issuer,
-            keys: Arc::new(RwLock::new(keys)),
-        })
+    /// Create OIDC state with lazy key generation (non-blocking).
+    /// Keys are generated in a background task so startup isn't delayed.
+    pub fn new(db: Db, issuer: String) -> Self {
+        let keys = Arc::new(RwLock::new(None));
+        let keys_clone = keys.clone();
+
+        // Generate RSA key in background to avoid blocking startup (~3s).
+        tokio::spawn(async move {
+            match SigningKeys::generate() {
+                Ok(k) => {
+                    tracing::info!(kid = %k.kid, "OIDC signing key generated");
+                    *keys_clone.write().await = Some(k);
+                }
+                Err(e) => tracing::error!(error = %e, "failed to generate OIDC signing key"),
+            }
+        });
+
+        Self { db, issuer, keys }
+    }
+
+    /// Get signing keys, waiting if still generating.
+    pub async fn signing_keys(&self) -> anyhow::Result<tokio::sync::RwLockReadGuard<'_, Option<SigningKeys>>> {
+        // Spin briefly if keys aren't ready yet.
+        for _ in 0..100 {
+            let guard = self.keys.read().await;
+            if guard.is_some() {
+                return Ok(guard);
+            }
+            drop(guard);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        anyhow::bail!("OIDC signing keys not ready after 5s")
     }
 }
 

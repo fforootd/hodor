@@ -33,7 +33,11 @@ async fn userinfo(State(state): State<OidcState>, req: axum::extract::Request) -
     };
 
     // Decode token to get subject.
-    let keys = state.keys.read().await;
+    let guard = match state.signing_keys().await {
+        Ok(g) => g,
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, "signing keys not ready").into_response(),
+    };
+    let keys = guard.as_ref().unwrap();
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_audience(&[&state.issuer]);
     validation.validate_aud = false; // relaxed for POC

@@ -30,11 +30,11 @@ async fn create(State(s): State<ApiState>, Json(req): Json<ProviderRequest>) -> 
 
 async fn list(State(s): State<ApiState>) -> Response {
     let scoped = s.db.scoped_default();
-    match sqlx::query_as::<_, (String, String, String, bool, String, String)>(
+    match sqlx::query_as::<_, (String, String, String, i64, String, String)>(
         "SELECT id, name, protocol, enabled, COALESCE(config,'{}'), created_at FROM providers WHERE instance_id = ? ORDER BY display_order, name")
         .bind(scoped.instance_id()).fetch_all(scoped.pool()).await {
         Ok(rows) => {
-            let items: Vec<ProviderResponse> = rows.into_iter().map(|r| ProviderResponse { id: r.0, name: r.1, protocol: r.2, enabled: r.3, config: serde_json::from_str(&r.4).unwrap_or_default(), created_at: r.5 }).collect();
+            let items: Vec<ProviderResponse> = rows.into_iter().map(|r| ProviderResponse { id: r.0, name: r.1, protocol: r.2, enabled: r.3 != 0, config: serde_json::from_str(&r.4).unwrap_or_default(), created_at: r.5 }).collect();
             response::json_ok(response::ListResponse { items, next_cursor: None, total: None })
         }
         Err(e) => response::internal_error(format!("{e}")),
@@ -43,10 +43,10 @@ async fn list(State(s): State<ApiState>) -> Response {
 
 async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
     let scoped = s.db.scoped_default();
-    match sqlx::query_as::<_, (String, String, String, bool, String, String)>(
+    match sqlx::query_as::<_, (String, String, String, i64, String, String)>(
         "SELECT id, name, protocol, enabled, COALESCE(config,'{}'), created_at FROM providers WHERE instance_id = ? AND id = ?")
         .bind(scoped.instance_id()).bind(&id).fetch_optional(scoped.pool()).await {
-        Ok(Some(r)) => response::json_ok(ProviderResponse { id: r.0, name: r.1, protocol: r.2, enabled: r.3, config: serde_json::from_str(&r.4).unwrap_or_default(), created_at: r.5 }),
+        Ok(Some(r)) => response::json_ok(ProviderResponse { id: r.0, name: r.1, protocol: r.2, enabled: r.3 != 0, config: serde_json::from_str(&r.4).unwrap_or_default(), created_at: r.5 }),
         Ok(None) => response::not_found("provider not found"), Err(e) => response::internal_error(format!("{e}")),
     }
 }

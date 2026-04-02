@@ -79,7 +79,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
     // OIDC provider.
     let issuer = format!("http://{}:{}", config.server.external_domain, config.server.port);
-    let oidc_state = zitadel_oidc::OidcState::new(db.clone(), issuer).await?;
+    let oidc_state = zitadel_oidc::OidcState::new(db.clone(), issuer);
 
     let api_state = zitadel_api::ApiState {
         db: db.clone(),

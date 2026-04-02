@@ -121,7 +121,11 @@ async fn handle_auth_code(state: &OidcState, req: &TokenRequest) -> Response {
     let (email, name) = user.unwrap_or_default();
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let keys = state.keys.read().await;
+    let guard = match state.signing_keys().await {
+        Ok(g) => g,
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, "signing keys not ready").into_response(),
+    };
+    let keys = guard.as_ref().unwrap();
 
     // Issue ID token.
     let id_token_claims = IdTokenClaims {
@@ -181,7 +185,11 @@ async fn handle_client_credentials(state: &OidcState, req: &TokenRequest) -> Res
     }
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let keys = state.keys.read().await;
+    let guard = match state.signing_keys().await {
+        Ok(g) => g,
+        Err(_) => return (StatusCode::SERVICE_UNAVAILABLE, "signing keys not ready").into_response(),
+    };
+    let keys = guard.as_ref().unwrap();
 
     let claims = AccessTokenClaims {
         iss: state.issuer.clone(),

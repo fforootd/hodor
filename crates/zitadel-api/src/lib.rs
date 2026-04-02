@@ -15,6 +15,7 @@ pub mod schemas;
 pub mod login_flows;
 pub mod fga;
 pub mod response;
+pub mod error;
 
 use axum::Router;
 use zitadel_auth::cookie::CookieConfig;
