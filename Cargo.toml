@@ -1,22 +1,22 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/hodor",
-    "crates/hodor-server",
-    "crates/hodor-api",
-    "crates/hodor-db",
-    "crates/hodor-oidc",
-    "crates/hodor-login",
-    "crates/hodor-auth",
-    "crates/hodor-cedar",
-    "crates/hodor-crypto",
-    "crates/hodor-config",
-    "crates/hodor-events",
-    "crates/hodor-notify",
-    "crates/hodor-catalog",
-    "crates/hodor-schema",
-    "crates/hodor-risk",
-    "crates/hodor-ratelimit",
+    "crates/zitadel",
+    "crates/zitadel-server",
+    "crates/zitadel-api",
+    "crates/zitadel-db",
+    "crates/zitadel-oidc",
+    "crates/zitadel-login",
+    "crates/zitadel-auth",
+    "crates/zitadel-cedar",
+    "crates/zitadel-crypto",
+    "crates/zitadel-config",
+    "crates/zitadel-events",
+    "crates/zitadel-notify",
+    "crates/zitadel-catalog",
+    "crates/zitadel-schema",
+    "crates/zitadel-risk",
+    "crates/zitadel-ratelimit",
 ]
 
 [workspace.package]
@@ -68,18 +68,18 @@ rust-embed = { version = "8", features = ["compression", "include-exclude"] }
 mime_guess = "2"
 
 # Workspace crate references
-hodor-config = { path = "crates/hodor-config" }
-hodor-server = { path = "crates/hodor-server" }
-hodor-api = { path = "crates/hodor-api" }
-hodor-db = { path = "crates/hodor-db" }
-hodor-oidc = { path = "crates/hodor-oidc" }
-hodor-login = { path = "crates/hodor-login" }
-hodor-auth = { path = "crates/hodor-auth" }
-hodor-cedar = { path = "crates/hodor-cedar" }
-hodor-crypto = { path = "crates/hodor-crypto" }
-hodor-events = { path = "crates/hodor-events" }
-hodor-notify = { path = "crates/hodor-notify" }
-hodor-catalog = { path = "crates/hodor-catalog" }
-hodor-schema = { path = "crates/hodor-schema" }
-hodor-risk = { path = "crates/hodor-risk" }
-hodor-ratelimit = { path = "crates/hodor-ratelimit" }
+zitadel-config = { path = "crates/zitadel-config" }
+zitadel-server = { path = "crates/zitadel-server" }
+zitadel-api = { path = "crates/zitadel-api" }
+zitadel-db = { path = "crates/zitadel-db" }
+zitadel-oidc = { path = "crates/zitadel-oidc" }
+zitadel-login = { path = "crates/zitadel-login" }
+zitadel-auth = { path = "crates/zitadel-auth" }
+zitadel-cedar = { path = "crates/zitadel-cedar" }
+zitadel-crypto = { path = "crates/zitadel-crypto" }
+zitadel-events = { path = "crates/zitadel-events" }
+zitadel-notify = { path = "crates/zitadel-notify" }
+zitadel-catalog = { path = "crates/zitadel-catalog" }
+zitadel-schema = { path = "crates/zitadel-schema" }
+zitadel-risk = { path = "crates/zitadel-risk" }
+zitadel-ratelimit = { path = "crates/zitadel-ratelimit" }

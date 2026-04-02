@@ -1,0 +1,6 @@
+[package]
+name = "zitadel-catalog"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

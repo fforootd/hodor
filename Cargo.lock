@@ -880,195 +880,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hodor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "hodor-config",
- "hodor-server",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "hodor-api"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "hodor-auth",
- "hodor-config",
- "hodor-crypto",
- "hodor-db",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tokio-stream",
- "tower",
- "tower-http",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hodor-auth"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argon2",
- "base64",
- "hex",
- "hmac",
- "hodor-crypto",
- "hodor-db",
- "password-hash",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hodor-catalog"
-version = "0.1.0"
-
-[[package]]
-name = "hodor-cedar"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "hodor-config"
-version = "0.1.0"
-dependencies = [
- "figment",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "hodor-crypto"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "hex",
- "rand 0.9.2",
- "thiserror",
-]
-
-[[package]]
-name = "hodor-db"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hex",
- "hodor-config",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "sqlx",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hodor-events"
-version = "0.1.0"
-
-[[package]]
-name = "hodor-login"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "hodor-auth",
- "hodor-db",
- "serde",
- "serde_json",
- "sqlx",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "hodor-notify"
-version = "0.1.0"
-
-[[package]]
-name = "hodor-oidc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64",
- "hodor-auth",
- "hodor-db",
- "jsonwebtoken",
- "rand 0.8.5",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tokio",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "hodor-ratelimit"
-version = "0.1.0"
-
-[[package]]
-name = "hodor-risk"
-version = "0.1.0"
-
-[[package]]
-name = "hodor-schema"
-version = "0.1.0"
-
-[[package]]
-name = "hodor-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "hodor-api",
- "hodor-auth",
- "hodor-config",
- "hodor-db",
- "hodor-login",
- "hodor-oidc",
- "mime_guess",
- "rust-embed",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
-]
-
-[[package]]
 name = "home"
 version = "0.5.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3512,6 +3323,195 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "zitadel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zitadel-config",
+ "zitadel-server",
+]
+
+[[package]]
+name = "zitadel-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
+ "zitadel-auth",
+ "zitadel-config",
+ "zitadel-crypto",
+ "zitadel-db",
+]
+
+[[package]]
+name = "zitadel-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "base64",
+ "hex",
+ "hmac",
+ "password-hash",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zitadel-crypto",
+ "zitadel-db",
+]
+
+[[package]]
+name = "zitadel-catalog"
+version = "0.1.0"
+
+[[package]]
+name = "zitadel-cedar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "zitadel-config"
+version = "0.1.0"
+dependencies = [
+ "figment",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "zitadel-crypto"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "hex",
+ "rand 0.9.2",
+ "thiserror",
+]
+
+[[package]]
+name = "zitadel-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zitadel-config",
+]
+
+[[package]]
+name = "zitadel-events"
+version = "0.1.0"
+
+[[package]]
+name = "zitadel-login"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tracing",
+ "uuid",
+ "zitadel-auth",
+ "zitadel-db",
+]
+
+[[package]]
+name = "zitadel-notify"
+version = "0.1.0"
+
+[[package]]
+name = "zitadel-oidc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "jsonwebtoken",
+ "rand 0.8.5",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "zitadel-auth",
+ "zitadel-db",
+]
+
+[[package]]
+name = "zitadel-ratelimit"
+version = "0.1.0"
+
+[[package]]
+name = "zitadel-risk"
+version = "0.1.0"
+
+[[package]]
+name = "zitadel-schema"
+version = "0.1.0"
+
+[[package]]
+name = "zitadel-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "mime_guess",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "zitadel-api",
+ "zitadel-auth",
+ "zitadel-config",
+ "zitadel-db",
+ "zitadel-login",
+ "zitadel-oidc",
 ]
 
 [[package]]

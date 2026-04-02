@@ -1,5 +1,0 @@
-FROM scratch
-ARG TARGETPLATFORM
-COPY ${TARGETPLATFORM}/zitadel /zitadel
-ENTRYPOINT ["/zitadel"]
-CMD ["serve"]

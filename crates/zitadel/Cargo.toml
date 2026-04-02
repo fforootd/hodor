@@ -1,0 +1,17 @@
+[package]
+name = "zitadel"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "zitadel"
+path = "src/main.rs"
+
+[dependencies]
+zitadel-config = { workspace = true }
+zitadel-server = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

@@ -1,6 +1,0 @@
-[package]
-name = "hodor-notify"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]

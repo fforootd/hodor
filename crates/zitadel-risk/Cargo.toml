@@ -1,0 +1,6 @@
+[package]
+name = "zitadel-risk"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
