@@ -300,6 +300,53 @@ clean:
 	rm -rf web/dist/
 	rm -f zitadel
 
+# ─── Rust Backend ─────────────────────────────────────────
+
+# Ensure web/dist exists for rust-embed (placeholder if not built).
+ensure-webdist-rs:
+	@if [ ! -d web/dist ]; then \
+		mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets; \
+		echo '<!DOCTYPE html><html><body>dev placeholder</body></html>' > web/dist/src/login/index.html; \
+		echo '<!DOCTYPE html><html><body>dev placeholder</body></html>' > web/dist/src/console/index.html; \
+		echo '<!DOCTYPE html><html><body>dev placeholder</body></html>' > web/dist/src/account/index.html; \
+		echo "Created placeholder web/dist (use 'make web' for real assets)"; \
+	fi
+
+# Build Rust backend.
+build-rs: ensure-webdist-rs
+	cargo build
+
+# Integrated Rust dev — Vite HMR on :5173 + Rust server on :8080.
+dev-rs: node_modules ensure-webdist-rs
+	@mkdir -p data
+	cargo build
+	@echo "─── Zitadel local dev (Rust) ───"
+	@echo "→ Console / Login / Account: http://localhost:5173"
+	@echo "→ API / OIDC:               http://localhost:8080"
+	@echo "→ Seed pack:                $(SEED)"
+	@echo "→ Admin login:              admin / admin123"
+	@echo "→ Admin PAT:                zitadel-dev-pat-do-not-use-in-production"
+	@trap 'kill 0' EXIT; \
+	ZITADEL_SEED_FILE="$(DEV_SEED_FILE)" ./target/debug/hodor start -c $(DEV_CONFIG) & \
+	npm run dev -w web
+
+# Run Rust tests.
+test-rs:
+	cargo test --workspace
+
+# Rust quality gate (CI-equivalent).
+quality-rs:
+	@echo "═══ cargo fmt ═══"
+	cargo fmt --check
+	@echo ""
+	@echo "═══ cargo clippy ═══"
+	cargo clippy --workspace -- -D warnings
+	@echo ""
+	@echo "═══ cargo test ═══"
+	cargo test --workspace
+	@echo ""
+	@echo "✅ Rust quality gate passed"
+
 # ─── Performance Benchmarks ───────────────────────────────
 
 .PHONY: bench bench-scale

@@ -1,0 +1,6 @@
+[package]
+name = "hodor-ratelimit"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

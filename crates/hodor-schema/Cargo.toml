@@ -1,0 +1,6 @@
+[package]
+name = "hodor-schema"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

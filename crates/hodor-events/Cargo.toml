@@ -1,0 +1,6 @@
+[package]
+name = "hodor-events"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

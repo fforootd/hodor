@@ -1,0 +1,85 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hodor",
+    "crates/hodor-server",
+    "crates/hodor-api",
+    "crates/hodor-db",
+    "crates/hodor-oidc",
+    "crates/hodor-login",
+    "crates/hodor-auth",
+    "crates/hodor-cedar",
+    "crates/hodor-crypto",
+    "crates/hodor-config",
+    "crates/hodor-events",
+    "crates/hodor-notify",
+    "crates/hodor-catalog",
+    "crates/hodor-schema",
+    "crates/hodor-risk",
+    "crates/hodor-ratelimit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8", features = ["macros"] }
+tower = { version = "0.5" }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "set-header", "compression-gzip"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Config
+figment = { version = "0.10", features = ["toml", "env"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "any", "migrate"] }
+
+# Crypto
+argon2 = "0.5"
+aes-gcm = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+
+# Auth
+jsonwebtoken = "9"
+
+# Misc
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+anyhow = "1"
+thiserror = "2"
+rust-embed = { version = "8", features = ["compression", "include-exclude"] }
+mime_guess = "2"
+
+# Workspace crate references
+hodor-config = { path = "crates/hodor-config" }
+hodor-server = { path = "crates/hodor-server" }
+hodor-api = { path = "crates/hodor-api" }
+hodor-db = { path = "crates/hodor-db" }
+hodor-oidc = { path = "crates/hodor-oidc" }
+hodor-login = { path = "crates/hodor-login" }
+hodor-auth = { path = "crates/hodor-auth" }
+hodor-cedar = { path = "crates/hodor-cedar" }
+hodor-crypto = { path = "crates/hodor-crypto" }
+hodor-events = { path = "crates/hodor-events" }
+hodor-notify = { path = "crates/hodor-notify" }
+hodor-catalog = { path = "crates/hodor-catalog" }
+hodor-schema = { path = "crates/hodor-schema" }
+hodor-risk = { path = "crates/hodor-risk" }
+hodor-ratelimit = { path = "crates/hodor-ratelimit" }

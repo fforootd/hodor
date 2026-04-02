@@ -1,0 +1,6 @@
+[package]
+name = "hodor-catalog"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

@@ -1,0 +1,17 @@
+[package]
+name = "hodor"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hodor"
+path = "src/main.rs"
+
+[dependencies]
+hodor-config = { workspace = true }
+hodor-server = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

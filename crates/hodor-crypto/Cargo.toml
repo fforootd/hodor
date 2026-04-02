@@ -1,0 +1,11 @@
+[package]
+name = "hodor-crypto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aes-gcm = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+hex = "0.4"
+rand = "0.9"

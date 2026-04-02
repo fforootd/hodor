@@ -42,3 +42,6 @@ lake_data/
 
 # Benchmark output
 bench-results/
+
+# Rust
+/target/

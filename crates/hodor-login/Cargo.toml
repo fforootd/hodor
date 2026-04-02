@@ -1,0 +1,15 @@
+[package]
+name = "hodor-login"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hodor-db = { workspace = true }
+hodor-auth = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
