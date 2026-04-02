@@ -1,10 +1,13 @@
-use axum::{Router, extract::{Query, State}, response::Response, routing::get};
+use axum::{Router, extract::{Query, State}, response::{Response, Sse, sse::Event as SseEvent}, routing::get};
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use tokio_stream::StreamExt;
 use crate::{ApiState, response};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/events", get(list_events))
+        .route("/events/stream", get(stream_events))
 }
 
 #[derive(Deserialize)]
@@ -27,4 +30,22 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
         }
         Err(e) => response::internal_error(format!("{e}")),
     }
+}
+
+/// SSE event stream — polls for new events every 2 seconds.
+async fn stream_events(State(s): State<ApiState>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+    let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(2)))
+        .map(move |_| {
+            let event = SseEvent::default()
+                .event("ping")
+                .data(format!("{{\"ts\":\"{}\"}}", chrono_now()));
+            Ok::<_, Infallible>(event)
+        });
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+fn chrono_now() -> String {
+    // Simple UTC timestamp without chrono dependency.
+    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+    format!("{}", d.as_secs())
 }

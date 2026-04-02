@@ -8,6 +8,9 @@ pub mod sessions;
 pub mod pats;
 pub mod events;
 pub mod search;
+pub mod settings;
+pub mod providers;
+pub mod console;
 pub mod response;
 
 use axum::Router;
@@ -45,6 +48,12 @@ pub fn routes(state: ApiState) -> Router {
         .merge(events::routes())
         // Search
         .merge(search::routes())
+        // Settings
+        .merge(settings::routes())
+        // Providers
+        .merge(providers::routes())
+        // Console bootstrap + counts
+        .merge(console::routes())
         // Auth middleware — validates Bearer token or session cookie.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

@@ -18,3 +18,4 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+tokio-stream = "0.1"
