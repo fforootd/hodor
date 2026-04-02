@@ -4,7 +4,7 @@
 
 > ⚠️ **Experimental** — This is a research/prototype project exploring a reimagined identity platform architecture. It is not production-ready and APIs may change without notice. See [Zitadel](https://github.com/zitadel/zitadel) for the production IAM system.
 
-**Identity infrastructure for humans and AI.** Open-source identity platform with unified auth, fine-grained authorization, and schema-driven user and application management — in a single binary.
+**Identity infrastructure for humans and AI.** Open-source identity platform with unified auth, fine-grained authorization, and schema-driven user and application management — single binary by default, edge-ready at scale.
 
 ## Quick Start
 
@@ -104,12 +104,12 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 
 ## Architecture
 
-- **Single binary** — REST API, login UI (Vue), admin console (Vue), account self-service (Vue)
+- **Single binary** — REST API, login UI (Vue), admin console (Vue), account self-service (Vue). Zero external dependencies at Level 0.
 - **Typed resource families** — canonical family endpoints like `/v1/users` and `/v1/apps`, with `schema_id` for writes and `schema_type` for list filtering
 - **Schema-driven resources** — JSON Schema with annotations (`x-claim-mapping`, `x-user-editable`, `x-sensitive`, `x-hidden`)
 - **SSO Federation** — Protocol-agnostic providers (OIDC, SAML, SCIM) with `expr`-based claim mapping
 - **Embedded OpenFGA** — Zanzibar-style authorization in-process
-- **SQLite + Postgres** — zero-config dev, production-ready with Postgres
+- **Four-primitive storage** — target architecture is OLTP, KV, Queue, OLAP. The current POC already has the shared SQL layer and analytics cache/drain path; see [Storage Architecture](docs/design/storage-architecture.md) and [Storage Implementation Status](docs/design/storage-implementation-status.md).
 - **Event-sourced audit** — every mutation emitted as an event with field-level redaction
 - **Import & Seed** — `POST /v1/import` for migrations, `--seed` YAML files for CI/dev
 

@@ -3,7 +3,6 @@ package login_test
 import (
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/testutil"
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 )
 
 func TestSSOStart_RedirectsToProviderAuthorizationURL(t *testing.T) {
@@ -67,7 +67,7 @@ func TestSSOCallback_CreatesLinkedIdentityAndSession(t *testing.T) {
 	ts := testutil.NewTestServer(t)
 	adminToken := ts.LoginAdmin()
 
-	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	providerServer := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
 			w.Header().Set("Content-Type", "application/json")

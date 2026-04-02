@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 )
 
@@ -25,12 +26,16 @@ func newTestDB(t *testing.T) *database.DB {
 }
 
 func createTestIdentity(t *testing.T, db *database.DB) string {
+	return createTestIdentityInInstance(t, db, httputil.DefaultInstanceID, "test@example.com")
+}
+
+func createTestIdentityInInstance(t *testing.T, db *database.DB, instanceID, identifier string) string {
 	t.Helper()
 	userID := id.New()
 	_, err := db.SQL().Exec(
-		`INSERT INTO users (id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
-		 VALUES (?, '1', 'test@example.com', 'Test User', 'human', 'active', '{}', datetime('now'), datetime('now'))`,
-		userID,
+		`INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, metadata, created_at, updated_at)
+		 VALUES (?, ?, '1', ?, 'Test User', 'human', 'active', '{}', datetime('now'), datetime('now'))`,
+		userID, instanceID, identifier,
 	)
 	if err != nil {
 		t.Fatalf("create identity: %v", err)
@@ -148,6 +153,68 @@ func TestSetPasswordReplace(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("new password should work after replacement")
+	}
+}
+
+func TestPasswordStorage_IsTenantScoped(t *testing.T) {
+	db := newTestDB(t)
+	pw := NewPasswords(db)
+
+	ctxTenantA := httputil.WithInstanceID(context.Background(), "tenant_a")
+	ctxTenantB := httputil.WithInstanceID(context.Background(), "tenant_b")
+
+	userID := createTestIdentityInInstance(t, db, "tenant_a", "tenant-a@example.com")
+
+	if err := pw.SetPassword(ctxTenantA, userID, "tenant-a-secret"); err != nil {
+		t.Fatalf("SetPassword tenant_a: %v", err)
+	}
+
+	ok, err := pw.CheckPassword(ctxTenantA, userID, "tenant-a-secret")
+	if err != nil {
+		t.Fatalf("CheckPassword tenant_a: %v", err)
+	}
+	if !ok {
+		t.Fatal("tenant_a password should verify in tenant_a context")
+	}
+
+	ok, err = pw.CheckPassword(ctxTenantB, userID, "tenant-a-secret")
+	if err != nil {
+		t.Fatalf("CheckPassword tenant_b: %v", err)
+	}
+	if ok {
+		t.Fatal("tenant_b context should not authenticate tenant_a credential")
+	}
+}
+
+func TestPasswordStorage_RejectsCrossTenantWrite(t *testing.T) {
+	db := newTestDB(t)
+	pw := NewPasswords(db)
+
+	ctxTenantA := httputil.WithInstanceID(context.Background(), "tenant_a")
+	ctxTenantB := httputil.WithInstanceID(context.Background(), "tenant_b")
+
+	userID := createTestIdentityInInstance(t, db, "tenant_a", "tenant-a-write@example.com")
+
+	if err := pw.SetPassword(ctxTenantA, userID, "tenant-a-secret"); err != nil {
+		t.Fatalf("SetPassword tenant_a: %v", err)
+	}
+
+	if err := pw.SetPassword(ctxTenantB, userID, "tenant-b-secret"); err == nil {
+		t.Fatal("cross-tenant SetPassword should fail")
+	}
+
+	var tenantACount, tenantBCount int
+	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM credentials WHERE instance_id = 'tenant_a' AND user_id = ?`, userID).Scan(&tenantACount); err != nil {
+		t.Fatalf("count tenant_a credentials: %v", err)
+	}
+	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM credentials WHERE instance_id = 'tenant_b' AND user_id = ?`, userID).Scan(&tenantBCount); err != nil {
+		t.Fatalf("count tenant_b credentials: %v", err)
+	}
+	if tenantACount != 1 {
+		t.Fatalf("tenant_a credential count = %d, want 1", tenantACount)
+	}
+	if tenantBCount != 0 {
+		t.Fatalf("tenant_b credential count = %d, want 0", tenantBCount)
 	}
 }
 

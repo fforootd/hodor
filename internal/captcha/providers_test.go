@@ -4,9 +4,10 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 )
 
 func TestVerifyProviderToken_Success(t *testing.T) {
@@ -15,7 +16,7 @@ func TestVerifyProviderToken_Success(t *testing.T) {
 		providerVerifyURLs["turnstile"] = original
 	}()
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
@@ -64,7 +65,7 @@ func TestVerifyProviderToken_InvalidToken(t *testing.T) {
 		providerVerifyURLs["recaptcha"] = original
 	}()
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":false,"error-codes":["invalid-input-response"]}`))
 	}))

@@ -7,10 +7,10 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/zitadel/zitadel/internal/testutil"
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 )
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXx8AAAAASUVORK5CYII="
@@ -160,7 +160,7 @@ func TestLoginFlowAssetImportPersistsSameOriginURL(t *testing.T) {
 		"state":    "draft",
 	})
 
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(decodeTinyPNG(t))
 	}))

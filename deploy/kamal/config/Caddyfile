@@ -1,0 +1,65 @@
+# Auto-generated from domains.json — do not edit manually.
+# Regenerate with: ./generate-caddyfile.sh
+{
+	on_demand_tls {
+		ask http://localhost:5555/check
+	}
+}
+
+login.acme.com {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8880 {
+		header_up X-Instance-Id inst_acme
+		header_up X-Forwarded-Proto https
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+auth.bigcorp.io {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8880 {
+		header_up X-Instance-Id inst_bigcorp
+		header_up X-Forwarded-Proto https
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+id.startup.dev {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8880 {
+		header_up X-Instance-Id inst_startup
+		header_up X-Forwarded-Proto https
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# Health check endpoint (HTTP only, no TLS).
+:80 {
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	# ACME HTTP-01 challenges are handled automatically by Caddy.
+	# All other HTTP traffic redirects to HTTPS.
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+# Ask endpoint for on-demand TLS validation.
+# Returns 200 if the domain is in our mapping, 404 otherwise.
+# Caddy calls this before provisioning a cert for an unknown domain.
+:5555 {
+	handle /check {
+		# This is a placeholder — in the POC, every domain in the Caddyfile
+		# already has an explicit site block, so on_demand_tls will match.
+		# For production, replace with a DB-backed lookup.
+		respond "ok" 200
+	}
+}

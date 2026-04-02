@@ -1,8 +1,14 @@
 package jobs
 
 import (
+	"context"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 func TestNextCronTime_Interval(t *testing.T) {
@@ -91,5 +97,51 @@ func TestFormatDuration(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("FormatDuration(%v) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestSchedulerCheckAndRunPropagatesInstanceContext(t *testing.T) {
+	db, err := database.Open("sqlite://" + filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	if err := database.Migrate(db); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, row := range []struct {
+		instanceID string
+		name       string
+	}{
+		{"tenant_a", "job_a"},
+		{"tenant_b", "job_b"},
+	} {
+		if _, err := db.SQL().Exec(
+			`INSERT INTO jobs (name, instance_id, display_name, description, cron, enabled, next_run_at, last_status, config_json, created_at)
+			 VALUES (?, ?, ?, '', '*/5 * * * *', 1, ?, 'idle', '{}', ?)`,
+			row.name, row.instanceID, row.name, now, now,
+		); err != nil {
+			t.Fatalf("insert job %s: %v", row.name, err)
+		}
+	}
+
+	scheduler := New(db)
+	var seen []string
+	scheduler.Register("job_a", func(ctx context.Context) error {
+		seen = append(seen, httputil.InstanceIDFromContext(ctx))
+		return nil
+	})
+	scheduler.Register("job_b", func(ctx context.Context) error {
+		seen = append(seen, httputil.InstanceIDFromContext(ctx))
+		return nil
+	})
+
+	scheduler.checkAndRun(context.Background())
+
+	slices.Sort(seen)
+	if !slices.Equal(seen, []string{"tenant_a", "tenant_b"}) {
+		t.Fatalf("job contexts = %v, want tenant_a and tenant_b", seen)
 	}
 }

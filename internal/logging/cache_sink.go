@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"math/big"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // cacheSink is an slog.Handler that writes records to the local SQLite cache.
@@ -39,7 +41,7 @@ func (h *cacheSink) Enabled(_ context.Context, level slog.Level) bool {
 	return level >= h.level
 }
 
-func (h *cacheSink) Handle(_ context.Context, r slog.Record) error {
+func (h *cacheSink) Handle(ctx context.Context, r slog.Record) error {
 	if h.mode == "off" {
 		return nil
 	}
@@ -100,6 +102,7 @@ func (h *cacheSink) Handle(_ context.Context, r slog.Record) error {
 	fingerprint, _ := attrs["device_fingerprint"].(string)
 
 	return h.cache.Write(CacheRecord{
+		InstanceID:  httputil.InstanceIDFromContext(ctx),
 		EventType:   eventType,
 		Category:    category,
 		Stream:      string(h.stream),

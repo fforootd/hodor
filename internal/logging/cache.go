@@ -14,6 +14,7 @@ import (
 // CacheRecord is a single log/event record stored in the local cache.
 type CacheRecord struct {
 	ID          int64
+	InstanceID  string
 	EventType   string
 	Category    string
 	Stream      string
@@ -57,6 +58,7 @@ func OpenCache(path string, maxRows int) (*Cache, error) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS log_buffer (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			instance_id TEXT NOT NULL DEFAULT 'default',
 			event_type TEXT NOT NULL,
 			category   TEXT NOT NULL DEFAULT '',
 			stream     TEXT NOT NULL DEFAULT '',
@@ -74,6 +76,10 @@ func OpenCache(path string, maxRows int) (*Cache, error) {
 		db.Close()
 		return nil, fmt.Errorf("create log_buffer table: %w", err)
 	}
+	if err := ensureLogBufferColumn(db, "instance_id", "ALTER TABLE log_buffer ADD COLUMN instance_id TEXT NOT NULL DEFAULT 'default'"); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	return &Cache{db: db, maxRows: maxRows}, nil
 }
@@ -83,10 +89,15 @@ func (c *Cache) Write(rec CacheRecord) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	instanceID := rec.InstanceID
+	if instanceID == "" {
+		instanceID = "default"
+	}
+
 	_, err := c.db.Exec(
-		`INSERT INTO log_buffer (event_type, category, stream, level, payload, actor_id, request_id, session_id, flow_id, fingerprint, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rec.EventType, rec.Category, rec.Stream, rec.Level, rec.Payload,
+		`INSERT INTO log_buffer (instance_id, event_type, category, stream, level, payload, actor_id, request_id, session_id, flow_id, fingerprint, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		instanceID, rec.EventType, rec.Category, rec.Stream, rec.Level, rec.Payload,
 		rec.ActorID, rec.RequestID, rec.SessionID, rec.FlowID, rec.Fingerprint,
 		rec.CreatedAt,
 	)
@@ -99,7 +110,7 @@ func (c *Cache) ReadBatch(n int) ([]CacheRecord, error) {
 	defer c.mu.Unlock()
 
 	rows, err := c.db.Query(
-		`SELECT id, event_type, category, stream, level, payload, actor_id, request_id, session_id, flow_id, fingerprint, created_at
+		`SELECT id, instance_id, event_type, category, stream, level, payload, actor_id, request_id, session_id, flow_id, fingerprint, created_at
 		 FROM log_buffer ORDER BY id ASC LIMIT ?`, n)
 	if err != nil {
 		return nil, err
@@ -109,7 +120,7 @@ func (c *Cache) ReadBatch(n int) ([]CacheRecord, error) {
 	var records []CacheRecord
 	for rows.Next() {
 		var r CacheRecord
-		if err := rows.Scan(&r.ID, &r.EventType, &r.Category, &r.Stream, &r.Level,
+		if err := rows.Scan(&r.ID, &r.InstanceID, &r.EventType, &r.Category, &r.Stream, &r.Level,
 			&r.Payload, &r.ActorID, &r.RequestID, &r.SessionID, &r.FlowID, &r.Fingerprint, &r.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -178,4 +189,36 @@ func (c *Cache) Close() error {
 // createdAtNow returns the current time in the format used by the cache.
 func createdAtNow() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05Z")
+}
+
+func ensureLogBufferColumn(db *sql.DB, column, alterStmt string) error {
+	rows, err := db.Query(`PRAGMA table_info(log_buffer)`)
+	if err != nil {
+		return fmt.Errorf("inspect log_buffer schema: %w", err)
+	}
+	defer rows.Close()
+
+	var (
+		cid          int
+		name         string
+		columnType   string
+		notNull      int
+		defaultValue sql.NullString
+		pk           int
+	)
+	for rows.Next() {
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("scan log_buffer schema: %w", err)
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("log_buffer schema rows: %w", err)
+	}
+	if _, err := db.Exec(alterStmt); err != nil {
+		return fmt.Errorf("migrate log_buffer schema: %w", err)
+	}
+	return nil
 }

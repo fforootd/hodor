@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 func TestCacheSink_Buffered(t *testing.T) {
@@ -78,5 +80,30 @@ func TestCacheSink_Off(t *testing.T) {
 
 	if cache.Count() != 0 {
 		t.Errorf("off mode: expected 0 records, got %d", cache.Count())
+	}
+}
+
+func TestCacheSink_PreservesInstanceID(t *testing.T) {
+	cache, err := OpenCache(testCachePath(t), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+
+	sink := newCacheSink(cache, StreamRequest, "buffered", 0)
+	record := slog.NewRecord(time.Now(), slog.LevelInfo, "request.api", 0)
+	if err := sink.Handle(httputil.WithInstanceID(context.Background(), "tenant_a"), record); err != nil {
+		t.Fatalf("Handle(): %v", err)
+	}
+
+	records, err := cache.ReadBatch(10)
+	if err != nil {
+		t.Fatalf("ReadBatch(): %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records len = %d, want 1", len(records))
+	}
+	if records[0].InstanceID != "tenant_a" {
+		t.Fatalf("InstanceID = %q, want tenant_a", records[0].InstanceID)
 	}
 }

@@ -44,14 +44,18 @@ For production Postgres: run `zitadel migrate` as a K8s Job, then `zitadel start
 
 ### 2. Pure Go Single Binary
 
-One binary, ~30MB, cross-compiles to any platform. No runtime dependencies.
+One binary, ~30MB, cross-compiles to any platform. No runtime dependencies at Level 0 (local/SQLite).
 
 | Principle | Implementation |
 |---|---|
 | No CGO | `modernc.org/sqlite` (pure Go SQLite) |
-| No external processes | OpenFGA embedded, no separate server |
+| No external processes (Level 0) | OpenFGA embedded, KV in-memory, queue via go channel |
 | No build toolchain | No protobuf compile, no webpack |
 | Embedded assets | UI, migrations, translations via `go:embed` |
+
+> **Scaling beyond a single process:** As deployments grow (Level 1-3), the same binary connects to external infrastructure — Postgres, Redis, dedicated queues — without code changes. The four storage primitives (OLTP, KV, Queue, OLAP) are interface-driven; deployment configuration selects implementations. See [Storage Architecture](storage-architecture.md) for the full progression.
+>
+> For the current POC reality check, see [Storage Implementation Status](storage-implementation-status.md). The edge-first storage split described in the architecture docs is not fully implemented end-to-end yet.
 
 ### 3. No Operational Surprises
 

@@ -23,6 +23,7 @@ func openTestDestDB(t *testing.T) *sql.DB {
 	// Create a minimal events table for drainer to INSERT into.
 	_, err = db.Exec(`
 		CREATE TABLE events (
+			instance_id TEXT NOT NULL DEFAULT 'default',
 			id TEXT PRIMARY KEY,
 			event_type TEXT NOT NULL,
 			category TEXT NOT NULL DEFAULT '',
@@ -81,7 +82,11 @@ func TestDrainer_FlushBatch(t *testing.T) {
 
 	// Verify event_type and category were preserved.
 	var eventType, category string
-	dest.QueryRow(`SELECT event_type, category FROM events LIMIT 1`).Scan(&eventType, &category)
+	var instanceID string
+	dest.QueryRow(`SELECT instance_id, event_type, category FROM events LIMIT 1`).Scan(&instanceID, &eventType, &category)
+	if instanceID != "default" {
+		t.Errorf("expected instance_id 'default', got %q", instanceID)
+	}
 	if eventType != "log.info" {
 		t.Errorf("expected event_type 'log.info', got %q", eventType)
 	}

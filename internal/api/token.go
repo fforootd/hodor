@@ -73,29 +73,32 @@ func resolveToken(ctx context.Context, db *sql.DB, rawToken string) (*TokenInfo,
 // resolveSessionToken validates a session token via the tokens + sessions tables.
 func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
+	now := time.Now().UTC()
 
 	var info TokenInfo
+	var tokenExpiresAt, tokenRevokedAt, sessionExpiresAt, sessionRevokedAt sql.NullString
 	err := db.QueryRowContext(ctx,
-		`SELECT t.user_id, t.session_id, COALESCE(u.org_id, '0') FROM tokens t
+		`SELECT t.user_id, t.session_id, COALESCE(u.org_id, '0'),
+		        t.expires_at, t.revoked_at, s.expires_at, s.revoked_at
+		 FROM tokens t
 		 JOIN sessions s ON t.session_id = s.id AND s.instance_id = ?
 		 LEFT JOIN users u ON t.user_id = u.id AND u.instance_id = ?
 		 WHERE t.token_hash = ?
 		   AND t.instance_id = ?
-		   AND t.type = 'session'
-		   AND t.revoked_at IS NULL
-		   AND s.revoked_at IS NULL
-		   AND s.expires_at > datetime('now')
-		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+		   AND t.type = 'session'`,
 		instanceID, instanceID, h, instanceID,
-	).Scan(&info.UserID, &info.SessionID, &info.OrgID)
+	).Scan(&info.UserID, &info.SessionID, &info.OrgID, &tokenExpiresAt, &tokenRevokedAt, &sessionExpiresAt, &sessionRevokedAt)
 	if err != nil {
+		return nil, fmt.Errorf("invalid session token")
+	}
+	if !tokenIsUsable(now, tokenExpiresAt, tokenRevokedAt) || !tokenIsUsable(now, sessionExpiresAt, sessionRevokedAt) {
 		return nil, fmt.Errorf("invalid session token")
 	}
 	info.TokenType = TokenTypeSession
 
 	// Update last_used (best-effort, inline — cheap single-row UPDATE).
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, now, h, instanceID)
+	lastUsedAt := time.Now().UTC().Format(time.RFC3339)
+	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, lastUsedAt, h, instanceID)
 
 	return &info, nil
 }
@@ -103,26 +106,30 @@ func resolveSessionToken(ctx context.Context, db *sql.DB, rawToken string, insta
 // resolvePATToken validates a personal access token via the tokens table.
 func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
+	now := time.Now().UTC()
 
 	var info TokenInfo
+	var expiresAt, revokedAt sql.NullString
 	err := db.QueryRowContext(ctx,
-		`SELECT t.user_id, COALESCE(u.org_id, '0') FROM tokens t
+		`SELECT t.user_id, COALESCE(u.org_id, '0'), t.expires_at, t.revoked_at
+		 FROM tokens t
 		 LEFT JOIN users u ON t.user_id = u.id AND u.instance_id = ?
 		 WHERE t.token_hash = ?
 		   AND t.instance_id = ?
-		   AND t.type = 'pat'
-		   AND t.revoked_at IS NULL
-		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+		   AND t.type = 'pat'`,
 		instanceID, h, instanceID,
-	).Scan(&info.UserID, &info.OrgID)
+	).Scan(&info.UserID, &info.OrgID, &expiresAt, &revokedAt)
 	if err != nil {
+		return nil, fmt.Errorf("invalid PAT")
+	}
+	if !tokenIsUsable(now, expiresAt, revokedAt) {
 		return nil, fmt.Errorf("invalid PAT")
 	}
 	info.TokenType = TokenTypePAT
 
 	// Update last_used (best-effort, inline — cheap single-row UPDATE).
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, now, h, instanceID)
+	lastUsedAt := time.Now().UTC().Format(time.RFC3339)
+	_, _ = db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token_hash = ? AND instance_id = ?`, lastUsedAt, h, instanceID)
 
 	return &info, nil
 }
@@ -130,18 +137,21 @@ func resolvePATToken(ctx context.Context, db *sql.DB, rawToken string, instanceI
 // resolveOpaqueToken validates an opaque token via the tokens table.
 func resolveOpaqueToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
+	now := time.Now().UTC()
 
 	var info TokenInfo
+	var expiresAt, revokedAt sql.NullString
 	err := db.QueryRowContext(ctx,
-		`SELECT user_id FROM tokens
+		`SELECT user_id, expires_at, revoked_at FROM tokens
 		 WHERE token_hash = ?
 		   AND instance_id = ?
-		   AND type = 'opaque'
-		   AND revoked_at IS NULL
-		   AND (expires_at IS NULL OR expires_at > datetime('now'))`,
+		   AND type = 'opaque'`,
 		h, instanceID,
-	).Scan(&info.UserID)
+	).Scan(&info.UserID, &expiresAt, &revokedAt)
 	if err != nil {
+		return nil, fmt.Errorf("invalid opaque token")
+	}
+	if !tokenIsUsable(now, expiresAt, revokedAt) {
 		return nil, fmt.Errorf("invalid opaque token")
 	}
 	info.TokenType = TokenTypeOpaque
@@ -153,30 +163,55 @@ func resolveOpaqueToken(ctx context.Context, db *sql.DB, rawToken string, instan
 // This provides backward compatibility during migration.
 func resolveLegacyToken(ctx context.Context, db *sql.DB, rawToken string, instanceID string) (*TokenInfo, error) {
 	h := hashToken(rawToken)
+	now := time.Now().UTC()
 
 	// First try the new tokens table (for migrated tokens).
 	var info TokenInfo
+	var expiresAt, revokedAt sql.NullString
 	err := db.QueryRowContext(ctx,
-		`SELECT t.user_id, COALESCE(t.session_id, ''), t.type FROM tokens t
+		`SELECT t.user_id, COALESCE(t.session_id, ''), t.type, t.expires_at, t.revoked_at
+		 FROM tokens t
 		 WHERE t.token_hash = ?
-		   AND t.instance_id = ?
-		   AND t.revoked_at IS NULL
-		   AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+		   AND t.instance_id = ?`,
 		h, instanceID,
-	).Scan(&info.UserID, &info.SessionID, &info.TokenType)
-	if err == nil {
+	).Scan(&info.UserID, &info.SessionID, &info.TokenType, &expiresAt, &revokedAt)
+	if err == nil && tokenIsUsable(now, expiresAt, revokedAt) {
 		return &info, nil
 	}
 
 	// Fall back to the old sessions table.
+	var sessionExpiresAt, sessionRevokedAt sql.NullString
 	err = db.QueryRowContext(ctx,
-		`SELECT user_id, id FROM sessions
-		 WHERE token_hash = ? AND instance_id = ? AND revoked_at IS NULL AND expires_at > datetime('now')`,
+		`SELECT user_id, id, expires_at, revoked_at FROM sessions
+		 WHERE token_hash = ? AND instance_id = ?`,
 		h, instanceID,
-	).Scan(&info.UserID, &info.SessionID)
+	).Scan(&info.UserID, &info.SessionID, &sessionExpiresAt, &sessionRevokedAt)
 	if err != nil {
+		return nil, fmt.Errorf("invalid token")
+	}
+	if !tokenIsUsable(now, sessionExpiresAt, sessionRevokedAt) {
 		return nil, fmt.Errorf("invalid token")
 	}
 	info.TokenType = TokenTypeSession
 	return &info, nil
+}
+
+func tokenIsUsable(now time.Time, expiresAt, revokedAt sql.NullString) bool {
+	if revokedAt.Valid && revokedAt.String != "" {
+		return false
+	}
+	if !expiresAt.Valid || expiresAt.String == "" {
+		return true
+	}
+	expiration, ok := parseStoredTimestamp(expiresAt.String)
+	return ok && expiration.After(now)
+}
+
+func parseStoredTimestamp(value string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

@@ -194,14 +194,16 @@ func (r *Resolver) matchFlow(f *LoginFlow, uc UserContext) (int, bool) {
 // loadActiveFlows loads all non-draft/non-archived flows for the given org
 // (plus instance-level flows where org_id is NULL).
 func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFlow, error) {
-	rows, err := r.db.SQL().QueryContext(ctx,
+	scoped := r.db.Scoped(ctx)
+	rows, err := scoped.QueryContext(ctx, scoped.Rebind(
 		`SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}')
 		 FROM login_flows
-		 WHERE COALESCE(enabled,1) = 1 AND state IN ('active','testing')
+		 WHERE instance_id = ?
+		   AND COALESCE(enabled,1) = 1 AND state IN ('active','testing')
 		   AND (org_id IS NULL OR org_id = '' OR org_id = ?)
-		 ORDER BY priority DESC`,
-		orgID,
+		 ORDER BY priority DESC`),
+		scoped.InstanceID(), orgID,
 	)
 	if err != nil {
 		return nil, err
@@ -233,14 +235,15 @@ func (r *Resolver) loadActiveFlows(ctx context.Context, orgID string) ([]LoginFl
 // TestAudience runs the audience rules against a sample of real users and returns
 // which users would match this flow.
 func (r *Resolver) TestAudience(ctx context.Context, flowID string, limit int) (*AudienceTestResult, error) {
+	scoped := r.db.Scoped(ctx)
 	// Load the flow.
 	var f LoginFlow
 	var configJSON, audienceJSON, authMethodsJSON string
 	var isDefault, enabled int
-	err := r.db.SQL().QueryRowContext(ctx,
+	err := scoped.QueryRowContext(ctx, scoped.Rebind(
 		`SELECT id, COALESCE(org_id,''), name, strategy, config, COALESCE(is_default,0), COALESCE(enabled,1), state, priority,
 		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}')
-		 FROM login_flows WHERE id = ?`, flowID,
+		 FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID,
 	).Scan(&f.ID, &f.OrgID, &f.Name, &f.Strategy, &configJSON,
 		&isDefault, &enabled, &f.State, &f.Priority,
 		&audienceJSON, &authMethodsJSON)
@@ -260,9 +263,9 @@ func (r *Resolver) TestAudience(ctx context.Context, flowID string, limit int) (
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	userRows, err := r.db.SQL().QueryContext(ctx,
+	userRows, err := scoped.QueryContext(ctx, scoped.Rebind(
 		`SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), COALESCE(display_name,''), COALESCE(identifier,''), COALESCE(metadata,'{}')
-		 FROM users WHERE state = 'active' ORDER BY created_at DESC LIMIT ?`, limit*3, // overfetch to get enough matches
+		 FROM users WHERE instance_id = ? AND state = 'active' ORDER BY created_at DESC LIMIT ?`), scoped.InstanceID(), limit*3, // overfetch to get enough matches
 	)
 	if err != nil {
 		return nil, err

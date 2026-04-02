@@ -8,6 +8,8 @@ import (
 	"math"
 	"net"
 	"strings"
+
+	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 const EvaluatorVersion = "builtin-risk/v1"
@@ -129,24 +131,27 @@ func (e *Engine) loadHistory(ctx context.Context, input Input) (historySnapshot,
 	if input.UserID == "" && input.Signals.VisitorID == "" {
 		return history, nil
 	}
+	instanceID := httputil.InstanceIDFromContext(ctx)
 
 	var err error
 	switch {
 	case input.UserID != "":
 		history.recentLoginFailures, err = queryCount(ctx, e.db,
 			`SELECT COUNT(*) FROM events
-			 WHERE event_type = 'auth.login_failed'
+			 WHERE instance_id = ?
+			   AND event_type = 'auth.login_failed'
 			   AND actor_id = ?
 			   AND created_at > datetime('now', '-1 hour')`,
-			input.UserID,
+			instanceID, input.UserID,
 		)
 	default:
 		history.recentLoginFailures, err = queryCount(ctx, e.db,
 			`SELECT COUNT(*) FROM events
-			 WHERE event_type = 'auth.login_failed'
+			 WHERE instance_id = ?
+			   AND event_type = 'auth.login_failed'
 			   AND fingerprint = ?
 			   AND created_at > datetime('now', '-1 hour')`,
-			input.Signals.VisitorID,
+			instanceID, input.Signals.VisitorID,
 		)
 	}
 	if err != nil {
@@ -159,10 +164,11 @@ func (e *Engine) loadHistory(ctx context.Context, input Input) (historySnapshot,
 
 	history.recentSessionRevokes, err = queryCount(ctx, e.db,
 		`SELECT COUNT(*) FROM sessions
-		 WHERE user_id = ?
+		 WHERE instance_id = ?
+		   AND user_id = ?
 		   AND revoked_at IS NOT NULL
 		   AND revoked_at > datetime('now', '-7 day')`,
-		input.UserID,
+		instanceID, input.UserID,
 	)
 	if err != nil {
 		return history, fmt.Errorf("load session revocations: %w", err)
@@ -170,10 +176,11 @@ func (e *Engine) loadHistory(ctx context.Context, input Input) (historySnapshot,
 
 	history.recentTokenRevokes, err = queryCount(ctx, e.db,
 		`SELECT COUNT(*) FROM tokens
-		 WHERE user_id = ?
+		 WHERE instance_id = ?
+		   AND user_id = ?
 		   AND revoked_at IS NOT NULL
 		   AND revoked_at > datetime('now', '-7 day')`,
-		input.UserID,
+		instanceID, input.UserID,
 	)
 	if err != nil {
 		return history, fmt.Errorf("load token revocations: %w", err)
@@ -182,18 +189,19 @@ func (e *Engine) loadHistory(ctx context.Context, input Input) (historySnapshot,
 	if input.Signals.VisitorID != "" {
 		history.knownFingerprint, err = queryExists(ctx, e.db,
 			`SELECT 1 FROM events
-			 WHERE actor_id = ?
+			 WHERE instance_id = ?
+			   AND actor_id = ?
 			   AND fingerprint = ?
 			   AND created_at > datetime('now', '-30 day')
 			 LIMIT 1`,
-			input.UserID, input.Signals.VisitorID,
+			instanceID, input.UserID, input.Signals.VisitorID,
 		)
 		if err != nil {
 			return history, fmt.Errorf("load known fingerprint: %w", err)
 		}
 	}
 
-	history.newIPOrUA, err = isNewIPOrUA(ctx, e.db, input.UserID, normalizeIPAddress(input.IPAddress), input.UserAgent)
+	history.newIPOrUA, err = isNewIPOrUA(ctx, e.db, instanceID, input.UserID, normalizeIPAddress(input.IPAddress), input.UserAgent)
 	if err != nil {
 		return history, fmt.Errorf("load ip/ua posture: %w", err)
 	}
@@ -346,7 +354,7 @@ func queryExists(ctx context.Context, db *sql.DB, query string, args ...any) (bo
 	return true, nil
 }
 
-func isNewIPOrUA(ctx context.Context, db *sql.DB, userID, ipAddress, userAgent string) (bool, error) {
+func isNewIPOrUA(ctx context.Context, db *sql.DB, instanceID, userID, ipAddress, userAgent string) (bool, error) {
 	if userID == "" || (ipAddress == "" && userAgent == "") {
 		return false, nil
 	}
@@ -354,9 +362,10 @@ func isNewIPOrUA(ctx context.Context, db *sql.DB, userID, ipAddress, userAgent s
 	var existing int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sessions
-		 WHERE user_id = ?
+		 WHERE instance_id = ?
+		   AND user_id = ?
 		   AND created_at > datetime('now', '-30 day')`,
-		userID,
+		instanceID, userID,
 	).Scan(&existing); err != nil {
 		return false, err
 	}
@@ -367,10 +376,11 @@ func isNewIPOrUA(ctx context.Context, db *sql.DB, userID, ipAddress, userAgent s
 	var matched int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sessions
-		 WHERE user_id = ?
+		 WHERE instance_id = ?
+		   AND user_id = ?
 		   AND created_at > datetime('now', '-30 day')
 		   AND (ip_address = ? OR user_agent = ?)`,
-		userID, ipAddress, userAgent,
+		instanceID, userID, ipAddress, userAgent,
 	).Scan(&matched); err != nil {
 		return false, err
 	}

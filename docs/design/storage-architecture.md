@@ -4,6 +4,8 @@
 **Builds on**: ADR-010 (Three-Tier Data), ADR-017 (Caching Tiers), ADR-021 (Multi-Tenancy)
 **Supersedes**: ADR-026 (Container-per-Tenant with D1) — generalized beyond Cloudflare
 
+> This document describes the **target storage architecture**. For what is actually implemented and tested in the current POC, see [Storage Implementation Status](storage-implementation-status.md).
+
 ## Core Principle
 
 The architecture separates **stable data** (users, orgs, configs) from **transient data** (sessions, tokens, auth requests, events). Stable data requires uniqueness and relational integrity. Transient data requires availability and write speed. These two categories have fundamentally different requirements and should never share the same write path.

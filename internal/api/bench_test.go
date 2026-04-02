@@ -18,6 +18,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/server"
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 )
 
 // benchServer creates a full Zitadel server for API benchmarks.
@@ -56,7 +57,7 @@ func newBenchServer(b *testing.B, seedCount int) *benchServer {
 
 	bus := eventbus.New()
 	srv := server.New(cfg, db, bus)
-	ts := httptest.NewServer(srv.Handler())
+	ts := httptestutil.NewServer(b, srv.Handler())
 
 	b.Cleanup(func() {
 		ts.Close()

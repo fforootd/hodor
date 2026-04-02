@@ -7,13 +7,15 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 )
 
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 
 	srv := New(DefaultConfig())
-	ts := httptest.NewServer(srv.Handler())
+	ts := httptestutil.NewServer(t, srv.Handler())
 	srv.issuer = ts.URL
 	return srv, ts
 }

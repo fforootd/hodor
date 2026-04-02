@@ -179,7 +179,7 @@ Action → Events table → visible in Console → queryable → traceable
 
 ## Consequences
 
-- **Pure Go binary** — no CGO, no OLAP engine deps, ~30MB
+- **Pure Go binary** — no CGO, no OLAP engine deps, ~30MB. Storage primitives are interface-driven; see [Storage Architecture](../design/storage-architecture.md) for deployment-level implementation choices.
 - **Three clear tiers** — OLTP (critical), OLAP (durable), Fire-and-forget (disposable)
 - **Local cache = zero external deps** — SQLite provides durability without Redis/Kafka
 - **Configurable reliability** — operators choose buffered, sampled, or off per stream

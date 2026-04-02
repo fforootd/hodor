@@ -1,6 +1,6 @@
 # System Architecture
 
-Zitadel is a single Go binary (~30MB) that bundles authentication, authorization, user and application management, and observability into one process.
+Zitadel is a single Go binary (~30MB) that bundles authentication, authorization, user and application management, and observability. At Level 0 (local/SQLite), everything runs in one process with zero external dependencies. As deployments scale, the same binary connects to external storage primitives (Postgres, Redis, queues) without code changes. See [Storage Architecture](../design/storage-architecture.md) for deployment profiles.
 
 ## High-Level Architecture
 
@@ -65,9 +65,11 @@ graph TB
         end
     end
 
-    subgraph Storage["Storage"]
-        SQLite["SQLite<br/>(dev / edge / homelab)"]
-        Postgres["PostgreSQL<br/>(production)"]
+    subgraph Storage["Storage (Four Primitives)"]
+        OLTP_S["OLTP<br/>(SQLite or Postgres)"]
+        KV_S["EdgeKV<br/>(in-memory, Redis, platform-native)"]
+        Queue_S["EdgeSink / Queue<br/>(go channel, PG table, SQS/Kafka)"]
+        OLAP_S["OLAP<br/>(same DB or dedicated)"]
     end
 
     subgraph Export["Export (OTEL)"]
@@ -111,8 +113,7 @@ graph TB
     IdentityAPI --> EventWriter
     MgmtAPI --> EventWriter
 
-    EventWriter --> SQLite
-    EventWriter --> Postgres
+    EventWriter --> OLTP_S
 
     EventWriter --> NotifyEngine
     NotifyEngine --> SMTP_C
@@ -216,11 +217,14 @@ graph LR
 
 ## Deployment Topologies
 
-| Target | Database | Storage |
-|---|---|---|
-| **Dev / Homelab** | SQLite (WAL mode) | Local filesystem |
-| **Production** | PostgreSQL (primary + replicas) | Postgres |
-| **Cloud** | PostgreSQL (per-region) | Postgres |
+The system is composed of four storage primitives — OLTP, KV, Queue, OLAP — with different implementations at each level. See [Storage Architecture](../design/storage-architecture.md) for full details.
+
+| Level | OLTP | KV | Queue | OLAP |
+|---|---|---|---|---|
+| **0 — Local** | SQLite | in-memory | go channel | same SQLite |
+| **1 — Scale Out** | Postgres | in-memory or Redis | PG unlogged table | same Postgres |
+| **2 — Dedicated KV** | Postgres | Redis / platform-native | PG table / Redis stream | same PG or dedicated |
+| **3 — Multi-Region** | Postgres primary | per-region Redis | per-region SQS/Kafka | ClickHouse / dedicated |
 
 ## Provider / Flow / Session Boundaries
 

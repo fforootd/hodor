@@ -87,17 +87,30 @@ func (p *Passwords) SetPassword(ctx context.Context, userID string, plain string
 	if err != nil {
 		return err
 	}
+	scoped := p.db.Scoped(ctx)
 
-	tx, err := p.db.SQL().BeginTx(ctx, nil)
+	tx, err := scoped.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
+	var exists int
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1 FROM users WHERE id = ? AND instance_id = ?`,
+		userID, scoped.InstanceID(),
+	).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("identity %s not found", userID)
+	}
+	if err != nil {
+		return fmt.Errorf("check identity: %w", err)
+	}
+
 	// Delete existing password credential if any.
 	_, err = tx.ExecContext(ctx,
-		`DELETE FROM credentials WHERE user_id = ? AND type = 'password'`,
-		userID,
+		`DELETE FROM credentials WHERE instance_id = ? AND user_id = ? AND type = 'password'`,
+		scoped.InstanceID(), userID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete old password: %w", err)
@@ -108,9 +121,9 @@ func (p *Passwords) SetPassword(ctx context.Context, userID string, plain string
 	// Store the encoded hash as data JSON.
 	credJSON := EncodeCredentialJSON(encoded)
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO credentials (id, user_id, type, data)
-		 VALUES (?, ?, 'password', ?)`,
-		credID, userID, credJSON,
+		`INSERT INTO credentials (id, instance_id, user_id, type, data)
+		 VALUES (?, ?, ?, 'password', ?)`,
+		credID, scoped.InstanceID(), userID, credJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert password credential: %w", err)
@@ -123,13 +136,16 @@ func (p *Passwords) SetPassword(ctx context.Context, userID string, plain string
 // Returns true if the password is correct. Transparently re-hashes if the
 // algorithm has been upgraded.
 func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain string) (bool, error) {
+	scoped := p.db.Scoped(ctx)
 	// Load password credential.
 	var credJSON string
 	var credID string
-	err := p.db.SQL().QueryRowContext(ctx,
-		`SELECT id, data FROM credentials
-		 WHERE user_id = ? AND type = 'password'`,
-		userID,
+	err := scoped.QueryRowContext(ctx,
+		`SELECT c.id, c.data
+		 FROM credentials c
+		 JOIN users u ON u.id = c.user_id AND u.instance_id = ?
+		 WHERE c.instance_id = ? AND c.user_id = ? AND c.type = 'password'`,
+		scoped.InstanceID(), scoped.InstanceID(), userID,
 	).Scan(&credID, &credJSON)
 	if err == sql.ErrNoRows {
 		return false, nil // No password credential.
@@ -155,9 +171,9 @@ func (p *Passwords) CheckPassword(ctx context.Context, userID string, plain stri
 	// If passwap returned an updated hash (algorithm upgrade), persist it.
 	if updated != "" {
 		updatedJSON := EncodeCredentialJSON(updated)
-		_, _ = p.db.SQL().ExecContext(ctx,
-			`UPDATE credentials SET data = ? WHERE id = ?`,
-			updatedJSON, credID,
+		_, _ = scoped.ExecContext(ctx,
+			`UPDATE credentials SET data = ? WHERE instance_id = ? AND id = ?`,
+			updatedJSON, scoped.InstanceID(), credID,
 		)
 	}
 

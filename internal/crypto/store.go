@@ -2,11 +2,10 @@ package crypto
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
-	"github.com/zitadel/zitadel/internal/httputil"
+	"github.com/zitadel/zitadel/internal/database"
 )
 
 // SecretMeta holds non-sensitive metadata about a stored secret.
@@ -23,12 +22,12 @@ type SecretMeta struct {
 // All data passes through a SecretBox for envelope encryption before
 // being written to the database, and is decrypted on read.
 type SecretStore struct {
-	db  *sql.DB
+	db  *database.DB
 	box *SecretBox
 }
 
 // NewSecretStore creates a SecretStore backed by the given DB and SecretBox.
-func NewSecretStore(db *sql.DB, box *SecretBox) *SecretStore {
+func NewSecretStore(db *database.DB, box *SecretBox) *SecretStore {
 	return &SecretStore{db: db, box: box}
 }
 
@@ -77,16 +76,29 @@ func (s *SecretStore) Put(ctx context.Context, id, secretType string, plaintext 
 		expiresAt = &t
 	}
 
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO secrets (instance_id, id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		instanceID, id, secretType, o.algorithm,
+	scoped := s.db.Scoped(ctx)
+	result, err := scoped.ExecContext(ctx, scoped.Rebind(
+		`INSERT INTO secrets (instance_id, id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+			 instance_id = excluded.instance_id,
+			 secret_type = excluded.secret_type,
+			 algorithm = excluded.algorithm,
+			 encryption_key_id = excluded.encryption_key_id,
+			 ciphertext = excluded.ciphertext,
+			 nonce = excluded.nonce,
+			 public_key = excluded.public_key,
+			 expires_at = excluded.expires_at
+		 WHERE secrets.instance_id = excluded.instance_id`),
+		scoped.InstanceID(), id, secretType, o.algorithm,
 		sealed.KeyID, sealed.Ciphertext, sealed.Nonce,
 		o.publicKey, expiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("secretstore: put %s: %w", id, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return fmt.Errorf("secretstore: put %s: secret id already exists in another instance", id)
 	}
 	return nil
 }
@@ -96,9 +108,10 @@ func (s *SecretStore) Get(ctx context.Context, id string) ([]byte, error) {
 	var ciphertext, nonce []byte
 	var keyID string
 
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	err := s.db.QueryRowContext(ctx,
-		`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE instance_id = ? AND id = ?`, instanceID, id,
+	scoped := s.db.Scoped(ctx)
+	err := scoped.QueryRowContext(ctx,
+		scoped.Rebind(`SELECT ciphertext, nonce, encryption_key_id FROM secrets WHERE instance_id = ? AND id = ?`),
+		scoped.InstanceID(), id,
 	).Scan(&ciphertext, &nonce, &keyID)
 	if err != nil {
 		return nil, fmt.Errorf("secretstore: get %s: %w", id, err)
@@ -114,11 +127,12 @@ func (s *SecretStore) GetByType(ctx context.Context, secretType string) (string,
 	var ciphertext, nonce []byte
 	var keyID string
 
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, ciphertext, nonce, encryption_key_id
+	scoped := s.db.Scoped(ctx)
+	err := scoped.QueryRowContext(ctx,
+		scoped.Rebind(`SELECT id, ciphertext, nonce, encryption_key_id
 		 FROM secrets WHERE instance_id = ? AND secret_type = ?
-		 ORDER BY created_at DESC LIMIT 1`, instanceID, secretType,
+		 ORDER BY created_at DESC LIMIT 1`),
+		scoped.InstanceID(), secretType,
 	).Scan(&id, &ciphertext, &nonce, &keyID)
 	if err != nil {
 		return "", nil, fmt.Errorf("secretstore: getByType %s: %w", secretType, err)
@@ -134,18 +148,19 @@ func (s *SecretStore) GetByType(ctx context.Context, secretType string) (string,
 
 // Delete removes a secret by ID.
 func (s *SecretStore) Delete(ctx context.Context, id string) error {
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	_, err := s.db.ExecContext(ctx, `DELETE FROM secrets WHERE instance_id = ? AND id = ?`, instanceID, id)
+	scoped := s.db.Scoped(ctx)
+	_, err := scoped.ExecContext(ctx, scoped.Rebind(`DELETE FROM secrets WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), id)
 	return err
 }
 
 // List returns metadata (no decryption) for all secrets of a given type.
 func (s *SecretStore) List(ctx context.Context, secretType string) ([]SecretMeta, error) {
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, secret_type, algorithm, encryption_key_id, expires_at, created_at
+	scoped := s.db.Scoped(ctx)
+	rows, err := scoped.QueryContext(ctx,
+		scoped.Rebind(`SELECT id, secret_type, algorithm, encryption_key_id, expires_at, created_at
 		 FROM secrets WHERE instance_id = ? AND secret_type = ?
-		 ORDER BY created_at DESC`, instanceID, secretType,
+		 ORDER BY created_at DESC`),
+		scoped.InstanceID(), secretType,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("secretstore: list %s: %w", secretType, err)
@@ -155,19 +170,17 @@ func (s *SecretStore) List(ctx context.Context, secretType string) ([]SecretMeta
 	var metas []SecretMeta
 	for rows.Next() {
 		var m SecretMeta
-		var expiresAt, createdAt sql.NullString
+		var expiresAt, createdAt string
 		if err := rows.Scan(&m.ID, &m.SecretType, &m.Algorithm,
 			&m.EncryptionKeyID, &expiresAt, &createdAt); err != nil {
 			return nil, err
 		}
-		if expiresAt.Valid {
-			if t, err := time.Parse(time.RFC3339, expiresAt.String); err == nil {
+		if expiresAt != "" {
+			if t, ok := parseSecretTimestamp(expiresAt); ok {
 				m.ExpiresAt = &t
 			}
 		}
-		if createdAt.Valid {
-			m.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
-		}
+		m.CreatedAt, _ = parseSecretTimestamp(createdAt)
 		metas = append(metas, m)
 	}
 	return metas, rows.Err()
@@ -182,12 +195,12 @@ func (s *SecretStore) ReEncryptAll(ctx context.Context) (int, error) {
 	}
 
 	activeID := s.box.ActiveKeyID()
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, ciphertext, nonce, encryption_key_id
+	scoped := s.db.Scoped(ctx)
+	rows, err := scoped.QueryContext(ctx,
+		scoped.Rebind(`SELECT id, ciphertext, nonce, encryption_key_id
 		 FROM secrets
-		 WHERE instance_id = ? AND encryption_key_id != ? AND encryption_key_id != ''`,
-		instanceID, activeID,
+		 WHERE instance_id = ? AND encryption_key_id != ? AND encryption_key_id != ''`),
+		scoped.InstanceID(), activeID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("secretstore: re-encrypt query: %w", err)
@@ -227,9 +240,9 @@ func (s *SecretStore) ReEncryptAll(ctx context.Context) (int, error) {
 			return rotated, fmt.Errorf("secretstore: re-encrypt seal %s: %w", r.id, err)
 		}
 
-		_, err = s.db.ExecContext(ctx,
-			`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ? WHERE instance_id = ? AND id = ?`,
-			sealed.Ciphertext, sealed.Nonce, sealed.KeyID, instanceID, r.id,
+		_, err = scoped.ExecContext(ctx,
+			scoped.Rebind(`UPDATE secrets SET ciphertext = ?, nonce = ?, encryption_key_id = ? WHERE instance_id = ? AND id = ?`),
+			sealed.Ciphertext, sealed.Nonce, sealed.KeyID, scoped.InstanceID(), r.id,
 		)
 		if err != nil {
 			return rotated, fmt.Errorf("secretstore: re-encrypt update %s: %w", r.id, err)
@@ -244,4 +257,13 @@ func (s *SecretStore) ReEncryptAll(ctx context.Context) (int, error) {
 // need direct encrypt/decrypt without the store (e.g., CertMagic storage).
 func (s *SecretStore) Box() *SecretBox {
 	return s.box
+}
+
+func parseSecretTimestamp(value string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

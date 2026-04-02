@@ -697,7 +697,7 @@ func seedIdentity(ctx context.Context, tx *sql.Tx, ident SeedIdentity, orgID, di
 	if orgID != "" {
 		tx.ExecContext(ctx,
 			bindSeedQuery(`INSERT INTO memberships (instance_id, resource_type, resource_id, user_id, role, added_at) VALUES (?, 'org', ?, ?, 'member', ?) ON CONFLICT(resource_type, resource_id, user_id) DO NOTHING`, dialect),
-					instanceID,
+			instanceID,
 			orgID, newID, now)
 	}
 

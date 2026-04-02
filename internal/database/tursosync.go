@@ -30,7 +30,7 @@ const (
 type TursoSyncDB struct {
 	*DB // exposes the read-path *sql.DB as the "main" database
 
-	writeDB    *sql.DB          // HTTP connection to Turso primary (for writes)
+	writeDB    *sql.DB            // HTTP connection to Turso primary (for writes)
 	syncEngine *turso.TursoSyncDb // sync engine for pull
 	pullMu     sync.Mutex
 }

@@ -17,9 +17,10 @@ Numbered decisions with rationale. See [ADR Index](000-index.md) for the full li
 
 | Document | What it covers |
 |---|---|
-| [Developer Experience](design/developer-experience.md) | Zero-config, pure Go single binary, config cascade, testing philosophy |
+| [Developer Experience](design/developer-experience.md) | Zero-config, pure Go single binary (Level 0), scaling path via storage primitives, config cascade, testing philosophy |
 | [Design Decisions](design/design-decisions.md) | Resolved decisions: OpenFGA, passkeys, SCIM scope, whitelabeling |
 | [Design Patterns](design/design-patterns.md) | Unified identity, i18n rules, notification channels, schema registry |
+| [Storage Implementation Status](design/storage-implementation-status.md) | Current-state reality check for storage: what is real, tested, partial, or still target architecture |
 
 ## Vision
 

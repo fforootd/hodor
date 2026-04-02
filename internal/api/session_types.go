@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	sessionsvc "github.com/zitadel/zitadel/internal/session"
+)
 
 type SessionResponse struct {
 	ID           string         `json:"id"`
@@ -34,4 +38,22 @@ func (a *API) RegisterSessionRoutes(mux *http.ServeMux, requireAdmin func(http.H
 	mux.HandleFunc("GET /v1/sessions", requireAdmin(a.listSessions))
 	mux.HandleFunc("GET /v1/sessions/{id}", requireAdmin(a.getSession))
 	mux.HandleFunc("POST /v1/sessions/{id}/revoke", requireAdmin(a.revokeSession))
+}
+
+func sessionResponseFromRecord(record sessionsvc.Record) SessionResponse {
+	return SessionResponse{
+		ID:           record.ID,
+		IduserID:     record.UserID,
+		OrgID:        record.OrgID,
+		AuthMethod:   record.AuthMethod,
+		ProviderID:   record.ProviderID,
+		ProviderKind: record.ProviderKind,
+		LoginFlowID:  record.LoginFlowID,
+		Metadata:     record.Metadata,
+		UserAgent:    record.UserAgent,
+		IPAddress:    record.IPAddress,
+		CreatedAt:    record.CreatedAt,
+		ExpiresAt:    record.ExpiresAt,
+		RevokedAt:    record.RevokedAt,
+	}
 }

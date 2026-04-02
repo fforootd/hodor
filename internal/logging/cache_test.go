@@ -17,15 +17,16 @@ func testCachePath(t *testing.T) string {
 // testRecord creates a CacheRecord with the given event type.
 func testRecord(eventType string) CacheRecord {
 	return CacheRecord{
-		EventType: eventType,
-		Category:  "log",
-		Stream:    "runtime",
-		Level:     "INFO",
-		Payload:   `{"msg":"test"}`,
-		ActorID:   "actor_1",
-		RequestID: "request_1",
-		SessionID: "session_1",
-		CreatedAt: createdAtNow(),
+		InstanceID: "default",
+		EventType:  eventType,
+		Category:   "log",
+		Stream:     "runtime",
+		Level:      "INFO",
+		Payload:    `{"msg":"test"}`,
+		ActorID:    "actor_1",
+		RequestID:  "request_1",
+		SessionID:  "session_1",
+		CreatedAt:  createdAtNow(),
 	}
 }
 

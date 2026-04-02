@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zitadel/zitadel/internal/database"
@@ -22,11 +23,11 @@ func emitGCEvent(ctx context.Context, db *database.DB, bus *eventbus.Bus, eventT
 		b, _ := json.Marshal(payload)
 		payloadJSON = string(b)
 	}
-	instanceID := httputil.DefaultInstanceID
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	_, _ = db.SQL().ExecContext(ctx,
 		`INSERT INTO events (instance_id, id, event_type, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, created_at)
-		 VALUES (?, ?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', datetime('now'))`,
-		instanceID, eventID, eventType, payloadJSON)
+		 VALUES (?, ?, ?, '0', '', 'system', '', 'gc', ?, '{}', '', '', ?)`,
+		instanceID, eventID, eventType, payloadJSON, time.Now().UTC().Format(time.RFC3339))
 	bus.Signal()
 }
 
@@ -40,7 +41,7 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 
 		cutoff := time.Now().UTC().Add(-ttl).Format(time.RFC3339)
 
-		instanceID := httputil.DefaultInstanceID
+		instanceID := httputil.InstanceIDFromContext(ctx)
 		res, err := db.SQL().ExecContext(ctx,
 			`DELETE FROM sessions WHERE instance_id = ? AND revoked_at IS NOT NULL AND revoked_at < ?`, instanceID, cutoff,
 		)
@@ -76,7 +77,7 @@ func SessionGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 // EventGC returns a job function that deletes OLTP events past their retention period.
 func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 	return func(ctx context.Context) error {
-		instanceID := httputil.DefaultInstanceID
+		instanceID := httputil.InstanceIDFromContext(ctx)
 		var lakeCursor string
 		err := db.SQL().QueryRowContext(ctx,
 			`SELECT last_event_id FROM consumer_cursors WHERE instance_id = ? AND consumer_name = 'lake_writer'`,
@@ -103,14 +104,15 @@ func EventGC(db *database.DB, bus *eventbus.Bus) JobFunc {
 			}
 
 			cutoff := time.Now().UTC().Add(-ttl).Format(time.RFC3339)
+			sqlPattern := eventPatternToSQLLike(p.EventPattern)
 
 			res, err := db.SQL().ExecContext(ctx,
 				`DELETE FROM events
 				 WHERE instance_id = ?
-				   AND event_type GLOB ?
+				   AND event_type LIKE ? ESCAPE '\'
 				   AND created_at < ?
 				   AND id <= ?`,
-				instanceID, p.EventPattern, cutoff, lakeCursor,
+				instanceID, sqlPattern, cutoff, lakeCursor,
 			)
 			if err != nil {
 				logging.Printf("[event_gc] pattern %q error: %v", p.EventPattern, err)
@@ -145,7 +147,7 @@ type retentionPolicy struct {
 }
 
 func loadRetentionPolicies(ctx context.Context, db *database.DB) ([]retentionPolicy, error) {
-	instanceID := httputil.DefaultInstanceID
+	instanceID := httputil.InstanceIDFromContext(ctx)
 	rows, err := db.SQL().QueryContext(ctx,
 		`SELECT event_pattern, oltp_ttl, lake_ttl, priority
 		 FROM retention_policies WHERE instance_id = ? ORDER BY priority DESC`,
@@ -171,16 +173,29 @@ func loadRetentionPolicies(ctx context.Context, db *database.DB) ([]retentionPol
 }
 
 func getRetentionTTL(ctx context.Context, db *database.DB, pattern string) time.Duration {
-	instanceID := httputil.DefaultInstanceID
-	var ttl string
-	err := db.SQL().QueryRowContext(ctx,
-		`SELECT oltp_ttl FROM retention_policies
-		 WHERE instance_id = ? AND ? GLOB event_pattern
-		 ORDER BY priority DESC LIMIT 1`,
-		instanceID, pattern,
-	).Scan(&ttl)
+	policies, err := loadRetentionPolicies(ctx, db)
 	if err != nil {
 		return 14 * 24 * time.Hour
 	}
-	return ParseTTL(ttl)
+	for _, p := range policies {
+		if eventPatternMatches(p.EventPattern, pattern) {
+			return ParseTTL(p.OLTPTTL)
+		}
+	}
+	return 14 * 24 * time.Hour
+}
+
+func eventPatternToSQLLike(pattern string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`, `*`, `%`, `?`, `_`)
+	return replacer.Replace(pattern)
+}
+
+func eventPatternMatches(globPattern, eventType string) bool {
+	if globPattern == "*" {
+		return true
+	}
+	if strings.HasSuffix(globPattern, "*") {
+		return strings.HasPrefix(eventType, strings.TrimSuffix(globPattern, "*"))
+	}
+	return globPattern == eventType
 }

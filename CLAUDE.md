@@ -108,7 +108,7 @@ make quality
 
 ## Conventions
 
-- **Pure Go** single binary — no CGO, no external processes. Uses `modernc.org/sqlite`.
+- **Pure Go** single binary — no CGO, no external processes by default (Level 0). Uses `modernc.org/sqlite` for local/dev; scales to Postgres + Redis + queues at higher deployment profiles. See `docs/design/storage-architecture.md`.
 - **REST API** with OpenAPI 3.1 spec generated from Go type annotations. Not gRPC.
 - **Frontend:** Vue 3 + shadcn-vue + Tailwind CSS. Three separate SPAs (login, console, account).
 - **ADRs** in `docs/adr/` govern architectural decisions — check before proposing structural changes.

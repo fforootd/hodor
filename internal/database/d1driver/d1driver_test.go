@@ -6,16 +6,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 )
 
 func TestQueryNormalizesJSONNumbersForBoolScan(t *testing.T) {
 	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/query" {
 			t.Fatalf("path = %s, want /query", r.URL.Path)
 		}
@@ -64,7 +65,7 @@ func TestExecSplitsMultiStatementDDL(t *testing.T) {
 	t.Helper()
 
 	var execCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/exec" {
 			t.Fatalf("path = %s, want /exec", r.URL.Path)
 		}
@@ -99,7 +100,7 @@ func TestExecSplitsMultiStatementDDL(t *testing.T) {
 func TestQueryParsesSQLiteTimestampsForTimeScan(t *testing.T) {
 	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/query" {
 			t.Fatalf("path = %s, want /query", r.URL.Path)
 		}
@@ -154,7 +155,7 @@ func TestQueryParsesSQLiteTimestampsForTimeScan(t *testing.T) {
 func TestExecEncodesByteParamsAsBlobPayload(t *testing.T) {
 	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/exec" {
 			t.Fatalf("path = %s, want /exec", r.URL.Path)
 		}
@@ -205,7 +206,7 @@ func TestExecEncodesByteParamsAsBlobPayload(t *testing.T) {
 func TestQueryNormalizesBlobArraysForByteScan(t *testing.T) {
 	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptestutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/query" {
 			t.Fatalf("path = %s, want /query", r.URL.Path)
 		}

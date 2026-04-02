@@ -16,12 +16,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/zitadel/zitadel/internal/database"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/logging"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 // Backend is the pluggable analytics query interface.
@@ -69,14 +70,13 @@ type RefInfo struct {
 // OLTPBackend queries the OLTP database directly (SQLite or Postgres).
 // This is the default backend — zero config, no extra dependencies.
 type OLTPBackend struct {
-	db      *sql.DB
-	dialect string // "sqlite" or "postgres"
+	db *database.DB
 }
 
 // NewOLTPBackend creates an analytics backend that queries the OLTP database.
-func NewOLTPBackend(db *sql.DB, dialect string) *OLTPBackend {
-	logging.Printf("[analytics] OLTP backend ready (dialect=%s)", dialect)
-	return &OLTPBackend{db: db, dialect: dialect}
+func NewOLTPBackend(db *database.DB) *OLTPBackend {
+	logging.Printf("[analytics] OLTP backend ready (dialect=%s)", db.Dialect())
+	return &OLTPBackend{db: db}
 }
 
 func (b *OLTPBackend) Close() error { return nil }
@@ -101,7 +101,7 @@ func (b *OLTPBackend) Query(ctx context.Context, rawSQL string, limit int) (*Que
 		rawSQL = fmt.Sprintf("%s LIMIT %d", strings.TrimRight(rawSQL, ";"), limit)
 	}
 
-	rows, err := b.db.QueryContext(ctx, rawSQL)
+	rows, err := b.db.SQL().QueryContext(ctx, rawSQL)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
@@ -158,13 +158,13 @@ func (b *OLTPBackend) Tables(ctx context.Context) ([]TableInfo, error) {
 	analyticsTable := []string{"events", "users", "sessions"}
 	tables := make([]TableInfo, 0, len(analyticsTable))
 
-	instanceID := httputil.InstanceIDFromContext(ctx)
+	scoped := b.db.Scoped(ctx)
 	for _, name := range analyticsTable {
 		info := TableInfo{Name: name}
 
 		// Row count.
 		var count int64
-		if err := b.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE instance_id = ?", name), instanceID).Scan(&count); err == nil {
+		if err := scoped.QueryRowContext(ctx, scoped.Rebind(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE instance_id = ?", name)), scoped.InstanceID()).Scan(&count); err == nil {
 			info.RowCount = count
 		}
 
@@ -178,20 +178,20 @@ func (b *OLTPBackend) Tables(ctx context.Context) ([]TableInfo, error) {
 
 func (b *OLTPBackend) getColumns(ctx context.Context, table string) []Column {
 	var query string
-	if b.dialect == "postgres" {
+	if b.db.Dialect() == "postgres" {
 		query = fmt.Sprintf(`SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '%s' ORDER BY ordinal_position`, table)
 	} else {
 		query = fmt.Sprintf("PRAGMA table_info('%s')", table)
 	}
 
-	rows, err := b.db.QueryContext(ctx, query)
+	rows, err := b.db.SQL().QueryContext(ctx, query)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 
 	var cols []Column
-	if b.dialect == "postgres" {
+	if b.db.Dialect() == "postgres" {
 		for rows.Next() {
 			var c Column
 			if err := rows.Scan(&c.Name, &c.Type); err == nil {

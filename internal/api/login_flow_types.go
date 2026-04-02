@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/zitadel/zitadel/internal/logging"
+	loginflowsvc "github.com/zitadel/zitadel/internal/loginflow"
 )
 
 // RegisterLoginFlowRoutes mounts all login flow management routes.
@@ -90,4 +91,24 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func loginFlowResponseFromRecord(record loginflowsvc.Record) LoginFlowResponse {
+	return LoginFlowResponse{
+		ID:          record.ID,
+		OrgID:       record.OrgID,
+		SchemaID:    record.SchemaID,
+		Name:        record.Name,
+		Strategy:    record.Strategy,
+		IsDefault:   record.IsDefault,
+		Enabled:     record.Enabled,
+		State:       record.State,
+		Priority:    record.Priority,
+		Audience:    record.Audience,
+		AuthMethods: record.AuthMethods,
+		Config:      record.Config,
+		Metadata:    record.Metadata,
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+	}
 }

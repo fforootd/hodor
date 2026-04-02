@@ -7,7 +7,7 @@
 
 ## Context
 
-Zitadel is a single Go binary (~30MB) that must cache effectively without requiring external infrastructure by default. As deployments scale from homelab (SQLite) to multi-machine production (Postgres + Redis), caching needs vary in scope, durability, and consistency requirements.
+Zitadel is a single Go binary (~30MB) that must cache effectively without requiring external infrastructure by default (Level 0). As deployments scale through [deployment profiles](../design/storage-architecture.md#deployment-profiles) (Level 0-3), caching needs vary in scope, durability, and consistency requirements. The L3 shared cache tier described here is now formalized as the **EdgeKV** primitive in the [Storage Architecture](../design/storage-architecture.md).
 
 This ADR defines a four-tier caching architecture where each tier serves a distinct purpose, and operators can opt-in to higher tiers as their scale demands.
 

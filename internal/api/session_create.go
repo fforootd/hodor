@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -13,6 +11,7 @@ import (
 	"github.com/zitadel/zitadel/internal/logging"
 	"github.com/zitadel/zitadel/internal/login"
 	"github.com/zitadel/zitadel/internal/risk"
+	sessionsvc "github.com/zitadel/zitadel/internal/session"
 	"github.com/zitadel/zitadel/internal/telemetry"
 )
 
@@ -101,50 +100,9 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 			metadata["auth_context"] = provenance.AuthContext
 		}
 	}
-	metadataJSON, _ := json.Marshal(metadata)
-
-	scoped := a.db.Scoped(ctx)
-	instanceID := scoped.InstanceID()
-	tx, err := scoped.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ? AND instance_id = ?`, userID, instanceID).Scan(&exists)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("identity %s not found", userID)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("check identity: %w", err)
-	}
-
 	sessionFingerprint := ""
 	if effectiveSignals != nil {
 		sessionFingerprint = effectiveSignals.VisitorID
-	}
-
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at, fingerprint)
-		 VALUES (?, ?, ?, '_global', ?, ?, ?, ?, ?, ?, ?)`,
-		sessionID, instanceID, userID, tokenHash,
-		userAgent, ipAddress, string(metadataJSON),
-		now.Format(time.RFC3339), expiresAt.Format(time.RFC3339), sessionFingerprint,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert session: %w", err)
-	}
-
-	tokenID := id.New()
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, session_id, scopes, expires_at, created_at)
-		 VALUES (?, ?, 'session', ?, ?, ?, '[]', ?, ?)`,
-		tokenID, instanceID, tokenHash, userID, sessionID,
-		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert token: %w", err)
 	}
 
 	ctxWithSession := telemetry.WithSessionID(ctx, sessionID)
@@ -152,20 +110,33 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 		ctxWithSession = telemetry.WithFingerprint(ctxWithSession, sessionFingerprint)
 	}
 
-	emitEvent(ctxWithSession, tx, "session.created", userID, sessionID, "session", map[string]any{
-		"user_id":       userID,
-		"user_agent":    userAgent,
-		"ip_address":    ipAddress,
-		"auth_method":   metadata["auth_method"],
-		"provider_id":   metadata["provider_id"],
-		"provider_kind": metadata["provider_kind"],
-		"login_flow_id": metadata["login_flow_id"],
-		"auth_context":  metadata["auth_context"],
+	tokenID := id.New()
+	record, err := a.sessionStore.Create(ctxWithSession, sessionsvc.CreateParams{
+		SessionID:   sessionID,
+		TokenID:     tokenID,
+		UserID:      userID,
+		OrgID:       "_global",
+		TokenHash:   tokenHash,
+		UserAgent:   userAgent,
+		IPAddress:   ipAddress,
+		Fingerprint: sessionFingerprint,
+		Metadata:    metadata,
+		CreatedAt:   now,
+		ExpiresAt:   expiresAt,
+		SessionCreatedPayload: map[string]any{
+			"user_id":       userID,
+			"user_agent":    userAgent,
+			"ip_address":    ipAddress,
+			"auth_method":   metadata["auth_method"],
+			"provider_id":   metadata["provider_id"],
+			"provider_kind": metadata["provider_kind"],
+			"login_flow_id": metadata["login_flow_id"],
+			"auth_context":  metadata["auth_context"],
+		},
+		RiskEvaluatedPayload: riskEventPayload(riskResult, "builtin_post_auth_advisory_v1", "v1"),
 	})
-	emitEvent(ctxWithSession, tx, "signal.risk_evaluated", userID, sessionID, "session", riskEventPayload(riskResult, "builtin_post_auth_advisory_v1", "v1"))
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
+	if err != nil {
+		return nil, err
 	}
 
 	if svc := FGAService; svc != nil {
@@ -181,20 +152,7 @@ func (a *API) CreateSessionInternal(ctx context.Context, userID string, userAgen
 	a.bus.Signal()
 
 	return &CreateSessionResponse{
-		Session: SessionResponse{
-			ID:           sessionID,
-			IduserID:     userID,
-			OrgID:        "",
-			AuthMethod:   stringOr(metadata["auth_method"]),
-			ProviderID:   stringOr(metadata["provider_id"]),
-			ProviderKind: stringOr(metadata["provider_kind"]),
-			LoginFlowID:  stringOr(metadata["login_flow_id"]),
-			Metadata:     metadata,
-			UserAgent:    userAgent,
-			IPAddress:    ipAddress,
-			CreatedAt:    now.Format(time.RFC3339),
-			ExpiresAt:    expiresAt.Format(time.RFC3339),
-		},
-		Token: rawToken,
+		Session: sessionResponseFromRecord(record),
+		Token:   rawToken,
 	}, nil
 }

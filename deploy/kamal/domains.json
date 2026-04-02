@@ -1,0 +1,5 @@
+{
+  "login.acme.com": "inst_acme",
+  "auth.bigcorp.io": "inst_bigcorp",
+  "id.startup.dev": "inst_startup"
+}

@@ -1,11 +1,10 @@
 package api
 
 import (
-	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/loginflow"
@@ -18,45 +17,18 @@ func (a *API) promoteLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scoped := a.db.Scoped(r.Context())
-	var currentState string
-	err := scoped.QueryRowContext(r.Context(),
-		scoped.Rebind(`SELECT state FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID,
-	).Scan(&currentState)
+	currentState, nextState, err := a.loginFlowStore.Promote(r.Context(), flowID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusNotFound, "login flow not found")
-		return
-	}
-
-	var nextState string
-	switch currentState {
-	case "draft":
-		nextState = "testing"
-	case "testing":
-		nextState = "active"
-	case "active":
-		httputil.WriteError(w, http.StatusBadRequest, "flow is already active")
-		return
-	case "archived":
-		httputil.WriteError(w, http.StatusBadRequest, "cannot promote archived flow; create a new version")
-		return
-	default:
-		httputil.WriteError(w, http.StatusBadRequest, "unknown state: "+currentState)
-		return
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = scoped.ExecContext(r.Context(),
-		scoped.Rebind(`UPDATE login_flows SET state = ?, updated_at = ? WHERE instance_id = ? AND id = ?`),
-		nextState, now, scoped.InstanceID(), flowID,
-	)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "promote failed")
+		switch {
+		case err == sql.ErrNoRows:
+			httputil.WriteError(w, http.StatusNotFound, "login flow not found")
+		case err != nil:
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
 	a.bus.Signal()
-
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"id":             flowID,
 		"previous_state": currentState,
@@ -71,19 +43,12 @@ func (a *API) archiveLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scoped := a.db.Scoped(r.Context())
-	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := scoped.ExecContext(r.Context(),
-		scoped.Rebind(`UPDATE login_flows SET state = 'archived', updated_at = ? WHERE instance_id = ? AND id = ?`),
-		now, scoped.InstanceID(), flowID,
-	)
-	if err != nil {
+	if err := a.loginFlowStore.Archive(r.Context(), flowID); err != nil {
+		if err == sql.ErrNoRows {
+			httputil.WriteError(w, http.StatusNotFound, "login flow not found")
+			return
+		}
 		httputil.WriteError(w, http.StatusInternalServerError, "archive failed")
-		return
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		httputil.WriteError(w, http.StatusNotFound, "login flow not found")
 		return
 	}
 
@@ -115,11 +80,12 @@ func (a *API) exportLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := a.loadLoginFlow(r.Context(), flowID)
+	record, err := a.loginFlowStore.Get(r.Context(), flowID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, "login flow not found")
 		return
 	}
+	resp := loginFlowResponseFromRecord(record)
 
 	export := map[string]any{
 		"template": map[string]any{
@@ -167,42 +133,10 @@ func (a *API) resolveLoginFlow(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, "resolution failed: "+err.Error())
 		return
 	}
-
 	if flow == nil {
 		httputil.WriteError(w, http.StatusNotFound, "no matching flow found")
 		return
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, flow)
-}
-
-func (a *API) loadLoginFlow(ctx context.Context, flowID string) (LoginFlowResponse, error) {
-	var resp LoginFlowResponse
-	var configStr, audienceStr, authMethodsStr, metadataStr string
-	var isDefault, enabled int
-
-	scoped := a.db.Scoped(ctx)
-	err := scoped.QueryRowContext(ctx,
-		scoped.Rebind(`SELECT id, COALESCE(org_id,''), COALESCE(schema_id,''), name, strategy, config,
-		        CASE WHEN COALESCE(is_default, false) THEN 1 ELSE 0 END,
-		        CASE WHEN COALESCE(enabled, true) THEN 1 ELSE 0 END, state, priority,
-		        COALESCE(audience,'{}'), COALESCE(auth_methods,'{}'),
-		        COALESCE(metadata,'{}'), created_at, updated_at
-		 FROM login_flows WHERE instance_id = ? AND id = ?`), scoped.InstanceID(), flowID,
-	).Scan(&resp.ID, &resp.OrgID, &resp.SchemaID, &resp.Name, &resp.Strategy, &configStr,
-		&isDefault, &enabled, &resp.State, &resp.Priority,
-		&audienceStr, &authMethodsStr, &metadataStr,
-		&resp.CreatedAt, &resp.UpdatedAt)
-	if err != nil {
-		return resp, err
-	}
-
-	resp.IsDefault = isDefault == 1 || isDefault != 0
-	resp.Enabled = enabled == 1 || enabled != 0
-	json.Unmarshal([]byte(configStr), &resp.Config)
-	json.Unmarshal([]byte(audienceStr), &resp.Audience)
-	json.Unmarshal([]byte(authMethodsStr), &resp.AuthMethods)
-	json.Unmarshal([]byte(metadataStr), &resp.Metadata)
-
-	return resp, nil
 }

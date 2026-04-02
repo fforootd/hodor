@@ -20,6 +20,13 @@ func timeNow() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
+func stringOr(value any) string {
+	if str, ok := value.(string); ok {
+		return str
+	}
+	return ""
+}
+
 // ── Request helpers ─────────────────────────────────────────────────────────
 
 // decodeBody reads and decodes the JSON request body into T.

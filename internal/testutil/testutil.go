@@ -22,6 +22,7 @@ import (
 	"github.com/zitadel/zitadel/internal/eventbus"
 	"github.com/zitadel/zitadel/internal/id"
 	"github.com/zitadel/zitadel/internal/server"
+	"github.com/zitadel/zitadel/internal/testutil/httptestutil"
 	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
@@ -88,7 +89,7 @@ func NewTestServerMultiTenant(t *testing.T) *TestServer {
 
 	srv := server.New(cfg, db, bus)
 	handler := srv.Handler()
-	ts := httptest.NewServer(handler)
+	ts := httptestutil.NewServer(t, handler)
 
 	t.Cleanup(func() {
 		ts.Close()
@@ -148,7 +149,7 @@ func newTestServer(t *testing.T, databaseURL string) *TestServer {
 
 	srv := server.New(cfg, db, bus)
 	handler := srv.Handler()
-	ts := httptest.NewServer(handler)
+	ts := httptestutil.NewServer(t, handler)
 
 	t.Cleanup(func() {
 		ts.Close()

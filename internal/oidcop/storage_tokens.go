@@ -10,12 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"github.com/zitadel/oidc/v3/pkg/op"
-
-	"github.com/zitadel/zitadel/internal/httputil"
 )
 
 func (s *Storage) CreateAccessToken(ctx context.Context, request op.TokenRequest) (string, time.Time, error) {
-	instanceID := httputil.InstanceIDFromContext(ctx)
+	scoped := s.scoped(ctx)
 	var applicationID string
 	if authReq, ok := request.(*AuthRequest); ok {
 		applicationID = authReq.ClientID
@@ -25,10 +23,10 @@ func (s *Storage) CreateAccessToken(ctx context.Context, request op.TokenRequest
 	expiration := time.Now().Add(5 * time.Minute)
 
 	tokenHash := tokenID
-	_, err := s.db.SQL().ExecContext(ctx,
+	_, err := scoped.ExecContext(ctx, scoped.Rebind(
 		`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, application_id, audience, scopes, expires_at)
-		 VALUES (?, ?, 'oidc_access', ?, ?, ?, ?, ?, ?)`,
-		tokenID, instanceID, tokenHash, request.GetSubject(), applicationID,
+		 VALUES (?, ?, 'oidc_access', ?, ?, ?, ?, ?, ?)`),
+		tokenID, scoped.InstanceID(), tokenHash, request.GetSubject(), applicationID,
 		strings.Join(request.GetAudience(), " "),
 		strings.Join(request.GetScopes(), " "),
 		expiration.Format(time.RFC3339),
@@ -40,7 +38,7 @@ func (s *Storage) CreateAccessToken(ctx context.Context, request op.TokenRequest
 }
 
 func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.TokenRequest, currentRefreshToken string) (string, string, time.Time, error) {
-	instanceID := httputil.InstanceIDFromContext(ctx)
+	scoped := s.scoped(ctx)
 	var applicationID string
 	if authReq, ok := request.(*AuthRequest); ok {
 		applicationID = authReq.ClientID
@@ -51,10 +49,10 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 	expiration := time.Now().Add(5 * time.Minute)
 
 	tokenHash := tokenID
-	_, err := s.db.SQL().ExecContext(ctx,
+	_, err := scoped.ExecContext(ctx, scoped.Rebind(
 		`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, application_id, audience, scopes, refresh_token_id, expires_at)
-		 VALUES (?, ?, 'oidc_access', ?, ?, ?, ?, ?, ?, ?)`,
-		tokenID, instanceID, tokenHash, request.GetSubject(), applicationID,
+		 VALUES (?, ?, 'oidc_access', ?, ?, ?, ?, ?, ?, ?)`),
+		tokenID, scoped.InstanceID(), tokenHash, request.GetSubject(), applicationID,
 		strings.Join(request.GetAudience(), " "),
 		strings.Join(request.GetScopes(), " "),
 		refreshTokenID, expiration.Format(time.RFC3339),
@@ -64,7 +62,7 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 	}
 
 	if currentRefreshToken != "" {
-		_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh' AND instance_id = ?`, currentRefreshToken, instanceID)
+		_, _ = scoped.ExecContext(ctx, scoped.Rebind(`DELETE FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh' AND instance_id = ?`), currentRefreshToken, scoped.InstanceID())
 	}
 
 	refreshExpiration := time.Now().Add(24 * time.Hour)
@@ -77,10 +75,10 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 		authTimeStr = time.Now().Format(time.RFC3339)
 	}
 
-	_, err = s.db.SQL().ExecContext(ctx,
+	_, err = scoped.ExecContext(ctx, scoped.Rebind(
 		`INSERT INTO tokens (id, instance_id, type, token_hash, user_id, application_id, audience, scopes, auth_time, refresh_token_id, expires_at)
-		 VALUES (?, ?, 'oidc_refresh', ?, ?, ?, ?, ?, ?, ?, ?)`,
-		refreshTokenID, instanceID, refreshTokenID, request.GetSubject(), applicationID,
+		 VALUES (?, ?, 'oidc_refresh', ?, ?, ?, ?, ?, ?, ?, ?)`),
+		refreshTokenID, scoped.InstanceID(), refreshTokenID, request.GetSubject(), applicationID,
 		strings.Join(request.GetAudience(), " "),
 		strings.Join(request.GetScopes(), " "),
 		authTimeStr,
@@ -94,14 +92,14 @@ func (s *Storage) CreateAccessAndRefreshTokens(ctx context.Context, request op.T
 }
 
 func (s *Storage) TokenRequestByRefreshToken(ctx context.Context, refreshToken string) (op.RefreshTokenRequest, error) {
-	instanceID := httputil.InstanceIDFromContext(ctx)
+	scoped := s.scoped(ctx)
 	var (
 		id, applicationID, userID, audienceStr, scopesStr string
 		authTimeStr, expirationStr                        string
 	)
-	err := s.db.SQL().QueryRowContext(ctx,
+	err := scoped.QueryRowContext(ctx, scoped.Rebind(
 		`SELECT id, application_id, user_id, audience, scopes, auth_time, expires_at
-		 FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh' AND instance_id = ?`, refreshToken, instanceID,
+		 FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh' AND instance_id = ?`), refreshToken, scoped.InstanceID(),
 	).Scan(&id, &applicationID, &userID, &audienceStr, &scopesStr, &authTimeStr, &expirationStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token")
@@ -143,17 +141,17 @@ func (r *RefreshTokenRequest) GetSubject() string               { return r.UserI
 func (r *RefreshTokenRequest) SetCurrentScopes(scopes []string) { r.Scopes = scopes }
 
 func (s *Storage) RevokeToken(ctx context.Context, tokenIDOrToken string, userID string, clientID string) *oidc.Error {
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM tokens WHERE id = ? AND application_id = ? AND type = 'oidc_access' AND instance_id = ?`, tokenIDOrToken, clientID, instanceID)
-	_, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM tokens WHERE token_hash = ? AND application_id = ? AND type = 'oidc_refresh' AND instance_id = ?`, tokenIDOrToken, clientID, instanceID)
+	scoped := s.scoped(ctx)
+	_, _ = scoped.ExecContext(ctx, scoped.Rebind(`DELETE FROM tokens WHERE id = ? AND application_id = ? AND type = 'oidc_access' AND instance_id = ?`), tokenIDOrToken, clientID, scoped.InstanceID())
+	_, _ = scoped.ExecContext(ctx, scoped.Rebind(`DELETE FROM tokens WHERE token_hash = ? AND application_id = ? AND type = 'oidc_refresh' AND instance_id = ?`), tokenIDOrToken, clientID, scoped.InstanceID())
 	return nil
 }
 
 func (s *Storage) GetRefreshTokenInfo(ctx context.Context, clientID string, token string) (string, string, error) {
-	instanceID := httputil.InstanceIDFromContext(ctx)
+	scoped := s.scoped(ctx)
 	var userID, id string
-	err := s.db.SQL().QueryRowContext(ctx,
-		`SELECT user_id, id FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh' AND instance_id = ?`, token, instanceID,
+	err := scoped.QueryRowContext(ctx, scoped.Rebind(
+		`SELECT user_id, id FROM tokens WHERE token_hash = ? AND type = 'oidc_refresh' AND instance_id = ?`), token, scoped.InstanceID(),
 	).Scan(&userID, &id)
 	if err != nil {
 		return "", "", op.ErrInvalidRefreshToken
@@ -162,11 +160,11 @@ func (s *Storage) GetRefreshTokenInfo(ctx context.Context, clientID string, toke
 }
 
 func (s *Storage) TerminateSession(ctx context.Context, userID string, clientID string) error {
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	_, _ = s.db.SQL().ExecContext(ctx,
-		`DELETE FROM tokens WHERE user_id = ? AND application_id = ? AND type = 'oidc_access' AND instance_id = ?`, userID, clientID, instanceID)
-	_, _ = s.db.SQL().ExecContext(ctx,
-		`DELETE FROM tokens WHERE user_id = ? AND application_id = ? AND type = 'oidc_refresh' AND instance_id = ?`, userID, clientID, instanceID)
+	scoped := s.scoped(ctx)
+	_, _ = scoped.ExecContext(ctx,
+		scoped.Rebind(`DELETE FROM tokens WHERE user_id = ? AND application_id = ? AND type = 'oidc_access' AND instance_id = ?`), userID, clientID, scoped.InstanceID())
+	_, _ = scoped.ExecContext(ctx,
+		scoped.Rebind(`DELETE FROM tokens WHERE user_id = ? AND application_id = ? AND type = 'oidc_refresh' AND instance_id = ?`), userID, clientID, scoped.InstanceID())
 	return nil
 }
 

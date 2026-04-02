@@ -65,8 +65,8 @@ func (d *Drainer) flush() {
 	}
 
 	stmt, err := tx.Prepare(
-		`INSERT INTO events (id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, created_at)
-		 VALUES (?, ?, ?, '0', ?, '', '', ?, ?, '{}', ?, ?, ?, ?, ?)`)
+		`INSERT INTO events (instance_id, id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, created_at)
+		 VALUES (?, ?, ?, ?, '0', ?, '', '', ?, ?, '{}', ?, ?, ?, ?, ?)`)
 	if err != nil {
 		tx.Rollback()
 		d.cb.RecordFailure()
@@ -83,7 +83,7 @@ func (d *Drainer) flush() {
 			payload = "{}"
 		}
 		_, err := stmt.Exec(
-			eventID, rec.EventType, rec.Category, rec.ActorID,
+			rec.InstanceID, eventID, rec.EventType, rec.Category, rec.ActorID,
 			rec.Stream, payload, rec.RequestID, rec.SessionID, rec.FlowID, rec.Fingerprint, rec.CreatedAt,
 		)
 		if err != nil {

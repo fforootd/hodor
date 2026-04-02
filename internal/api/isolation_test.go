@@ -69,6 +69,42 @@ func TestCrossTenantIsolation(t *testing.T) {
 		t.Fatalf("create user in tenant_a: expected 200/201, got %d: %v", userCode, userBody)
 	}
 
+	tenantAFlowCode, tenantAFlowBody := srv.RequestWithHeaders("POST", "/v1/login-flows", map[string]string{
+		"Authorization": "Bearer " + tenantAToken,
+		"X-Instance-Id": "tenant_a",
+	}, map[string]any{
+		"schema_id": "login_flow_v1",
+		"name":      "Tenant A Flow",
+		"strategy":  "identifier_first",
+		"state":     "active",
+		"priority":  100,
+	})
+	if tenantAFlowCode != 200 && tenantAFlowCode != 201 {
+		t.Fatalf("create login flow in tenant_a: expected 200/201, got %d: %v", tenantAFlowCode, tenantAFlowBody)
+	}
+	tenantAFlowID, _ := tenantAFlowBody["id"].(string)
+	if tenantAFlowID == "" {
+		t.Fatal("tenant_a login flow id is empty")
+	}
+
+	tenantBFlowCode, tenantBFlowBody := srv.RequestWithHeaders("POST", "/v1/login-flows", map[string]string{
+		"Authorization": "Bearer " + tenantBToken,
+		"X-Instance-Id": "tenant_b",
+	}, map[string]any{
+		"schema_id": "login_flow_v1",
+		"name":      "Tenant B Flow",
+		"strategy":  "identifier_first",
+		"state":     "active",
+		"priority":  10,
+	})
+	if tenantBFlowCode != 200 && tenantBFlowCode != 201 {
+		t.Fatalf("create login flow in tenant_b: expected 200/201, got %d: %v", tenantBFlowCode, tenantBFlowBody)
+	}
+	tenantBFlowID, _ := tenantBFlowBody["id"].(string)
+	if tenantBFlowID == "" {
+		t.Fatal("tenant_b login flow id is empty")
+	}
+
 	// ── Step 2: Query tenant_b — should see NO tenant_a data ───────────────
 
 	t.Run("tenant_b sees no orgs from tenant_a", func(t *testing.T) {
@@ -101,6 +137,36 @@ func TestCrossTenantIsolation(t *testing.T) {
 		first, _ := users[0].(map[string]any)
 		if first["identifier"] != "admin_b" {
 			t.Fatalf("tenant_b user should be admin_b, got %v", first["identifier"])
+		}
+	})
+
+	t.Run("login flow resolution stays within tenant instance", func(t *testing.T) {
+		codeA, bodyA := srv.RequestWithHeaders("POST", "/v1/login-flows/resolve", map[string]string{
+			"Authorization": "Bearer " + tenantAToken,
+			"X-Instance-Id": "tenant_a",
+		}, map[string]any{
+			"org_id":    "1",
+			"schema_id": "human_user_v1",
+		})
+		if codeA != 200 {
+			t.Fatalf("resolve login flow in tenant_a: expected 200, got %d: %v", codeA, bodyA)
+		}
+		if bodyA["id"] != tenantAFlowID {
+			t.Fatalf("tenant_a resolved flow %v, want %s", bodyA["id"], tenantAFlowID)
+		}
+
+		codeB, bodyB := srv.RequestWithHeaders("POST", "/v1/login-flows/resolve", map[string]string{
+			"Authorization": "Bearer " + tenantBToken,
+			"X-Instance-Id": "tenant_b",
+		}, map[string]any{
+			"org_id":    "1",
+			"schema_id": "human_user_v1",
+		})
+		if codeB != 200 {
+			t.Fatalf("resolve login flow in tenant_b: expected 200, got %d: %v", codeB, bodyB)
+		}
+		if bodyB["id"] != tenantBFlowID {
+			t.Fatalf("tenant_b resolved flow %v, want %s", bodyB["id"], tenantBFlowID)
 		}
 	})
 

@@ -88,7 +88,7 @@ func New(cfg *config.Config, db *database.DB, bus *eventbus.Bus) *Server {
 	logging.Printf("Catalog ready (%d embedded templates)", catalogSvc.EmbeddedCount())
 
 	// Mount analytics engine (queries OLTP database directly — pure Go, no DuckDB).
-	oltpBackend := analytics.NewOLTPBackend(db.SQL(), db.Dialect())
+	oltpBackend := analytics.NewOLTPBackend(db)
 	analyticsEngine := analytics.New(oltpBackend)
 	analyticsEngine.RegisterRoutes(mux)
 
@@ -220,7 +220,7 @@ func initSecretStore(cfg *config.Config, db *database.DB) (*zcrypto.SecretBox, *
 	} else {
 		logging.Printf("[encryption] active_key=%s, ring_size=%d", cfg.Encryption.ActiveKeyID, len(cfg.Encryption.Keys))
 	}
-	return secretBox, zcrypto.NewSecretStore(db.SQL(), secretBox)
+	return secretBox, zcrypto.NewSecretStore(db, secretBox)
 }
 
 func registerWebRoutes(mux *http.ServeMux) {

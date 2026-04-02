@@ -37,7 +37,7 @@ func newStorageWithServer(t *testing.T) (*Storage, *database.DB) {
 	if err != nil {
 		t.Fatalf("NewSecretBox() error = %v", err)
 	}
-	store := crypto.NewSecretStore(db.SQL(), box)
+	store := crypto.NewSecretStore(db, box)
 	return NewStorage(db, store), db
 }
 
@@ -303,7 +303,7 @@ func TestStorageOpenWithDatabaseOpenHelper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSecretBox() error = %v", err)
 	}
-	store := crypto.NewSecretStore(db.SQL(), box)
+	store := crypto.NewSecretStore(db, box)
 	storage := NewStorage(db, store)
 
 	if err := storage.Health(t.Context()); err != nil {

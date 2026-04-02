@@ -52,7 +52,8 @@
 | [Developer Experience](design/developer-experience.md) | Zero-config, pure Go binary, config cascade, testing philosophy |
 | [Design Decisions](design/design-decisions.md) | Resolved architecture and product decisions with rationale |
 | [Design Patterns](design/design-patterns.md) | Unified identity, i18n, notifications, schemas, UI architecture |
-| [Storage Architecture](design/storage-architecture.md) | Three data categories (stable, transient, usage) across three deployment scenarios (local, production, cloud) |
+| [Storage Architecture](design/storage-architecture.md) | Four storage primitives (OLTP, KV, Queue, OLAP) across four deployment profiles (Level 0-3: local, scale-out, dedicated KV, multi-region). Canonical reference for data architecture. |
+| [Storage Implementation Status](design/storage-implementation-status.md) | Reality check for the current POC: what storage tiers are actually implemented, tested, and still only documented as target architecture. |
 
 ## Guides
 

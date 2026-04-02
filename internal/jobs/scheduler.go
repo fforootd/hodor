@@ -65,10 +65,8 @@ func (s *Scheduler) Run(ctx context.Context) {
 // initNextRun sets next_run_at for jobs that don't have one yet.
 func (s *Scheduler) initNextRun() {
 	now := time.Now().UTC()
-	instanceID := httputil.DefaultInstanceID
 	rows, err := s.db.SQL().Query(
-		`SELECT name, cron FROM jobs WHERE instance_id = ? AND enabled = 1 AND (next_run_at IS NULL OR next_run_at = '')`,
-		instanceID,
+		`SELECT instance_id, name, cron FROM jobs WHERE enabled = 1 AND (next_run_at IS NULL OR next_run_at = '')`,
 	)
 	if err != nil {
 		logging.Printf("[scheduler] init error: %v", err)
@@ -77,8 +75,8 @@ func (s *Scheduler) initNextRun() {
 	defer rows.Close()
 
 	for rows.Next() {
-		var name, cron string
-		if err := rows.Scan(&name, &cron); err != nil {
+		var instanceID, name, cron string
+		if err := rows.Scan(&instanceID, &name, &cron); err != nil {
 			continue
 		}
 		next := nextCronTime(now, cron)
@@ -96,11 +94,10 @@ func (s *Scheduler) initNextRun() {
 func (s *Scheduler) checkAndRun(ctx context.Context) {
 	now := time.Now().UTC()
 
-	instanceID := httputil.DefaultInstanceID
 	rows, err := s.db.SQL().QueryContext(ctx,
-		`SELECT name, cron FROM jobs
-		 WHERE instance_id = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`,
-		instanceID, now.Format(time.RFC3339),
+		`SELECT instance_id, name, cron FROM jobs
+		 WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`,
+		now.Format(time.RFC3339),
 	)
 	if err != nil {
 		logging.Printf("[scheduler] check error: %v", err)
@@ -109,13 +106,14 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 	defer rows.Close()
 
 	type dueJob struct {
-		name string
-		cron string
+		instanceID string
+		name       string
+		cron       string
 	}
 	var due []dueJob
 	for rows.Next() {
 		var j dueJob
-		if err := rows.Scan(&j.name, &j.cron); err != nil {
+		if err := rows.Scan(&j.instanceID, &j.name, &j.cron); err != nil {
 			continue
 		}
 		due = append(due, j)
@@ -135,11 +133,11 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		// Mark as running.
 		_, _ = s.db.SQL().ExecContext(ctx,
 			`UPDATE jobs SET last_status = 'running', last_run_at = ? WHERE instance_id = ? AND name = ?`,
-			now.Format(time.RFC3339), instanceID, j.name,
+			now.Format(time.RFC3339), j.instanceID, j.name,
 		)
 
 		// Run the job.
-		err := fn(ctx)
+		err := fn(httputil.WithInstanceID(ctx, j.instanceID))
 
 		// Update status.
 		status := "success"
@@ -155,7 +153,7 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		next := nextCronTime(time.Now().UTC(), j.cron)
 		_, _ = s.db.SQL().ExecContext(ctx,
 			`UPDATE jobs SET last_status = ?, last_error = ?, run_count = run_count + 1, next_run_at = ? WHERE instance_id = ? AND name = ?`,
-			status, errMsg, next.Format(time.RFC3339), instanceID, j.name,
+			status, errMsg, next.Format(time.RFC3339), j.instanceID, j.name,
 		)
 	}
 }

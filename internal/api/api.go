@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/zitadel/zitadel/internal/catalog"
+	"github.com/zitadel/zitadel/internal/events"
 	"github.com/zitadel/zitadel/internal/logging"
+	"github.com/zitadel/zitadel/internal/loginflow"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,20 +27,22 @@ import (
 
 	"github.com/zitadel/zitadel/internal/schema"
 	"github.com/zitadel/zitadel/internal/session"
-	"github.com/zitadel/zitadel/internal/telemetry"
 	"github.com/zitadel/zitadel/internal/uniqueness"
 )
 
 // API holds the REST handlers and their dependencies.
 type API struct {
-	db          *database.DB
-	bus         *eventbus.Bus
-	cookies     *session.CookieConfig
-	spec        *OpenAPIRegistry
-	catalog     *catalog.Service
-	risk        risk.Evaluator
-	notifier    *notify.Service
-	schemaCache *schema.SchemaCache
+	db             *database.DB
+	bus            *eventbus.Bus
+	cookies        *session.CookieConfig
+	spec           *OpenAPIRegistry
+	catalog        *catalog.Service
+	risk           risk.Evaluator
+	notifier       *notify.Service
+	schemaCache    *schema.SchemaCache
+	sessionStore   *session.Store
+	loginFlowStore *loginflow.Store
+	eventStore     *events.Store
 }
 
 // New creates a new API handler.
@@ -49,12 +53,15 @@ func New(db *database.DB, bus *eventbus.Bus, cookies *session.CookieConfig) *API
 	}
 
 	return &API{
-		db:          db,
-		bus:         bus,
-		cookies:     cookies,
-		spec:        &OpenAPIRegistry{},
-		risk:        riskEvaluator,
-		schemaCache: schema.NewSchemaCache(5 * time.Minute),
+		db:             db,
+		bus:            bus,
+		cookies:        cookies,
+		spec:           &OpenAPIRegistry{},
+		risk:           riskEvaluator,
+		schemaCache:    schema.NewSchemaCache(5 * time.Minute),
+		sessionStore:   session.NewStore(db),
+		loginFlowStore: loginflow.NewStore(db),
+		eventStore:     events.NewStore(db),
 	}
 }
 
@@ -382,7 +389,7 @@ func (a *API) createOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), stx.Tx(), "org.created", orgID, orgID, "org", map[string]any{
+	emitEvent(r.Context(), stx, "org.created", orgID, orgID, "org", map[string]any{
 		"name": name,
 	})
 
@@ -628,7 +635,6 @@ func (a *API) listApps(w http.ResponseWriter, r *http.Request) {
 	scoped := a.db.Scoped(r.Context())
 	var where []string
 	var args []any
-	where = append(where, "a.instance_id = ?")
 	args = append(args, scoped.InstanceID())
 	where = append(where, "a.id > ?")
 	args = append(args, cursor)
@@ -650,7 +656,7 @@ func (a *API) listApps(w http.ResponseWriter, r *http.Request) {
 	                 a.state, COALESCE(a.schema_id,''), COALESCE(s.type,''), COALESCE(a.metadata,'{}'), a.created_at, a.updated_at
 	          FROM apps a
 	          LEFT JOIN schemas s ON a.schema_id = s.id
-	          WHERE ` + strings.Join(where, " AND ") + `
+	          WHERE a.instance_id = ? AND ` + strings.Join(where, " AND ") + `
 	          ORDER BY a.id ASC
 	          LIMIT ?`
 	args = append(args, limit+1)
@@ -879,7 +885,7 @@ func (a *API) createApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), stx.Tx(), "app.created", appID, appID, "app", map[string]any{
+	emitEvent(r.Context(), stx, "app.created", appID, appID, "app", map[string]any{
 		"name":      name,
 		"client_id": clientID,
 	})
@@ -1291,7 +1297,7 @@ func (a *API) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit event.
-	emitEvent(r.Context(), stx.Tx(), "identity.created", userID, userID, "identity", map[string]any{
+	emitEvent(r.Context(), stx, "identity.created", userID, userID, "identity", map[string]any{
 		"identifier": identifier,
 	})
 
@@ -1378,8 +1384,8 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	baseSelect := `SELECT i.id, i.org_id, i.identifier, i.display_name, i.user_type, i.state,
 		COALESCE(i.schema_id,''), COALESCE(s.type,''), i.metadata, i.created_at, i.updated_at
 		 FROM users i
-		 LEFT JOIN schemas s ON i.schema_id = s.id`
-	where = append(where, `i.instance_id = ?`)
+		 LEFT JOIN schemas s ON i.schema_id = s.id
+		 WHERE i.instance_id = ?`
 	args = append(args, scoped.InstanceID())
 	if schemaType != "" {
 		where = append(where, `s.type = ?`)
@@ -1387,8 +1393,8 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if orgIDFilter != "" {
-		where = append(where, `i.id IN (SELECT user_id FROM memberships WHERE resource_type='org' AND resource_id=?)`)
-		args = append(args, orgIDFilter)
+		where = append(where, `i.id IN (SELECT user_id FROM memberships WHERE instance_id = ? AND resource_type='org' AND resource_id=?)`)
+		args = append(args, scoped.InstanceID(), orgIDFilter)
 	}
 	if stateFilter != "" {
 		where = append(where, `i.state = ?`)
@@ -1397,7 +1403,11 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 	where = append(where, `i.id > ?`)
 	args = append(args, cursor)
 
-	query := baseSelect + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY i.id ASC LIMIT ?`
+	query := baseSelect
+	if len(where) > 0 {
+		query += ` AND ` + strings.Join(where, " AND ")
+	}
+	query += ` ORDER BY i.id ASC LIMIT ?`
 	args = append(args, limit+1)
 	rows, err = scoped.QueryContext(r.Context(), scoped.Rebind(query), args...)
 	if err != nil {
@@ -1605,7 +1615,7 @@ func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emitEvent(r.Context(), stx.Tx(), "identity.deleted", userID, userID, "identity", nil)
+	emitEvent(r.Context(), stx, "identity.deleted", userID, userID, "identity", nil)
 
 	// FGA: clean up all tuples (best-effort — orphan tuples on deleted users are harmless).
 	if svc := FGAService; svc != nil {
@@ -2687,83 +2697,31 @@ func (a *API) getResource(table string) http.HandlerFunc {
 	}
 }
 
-// execer abstracts *sql.Tx and *sql.DB for event insertion.
-type execer interface {
+type eventWriter interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	InstanceID() string
+	Rebind(string) string
 }
 
-// emitEventTo is the single implementation for audit event emission.
-// All other emit* functions delegate here.
-func emitEventTo(ctx context.Context, db execer, eventType, actorID, aggregateID, aggregateType string, payload map[string]any) {
-	eventID := id.New()
-	payloadJSON := "{}"
-	if len(payload) > 0 {
-		b, _ := json.Marshal(payload)
-		payloadJSON = string(b)
-	}
-	instanceID := httputil.InstanceIDFromContext(ctx)
-	requestID := telemetry.RequestIDFromContext(ctx)
-	sessionID := telemetry.SessionIDFromContext(ctx)
-	flowID := telemetry.FlowIDFromContext(ctx)
-	fingerprint := telemetry.FingerprintFromContext(ctx)
-	clientID := telemetry.ClientIDFromContext(ctx)
-	tokenID := telemetry.TokenIDFromContext(ctx)
-	delegationType := telemetry.DelegationTypeFromContext(ctx)
-	sdkName := telemetry.SDKNameFromContext(ctx)
-	sdkVersion := telemetry.SDKVersionFromContext(ctx)
-
-	db.ExecContext(ctx, //nolint:errcheck // fire-and-forget audit event
-		`INSERT INTO events (instance_id, id, event_type, category, org_id, actor_id, actor_type, aggregate_id, aggregate_type, payload, metadata, request_id, session_id, flow_id, fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at)
-		 VALUES (?, ?, ?, ?, '0', ?, '', ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		instanceID, eventID, eventType, eventCategory(eventType), actorID, aggregateID, aggregateType, payloadJSON, requestID, sessionID, flowID, fingerprint, clientID, tokenID, delegationType, sdkName, sdkVersion)
+func emitEventTo(ctx context.Context, db eventWriter, eventType, actorID, aggregateID, aggregateType string, payload map[string]any) {
+	_ = events.Append(ctx, db, eventType, actorID, aggregateID, aggregateType, payload) //nolint:errcheck
 }
 
 // emitEvent emits an audit event within a transaction or scoped connection.
-func emitEvent(ctx context.Context, db execer, eventType string, actorID, aggregateID, aggregateType string, payload map[string]any) {
+func emitEvent(ctx context.Context, db eventWriter, eventType string, actorID, aggregateID, aggregateType string, payload map[string]any) {
 	emitEventTo(ctx, db, eventType, actorID, aggregateID, aggregateType, payload)
 }
 
 // EmitAuthEvent emits an auth-category event outside a transaction and signals the bus.
 func (a *API) EmitAuthEvent(ctx context.Context, eventType string, actorID string, payload map[string]any) {
-	emitEventTo(ctx, a.db.SQL(), eventType, actorID, actorID, "auth", payload)
+	emitEventTo(ctx, a.db.Scoped(ctx), eventType, actorID, actorID, "auth", payload)
 	a.bus.Signal()
 }
 
 // EmitEvent emits a generic event outside a transaction and signals the bus.
 func (a *API) EmitEvent(ctx context.Context, eventType, actorID, aggregateID, aggregateType string, payload map[string]any) {
-	emitEventTo(ctx, a.db.SQL(), eventType, actorID, aggregateID, aggregateType, payload)
+	emitEventTo(ctx, a.db.Scoped(ctx), eventType, actorID, aggregateID, aggregateType, payload)
 	a.bus.Signal()
-}
-
-// eventCategory derives the event category from the event_type prefix.
-func eventCategory(eventType string) string {
-	for i := 0; i < len(eventType); i++ {
-		if eventType[i] == '.' {
-			prefix := eventType[:i]
-			switch prefix {
-			case "entity", "identity", "provider", "settings", "schema":
-				return "entity"
-			case "auth":
-				return "auth"
-			case "session":
-				return "session"
-			case "token":
-				return "token"
-			case "request", "api":
-				return "request"
-			case "log":
-				return "log"
-			case "signal":
-				return "signal"
-			case "threat":
-				return "threat"
-			case "notification":
-				return "system"
-			}
-			return prefix
-		}
-	}
-	return "system"
 }
 
 // GetIdentityByID is an exported helper for the UI to get an identity (for edit form).
@@ -2803,7 +2761,7 @@ func (a *API) CreateUserInternal(r *http.Request, req UserRequest) (UserResponse
 		return UserResponse{}, err
 	}
 
-	emitEvent(r.Context(), stx.Tx(), "identity.created", userID, userID, "identity", map[string]any{
+	emitEvent(r.Context(), stx, "identity.created", userID, userID, "identity", map[string]any{
 		"identifier": req.Identifier,
 	})
 
@@ -2901,7 +2859,7 @@ func (a *API) DeleteIdentityInternal(r *http.Request, userID string) error {
 		return fmt.Errorf("identity %s", userID)
 	}
 
-	emitEvent(r.Context(), stx.Tx(), "identity.deleted", userID, userID, "identity", nil)
+	emitEvent(r.Context(), stx, "identity.deleted", userID, userID, "identity", nil)
 	if err := stx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

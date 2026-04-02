@@ -1,21 +1,16 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
-
-	"github.com/zitadel/zitadel/internal/database"
-	"github.com/zitadel/zitadel/internal/httputil"
-
 	"strconv"
 	"strings"
 
+	eventsvc "github.com/zitadel/zitadel/internal/events"
+	"github.com/zitadel/zitadel/internal/httputil"
 	"github.com/zitadel/zitadel/internal/id"
 )
-
-// --- Event types ---
 
 type EventResponse struct {
 	ID             string `json:"id"`
@@ -44,7 +39,6 @@ type AggregateRow struct {
 	Count      int64             `json:"count"`
 }
 
-// RegisterEventRoutes mounts event-related REST routes.
 func (a *API) RegisterEventRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/events", a.listEvents)
 	mux.HandleFunc("GET /v1/events/aggregate", a.aggregateEvents)
@@ -58,181 +52,54 @@ func (a *API) listEvents(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	var cursor string
-	if c := r.URL.Query().Get("cursor"); c != "" {
-		cursor = c
-	}
 
-	scoped := a.db.Scoped(r.Context())
-	query, args := a.buildEventsQuery(r, scoped, cursor, limit)
-
-	rows, err := scoped.QueryContext(r.Context(), query, args...)
+	items, nextCursor, err := a.eventStore.List(r.Context(), eventsvc.Filter{
+		Cursor:         r.URL.Query().Get("cursor"),
+		Limit:          limit,
+		OrgID:          r.URL.Query().Get("org_id"),
+		AggregateType:  r.URL.Query().Get("aggregate_type"),
+		AggregateID:    r.URL.Query().Get("aggregate_id"),
+		SessionID:      r.URL.Query().Get("session_id"),
+		Fingerprint:    r.URL.Query().Get("fingerprint"),
+		ClientID:       r.URL.Query().Get("client_id"),
+		DelegationType: r.URL.Query().Get("delegation_type"),
+		Since:          r.URL.Query().Get("since"),
+		Types:          splitCSV(r.URL.Query().Get("types")),
+	})
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	defer rows.Close()
 
-	var events []EventResponse
-	for rows.Next() {
-		evt, err := a.scanEventRow(rows)
-		if err != nil {
-			continue
-		}
-		events = append(events, evt)
+	events := make([]EventResponse, 0, len(items))
+	for _, item := range items {
+		events = append(events, eventResponseFromRecord(item))
 	}
-	if err := rows.Err(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
-		return
-	}
-
-	var nextCursor string
-	if len(events) > limit {
-		events = events[:limit]
-		nextCursor = events[len(events)-1].ID
-	}
-
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: events, NextCursor: nextCursor})
-}
-
-func (a *API) buildEventsQuery(r *http.Request, scoped *database.ScopedDB, cursor string, limit int) (string, []any) {
-	query := `SELECT id, event_type, org_id, actor_id, actor_type,
-	                 aggregate_id, aggregate_type, payload, metadata, created_at,
-	                 request_id, session_id, flow_id, fingerprint,
-	                 client_id, token_id, delegation_type, sdk_name, sdk_version
-	          FROM events WHERE instance_id = ? AND id > ?`
-	args := []any{scoped.InstanceID(), cursor}
-
-	params := map[string]string{
-		"org_id":          r.URL.Query().Get("org_id"),
-		"aggregate_type":  r.URL.Query().Get("aggregate_type"),
-		"aggregate_id":    r.URL.Query().Get("aggregate_id"),
-		"session_id":      r.URL.Query().Get("session_id"),
-		"fingerprint":     r.URL.Query().Get("fingerprint"),
-		"client_id":       r.URL.Query().Get("client_id"),
-		"delegation_type": r.URL.Query().Get("delegation_type"),
-		"created_at >= ?": r.URL.Query().Get("since"),
-	}
-
-	for col, val := range params {
-		if val == "" {
-			continue
-		}
-		if strings.Contains(col, "?") {
-			query += " AND " + col
-		} else {
-			query += fmt.Sprintf(" AND %s = ?", col)
-		}
-		args = append(args, val)
-	}
-
-	if types := r.URL.Query().Get("types"); types != "" {
-		typeList := strings.Split(types, ",")
-		placeholders := make([]string, len(typeList))
-		for i, t := range typeList {
-			placeholders[i] = "?"
-			args = append(args, strings.TrimSpace(t))
-		}
-		query += fmt.Sprintf(" AND event_type IN (%s)", strings.Join(placeholders, ","))
-	}
-
-	query += ` ORDER BY id ASC LIMIT ?`
-	args = append(args, limit+1)
-	return scoped.Rebind(query), args
-}
-
-func (a *API) scanEventRow(rows *sql.Rows) (EventResponse, error) {
-	var evt EventResponse
-	var payloadStr, metadataStr string
-	var requestID, sessionID, flowID, fingerprint *string
-	var clientID, tokenID, delegationType, sdkName, sdkVersion *string
-	err := rows.Scan(
-		&evt.ID, &evt.EventType, &evt.OrgID, &evt.ActorID, &evt.ActorType,
-		&evt.AggregateID, &evt.AggregateType,
-		&payloadStr, &metadataStr, &evt.CreatedAt,
-		&requestID, &sessionID, &flowID, &fingerprint,
-		&clientID, &tokenID, &delegationType, &sdkName, &sdkVersion,
-	)
-	if err != nil {
-		return evt, err
-	}
-	if requestID != nil {
-		evt.RequestID = *requestID
-	}
-	if sessionID != nil {
-		evt.SessionID = *sessionID
-	}
-	if flowID != nil {
-		evt.FlowID = *flowID
-	}
-	if fingerprint != nil {
-		evt.Fingerprint = *fingerprint
-	}
-	if clientID != nil {
-		evt.ClientID = *clientID
-	}
-	if tokenID != nil {
-		evt.TokenID = *tokenID
-	}
-	if delegationType != nil {
-		evt.DelegationType = *delegationType
-	}
-	if sdkName != nil {
-		evt.SDKName = *sdkName
-	}
-	if sdkVersion != nil {
-		evt.SDKVersion = *sdkVersion
-	}
-	_ = json.Unmarshal([]byte(payloadStr), &evt.Payload)
-	_ = json.Unmarshal([]byte(metadataStr), &evt.Metadata)
-	return evt, nil
 }
 
 func (a *API) aggregateEvents(w http.ResponseWriter, r *http.Request) {
 	queryName := r.URL.Query().Get("query")
-	scoped := a.db.Scoped(r.Context())
-
-	var query string
-	var args []any
-
 	switch queryName {
 	case "event_counts":
-		orgID := r.URL.Query().Get("org_id")
-		query = scoped.Rebind(`SELECT event_type, COUNT(*) as cnt FROM events WHERE instance_id = ? AND org_id = ? GROUP BY event_type`)
-		args = []any{scoped.InstanceID(), orgID}
 	default:
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unknown aggregate query: %s", queryName))
 		return
 	}
 
-	rows, err := scoped.QueryContext(r.Context(), query, args...)
+	rows, err := a.eventStore.AggregateCountsByEventType(r.Context(), r.URL.Query().Get("org_id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "aggregate query failed")
 		return
 	}
-	defer rows.Close()
 
-	var result []AggregateRow
-	for rows.Next() {
-		var key string
-		var count int64
-		if err := rows.Scan(&key, &count); err != nil {
-			continue
-		}
-		result = append(result, AggregateRow{
-			Dimensions: map[string]string{"event_type": key},
-			Count:      count,
-		})
+	result := make([]AggregateRow, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, AggregateRow{Dimensions: row.Dimensions, Count: row.Count})
 	}
-	if err := rows.Err(); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "rows error")
-		return
-	}
-
 	httputil.WriteJSON(w, http.StatusOK, ListResponse{Items: result})
 }
 
-// streamEvents provides Server-Sent Events (SSE) for real-time event streaming.
 func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -246,71 +113,35 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	scoped := a.db.Scoped(r.Context())
 	consumer := a.bus.Register(id.NewSSEConsumer())
-
-	// Determine starting cursor.
-	var cursor string
-	if c := r.URL.Query().Get("cursor"); c != "" && c != "now" {
-		cursor = c
-	} else {
-		scoped.QueryRowContext(r.Context(), scoped.Rebind(`SELECT COALESCE(MAX(id), '') FROM events WHERE instance_id = ?`), scoped.InstanceID()).Scan(&cursor)
+	cursor := r.URL.Query().Get("cursor")
+	if cursor == "" || cursor == "now" {
+		cursor, _ = a.eventStore.MaxID(r.Context())
 	}
 
-	typeFilter := r.URL.Query().Get("types")
-	var typeList []string
-	if typeFilter != "" {
-		for _, t := range strings.Split(typeFilter, ",") {
-			typeList = append(typeList, strings.TrimSpace(t))
-		}
-	}
-
+	typeList := splitCSV(r.URL.Query().Get("types"))
 	fingerprintFilter := r.URL.Query().Get("fingerprint")
 	clientFilter := r.URL.Query().Get("client_id")
 
 	for {
 		if !consumer.Wait(r.Context()) {
-			return // Client disconnected.
-		}
-
-		rows, err := scoped.QueryContext(r.Context(),
-			scoped.Rebind(`SELECT id, event_type, org_id, actor_id, actor_type,
-			        aggregate_id, aggregate_type, payload, metadata, created_at,
-			        request_id, session_id, flow_id, fingerprint,
-			        client_id, token_id, delegation_type, sdk_name, sdk_version
-			 FROM events WHERE instance_id = ? AND id > ? ORDER BY id ASC LIMIT 100`), scoped.InstanceID(), cursor)
-		if err != nil {
 			return
 		}
 
-		for rows.Next() {
-			evt, err := a.scanEventRow(rows)
-			if err != nil {
+		records, err := a.eventStore.ListAfter(r.Context(), cursor, 100)
+		if err != nil {
+			return
+		}
+		for _, record := range records {
+			evt := eventResponseFromRecord(record)
+			if len(typeList) > 0 && !containsString(typeList, evt.EventType) {
+				cursor = evt.ID
 				continue
 			}
-
-			// Apply type filter.
-			if len(typeList) > 0 {
-				matched := false
-				for _, t := range typeList {
-					if evt.EventType == t {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					cursor = evt.ID
-					continue
-				}
-			}
-
-			// Apply fingerprint filter.
 			if fingerprintFilter != "" && evt.Fingerprint != fingerprintFilter {
 				cursor = evt.ID
 				continue
 			}
-
-			// Apply client_id filter.
 			if clientFilter != "" && evt.ClientID != clientFilter {
 				cursor = evt.ID
 				continue
@@ -321,9 +152,53 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			cursor = evt.ID
 		}
-		if err := rows.Err(); err != nil {
-			return // Rows iteration error.
-		}
-		_ = rows.Close() //nolint:sqlclosecheck // SSE loop: rows created each iteration, defer would leak.
 	}
+}
+
+func eventResponseFromRecord(record eventsvc.Event) EventResponse {
+	return EventResponse{
+		ID:             record.ID,
+		EventType:      record.EventType,
+		OrgID:          record.OrgID,
+		ActorID:        record.ActorID,
+		ActorType:      record.ActorType,
+		AggregateID:    record.AggregateID,
+		AggregateType:  record.AggregateType,
+		RequestID:      record.RequestID,
+		SessionID:      record.SessionID,
+		FlowID:         record.FlowID,
+		Fingerprint:    record.Fingerprint,
+		ClientID:       record.ClientID,
+		TokenID:        record.TokenID,
+		DelegationType: record.DelegationType,
+		SDKName:        record.SDKName,
+		SDKVersion:     record.SDKVersion,
+		Payload:        record.Payload,
+		Metadata:       record.Metadata,
+		CreatedAt:      record.CreatedAt,
+	}
+}
+
+func splitCSV(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
