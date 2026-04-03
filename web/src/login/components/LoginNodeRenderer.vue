@@ -459,12 +459,13 @@
   ])
 
   function actionDisabled(action: string): boolean {
-    return (
-      !!action &&
-      !!props.captchaRequired &&
-      !props.captchaSolved &&
-      protectedCaptchaActions.has(action)
-    )
+    if (!action || !props.captchaRequired || props.captchaSolved) return false
+    if (!protectedCaptchaActions.has(action)) return false
+    // Don't disable buttons for invisible POW challenges — they auto-solve.
+    const hasPowChallenge = props.flowStep?.nodes?.some((n: any) => n.type === 'captcha_challenge')
+    if (hasPowChallenge) return false
+    // Only disable for interactive captcha widgets (altcha checkbox, hCaptcha, etc.)
+    return true
   }
 </script>
 

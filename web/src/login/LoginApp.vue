@@ -319,6 +319,7 @@
   function applyInitializedFlow(step: FlowStep) {
     applyFlowStepState(step)
     maybeCollectFingerprint(step)
+    maybeAutoSolvePow(step)
   }
 
   function handleCompleteResponse(resp: FlowStep | FlowCompleteResponse): boolean {
@@ -375,7 +376,18 @@
   async function onSubmit() {
     const action = pendingAction.value || 'identifier'
     if (requiresCaptchaVerification(action)) {
-      submitError.value = 'Complete captcha verification to continue.'
+      // POW challenge is auto-solving in the background.
+      // Wait for it to complete, then retry the submission.
+      if (captchaSolving.value) {
+        submitError.value = 'Verifying... please wait.'
+        return
+      }
+      // Trigger a solve if it hasn't started yet.
+      await solveCaptcha()
+      // After solving, retry the action.
+      if (captchaSolved.value) {
+        await submitAction(action)
+      }
       return
     }
     await submitAction(action)
@@ -468,6 +480,7 @@
       }
 
       maybeCollectFingerprint(step)
+      maybeAutoSolvePow(step)
       captchaSolving.value = false
     } catch (err) {
       const detail = toLoginErrorDetail(err)
@@ -550,6 +563,16 @@
     captchaSolving.value = true
     submitError.value = ''
     await submitAction('captcha_submit', { captcha_token: token })
+  }
+
+  /** Auto-solve POW challenge if the step contains a captcha_challenge node. */
+  function maybeAutoSolvePow(step: FlowStep) {
+    if (!step.captcha_required) return
+    if (step.captcha_verified) return
+    const hasChallenge = step.nodes.some((n: any) => n.type === 'captcha_challenge')
+    if (!hasChallenge) return
+    // Trigger the solver asynchronously — it runs in the background and submits the solution.
+    solveCaptcha()
   }
 
   async function maybeCollectFingerprint(step: FlowStep) {
