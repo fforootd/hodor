@@ -1,5 +1,6 @@
 # Hodor Todos
 
+- SAML SP, IDP (will be annoying in rust as well)
 - IdentityListView should we UserListView
 - ~~Secrets encryption in secrets storage with list of masterkeys~~ ✅ ALE: AES-256-GCM envelope encryption with rotatable key ring, `secrets` table
 - Groups as Marketplace addon for FGA?

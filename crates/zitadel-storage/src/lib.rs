@@ -15,9 +15,8 @@ pub use stateful::{
     StatefulStorage, StatefulStore, UserIdentity,
 };
 pub use transient::{
-    AuthRequestRedirect, ChannelSink, CreatedSession, DefaultKvStore, DefaultSink,
-    DefaultTransientStorage, KvStore, LoginFlowRuntimeState, MemoryKvStore, NewLoginFlowState,
-    NoopSink, PersistedSessionRecord, ProviderAuthState, SessionRecord, Sink, SqlKvStore, SqlSink,
-    TransientRecord, TransientStorage,
-    AuthRequestRequirements,
+    AuthRequestRedirect, AuthRequestRequirements, ChannelSink, CreatedSession, DefaultKvStore,
+    DefaultSink, DefaultTransientStorage, KvStore, LoginFlowRuntimeState, MemoryKvStore,
+    NewLoginFlowState, NoopSink, PersistedSessionRecord, ProviderAuthState, SessionRecord, Sink,
+    SqlKvStore, SqlSink, TransientRecord, TransientStorage,
 };
