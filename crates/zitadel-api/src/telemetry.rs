@@ -19,7 +19,7 @@ struct FingerprintResponse {
     id: String,
     #[serde(rename = "type")]
     type_: String,
-    raw_data: String,
+    raw_data: serde_json::Value,
     created_at: String,
 }
 
@@ -61,7 +61,8 @@ async fn list_fingerprints(
                 .map(|r| FingerprintResponse {
                     id: r.0,
                     type_: r.1,
-                    raw_data: r.2,
+                    raw_data: serde_json::from_str(&r.2)
+                        .unwrap_or(serde_json::Value::Object(Default::default())),
                     created_at: r.3,
                 })
                 .collect();

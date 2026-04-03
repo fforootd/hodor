@@ -31,11 +31,12 @@ size="sm" :variant="isLive ? 'default' : 'outline'" :class="isLive ? 'bg-red-600
       </Button>
     </div>
 
-    <DataTable 
+    <DataTable
       v-if="events.length > 0"
-      v-model:row-selection="selectedRows" 
-      :columns="columns as any" 
+      v-model:row-selection="selectedRows"
+      :columns="columns as any"
       :data="events"
+      :initial-sorting="[{ id: 'created_at', desc: true }]"
     >
       <template #toolbar="{ table }">
         <div style="display:none">{{ __setTable(table) }}</div>

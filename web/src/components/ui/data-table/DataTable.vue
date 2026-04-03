@@ -28,10 +28,13 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
-}>()
+  initialSorting?: SortingState
+}>(), {
+  initialSorting: () => [],
+})
 
 const emit = defineEmits<{
   (e: 'update:rowSelection', val: any): void
@@ -43,7 +46,7 @@ function valueUpdater<T>(updaterOrValue: Updater<T>, target: { value: T }, emitN
   if (emitName) emit(emitName as any, next)
 }
 
-const sorting = ref<SortingState>([])
+const sorting = ref<SortingState>(props.initialSorting)
 const columnFilters = ref<ColumnFiltersState>([])
 // Derive initial visibility from column meta — columns with meta.defaultHidden start hidden
 const initialVisibility: VisibilityState = {}

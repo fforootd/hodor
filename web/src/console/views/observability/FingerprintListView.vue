@@ -157,18 +157,30 @@ function formatDate(ds: string) {
 }
 
 function formatSummary(data: any): string {
-  if (!data) return ''
+  if (!data || typeof data !== 'object') return ''
   const parts: string[] = []
-  
+
+  // Thumbmark / rich fingerprint format
   if (data.system?.browser?.name) parts.push(data.system.browser.name)
   if (data.system?.os?.name) parts.push(data.system.os.name)
   if (data.hardware?.deviceMemory) parts.push(`${data.hardware.deviceMemory}GB RAM`)
   if (data.hardware?.hardwareConcurrency) parts.push(`${data.hardware.hardwareConcurrency} Cores`)
-  
+
+  // Simple seed format (ua, screen, device, os)
+  if (parts.length === 0) {
+    if (data.ua) parts.push(data.ua.split(/[/()]/)[0].trim())
+    if (data.screen) parts.push(data.screen)
+    if (data.device) parts.push(data.device)
+    if (data.os) parts.push(data.os)
+    if (data.lang) parts.push(data.lang)
+  }
+
   if (parts.length > 0) return parts.join(', ')
-  
+
   // Fallback to first few keys
-  return Object.keys(data).slice(0, 4).join(', ') + '...'
+  const keys = Object.keys(data)
+  if (keys.length === 0) return ''
+  return keys.slice(0, 4).join(', ') + (keys.length > 4 ? '...' : '')
 }
 
 onMounted(() => {
