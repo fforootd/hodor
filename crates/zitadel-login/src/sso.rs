@@ -589,10 +589,13 @@ mod tests {
             .execute(scoped.pool())
             .await
             .unwrap();
-        let storage =
-            StorageRuntime::from_config(&zitadel_config::Config::default().storage, db.clone())
-                .await
-                .unwrap();
+        let storage = StorageRuntime::from_config(
+            &zitadel_config::Config::default().storage,
+            db.clone(),
+            zitadel_config::Config::default().session.max_age_secs,
+        )
+        .await
+        .unwrap();
 
         LoginState {
             db: db.clone(),

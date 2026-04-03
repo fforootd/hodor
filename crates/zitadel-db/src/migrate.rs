@@ -23,6 +23,14 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "00004_oidc_auth_request_max_age",
         include_str!("../../../migrations/sqlite/00004_oidc_auth_request_max_age.sql"),
     ),
+    (
+        "00005_events_indexes",
+        include_str!("../../../migrations/sqlite/00005_events_indexes.sql"),
+    ),
+    (
+        "00006_retention_scheduler",
+        include_str!("../../../migrations/sqlite/00006_retention_scheduler.sql"),
+    ),
 ];
 
 const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
@@ -45,6 +53,14 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
     (
         "00004_oidc_auth_request_max_age",
         include_str!("../../../migrations/postgres/00004_oidc_auth_request_max_age.sql"),
+    ),
+    (
+        "00005_events_indexes",
+        include_str!("../../../migrations/postgres/00005_events_indexes.sql"),
+    ),
+    (
+        "00006_retention_scheduler",
+        include_str!("../../../migrations/postgres/00006_retention_scheduler.sql"),
     ),
 ];
 

@@ -171,9 +171,10 @@ mod tests {
             config.server.force_insecure_cookies,
             config.session.max_age_secs as i64,
         ));
-        let storage = StorageRuntime::from_config(&config.storage, db.clone())
-            .await
-            .unwrap();
+        let storage =
+            StorageRuntime::from_config(&config.storage, db.clone(), config.session.max_age_secs)
+                .await
+                .unwrap();
         let fga = Arc::new(FgaService::new(db.clone()));
         fga.initialize_instance(DEFAULT_INSTANCE_ID).await.unwrap();
         let oidc = zitadel_oidc::OidcState::new_with_config(

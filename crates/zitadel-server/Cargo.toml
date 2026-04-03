@@ -24,6 +24,8 @@ mime_guess = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 zitadel-testkit = { workspace = true }

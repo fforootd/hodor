@@ -59,7 +59,7 @@ pub struct EventResponse {
 
 async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) -> Response {
     let scoped = s.db.scoped_default();
-    let cursor = p.cursor.unwrap_or_default();
+    let cursor = decode_cursor(p.cursor.as_deref());
     let (created_at, _) = scoped.select_timestamps();
     let payload = scoped.as_text("payload");
     let metadata = scoped.as_text("metadata");
@@ -67,8 +67,8 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
     // Build dynamic WHERE clause with optional filters.
     // Exclude internal log.* events by default — they're server-side observability
     // noise and shouldn't appear in the user-facing audit log.
-    let mut conditions = vec!["instance_id = $1".to_string(), "id > $2".to_string()];
-    let mut bind_idx = 3u32;
+    let mut conditions = vec!["instance_id = $1".to_string()];
+    let mut bind_idx = 2u32;
     let mut extra_binds: Vec<String> = Vec::new();
 
     if let Some(ref et) = p.event_type {
@@ -93,6 +93,19 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
         extra_binds.push(aid.clone());
         bind_idx += 1;
     }
+    if let Some((cursor_created_at, cursor_id)) = &cursor {
+        let cursor_ts_expr = match s.db.dialect() {
+            zitadel_db::Dialect::Postgres => format!("CAST(${bind_idx} AS TIMESTAMPTZ)"),
+            zitadel_db::Dialect::Sqlite => format!("datetime(${bind_idx})"),
+        };
+        conditions.push(format!(
+            "(created_at < {cursor_ts_expr} OR (created_at = {cursor_ts_expr} AND id < ${}))",
+            bind_idx + 1
+        ));
+        extra_binds.push(cursor_created_at.clone());
+        extra_binds.push(cursor_id.clone());
+        bind_idx += 2;
+    }
 
     let where_clause = conditions.join(" AND ");
     let sql = format!(
@@ -102,10 +115,10 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
          request_id, session_id, flow_id, fingerprint, \
          client_id, token_id, delegation_type, \
          sdk_name, sdk_version, sequence, {created_at} \
-         FROM events WHERE {where_clause} ORDER BY created_at DESC LIMIT ${bind_idx}"
+         FROM events WHERE {where_clause} ORDER BY created_at DESC, id DESC LIMIT ${bind_idx}"
     );
 
-    let mut query = sqlx::query(&sql).bind(scoped.instance_id()).bind(&cursor);
+    let mut query = sqlx::query(&sql).bind(scoped.instance_id());
     for val in &extra_binds {
         query = query.bind(val);
     }
@@ -144,7 +157,7 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
                     }
                 })
                 .collect();
-            let next_cursor = items.last().map(|e| e.id.clone());
+            let next_cursor = items.last().map(|e| encode_cursor(&e.created_at, &e.id));
             response::json_ok(response::ListResponse {
                 items,
                 next_cursor,
@@ -153,6 +166,19 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
         }
         Err(e) => response::internal_error(format!("{e}")),
     }
+}
+
+fn encode_cursor(created_at: &str, id: &str) -> String {
+    format!("{created_at}|{id}")
+}
+
+fn decode_cursor(cursor: Option<&str>) -> Option<(String, String)> {
+    let raw = cursor?.trim();
+    if raw.is_empty() || raw == "now" {
+        return None;
+    }
+    let (created_at, id) = raw.split_once('|')?;
+    Some((created_at.to_string(), id.to_string()))
 }
 
 /// SSE event stream — polls for new events every 2 seconds.

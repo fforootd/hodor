@@ -299,6 +299,34 @@ export const eventApi = {
   },
 }
 
+export interface JobStatus {
+  name: string
+  display_name: string
+  description: string
+  schedule: string
+  enabled: boolean
+  status: string
+  strategy: string
+  targets: string[]
+  retention: string
+  cadence: string
+  run_count: number
+  last_removed_count: number
+  last_error: string
+  last_run_at?: string | null
+  next_run_at?: string | null
+  lease_expires_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const jobApi = {
+  list: async (): Promise<JobStatus[]> => {
+    const res = await api.get<{ items?: JobStatus[] }>('/v1/jobs')
+    return res.items || []
+  },
+}
+
 // ------------------------------------------------------------------
 // Search API
 // ------------------------------------------------------------------

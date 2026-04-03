@@ -7,6 +7,7 @@ pub mod console;
 pub mod events;
 pub mod fga;
 pub mod groups;
+pub mod jobs;
 pub mod login_flows;
 pub mod middleware;
 pub mod openapi;
@@ -59,6 +60,8 @@ pub fn routes(state: ApiState) -> Router {
         .merge(apps::routes())
         // Sessions (admin)
         .merge(sessions::routes())
+        // Background jobs
+        .merge(jobs::routes())
         // PATs
         .merge(pats::routes())
         // Events

@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Job",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "display_name": { "type": "string" },
+    "description": { "type": "string" },
+    "schedule": { "type": "string" },
+    "enabled": { "type": "boolean" },
+    "status": { "type": "string" },
+    "strategy": { "type": "string" },
+    "targets": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "retention": { "type": "string" },
+    "cadence": { "type": "string" },
+    "run_count": { "type": "integer" },
+    "last_removed_count": { "type": "integer" },
+    "last_error": { "type": "string" },
+    "last_run_at": { "type": ["string", "null"] },
+    "next_run_at": { "type": ["string", "null"] },
+    "lease_expires_at": { "type": ["string", "null"] },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" }
+  },
+  "required": [
+    "name",
+    "display_name",
+    "description",
+    "schedule",
+    "enabled",
+    "status",
+    "strategy",
+    "targets",
+    "retention",
+    "cadence",
+    "run_count",
+    "last_removed_count",
+    "last_error",
+    "created_at",
+    "updated_at"
+  ]
+}

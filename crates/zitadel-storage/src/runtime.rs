@@ -27,7 +27,11 @@ pub struct StorageRuntime {
 }
 
 impl StorageRuntime {
-    pub async fn from_config(config: &StorageConfig, db: Db) -> anyhow::Result<Self> {
+    pub async fn from_config(
+        config: &StorageConfig,
+        db: Db,
+        session_max_age_secs: u64,
+    ) -> anyhow::Result<Self> {
         let stateful_backend = match db.dialect() {
             Dialect::Sqlite => "sqlite",
             Dialect::Postgres => "postgres",
@@ -54,14 +58,16 @@ impl StorageRuntime {
 
         let kv_backend = derive_kv_backend(config, db.dialect())?;
         let kv = match kv_backend.as_str() {
-            "memory" => DefaultKvStore::Memory(MemoryKvStore::new(db.clone())),
+            "memory" => {
+                DefaultKvStore::Memory(MemoryKvStore::new(db.clone(), session_max_age_secs))
+            }
             "postgres_unlogged" => {
                 if db.dialect() != Dialect::Postgres {
                     anyhow::bail!(
                         "storage.kv.backend = \"postgres_unlogged\" requires a Postgres stateful store"
                     );
                 }
-                DefaultKvStore::Sql(SqlKvStore::new(db.clone()))
+                DefaultKvStore::Sql(SqlKvStore::new(db.clone(), session_max_age_secs))
             }
             "redis" => anyhow::bail!(
                 "storage.kv.backend = \"redis\" is not implemented yet in this POC runtime"
@@ -214,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_defaults_derive_memory_kv_and_channel_sink() {
         let db = Db::open("").await.unwrap();
-        let runtime = StorageRuntime::from_config(&StorageConfig::default(), db)
+        let runtime = StorageRuntime::from_config(&StorageConfig::default(), db, 86_400)
             .await
             .unwrap();
 
@@ -262,7 +268,7 @@ mod tests {
             ..Default::default()
         };
 
-        let error = StorageRuntime::from_config(&config, db)
+        let error = StorageRuntime::from_config(&config, db, 86_400)
             .await
             .err()
             .unwrap();

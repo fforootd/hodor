@@ -10,6 +10,7 @@ pub struct StorageConfig {
     pub sink: SinkConfig,
     pub process_cache: ProcessCacheConfig,
     pub analytics: AnalyticsStorageConfig,
+    pub retention: RetentionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -107,4 +108,82 @@ impl Default for ProcessCacheConfig {
 pub struct AnalyticsStorageConfig {
     pub backend: String,
     pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct RetentionConfig {
+    pub events: EventRetentionConfig,
+    pub sessions: TerminalDataRetentionConfig,
+    pub tokens: TerminalDataRetentionConfig,
+    pub transient_auth_state: ExpiredDataRetentionConfig,
+    pub sink_inbox: InboxRetentionConfig,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            events: EventRetentionConfig::default(),
+            sessions: TerminalDataRetentionConfig::default(),
+            tokens: TerminalDataRetentionConfig::default(),
+            transient_auth_state: ExpiredDataRetentionConfig::default(),
+            sink_inbox: InboxRetentionConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct EventRetentionConfig {
+    pub keep_for: String,
+}
+
+impl Default for EventRetentionConfig {
+    fn default() -> Self {
+        Self {
+            keep_for: "14d".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct TerminalDataRetentionConfig {
+    pub retain_terminal_for: String,
+}
+
+impl Default for TerminalDataRetentionConfig {
+    fn default() -> Self {
+        Self {
+            retain_terminal_for: "7d".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct ExpiredDataRetentionConfig {
+    pub retain_after_expiry: String,
+}
+
+impl Default for ExpiredDataRetentionConfig {
+    fn default() -> Self {
+        Self {
+            retain_after_expiry: "1h".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct InboxRetentionConfig {
+    pub retain_failed_for: String,
+}
+
+impl Default for InboxRetentionConfig {
+    fn default() -> Self {
+        Self {
+            retain_failed_for: "24h".into(),
+        }
+    }
 }

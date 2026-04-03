@@ -77,9 +77,13 @@ mod tests {
         let mut config = zitadel_config::Config::default();
         config.server.public_origin = "http://localhost:8080".into();
         config.server.force_insecure_cookies = false;
-        let storage = zitadel_storage::StorageRuntime::from_config(&config.storage, db.clone())
-            .await
-            .unwrap();
+        let storage = zitadel_storage::StorageRuntime::from_config(
+            &config.storage,
+            db.clone(),
+            config.session.max_age_secs,
+        )
+        .await
+        .unwrap();
         LoginState {
             db,
             stateful: storage.stateful.clone(),

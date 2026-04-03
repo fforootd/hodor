@@ -133,6 +133,13 @@ pub struct WorkersConfig {
     pub event_workers: u32,
     pub lake_batch_size: u32,
     pub lake_batch_window_secs: u32,
+    pub scheduler_enabled: bool,
+    pub scheduler_poll_interval: String,
+    pub scheduler_lease_ttl: String,
+    pub cleanup_batch_size: u32,
+    pub cleanup_max_rows_per_run: u32,
+    pub cleanup_max_run_duration: String,
+    pub event_partition_premake_days: u32,
 }
 
 impl Default for WorkersConfig {
@@ -142,6 +149,13 @@ impl Default for WorkersConfig {
             event_workers: 1,
             lake_batch_size: 1000,
             lake_batch_window_secs: 5,
+            scheduler_enabled: true,
+            scheduler_poll_interval: "30s".into(),
+            scheduler_lease_ttl: "90s".into(),
+            cleanup_batch_size: 500,
+            cleanup_max_rows_per_run: 2000,
+            cleanup_max_run_duration: "2s".into(),
+            event_partition_premake_days: 3,
         }
     }
 }

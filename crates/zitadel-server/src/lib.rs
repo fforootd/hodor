@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod health;
+mod jobs;
 pub mod openapi;
 
 use axum::Router;
@@ -81,6 +82,8 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         }
     }
 
+    jobs::start(&config, db.clone()).await?;
+
     // Build encryption secret box from config (plaintext passthrough if no keys configured).
     let encryption_keys: std::collections::HashMap<String, String> = config
         .encryption
@@ -136,7 +139,12 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         login_path,
         &config.oidc,
     );
-    let storage = zitadel_storage::StorageRuntime::from_config(&config.storage, db.clone()).await?;
+    let storage = zitadel_storage::StorageRuntime::from_config(
+        &config.storage,
+        db.clone(),
+        config.session.max_age_secs,
+    )
+    .await?;
     let fga = Arc::new(FgaService::new(db.clone()));
     fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
 

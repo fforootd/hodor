@@ -246,15 +246,23 @@ impl Sink for NoopSink {
 #[derive(Clone)]
 pub struct SqlKvStore {
     db: Db,
+    session_max_age_secs: u64,
 }
 
 impl SqlKvStore {
-    pub fn new(db: Db) -> Self {
-        Self { db }
+    pub fn new(db: Db, session_max_age_secs: u64) -> Self {
+        Self {
+            db,
+            session_max_age_secs,
+        }
     }
 
     pub(crate) fn scoped(&self, instance_id: &str) -> zitadel_db::scoped::ScopedDb {
         self.db.scoped(instance_id.to_string())
+    }
+
+    pub(crate) fn session_max_age_secs(&self) -> u64 {
+        self.session_max_age_secs
     }
 }
 
@@ -430,19 +438,21 @@ struct MemoryState {
 #[derive(Clone)]
 pub struct MemoryKvStore {
     db: Db,
+    session_max_age_secs: u64,
     state: Arc<RwLock<MemoryState>>,
 }
 
 impl MemoryKvStore {
-    pub fn new(db: Db) -> Self {
+    pub fn new(db: Db, session_max_age_secs: u64) -> Self {
         Self {
             db,
+            session_max_age_secs,
             state: Arc::new(RwLock::new(MemoryState::default())),
         }
     }
 
     fn sql(&self) -> SqlKvStore {
-        SqlKvStore::new(self.db.clone())
+        SqlKvStore::new(self.db.clone(), self.session_max_age_secs)
     }
 }
 
@@ -459,7 +469,7 @@ impl KvStore for MemoryKvStore {
         let session_id = Uuid::new_v4().to_string();
         let token = Uuid::new_v4().to_string();
         let (created_at, created_at_epoch, expires_at) =
-            session_timestamps(&self.db, instance_id).await?;
+            session_timestamps(&self.db, instance_id, self.session_max_age_secs).await?;
         let record = SessionRecord {
             id: session_id.clone(),
             user_id: user_id.to_string(),
@@ -1470,17 +1480,23 @@ async fn apply_channel_batch(db: &Db, pending: &mut Vec<TransientRecord>) -> any
 async fn session_timestamps(
     db: &Db,
     instance_id: &str,
+    session_max_age_secs: u64,
 ) -> anyhow::Result<(String, u64, Option<String>)> {
     let scoped = db.scoped(instance_id.to_string());
+    let max_age = session_max_age_secs.max(1);
     let sql = match db.dialect() {
         zitadel_db::Dialect::Postgres => {
-            "SELECT CURRENT_TIMESTAMP::text, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::bigint, (CURRENT_TIMESTAMP + INTERVAL '24 hours')::text"
+            format!(
+                "SELECT CURRENT_TIMESTAMP::text, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::bigint, (CURRENT_TIMESTAMP + INTERVAL '{max_age} seconds')::text"
+            )
         }
         zitadel_db::Dialect::Sqlite => {
-            "SELECT datetime('now'), CAST(strftime('%s', 'now') AS INTEGER), datetime('now', '+24 hours')"
+            format!(
+                "SELECT datetime('now'), CAST(strftime('%s', 'now') AS INTEGER), datetime('now', '+{max_age} seconds')"
+            )
         }
     };
-    let row: (String, i64, String) = sqlx::query_as(sql).fetch_one(scoped.pool()).await?;
+    let row: (String, i64, String) = sqlx::query_as(&sql).fetch_one(scoped.pool()).await?;
     Ok((row.0, row.1 as u64, Some(row.2)))
 }
 
@@ -1514,6 +1530,9 @@ async fn ensure_sink_inbox_table(db: &Db) -> anyhow::Result<()> {
         }
     };
     sqlx::query(sql).execute(db.pool()).await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_storage_sink_inbox_created_at ON storage_sink_inbox(created_at)")
+        .execute(db.pool())
+        .await?;
     Ok(())
 }
 
@@ -1778,7 +1797,7 @@ mod tests {
             .unwrap();
 
         let sink = RecordingSink::default();
-        let storage = TransientStorage::new(SqlKvStore::new(db.clone()), sink.clone());
+        let storage = TransientStorage::new(SqlKvStore::new(db.clone(), 86_400), sink.clone());
 
         let created = storage
             .create_session(
@@ -1829,7 +1848,7 @@ mod tests {
             .await
             .unwrap();
 
-        let storage = TransientStorage::new(MemoryKvStore::new(db.clone()), FailingSink);
+        let storage = TransientStorage::new(MemoryKvStore::new(db.clone(), 86_400), FailingSink);
         let created = storage
             .create_session(
                 zitadel_db::DEFAULT_INSTANCE_ID,
@@ -1853,7 +1872,7 @@ mod tests {
     async fn provider_auth_state_is_consumed_once() {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        let storage = TransientStorage::new(MemoryKvStore::new(db), NoopSink);
+        let storage = TransientStorage::new(MemoryKvStore::new(db, 86_400), NoopSink);
 
         let state = ProviderAuthState {
             provider_id: "provider-1".into(),
@@ -1908,7 +1927,7 @@ mod tests {
             .unwrap();
 
         let sink = ChannelSink::new(db.clone(), 16, 4, parse_duration("10ms"));
-        let storage = TransientStorage::new(MemoryKvStore::new(db.clone()), sink);
+        let storage = TransientStorage::new(MemoryKvStore::new(db.clone(), 86_400), sink);
         let created = storage
             .create_session(
                 zitadel_db::DEFAULT_INSTANCE_ID,
@@ -1923,7 +1942,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(40)).await;
 
-        let found = SqlKvStore::new(db)
+        let found = SqlKvStore::new(db, 86_400)
             .find_session_by_token(zitadel_db::DEFAULT_INSTANCE_ID, &created.token)
             .await
             .unwrap();

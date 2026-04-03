@@ -189,6 +189,21 @@ backend = "memory"
 # Reserved for future dedicated analytics storage.
 # backend = "same_stateful"
 
+[storage.retention.events]
+keep_for = "14d"
+
+[storage.retention.sessions]
+retain_terminal_for = "7d"
+
+[storage.retention.tokens]
+retain_terminal_for = "7d"
+
+[storage.retention.transient_auth_state]
+retain_after_expiry = "1h"
+
+[storage.retention.sink_inbox]
+retain_failed_for = "24h"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # OBSERVABILITY — Logging and telemetry
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -260,6 +275,13 @@ notification_workers = 1
 event_workers = 1
 lake_batch_size = 1000
 lake_batch_window_secs = 5
+scheduler_enabled = true
+scheduler_poll_interval = "30s"
+scheduler_lease_ttl = "90s"
+cleanup_batch_size = 500
+cleanup_max_rows_per_run = 2000
+cleanup_max_run_duration = "2s"
+event_partition_premake_days = 3
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENCRYPTION — AES-256-GCM envelope encryption for sensitive DB fields

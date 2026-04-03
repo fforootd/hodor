@@ -2,26 +2,35 @@
   <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Background Jobs</h1>
-      <p class="text-muted-foreground text-sm">Registered recurring jobs and their status.</p>
+      <p class="text-muted-foreground text-sm">
+        Effective cleanup schedules, retention windows, and recent runtime status.
+      </p>
     </div>
 
-    <DataTable 
-      v-model:row-selection="selectedRows" 
-      :columns="columns as any" 
+    <div v-if="errorMessage" class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+      {{ errorMessage }}
+    </div>
+
+    <div v-if="loading" class="rounded-md border bg-card px-4 py-6 text-sm text-muted-foreground">
+      Loading job state…
+    </div>
+
+    <DataTable
+      v-else
+      v-model:row-selection="selectedRows"
+      :columns="columns as any"
       :data="jobs"
     >
       <template #toolbar="{ table }">
-        <div class="flex items-center justify-between w-full mb-4">
-          <div class="w-full max-w-lg relative">
-            <div class="relative w-full">
-              <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
-              <Input
-                placeholder="Search jobs..."
-                class="pl-9 bg-background w-full relative z-0"
-                :model-value="globalSearch"
-                @update:model-value="val => { globalSearch = String(val); table.setGlobalFilter(String(val)) }"
-              />
-            </div>
+        <div class="mb-4 flex w-full items-center justify-between gap-4">
+          <div class="relative w-full max-w-lg">
+            <Search class="absolute left-2.5 top-2.5 z-10 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search jobs..."
+              class="relative z-0 w-full bg-background pl-9"
+              :model-value="globalSearch"
+              @update:model-value="val => { globalSearch = String(val); table.setGlobalFilter(String(val)) }"
+            />
           </div>
 
           <DropdownMenu>
@@ -38,7 +47,7 @@
                 :checked="table.getState().columnVisibility[column.id] !== false"
                 @update:checked="(val: boolean) => column.toggleVisibility(!!val)"
               >
-                {{ column.id.replace('_', ' ') }}
+                {{ column.id.replaceAll('_', ' ') }}
               </DropdownMenuCheckboxItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -53,29 +62,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h } from 'vue'
+import { h, onMounted, ref } from 'vue'
+import { createColumnHelper } from '@tanstack/vue-table'
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ChevronDown, Clock3, Search, TriangleAlert } from 'lucide-vue-next'
+import { jobApi, type JobStatus } from '@/api/resources'
 import DataTable from '@/components/ui/data-table/DataTable.vue'
 import DataTablePagination from '@/components/ui/data-table/DataTablePagination.vue'
-import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu'
-import { Search, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2 } from 'lucide-vue-next'
-import { createColumnHelper } from '@tanstack/vue-table'
+import { Checkbox } from '@/components/ui/checkbox'
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
 
-interface Job {
-  name: string
-  status: string
-}
-
-const jobList: Job[] = [
-  { name: 'lake_writer', status: 'scheduled' },
-  { name: 'session_gc', status: 'scheduled' },
-  { name: 'event_gc', status: 'scheduled' },
-]
-
-const jobs = ref<Job[]>(jobList)
+const jobs = ref<JobStatus[]>([])
+const loading = ref(true)
+const errorMessage = ref('')
 const selectedRows = ref({})
 const globalSearch = ref('')
 
@@ -86,7 +87,50 @@ function getSortIcon(column: any) {
   return ArrowUpDown
 }
 
-const columnHelper = createColumnHelper<Job>()
+function formatDate(value?: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function statusClass(status: string) {
+  switch (status) {
+    case 'ok':
+    case 'scheduled':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    case 'running':
+      return 'border-sky-200 bg-sky-50 text-sky-700'
+    case 'error':
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    default:
+      return 'border-muted bg-muted/40 text-muted-foreground'
+  }
+}
+
+function strategyClass(strategy: string) {
+  return strategy === 'partition_drop'
+    ? 'border-violet-200 bg-violet-50 text-violet-700'
+    : 'border-slate-200 bg-slate-50 text-slate-700'
+}
+
+async function loadJobs() {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    jobs.value = await jobApi.list()
+  } catch (error) {
+    console.error('Failed to load jobs', error)
+    errorMessage.value = 'Unable to load runtime job state.'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadJobs()
+})
+
+const columnHelper = createColumnHelper<JobStatus>()
 
 const columns = [
   columnHelper.display({
@@ -105,29 +149,71 @@ const columns = [
     enableSorting: false,
     enableHiding: false,
   }),
-  columnHelper.accessor('name', {
+  columnHelper.accessor('display_name', {
+    id: 'job',
     header: ({ column }) => h(Button, {
       variant: 'ghost',
       class: '-ml-4',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    }, () => ['Job Name', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
-    cell: info => h('span', { class: 'font-medium font-mono text-sm' }, info.getValue()),
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+    }, () => ['Job', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: ({ row }) => h('div', { class: 'space-y-1' }, [
+      h('div', { class: 'font-medium' }, row.original.display_name),
+      h('div', { class: 'font-mono text-xs text-muted-foreground' }, row.original.name),
+      h('div', { class: 'max-w-[320px] text-xs text-muted-foreground' }, row.original.description),
+    ]),
+  }),
+  columnHelper.accessor('strategy', {
+    header: ({ column }) => h(Button, {
+      variant: 'ghost',
+      class: '-ml-4',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+    }, () => ['Strategy', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
+    cell: info => h(Badge, {
+      variant: 'outline',
+      class: `font-normal capitalize ${strategyClass(info.getValue())}`,
+    }, () => info.getValue().replace('_', ' ')),
+  }),
+  columnHelper.accessor(row => row.targets.join(', '), {
+    id: 'targets',
+    header: 'Targets',
+    cell: info => h('span', { class: 'text-sm text-muted-foreground' }, info.getValue()),
+  }),
+  columnHelper.accessor('retention', {
+    header: 'Retention',
+    cell: info => h('span', { class: 'font-mono text-sm' }, info.getValue() || '—'),
+  }),
+  columnHelper.accessor('schedule', {
+    header: 'Schedule',
+    cell: ({ row }) => h('div', { class: 'space-y-1' }, [
+      h('div', { class: 'font-mono text-sm' }, row.original.schedule),
+      h('div', { class: 'text-xs text-muted-foreground' }, `Every ${row.original.cadence || '—'}`),
+    ]),
   }),
   columnHelper.accessor('status', {
-    header: ({ column }) => h(Button, {
-      variant: 'ghost',
-      class: '-ml-4',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    }, () => ['Status', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })]),
-    cell: info => {
-      return h(Badge, { 
-        variant: 'outline', 
-        class: 'font-normal flex items-center space-x-1 text-green-700 bg-green-100 border-green-200 capitalize whitespace-nowrap' 
+    header: 'Status',
+    cell: ({ row }) => {
+      const status = row.original.status
+      const icon = status === 'error' ? TriangleAlert : status === 'running' ? Clock3 : CheckCircle2
+      return h(Badge, {
+        variant: 'outline',
+        class: `font-normal capitalize whitespace-nowrap ${statusClass(status)}`,
       }, () => [
-        h(CheckCircle2, { class: 'w-3 h-3 mr-1 shrink-0' }),
-        h('span', info.getValue())
+        h(icon, { class: 'mr-1 h-3 w-3 shrink-0' }),
+        h('span', status),
       ])
     },
+  }),
+  columnHelper.accessor('last_removed_count', {
+    header: 'Last Removed',
+    cell: info => h('span', { class: 'font-mono text-sm' }, String(info.getValue())),
+  }),
+  columnHelper.accessor('last_run_at', {
+    header: 'Last Run',
+    cell: info => h('span', { class: 'text-sm text-muted-foreground' }, formatDate(info.getValue())),
+  }),
+  columnHelper.accessor('next_run_at', {
+    header: 'Next Run',
+    cell: info => h('span', { class: 'text-sm text-muted-foreground' }, formatDate(info.getValue())),
   }),
 ]
 </script>

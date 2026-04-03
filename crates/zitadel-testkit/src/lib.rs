@@ -177,7 +177,12 @@ impl TestContext {
             "/login".into(),
             &config.oidc,
         );
-        let storage = StorageRuntime::from_config(&config.storage, db.db.clone()).await?;
+        let storage = StorageRuntime::from_config(
+            &config.storage,
+            db.db.clone(),
+            config.session.max_age_secs,
+        )
+        .await?;
         let fga = Arc::new(FgaService::new(db.db.clone()));
         fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
 

@@ -48,10 +48,12 @@ pub(crate) async fn create_session_impl(
     let token = Uuid::new_v4().to_string();
     let hashed_token = token_hash(&token);
     let org = if org_id.is_empty() { "_global" } else { org_id };
+    let max_age_secs = kv.session_max_age_secs().max(1);
     let expires_expr = match scoped.dialect() {
-        Dialect::Postgres => "CURRENT_TIMESTAMP + INTERVAL '24 hours'",
-        Dialect::Sqlite => "datetime(CURRENT_TIMESTAMP, '+24 hours')",
+        Dialect::Postgres => format!("CURRENT_TIMESTAMP + INTERVAL '{max_age_secs} seconds'"),
+        Dialect::Sqlite => format!("datetime(CURRENT_TIMESTAMP, '+{max_age_secs} seconds')"),
     };
+
     let sql = format!(
         "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, fingerprint, created_at, expires_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, {}, {})",
