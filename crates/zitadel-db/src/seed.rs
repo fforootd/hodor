@@ -406,12 +406,15 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         );
     }
 
-    // Seed observability data (events + fingerprints) if tables are empty.
-    let event_count: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM events WHERE instance_id = 'default'")
-            .fetch_one(pool)
-            .await?;
-    if event_count.0 == 0 {
+    // Seed observability data (events + fingerprints) if no seeded events exist.
+    // We check for a specific seeded event type to avoid counting log.* entries
+    // that the observability layer writes during startup.
+    let seeded_event_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM events WHERE instance_id = 'default' AND event_type = 'user.login.succeeded'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if seeded_event_count.0 == 0 {
         seed_observability(pool, &org_id, &seed).await?;
     }
 
