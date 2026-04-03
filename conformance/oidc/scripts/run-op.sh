@@ -83,8 +83,9 @@ trap cleanup EXIT INT TERM
 )
 
 docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" build nginx >/dev/null
-docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d mongodb oidcc-provider server nginx
+docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d mongodb oidcc-provider server
 docker compose -p "$PROJECT_NAME" -f "$ZITADEL_COMPOSE" up -d --build zitadel
+docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d nginx
 
 wait_for_url "http://127.0.0.1:18081/healthz" "zitadel"
 wait_for_url "https://127.0.0.1:8443/api/runner/available" "conformance suite" 1

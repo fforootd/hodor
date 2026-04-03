@@ -71,17 +71,9 @@ pub(crate) async fn login_get(
         !prompts.contains(&"login".to_string()) && !prompts.contains(&"select_account".to_string());
     let silent = prompts.contains(&"none".to_string());
 
-    if let Some((user_id, identifier, display_name)) = extract_session_user(&state, &headers).await
-    {
-        if silent && allow_reuse {
-            return complete_auth_request_redirect(&state, &query.auth_request_id, &user_id).await;
-        }
-
+    if let Some((user_id, _, _)) = extract_session_user(&state, &headers).await {
         if allow_reuse {
-            return html_response(
-                StatusCode::OK,
-                render_session_reuse_page(&query.auth_request_id, &identifier, &display_name),
-            );
+            return complete_auth_request_redirect(&state, &query.auth_request_id, &user_id).await;
         }
     } else if silent {
         return auth_error_redirect_response(&state, &query.auth_request_id, "login_required")

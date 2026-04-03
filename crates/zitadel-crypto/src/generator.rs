@@ -208,9 +208,10 @@ mod tests {
         let profile = GeneratorPurpose::EmailVerificationCode.default_profile();
         let code = generate(&profile);
         assert_eq!(code.len(), 6);
-        assert!(code
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+        assert!(
+            code.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]

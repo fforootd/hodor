@@ -21,26 +21,6 @@
       "match": "https://nginx:8446/authorize*",
       "tasks": [
         {
-          "task": "Reuse existing session",
-          "optional": true,
-          "match": "https://nginx:8446/conformance/login*",
-          "commands": [
-            [
-              "wait",
-              "xpath",
-              "//*",
-              5,
-              "Use your existing session?",
-              "update-image-placeholder-optional"
-            ],
-            [
-              "click",
-              "xpath",
-              "//button[contains(., 'Continue with this session')]"
-            ]
-          ]
-        },
-        {
           "task": "Login",
           "optional": true,
           "match": "https://nginx:8446/conformance/login*",

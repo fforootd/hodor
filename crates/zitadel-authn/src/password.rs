@@ -122,7 +122,6 @@ impl Argon2idHasher {
             expected_p_cost: p,
         }
     }
-
 }
 
 impl Hasher for Argon2idHasher {

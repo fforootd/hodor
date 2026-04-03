@@ -216,11 +216,7 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
     // Session
     if let Ok(v) = env::var("ZITADEL_SESSION_MAX_AGE_SECS") {
         if let Ok(value) = v.parse::<u64>() {
-            merge_path(
-                &mut overrides,
-                &["session", "max_age_secs"],
-                json!(value),
-            );
+            merge_path(&mut overrides, &["session", "max_age_secs"], json!(value));
         }
     }
 
