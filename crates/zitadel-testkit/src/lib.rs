@@ -21,6 +21,7 @@ use zitadel_authn::{
 };
 use zitadel_config::{Config, password::PasswordHasherConfig};
 use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
+use zitadel_fga::{FgaService, StoreResolver};
 use zitadel_login::LoginState;
 use zitadel_oidc::{
     OidcState,
@@ -160,9 +161,12 @@ impl TestContext {
             &config.oidc,
         );
         let storage = StorageRuntime::from_config(&config.storage, db.db.clone()).await?;
+        let fga = Arc::new(FgaService::new(db.db.clone()));
+        fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
 
         let api_state = ApiState {
             db: db.db.clone(),
+            fga,
             stateful: storage.stateful.clone(),
             transient: storage.transient.clone(),
             analytics: storage.analytics.clone(),
@@ -184,6 +188,7 @@ impl TestContext {
                 ReqwestHttpClient::new(),
                 InMemoryIssuerMetadataCache::default(),
             )),
+            pow_secret: config.server.management_secret.clone(),
         };
 
         Ok(Self {

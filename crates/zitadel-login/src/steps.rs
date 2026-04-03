@@ -774,22 +774,22 @@ async fn handle_fingerprint_submit(
     .into_response()
 }
 
-/// Handle "captcha_submit" action: verify captcha and mark flow as verified.
+/// Handle "captcha_submit" action: verify POW proof and mark flow as verified.
 async fn handle_captcha_submit(
     state: &LoginState,
     flow_id: &str,
     flow: &LoginFlowRuntimeState,
     req: &FlowSubmitRequest,
 ) -> Response {
-    // Accept altcha_payload (PoW) or captcha_token (third-party widget).
-    let has_altcha = req._extra.get("altcha_payload").is_some();
+    // Accept altcha_payload (PoW solution).
+    let altcha = req._extra.get("altcha_payload");
     let has_token = req
         ._extra
         .get("captcha_token")
         .and_then(|v| v.as_str())
         .is_some_and(|s| !s.is_empty());
 
-    if !has_altcha && !has_token {
+    if altcha.is_none() && !has_token {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "altcha_payload or captcha_token is required"})),
@@ -797,9 +797,31 @@ async fn handle_captcha_submit(
             .into_response();
     }
 
-    // POC: trust the client-submitted proof. Production should verify:
-    // - Altcha: validate HMAC signature + PoW hash against server-generated challenge
-    // - Third-party: call provider verification API (hCaptcha/reCAPTCHA/Turnstile)
+    // Verify the POW solution using HMAC + SHA-256.
+    if let Some(payload) = altcha {
+        let solution: zitadel_botdetect::Solution = match serde_json::from_value(payload.clone()) {
+            Ok(s) => s,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": format!("invalid altcha_payload: {e}")})),
+                )
+                    .into_response();
+            }
+        };
+
+        // Use the server's cookie secret as the HMAC key for POW challenges.
+        let secret_key = state.pow_secret.as_bytes();
+        if !zitadel_botdetect::verify_solution(secret_key, &solution) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid proof-of-work solution"})),
+            )
+                .into_response();
+        }
+    }
+
+    // Third-party captcha tokens: still a stub for future provider integration.
 
     let mut data = flow.data.clone();
     data["captcha_verified"] = serde_json::Value::Bool(true);

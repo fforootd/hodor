@@ -6,6 +6,7 @@ members = [
     "crates/zitadel-observability",
     "crates/zitadel-server",
     "crates/zitadel-api",
+    "crates/zitadel-fga",
     "crates/zitadel-storage",
     "crates/zitadel-db",
     "crates/zitadel-oidc",
@@ -17,6 +18,7 @@ members = [
     "crates/zitadel-catalog",
     "crates/zitadel-schema",
     "crates/zitadel-expr",
+    "crates/zitadel-botdetect",
 ]
 
 [workspace.package]
@@ -81,6 +83,7 @@ zitadel-testkit = { path = "crates/zitadel-testkit" }
 zitadel-observability = { path = "crates/zitadel-observability" }
 zitadel-server = { path = "crates/zitadel-server" }
 zitadel-api = { path = "crates/zitadel-api" }
+zitadel-fga = { path = "crates/zitadel-fga" }
 zitadel-storage = { path = "crates/zitadel-storage" }
 zitadel-db = { path = "crates/zitadel-db" }
 zitadel-oidc = { path = "crates/zitadel-oidc" }

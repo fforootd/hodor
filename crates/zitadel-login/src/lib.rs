@@ -30,6 +30,8 @@ pub struct LoginState {
     pub public_origin: Arc<String>,
     pub conformance_login_html: bool,
     pub rp: Arc<DefaultRpService>,
+    /// Secret key for POW challenge HMAC signatures.
+    pub pow_secret: String,
 }
 
 pub fn routes(state: LoginState) -> Router {
@@ -94,6 +96,7 @@ mod tests {
                 zitadel_oidc::rp::ReqwestHttpClient::new(),
                 zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
             )),
+            pow_secret: "test-pow-secret".into(),
         }
     }
 

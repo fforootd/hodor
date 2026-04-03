@@ -26,6 +26,7 @@ use axum::Router;
 use std::sync::Arc;
 use zitadel_authn::cookie::CookieConfig;
 use zitadel_db::Db;
+use zitadel_fga::FgaService;
 use zitadel_oidc::OidcState;
 use zitadel_storage::{DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTransientStorage};
 
@@ -33,6 +34,7 @@ use zitadel_storage::{DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTr
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Db,
+    pub fga: Arc<FgaService>,
     pub stateful: Arc<DefaultStatefulStorage>,
     pub transient: Arc<DefaultTransientStorage>,
     pub analytics: Arc<DefaultAnalyticsStorage>,
@@ -91,5 +93,12 @@ pub fn routes(state: ApiState) -> Router {
             middleware::auth_gate,
         ));
 
-    Router::new().nest("/v1", authed).with_state(state)
+    // Public routes (no auth required).
+    let public = Router::new()
+        // Telemetry ingest (fingerprints) — called during login before session exists.
+        .merge(telemetry::public_routes());
+
+    Router::new()
+        .nest("/v1", authed.merge(public))
+        .with_state(state)
 }

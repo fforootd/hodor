@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
 use zitadel_config::Config;
+use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_fga::{FgaService, StoreResolver};
 
 /// Shared server state accessible from handlers.
 pub struct AppState {
@@ -135,9 +137,12 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         &config.oidc,
     );
     let storage = zitadel_storage::StorageRuntime::from_config(&config.storage, db.clone()).await?;
+    let fga = Arc::new(FgaService::new(db.clone()));
+    fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
 
     let api_state = zitadel_api::ApiState {
         db: db.clone(),
+        fga,
         stateful: storage.stateful.clone(),
         transient: storage.transient.clone(),
         analytics: storage.analytics.clone(),
@@ -159,6 +164,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
             zitadel_oidc::rp::ReqwestHttpClient::new(),
             zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
         )),
+        pow_secret: config.server.management_secret.clone(),
     };
 
     let state = Arc::new(AppState {

@@ -1,63 +1,58 @@
 /**
- * Browser fingerprinting wrapper for ThumbmarkJS.
+ * Browser fingerprinting via FingerprintJS OSS v5.
  *
  * Collects a persistent visitor ID that survives:
  * - Tab switches
- * - Private/incognito mode
+ * - Private/incognito mode (most browsers)
  * - Cookie clears
  *
- * The fingerprint is based on hardware signals (canvas, WebGL, audio, etc.)
+ * The fingerprint is based on 42 hardware signals (canvas, WebGL, audio, etc.)
  * and does NOT use cookies or localStorage.
  *
  * GDPR/HIPAA/CCPA compliant — no PII is collected.
  */
 
 export interface FingerprintResult {
-  /** 32-char hex fingerprint hash — persistent across sessions */
+  /** Stable hex fingerprint hash — persistent across sessions */
   visitorId: string
-  /** Individual component hashes used to compute the fingerprint */
-  components: Record<string, string>
+  /** Individual component signals used to compute the fingerprint */
+  components: Record<string, unknown>
+  /** Confidence score (0-1, FingerprintJS only) */
+  confidence: number
   /** Timestamp when the fingerprint was collected */
   collectedAt: number
 }
 
 /**
- * Collect a browser fingerprint.
+ * Collect a browser fingerprint using FingerprintJS OSS v5.
  *
- * If ThumbmarkJS is installed (@thumbmarkjs/thumbmarkjs), it uses the full
- * library for maximum accuracy. Otherwise, falls back to a lightweight
- * built-in implementation using canvas + navigator signals.
+ * Falls back to a lightweight built-in implementation if FingerprintJS
+ * fails to load (e.g. blocked by content policy, SSR).
  */
 export async function collectFingerprint(): Promise<FingerprintResult> {
-  // Try ThumbmarkJS first (if installed).
   try {
-    // Variable-based import to bypass Vite's static analysis.
-    // ThumbmarkJS is an optional peer dependency — works without it.
-    const pkg = '@thumbmarkjs/thumbmarkjs'
-    const tm = await (Function('p', 'return import(p)')(pkg))
-    if (tm && (tm.getFingerprint || tm.default?.getFingerprint)) {
-      const fn = tm.getFingerprint || tm.default.getFingerprint
-      const result = await fn()
-      return {
-        visitorId: typeof result === 'string' ? result : result.hash || result.thumbmark || '',
-        components: typeof result === 'object' ? (result.components || {}) : {},
-        collectedAt: Date.now(),
-      }
+    const FingerprintJS = await import('@fingerprintjs/fingerprintjs')
+    const fp = await FingerprintJS.load({ monitoring: false })
+    const result = await fp.get()
+
+    return {
+      visitorId: result.visitorId,
+      components: result.components as Record<string, unknown>,
+      confidence: result.confidence.score,
+      collectedAt: Date.now(),
     }
   } catch {
-    // ThumbmarkJS not installed — use fallback.
+    // FingerprintJS failed — use fallback.
+    return collectFallbackFingerprint()
   }
-
-  // Fallback: lightweight built-in fingerprinting.
-  return collectFallbackFingerprint()
 }
 
 /**
  * Lightweight fallback fingerprint using browser-native APIs.
- * Less accurate than ThumbmarkJS but works without dependencies.
+ * Less accurate than FingerprintJS but works without the library.
  */
 async function collectFallbackFingerprint(): Promise<FingerprintResult> {
-  const components: Record<string, string> = {}
+  const components: Record<string, unknown> = {}
 
   // Canvas fingerprint.
   try {
@@ -71,13 +66,13 @@ async function collectFallbackFingerprint(): Promise<FingerprintResult> {
       ctx.fillStyle = '#f60'
       ctx.fillRect(100, 1, 62, 20)
       ctx.fillStyle = '#069'
-      ctx.fillText('Zitadel fp 🔐', 2, 15)
+      ctx.fillText('Zitadel fp', 2, 15)
       ctx.fillStyle = 'rgba(102, 204, 0, 0.7)'
       ctx.fillText('canvas fp', 4, 35)
-      components.canvas = await hashString(canvas.toDataURL())
+      components.canvas = { value: await hashString(canvas.toDataURL()) }
     }
   } catch {
-    components.canvas = 'unavailable'
+    components.canvas = { error: 'unavailable' }
   }
 
   // WebGL renderer.
@@ -87,40 +82,45 @@ async function collectFallbackFingerprint(): Promise<FingerprintResult> {
     if (gl && gl instanceof WebGLRenderingContext) {
       const dbg = gl.getExtension('WEBGL_debug_renderer_info')
       if (dbg) {
-        components.webgl_renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || ''
-        components.webgl_vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || ''
+        components.webGlBasics = {
+          value: {
+            vendor: gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || '',
+            renderer: gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '',
+          },
+        }
       }
     }
   } catch {
-    components.webgl_renderer = 'unavailable'
+    components.webGlBasics = { error: 'unavailable' }
   }
 
   // Screen.
-  components.screen = `${screen.width}x${screen.height}x${screen.colorDepth}`
+  components.screenResolution = { value: [screen.width, screen.height] }
+  components.colorDepth = { value: screen.colorDepth }
 
   // Timezone.
-  components.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  components.timezone = { value: Intl.DateTimeFormat().resolvedOptions().timeZone || '' }
 
   // Language.
-  components.language = navigator.language || ''
+  components.languages = { value: [[navigator.language]] }
 
   // Platform.
-  components.platform = navigator.platform || ''
+  components.platform = { value: navigator.platform || '' }
 
   // Hardware concurrency.
-  components.cores = String(navigator.hardwareConcurrency || 0)
+  components.hardwareConcurrency = { value: navigator.hardwareConcurrency || 0 }
 
   // Device memory (if available).
-  components.memory = String((navigator as any).deviceMemory || 0)
+  components.deviceMemory = { value: (navigator as any).deviceMemory || 0 }
 
   // Compute composite hash.
   const combined = Object.entries(components)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}:${v}`)
+    .map(([k, v]) => `${k}:${JSON.stringify(v)}`)
     .join('|')
   const visitorId = await hashString(combined)
 
-  return { visitorId, components, collectedAt: Date.now() }
+  return { visitorId, components, confidence: 0.4, collectedAt: Date.now() }
 }
 
 /**
@@ -136,7 +136,7 @@ async function hashString(input: string): Promise<string> {
 }
 
 /**
- * Submit the fingerprint to the flow engine.
+ * Submit the fingerprint to the login flow engine.
  */
 export async function submitFingerprint(
   baseUrl: string,
@@ -151,10 +151,40 @@ export async function submitFingerprint(
       body: JSON.stringify({
         action: 'fingerprint_submit',
         visitor_id: fingerprint.visitorId,
-        fingerprint_hash: fingerprint.visitorId, // same for now
+        fingerprint_hash: fingerprint.visitorId,
       }),
     })
   } catch {
     // Silent fail — fingerprint collection should never block login.
+  }
+}
+
+/**
+ * Upload the full fingerprint context to the telemetry endpoint.
+ * Called after login flow fingerprint submission succeeds.
+ */
+export function uploadFingerprintContext(
+  baseUrl: string,
+  fingerprint: FingerprintResult,
+): void {
+  try {
+    fetch(`${baseUrl}/v1/telemetry/fingerprints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        id: fingerprint.visitorId,
+        type: 'fingerprintjs',
+        raw_data: {
+          visitorId: fingerprint.visitorId,
+          components: fingerprint.components,
+          confidence: { score: fingerprint.confidence },
+          collectedAt: fingerprint.collectedAt,
+        },
+      }),
+      keepalive: true,
+    }).catch(() => {})
+  } catch {
+    // Silent fail — telemetry should never block login.
   }
 }

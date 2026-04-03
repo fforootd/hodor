@@ -63,53 +63,24 @@ export function generateTraceparent(): string {
   return `00-${flowTraceId}-${spanId}-01`
 }
 
-// ─── Device Fingerprint (ThumbmarkJS) ──────────────────────
-// Computes a stable 32-char device fingerprint that persists
-// across tabs, refreshes, and private browsing. Cookie-less.
+// ─── Device Fingerprint ──────────────────────────────────────
+// Fingerprint collection is now handled by FingerprintJS OSS v5
+// via the login flow (see lib/fingerprint.ts + LoginApp.vue).
+// This module only caches the visitor ID for trace correlation.
 let cachedFingerprint: string | null = null
-let fingerprintPromise: Promise<string> | null = null
 
 /**
- * Get the device fingerprint. Returns cached value if available,
- * or null if not yet computed.
+ * Get the cached device fingerprint (set during login flow).
  */
 export function getDeviceFingerprint(): string | null {
   return cachedFingerprint
 }
 
 /**
- * Compute the device fingerprint asynchronously.
- * Called during initTelemetry(). The result is cached for all subsequent calls.
+ * Set the device fingerprint from the login flow collector.
  */
-async function computeFingerprint(): Promise<string> {
-  if (cachedFingerprint) return cachedFingerprint
-  if (fingerprintPromise) return fingerprintPromise
-
-  fingerprintPromise = (async () => {
-    try {
-      const { getThumbmark } = await import('@thumbmarkjs/thumbmarkjs')
-      const fpData = await getThumbmark()
-      const fp = fpData.thumbmark as string
-      cachedFingerprint = fp
-
-      // Ingest the raw thumbmark payload directly to the server for analytics/fraud modeling
-      fetch('/v1/telemetry/fingerprints', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fpData),
-        keepalive: true, // Fire and forget
-      }).catch(console.warn)
-
-      return fp
-    } catch {
-      // ThumbmarkJS failed (e.g., server-side rendering, blocked APIs).
-      // Fall back to a session-scoped random ID.
-      cachedFingerprint = `fallback-${generateHex(24)}`
-      return cachedFingerprint
-    }
-  })()
-
-  return fingerprintPromise
+export function setDeviceFingerprint(fp: string): void {
+  cachedFingerprint = fp
 }
 
 // Lightweight tracer that works without the full OTel SDK.
@@ -235,14 +206,11 @@ let provider: TelemetryProvider | null = null
  * Initialize the telemetry provider. Call once on component mount.
  * Uses the fallback tracer by default (no OTel dependency needed).
  * When OTel packages are installed, it will auto-detect and use them.
- * Also kicks off async device fingerprint computation.
+ * Fingerprint computation is handled by the login flow (see lib/fingerprint.ts).
  */
 export function initTelemetry(config: TelemetryConfig): TelemetryProvider | null {
   if (config.enabled === false) return null
   if (provider) return provider
-
-  // Start fingerprint computation in the background (non-blocking).
-  computeFingerprint()
 
   provider = new FallbackTracer(config)
   return provider

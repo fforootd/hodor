@@ -453,22 +453,22 @@ async fn seed_observability(
     // Collect app client_ids.
     let app_clients: Vec<String> = seed.apps.iter().map(|a| a.client_id.clone()).collect();
 
-    // Generate fingerprints.
+    // Generate fingerprints (FingerprintJS OSS v5 format).
     let fingerprints = [
         (
             "fp_browser_chrome_win",
-            "browser",
-            r#"{"ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125","screen":"1920x1080","lang":"en-US"}"#,
+            "fingerprintjs",
+            r#"{"visitorId":"a3c1e8f04b7d29561f8c0da2e7b634f1","components":{"screenResolution":{"value":[1920,1080]},"colorDepth":{"value":24},"hardwareConcurrency":{"value":8},"deviceMemory":{"value":8},"timezone":{"value":"America/New_York"},"languages":{"value":[["en-US","en"]]},"platform":{"value":"Win32"},"webGlBasics":{"value":{"vendor":"Google Inc. (NVIDIA)","renderer":"ANGLE (NVIDIA, NVIDIA GeForce RTX 3070, D3D11)"}}},"confidence":{"score":0.995},"collectedAt":1719500000}"#,
         ),
         (
             "fp_browser_firefox_mac",
-            "browser",
-            r#"{"ua":"Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5) Firefox/128","screen":"2560x1600","lang":"en-US"}"#,
+            "fingerprintjs",
+            r#"{"visitorId":"7f2b9d0e15a84c3f6e1d0b8a24c97e53","components":{"screenResolution":{"value":[2560,1600]},"colorDepth":{"value":30},"hardwareConcurrency":{"value":12},"deviceMemory":{"value":16},"timezone":{"value":"America/Los_Angeles"},"languages":{"value":[["en-US"]]},"platform":{"value":"MacIntel"},"webGlBasics":{"value":{"vendor":"Google Inc. (Apple)","renderer":"ANGLE (Apple, Apple M2 Pro, OpenGL 4.1)"}}},"confidence":{"score":0.992},"collectedAt":1719503600}"#,
         ),
         (
             "fp_mobile_ios",
-            "mobile",
-            r#"{"ua":"Zitadel-iOS/2.1","device":"iPhone15,2","os":"iOS 18.0"}"#,
+            "fingerprintjs",
+            r#"{"visitorId":"d4e6f8a12c3b5970e8d1f4a6b9c2d7e0","components":{"screenResolution":{"value":[1179,2556]},"colorDepth":{"value":32},"hardwareConcurrency":{"value":6},"deviceMemory":{"value":6},"timezone":{"value":"Europe/London"},"languages":{"value":[["en-GB","en"]]},"platform":{"value":"iPhone"},"webGlBasics":{"value":{"vendor":"Apple Inc.","renderer":"Apple GPU"}}},"confidence":{"score":0.988},"collectedAt":1719507200}"#,
         ),
     ];
     for (id, type_, raw) in &fingerprints {

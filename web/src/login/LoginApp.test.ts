@@ -85,6 +85,7 @@ describe('LoginApp adaptive captcha refresh', () => {
     vi.mocked(collectFingerprint).mockResolvedValue({
       visitorId: 'fp_123',
       components: {},
+      confidence: 0.995,
       collectedAt: Date.now(),
     })
 

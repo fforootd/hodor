@@ -1,0 +1,15 @@
+[package]
+name = "zitadel-botdetect"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hmac = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+hex = "0.4"
+rand = "0.9"
+
+[dev-dependencies]

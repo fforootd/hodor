@@ -160,19 +160,26 @@ function formatSummary(data: any): string {
   if (!data || typeof data !== 'object') return ''
   const parts: string[] = []
 
-  // Thumbmark / rich fingerprint format
-  if (data.system?.browser?.name) parts.push(data.system.browser.name)
-  if (data.system?.os?.name) parts.push(data.system.os.name)
-  if (data.hardware?.deviceMemory) parts.push(`${data.hardware.deviceMemory}GB RAM`)
-  if (data.hardware?.hardwareConcurrency) parts.push(`${data.hardware.hardwareConcurrency} Cores`)
+  // FingerprintJS OSS v5 format — components have {value, duration} structure
+  const c = data.components
+  if (c) {
+    const renderer = c.webGlBasics?.value?.renderer
+    if (renderer) parts.push(renderer.replace(/ANGLE \(/, '').replace(/\)$/, '').split(',')[0].trim())
+    const res = c.screenResolution?.value
+    if (Array.isArray(res)) parts.push(`${res[0]}×${res[1]}`)
+    if (c.platform?.value) parts.push(c.platform.value)
+    const langs = c.languages?.value?.[0]
+    if (Array.isArray(langs) && langs[0]) parts.push(langs[0])
+    if (c.hardwareConcurrency?.value) parts.push(`${c.hardwareConcurrency.value} cores`)
+    if (c.deviceMemory?.value) parts.push(`${c.deviceMemory.value}GB`)
+  }
 
-  // Simple seed format (ua, screen, device, os)
+  // Legacy/simple formats
   if (parts.length === 0) {
     if (data.ua) parts.push(data.ua.split(/[/()]/)[0].trim())
     if (data.screen) parts.push(data.screen)
-    if (data.device) parts.push(data.device)
-    if (data.os) parts.push(data.os)
-    if (data.lang) parts.push(data.lang)
+    if (data.platform) parts.push(data.platform)
+    if (data.language || data.lang) parts.push(data.language || data.lang)
   }
 
   if (parts.length > 0) return parts.join(', ')

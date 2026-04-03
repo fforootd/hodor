@@ -1,196 +1,591 @@
-use crate::{ApiState, response};
 use axum::{
     Json, Router,
-    extract::State,
-    response::Response,
+    extract::{Path, Query, Request, State},
+    middleware::Next,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::json;
+use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_fga::{
+    AuthorizationModelWriteRequest, BatchCheckRequest, ChangeRepository, CheckRequest,
+    CheckResponse, Evaluator, ExpandRequest, FgaApi, FgaError, ListObjectsRequest,
+    ListUsersRequest, ModelRepository, ReadRequest, StoreResolver, TupleFilter, TupleKey,
+    TupleKeySet, TupleRepository, WriteRequest,
+};
+
+use crate::{ApiState, middleware, response};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
-        .route("/fga/check", post(fga_check))
+        .route("/fga/store", get(discover_store))
+        .route("/fga/check", post(legacy_check))
         .route(
             "/fga/tuples",
-            get(list_tuples).post(write_tuples).delete(delete_tuples),
+            get(legacy_read_tuples)
+                .post(legacy_write_tuples)
+                .delete(legacy_delete_tuples),
         )
-        .route("/fga/list-objects", post(list_objects))
-        .route("/fga/model", get(get_model))
-        .route("/fga/model/graph", get(model_graph))
-        .route("/fga/expand", post(expand))
-        .route("/fga/test", post(batch_test))
+        .route("/fga/list-objects", post(legacy_list_objects))
+        .route("/fga/model", get(legacy_model).post(legacy_write_model))
+        .route("/fga/model/graph", get(legacy_model_graph))
+        .route("/fga/expand", post(legacy_expand))
+        .route("/fga/test", post(legacy_batch_test))
+        .route("/fga/stores/{store_id}/check", post(check_store))
+        .route(
+            "/fga/stores/{store_id}/batch-check",
+            post(batch_check_store),
+        )
+        .route("/fga/stores/{store_id}/read", post(read_store))
+        .route("/fga/stores/{store_id}/write", post(write_store))
+        .route("/fga/stores/{store_id}/expand", post(expand_store))
+        .route(
+            "/fga/stores/{store_id}/list-objects",
+            post(list_objects_store),
+        )
+        .route("/fga/stores/{store_id}/list-users", post(list_users_store))
+        .route("/fga/stores/{store_id}/changes", get(read_changes_store))
+        .route(
+            "/fga/stores/{store_id}/authorization-models",
+            get(read_authorization_models_store).post(write_authorization_model_store),
+        )
+        .route(
+            "/fga/stores/{store_id}/authorization-models/{model_id}",
+            get(read_authorization_model_store),
+        )
+        .layer(axum::middleware::from_fn(pat_only))
 }
 
-#[derive(Deserialize)]
-pub struct CheckRequest {
-    pub user: String,
-    pub relation: String,
-    pub object: String,
-}
-
-#[derive(Serialize)]
-pub struct CheckResponse {
-    pub allowed: bool,
-}
-
-/// POST /v1/fga/check — check if user has relation to object.
-/// POC: root instance owner always gets wildcard access.
-async fn fga_check(State(s): State<ApiState>, Json(req): Json<CheckRequest>) -> Response {
-    let scoped = s.db.scoped_default();
-
-    // Check if user is the bootstrapped admin (root instance owner bypass).
-    let is_admin = is_instance_owner(&scoped, &req.user).await.unwrap_or(false);
-    if is_admin {
-        return response::json_ok(CheckResponse { allowed: true });
+async fn pat_only(req: Request, next: Next) -> Response {
+    let identity = middleware::identity_from_request(&req);
+    if identity.is_none() {
+        return response::error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "authentication required",
+        );
     }
-
-    // POC: check memberships table for basic RBAC.
-    let allowed = check_membership(&scoped, &req.user, &req.relation, &req.object)
-        .await
-        .unwrap_or(false);
-    response::json_ok(CheckResponse { allowed })
-}
-
-#[derive(Deserialize)]
-pub struct TupleRequest {
-    pub user: String,
-    pub relation: String,
-    pub object: String,
-}
-
-async fn write_tuples(State(s): State<ApiState>, Json(req): Json<TupleRequest>) -> Response {
-    let scoped = s.db.scoped_default();
-    // Map to memberships table.
-    let parts: Vec<&str> = req.object.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return response::bad_request("object must be type:id");
+    #[allow(clippy::nonminimal_bool)]
+    if !identity.is_some_and(|identity| identity.token_type == "pat") {
+        return response::error(
+            axum::http::StatusCode::FORBIDDEN,
+            "personal access token required",
+        );
     }
-    let user_id = req.user.strip_prefix("user:").unwrap_or(&req.user);
+    next.run(req).await
+}
 
-    let insert_sql = match scoped.dialect() {
-        zitadel_db::Dialect::Sqlite => {
-            "INSERT OR IGNORE INTO memberships (instance_id, resource_type, resource_id, user_id, role) VALUES ($1, $2, $3, $4, $5)"
-        }
-        zitadel_db::Dialect::Postgres => {
-            "INSERT INTO memberships (instance_id, resource_type, resource_id, user_id, role) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING"
+fn fga_error_response(error: FgaError) -> Response {
+    let (status, code, message, kind) = match error {
+        FgaError::BadRequest(message) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_request",
+            message,
+            "configuration",
+        ),
+        FgaError::NotFound(message) => (
+            axum::http::StatusCode::NOT_FOUND,
+            "not_found",
+            message,
+            "internal",
+        ),
+        FgaError::Forbidden(message) => (
+            axum::http::StatusCode::FORBIDDEN,
+            "forbidden",
+            message,
+            "internal",
+        ),
+        FgaError::Unsupported(message) => (
+            axum::http::StatusCode::NOT_IMPLEMENTED,
+            "unsupported",
+            message,
+            "configuration",
+        ),
+        FgaError::Internal(error) => {
+            tracing::error!(error = %error, "embedded fga request failed");
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "authorization engine error".to_string(),
+                "internal",
+            )
         }
     };
-    let _ = sqlx::query(insert_sql)
-        .bind(scoped.instance_id())
-        .bind(parts[0])
-        .bind(parts[1])
-        .bind(user_id)
-        .bind(&req.relation)
-        .execute(scoped.pool())
-        .await;
-    response::json_ok(serde_json::json!({"written": true}))
-}
 
-async fn list_tuples(State(s): State<ApiState>) -> Response {
-    let scoped = s.db.scoped_default();
-    match sqlx::query_as::<_, (String, String, String, String)>(
-        "SELECT resource_type, resource_id, user_id, role FROM memberships WHERE instance_id = $1 LIMIT 100")
-        .bind(scoped.instance_id()).fetch_all(scoped.pool()).await {
-        Ok(rows) => {
-            let tuples: Vec<serde_json::Value> = rows.into_iter().map(|r| serde_json::json!({
-                "user": format!("user:{}", r.2), "relation": r.3, "object": format!("{}:{}", r.0, r.1)
-            })).collect();
-            response::json_ok(serde_json::json!({"tuples": tuples}))
-        }
-        Err(e) => response::internal_error(format!("{e}")),
-    }
-}
-
-async fn delete_tuples(State(s): State<ApiState>, Json(req): Json<TupleRequest>) -> Response {
-    let scoped = s.db.scoped_default();
-    let parts: Vec<&str> = req.object.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return response::bad_request("object must be type:id");
-    }
-    let user_id = req.user.strip_prefix("user:").unwrap_or(&req.user);
-    let _ = sqlx::query("DELETE FROM memberships WHERE instance_id = $1 AND resource_type = $2 AND resource_id = $3 AND user_id = $4 AND role = $5")
-        .bind(scoped.instance_id()).bind(parts[0]).bind(parts[1]).bind(user_id).bind(&req.relation)
-        .execute(scoped.pool()).await;
-    response::json_ok(serde_json::json!({"deleted": true}))
-}
-
-async fn list_objects(
-    State(_s): State<ApiState>,
-    Json(_body): Json<serde_json::Value>,
-) -> Response {
-    // POC stub.
-    response::json_ok(serde_json::json!({"objects": []}))
-}
-
-async fn get_model(State(_s): State<ApiState>) -> Response {
-    // Return the Cedar/FGA authorization model summary.
-    response::json_ok(serde_json::json!({
-        "types": ["user", "instance", "org", "group", "project", "app", "settings", "session"],
-        "relations": {
-            "instance": ["owner", "admin", "viewer"],
-            "org": ["owner", "admin", "member", "viewer"],
-            "group": ["member", "admin"],
-            "project": ["owner", "admin", "member"],
-            "app": ["admin", "viewer"],
-        }
-    }))
-}
-
-async fn model_graph(State(_s): State<ApiState>) -> Response {
-    response::json_ok(serde_json::json!({"graph": "instance → org → project → app"}))
-}
-
-async fn expand(State(_s): State<ApiState>, Json(_body): Json<serde_json::Value>) -> Response {
-    response::json_ok(serde_json::json!({"tree": {}}))
-}
-
-async fn batch_test(State(_s): State<ApiState>, Json(_body): Json<serde_json::Value>) -> Response {
-    response::json_ok(serde_json::json!({"results": []}))
-}
-
-/// Check if a user is the root instance owner (first admin).
-/// POC: checks if user has an admin PAT or is the first user created (identifier = 'admin').
-async fn is_instance_owner(
-    scoped: &zitadel_db::scoped::ScopedDb,
-    user_ref: &str,
-) -> anyhow::Result<bool> {
-    let user_id = user_ref.strip_prefix("user:").unwrap_or(user_ref);
-
-    // Check if user has a PAT (admin users get PATs during seed).
-    let has_pat: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM tokens WHERE instance_id = $1 AND user_id = $2 AND type = 'pat' AND revoked_at IS NULL LIMIT 1")
-        .bind(scoped.instance_id()).bind(user_id)
-        .fetch_optional(scoped.pool()).await?;
-    if has_pat.is_some() {
-        return Ok(true);
-    }
-
-    // Check if user is the admin user (identifier = 'admin').
-    let is_admin: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM users WHERE instance_id = $1 AND id = $2 AND identifier = 'admin' LIMIT 1",
+    (
+        status,
+        Json(json!({
+            "error": {
+                "message": message,
+                "code": code,
+                "retryable": false,
+                "kind": kind,
+            }
+        })),
     )
-    .bind(scoped.instance_id())
-    .bind(user_id)
-    .fetch_optional(scoped.pool())
-    .await?;
-    Ok(is_admin.is_some())
+        .into_response()
 }
 
-/// Check membership-based access.
-async fn check_membership(
-    scoped: &zitadel_db::scoped::ScopedDb,
-    user_ref: &str,
-    relation: &str,
-    object: &str,
-) -> anyhow::Result<bool> {
-    let user_id = user_ref.strip_prefix("user:").unwrap_or(user_ref);
-    let parts: Vec<&str> = object.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return Ok(false);
+async fn current_store(state: &ApiState) -> Result<String, FgaError> {
+    Ok(state.fga.discover_store(DEFAULT_INSTANCE_ID).await?.id)
+}
+
+async fn discover_store(State(state): State<ApiState>) -> Response {
+    match state.fga.discover_store(DEFAULT_INSTANCE_ID).await {
+        Ok(store) => response::json_ok(json!({
+            "store_id": store.id,
+            "name": store.name,
+            "instance_id": DEFAULT_INSTANCE_ID,
+        })),
+        Err(error) => fga_error_response(error),
     }
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM memberships WHERE instance_id = $1 AND user_id = $2 AND resource_type = $3 AND resource_id = $4 AND role = $5")
-        .bind(scoped.instance_id()).bind(user_id).bind(parts[0]).bind(parts[1]).bind(relation)
-        .fetch_optional(scoped.pool()).await?;
-    Ok(row.is_some())
+}
+
+#[derive(Deserialize)]
+struct LegacyCheckRequest {
+    user: String,
+    relation: String,
+    object: String,
+}
+
+async fn legacy_check(
+    State(state): State<ApiState>,
+    Json(body): Json<LegacyCheckRequest>,
+) -> Response {
+    match current_store(&state).await {
+        Ok(store_id) => match state
+            .fga
+            .check(
+                DEFAULT_INSTANCE_ID,
+                &store_id,
+                CheckRequest {
+                    tuple_key: TupleKey {
+                        user: body.user.clone(),
+                        relation: body.relation.clone(),
+                        object: body.object.clone(),
+                        condition: None,
+                    },
+                    authorization_model_id: None,
+                    contextual_tuples: None,
+                    context: None,
+                },
+            )
+            .await
+        {
+            Ok(CheckResponse { allowed }) => response::json_ok(json!({
+                "allowed": allowed,
+                "user": body.user,
+                "relation": body.relation,
+                "object": body.object,
+            })),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyTupleQuery {
+    user: Option<String>,
+    relation: Option<String>,
+    object: Option<String>,
+}
+
+async fn legacy_read_tuples(
+    State(state): State<ApiState>,
+    Query(query): Query<LegacyTupleQuery>,
+) -> Response {
+    match current_store(&state).await {
+        Ok(store_id) => match state
+            .fga
+            .read_tuples(
+                DEFAULT_INSTANCE_ID,
+                &store_id,
+                ReadRequest {
+                    tuple_key: Some(TupleFilter {
+                        user: query.user,
+                        relation: query.relation,
+                        object: query.object,
+                    }),
+                    page_size: Some(100),
+                    continuation_token: None,
+                },
+            )
+            .await
+        {
+            Ok(result) => response::json_ok(json!({
+                "tuples": result.tuples.into_iter().map(|tuple| tuple.key).collect::<Vec<_>>()
+            })),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyTupleWriteRequest {
+    tuples: Vec<TupleKey>,
+}
+
+async fn legacy_write_tuples(
+    State(state): State<ApiState>,
+    Json(body): Json<LegacyTupleWriteRequest>,
+) -> Response {
+    let count = body.tuples.len();
+    match current_store(&state).await {
+        Ok(store_id) => match state
+            .fga
+            .write_tuples(
+                DEFAULT_INSTANCE_ID,
+                &store_id,
+                WriteRequest {
+                    writes: TupleKeySet {
+                        tuple_keys: body.tuples,
+                    },
+                    deletes: TupleKeySet { tuple_keys: vec![] },
+                    authorization_model_id: None,
+                },
+            )
+            .await
+        {
+            Ok(()) => response::json_ok(json!({
+                "status": "ok",
+                "written": count,
+            })),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn legacy_delete_tuples(
+    State(state): State<ApiState>,
+    Json(body): Json<LegacyTupleWriteRequest>,
+) -> Response {
+    let count = body.tuples.len();
+    match current_store(&state).await {
+        Ok(store_id) => match state
+            .fga
+            .write_tuples(
+                DEFAULT_INSTANCE_ID,
+                &store_id,
+                WriteRequest {
+                    writes: TupleKeySet { tuple_keys: vec![] },
+                    deletes: TupleKeySet {
+                        tuple_keys: body.tuples,
+                    },
+                    authorization_model_id: None,
+                },
+            )
+            .await
+        {
+            Ok(()) => response::json_ok(json!({
+                "status": "ok",
+                "deleted": count,
+            })),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn legacy_list_objects(
+    State(state): State<ApiState>,
+    Json(body): Json<ListObjectsRequest>,
+) -> Response {
+    match current_store(&state).await {
+        Ok(store_id) => match state
+            .fga
+            .list_objects(DEFAULT_INSTANCE_ID, &store_id, body)
+            .await
+        {
+            Ok(result) => response::json_ok(result),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn legacy_model(State(state): State<ApiState>) -> Response {
+    match state.fga.legacy_model(DEFAULT_INSTANCE_ID).await {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn legacy_write_model(
+    State(state): State<ApiState>,
+    Json(body): Json<AuthorizationModelWriteRequest>,
+) -> Response {
+    match current_store(&state).await {
+        Ok(store_id) => match state
+            .fga
+            .write_model(DEFAULT_INSTANCE_ID, &store_id, body)
+            .await
+        {
+            Ok(result) => response::json_ok(result),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn legacy_model_graph(State(state): State<ApiState>) -> Response {
+    match state.fga.legacy_model_graph(DEFAULT_INSTANCE_ID).await {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn legacy_expand(State(state): State<ApiState>, Json(body): Json<ExpandRequest>) -> Response {
+    match current_store(&state).await {
+        Ok(store_id) => match state.fga.expand(DEFAULT_INSTANCE_ID, &store_id, body).await {
+            Ok(result) => response::json_ok(result),
+            Err(error) => fga_error_response(error),
+        },
+        Err(error) => fga_error_response(error),
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyBatchAssertion {
+    user: String,
+    relation: String,
+    object: String,
+    expected: bool,
+}
+
+#[derive(Deserialize)]
+struct LegacyBatchRequest {
+    assertions: Vec<LegacyBatchAssertion>,
+}
+
+async fn legacy_batch_test(
+    State(state): State<ApiState>,
+    Json(body): Json<LegacyBatchRequest>,
+) -> Response {
+    match current_store(&state).await {
+        Ok(store_id) => {
+            let request = BatchCheckRequest {
+                checks: body
+                    .assertions
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, assertion)| zitadel_fga::BatchCheckItem {
+                        tuple_key: TupleKey {
+                            user: assertion.user.clone(),
+                            relation: assertion.relation.clone(),
+                            object: assertion.object.clone(),
+                            condition: None,
+                        },
+                        correlation_id: Some(idx.to_string()),
+                    })
+                    .collect(),
+                authorization_model_id: None,
+                contextual_tuples: None,
+                context: None,
+            };
+            match state
+                .fga
+                .batch_check(DEFAULT_INSTANCE_ID, &store_id, request)
+                .await
+            {
+                Ok(result) => {
+                    let mut passed = 0usize;
+                    let results = body
+                        .assertions
+                        .into_iter()
+                        .zip(result.results)
+                        .map(|(assertion, actual)| {
+                            let pass = assertion.expected == actual.allowed;
+                            if pass {
+                                passed += 1;
+                            }
+                            json!({
+                                "user": assertion.user,
+                                "relation": assertion.relation,
+                                "object": assertion.object,
+                                "expected": assertion.expected,
+                                "actual": actual.allowed,
+                                "pass": pass,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    response::json_ok(json!({
+                        "total": results.len(),
+                        "passed": passed,
+                        "failed": results.len().saturating_sub(passed),
+                        "results": results,
+                    }))
+                }
+                Err(error) => fga_error_response(error),
+            }
+        }
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn check_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<CheckRequest>,
+) -> Response {
+    match state.fga.check(DEFAULT_INSTANCE_ID, &store_id, body).await {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn batch_check_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<BatchCheckRequest>,
+) -> Response {
+    match state
+        .fga
+        .batch_check(DEFAULT_INSTANCE_ID, &store_id, body)
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn read_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<ReadRequest>,
+) -> Response {
+    match state
+        .fga
+        .read_tuples(DEFAULT_INSTANCE_ID, &store_id, body)
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn write_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<WriteRequest>,
+) -> Response {
+    match state
+        .fga
+        .write_tuples(DEFAULT_INSTANCE_ID, &store_id, body)
+        .await
+    {
+        Ok(()) => response::json_ok(json!({})),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn expand_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<ExpandRequest>,
+) -> Response {
+    match state.fga.expand(DEFAULT_INSTANCE_ID, &store_id, body).await {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn list_objects_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<ListObjectsRequest>,
+) -> Response {
+    match state
+        .fga
+        .list_objects(DEFAULT_INSTANCE_ID, &store_id, body)
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn list_users_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<ListUsersRequest>,
+) -> Response {
+    match state
+        .fga
+        .list_users(DEFAULT_INSTANCE_ID, &store_id, body)
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+#[derive(Deserialize)]
+struct ReadChangesQuery {
+    #[serde(rename = "type")]
+    object_type: Option<String>,
+    page_size: Option<u32>,
+    continuation_token: Option<String>,
+}
+
+async fn read_changes_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Query(query): Query<ReadChangesQuery>,
+) -> Response {
+    match state
+        .fga
+        .read_changes(
+            DEFAULT_INSTANCE_ID,
+            &store_id,
+            query.object_type.as_deref(),
+            query.page_size.unwrap_or(50),
+            query.continuation_token.as_deref(),
+        )
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn read_authorization_models_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+) -> Response {
+    match state.fga.read_models(DEFAULT_INSTANCE_ID, &store_id).await {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn read_authorization_model_store(
+    State(state): State<ApiState>,
+    Path((store_id, model_id)): Path<(String, String)>,
+) -> Response {
+    match state
+        .fga
+        .read_model(DEFAULT_INSTANCE_ID, &store_id, Some(&model_id))
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
+}
+
+async fn write_authorization_model_store(
+    State(state): State<ApiState>,
+    Path(store_id): Path<String>,
+    Json(body): Json<AuthorizationModelWriteRequest>,
+) -> Response {
+    match state
+        .fga
+        .write_model(DEFAULT_INSTANCE_ID, &store_id, body)
+        .await
+    {
+        Ok(result) => response::json_ok(result),
+        Err(error) => fga_error_response(error),
+    }
 }

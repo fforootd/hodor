@@ -10,6 +10,7 @@ zitadel-authn = { workspace = true }
 zitadel-expr = { workspace = true }
 zitadel-oidc = { workspace = true }
 zitadel-schema = { workspace = true }
+zitadel-botdetect = { path = "../zitadel-botdetect" }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

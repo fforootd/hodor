@@ -25,6 +25,22 @@ export type {
   FgaBatchTestResponse as FGABatchTestResult,
   FgaModelGraphResponse,
   FgaModelResponse,
+  FgaStoreResponse as FGAStore,
+  FgaStoreCheckRequest,
+  FgaStoreCheckResponse,
+  FgaStoreBatchCheckRequest,
+  FgaStoreBatchCheckResponse,
+  FgaStoreReadRequest,
+  FgaStoreReadResponse,
+  FgaStoreWriteRequest,
+  FgaStoreWriteResponse,
+  FgaStoreListUsersRequest,
+  FgaStoreListUsersResponse,
+  FgaStoreReadChangesResponse,
+  FgaAuthorizationModelWriteRequest,
+  FgaAuthorizationModelWriteResponse,
+  FgaAuthorizationModelMetadata,
+  FgaAuthorizationModelsListResponse,
   FgaReadTuplesResponse,
   FgaWriteTuplesResponse,
   FgaDeleteTuplesResponse,
@@ -54,6 +70,24 @@ import type {
   FgaBatchTestResponse,
   FgaModelGraphResponse,
   FgaModelResponse,
+  FgaStoreResponse,
+  FgaStoreCheckRequest,
+  FgaStoreCheckResponse,
+  FgaStoreBatchCheckRequest,
+  FgaStoreBatchCheckResponse,
+  FgaStoreReadRequest,
+  FgaStoreReadResponse,
+  FgaStoreWriteRequest,
+  FgaStoreWriteResponse,
+  FgaStoreListUsersRequest,
+  FgaStoreListUsersResponse,
+  FgaStoreReadChangesResponse,
+  FgaAuthorizationModelWriteRequest,
+  FgaAuthorizationModelWriteResponse,
+  FgaAuthorizationModelMetadata,
+  FgaAuthorizationModelsListResponse,
+  FgaExpandRequest,
+  FgaListObjectsRequest,
   FgaListObjectsResponse,
   FgaExpandResponse,
   SearchResponse,
@@ -99,8 +133,21 @@ import {
   deleteProvider as deleteProviderFn,
   listProviderTemplates as listProviderTemplatesFn,
   fgaGetModel,
+  fgaWriteModel as fgaWriteModelFn,
   fgaModelGraph,
   fgaCheck as fgaCheckFn,
+  fgaDiscoverStore as fgaDiscoverStoreFn,
+  fgaStoreCheck as fgaStoreCheckFn,
+  fgaStoreBatchCheck as fgaStoreBatchCheckFn,
+  fgaStoreRead as fgaStoreReadFn,
+  fgaStoreWrite as fgaStoreWriteFn,
+  fgaStoreExpand as fgaStoreExpandFn,
+  fgaStoreListObjects as fgaStoreListObjectsFn,
+  fgaStoreListUsers as fgaStoreListUsersFn,
+  fgaStoreReadChanges as fgaStoreReadChangesFn,
+  fgaStoreListAuthorizationModels as fgaStoreListAuthorizationModelsFn,
+  fgaStoreWriteAuthorizationModel as fgaStoreWriteAuthorizationModelFn,
+  fgaStoreGetAuthorizationModel as fgaStoreGetAuthorizationModelFn,
   fgaReadTuples,
   fgaWriteTuples as fgaWriteTuplesFn,
   fgaDeleteTuples as fgaDeleteTuplesFn,
@@ -476,7 +523,11 @@ export interface FGATestResult {
 }
 
 export const fgaApi = {
+  discoverStore: (): Promise<FgaStoreResponse> =>
+    unwrap<FgaStoreResponse>(fgaDiscoverStoreFn()),
   getModel: (): Promise<FgaModelResponse> => unwrap<FgaModelResponse>(fgaGetModel()),
+  writeModel: (body: FgaAuthorizationModelWriteRequest): Promise<FgaAuthorizationModelWriteResponse> =>
+    unwrap<FgaAuthorizationModelWriteResponse>(fgaWriteModelFn({ body })),
   getModelGraph: (): Promise<FgaModelGraphResponse> => unwrap<FgaModelGraphResponse>(fgaModelGraph()),
   check: (user: string, relation: string, object: string): Promise<FgaCheckResponse> =>
     unwrap<FgaCheckResponse>(fgaCheckFn({ body: { user, relation, object } })),
@@ -497,6 +548,28 @@ export const fgaApi = {
     unwrap<FgaExpandResponse>(fgaExpandFn({ body: { relation, object } })),
   batchTest: (assertions: { user: string; relation: string; object: string; expected: boolean }[]): Promise<FgaBatchTestResponse> =>
     unwrap<FgaBatchTestResponse>(fgaBatchTestFn({ body: { assertions } as any })),
+  checkStore: (storeId: string, body: FgaStoreCheckRequest): Promise<FgaStoreCheckResponse> =>
+    unwrap<FgaStoreCheckResponse>(fgaStoreCheckFn({ path: { store_id: storeId }, body })),
+  batchCheckStore: (storeId: string, body: FgaStoreBatchCheckRequest): Promise<FgaStoreBatchCheckResponse> =>
+    unwrap<FgaStoreBatchCheckResponse>(fgaStoreBatchCheckFn({ path: { store_id: storeId }, body })),
+  readStore: (storeId: string, body: FgaStoreReadRequest): Promise<FgaStoreReadResponse> =>
+    unwrap<FgaStoreReadResponse>(fgaStoreReadFn({ path: { store_id: storeId }, body })),
+  writeStore: (storeId: string, body: FgaStoreWriteRequest): Promise<FgaStoreWriteResponse> =>
+    unwrap<FgaStoreWriteResponse>(fgaStoreWriteFn({ path: { store_id: storeId }, body })),
+  expandStore: (storeId: string, relation: string, object: string, extra?: Partial<FgaExpandRequest>): Promise<FgaExpandResponse> =>
+    unwrap<FgaExpandResponse>(fgaStoreExpandFn({ path: { store_id: storeId }, body: { relation, object, ...extra } })),
+  listObjectsStore: (storeId: string, user: string, relation: string, type: string, extra?: Partial<FgaListObjectsRequest>): Promise<FgaListObjectsResponse> =>
+    unwrap<FgaListObjectsResponse>(fgaStoreListObjectsFn({ path: { store_id: storeId }, body: { user, relation, type, ...extra } })),
+  listUsersStore: (storeId: string, body: FgaStoreListUsersRequest): Promise<FgaStoreListUsersResponse> =>
+    unwrap<FgaStoreListUsersResponse>(fgaStoreListUsersFn({ path: { store_id: storeId }, body })),
+  readChangesStore: (storeId: string, params?: { type?: string; page_size?: number; continuation_token?: string }): Promise<FgaStoreReadChangesResponse> =>
+    unwrap<FgaStoreReadChangesResponse>(fgaStoreReadChangesFn({ path: { store_id: storeId }, query: params })),
+  listAuthorizationModelsStore: (storeId: string): Promise<FgaAuthorizationModelsListResponse> =>
+    unwrap<FgaAuthorizationModelsListResponse>(fgaStoreListAuthorizationModelsFn({ path: { store_id: storeId } })),
+  getAuthorizationModelStore: (storeId: string, modelId: string): Promise<FgaAuthorizationModelMetadata> =>
+    unwrap<FgaAuthorizationModelMetadata>(fgaStoreGetAuthorizationModelFn({ path: { store_id: storeId, model_id: modelId } })),
+  writeAuthorizationModelStore: (storeId: string, body: FgaAuthorizationModelWriteRequest): Promise<FgaAuthorizationModelWriteResponse> =>
+    unwrap<FgaAuthorizationModelWriteResponse>(fgaStoreWriteAuthorizationModelFn({ path: { store_id: storeId }, body })),
 }
 
 // ------------------------------------------------------------------

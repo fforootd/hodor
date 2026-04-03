@@ -27,6 +27,15 @@ pub(crate) enum UINode {
     Avatar { initial: String, text: String },
     #[serde(rename = "fingerprint_collect")]
     FingerprintCollect,
+    #[allow(dead_code)]
+    #[serde(rename = "captcha_challenge")]
+    CaptchaChallenge {
+        algorithm: String,
+        salt: String,
+        challenge: String,
+        maxnumber: u64,
+        signature: String,
+    },
 }
 
 pub(crate) fn identifier_step_nodes() -> Vec<UINode> {

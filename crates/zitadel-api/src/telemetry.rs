@@ -3,15 +3,18 @@ use axum::{
     Json, Router,
     extract::{Query, State},
     response::Response,
-    routing::get,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 
+/// Authenticated routes (list fingerprints).
 pub fn routes() -> Router<ApiState> {
-    Router::new().route(
-        "/telemetry/fingerprints",
-        get(list_fingerprints).post(ingest_fingerprint),
-    )
+    Router::new().route("/telemetry/fingerprints", get(list_fingerprints))
+}
+
+/// Public routes (fingerprint ingest — called during login before session exists).
+pub fn public_routes() -> Router<ApiState> {
+    Router::new().route("/telemetry/fingerprints", post(ingest_fingerprint))
 }
 
 #[derive(Serialize)]

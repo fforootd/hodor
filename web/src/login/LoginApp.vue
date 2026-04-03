@@ -94,7 +94,7 @@
     traceFormSubmit,
     setFlowId,
   } from '@/lib/telemetry'
-  import { collectFingerprint } from '@/lib/fingerprint'
+  import { collectFingerprint, uploadFingerprintContext } from '@/lib/fingerprint'
   import { createReadyzWaiter, useAppBootstrap } from '@/bootstrap/app-bootstrap'
   import { toLoginErrorDetail, type LoginErrorDetail } from './init-state'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
@@ -573,6 +573,9 @@
       )) as FlowStep
       applyFlowStepState(refreshedStep)
       fingerprintCollected.value = true
+
+      // Upload full fingerprint context to telemetry (fire-and-forget).
+      uploadFingerprintContext(props.apiBaseUrl || '', fp)
     } catch {
       // Fingerprint collection should never block login.
     }

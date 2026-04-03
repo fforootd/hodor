@@ -610,6 +610,7 @@ mod tests {
                 zitadel_oidc::rp::ReqwestHttpClient::new(),
                 zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
             )),
+            pow_secret: "test-pow-secret".into(),
         }
     }
 
