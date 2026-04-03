@@ -1,4 +1,4 @@
-#![allow(clippy::too_many_arguments, unused_imports)]
+#![allow(clippy::too_many_arguments)]
 mod report;
 
 use std::{
@@ -19,8 +19,8 @@ use zitadel_config::{Config, password::PasswordHasherConfig};
 use zitadel_db::{DEFAULT_INSTANCE_ID, Dialect};
 use zitadel_fga::{
     AuthorizationModelWriteRequest, BatchCheckItem, BatchCheckRequest, BatchCheckResponse,
-    CheckRequest, CheckResponse, Evaluator, FgaService, ModelRepository, StoreResolver, TupleKey,
-    TupleKeySet, TupleRepository, TypeDefinition, WriteRequest,
+    CheckRequest, CheckResponse, Evaluator, ModelRepository, StoreResolver, TupleKey, TupleKeySet,
+    TupleRepository, TypeDefinition, WriteRequest,
 };
 use zitadel_testkit::{AuthActor, PatFixture, SessionFixture, TestApp, TestContext, UserFixture};
 
@@ -752,6 +752,7 @@ async fn collect_scenarios(
     );
 
     let transient = env.ctx().api_state.transient.clone();
+    let missing_token = "perf-session-miss-token".to_string();
     reports.push(
         measure_serial(
             "session_lookup_miss",
@@ -760,10 +761,10 @@ async fn collect_scenarios(
             tuning.serial_rounds,
             move || {
                 let transient = transient.clone();
+                let missing_token = missing_token.clone();
                 async move {
-                    let token = format!("missing-session-token-{}", Uuid::new_v4().simple());
                     let session = transient
-                        .find_session_by_token(DEFAULT_INSTANCE_ID, &token)
+                        .find_session_by_token(DEFAULT_INSTANCE_ID, &missing_token)
                         .await?;
                     if session.is_some() {
                         bail!("missing perf session lookup unexpectedly hit");

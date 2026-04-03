@@ -4971,6 +4971,7 @@ dependencies = [
  "zitadel-db",
  "zitadel-observability",
  "zitadel-oidc",
+ "zitadel-perf",
  "zitadel-server",
 ]
 
@@ -5139,6 +5140,7 @@ dependencies = [
  "base64",
  "hex",
  "rand 0.8.5",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
@@ -5201,6 +5203,27 @@ dependencies = [
  "zitadel-config",
  "zitadel-db",
  "zitadel-storage",
+]
+
+[[package]]
+name = "zitadel-perf"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
+ "zitadel-api",
+ "zitadel-authn",
+ "zitadel-config",
+ "zitadel-db",
+ "zitadel-fga",
+ "zitadel-login",
+ "zitadel-storage",
+ "zitadel-testkit",
 ]
 
 [[package]]

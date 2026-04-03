@@ -136,6 +136,7 @@ SQLite is the default test database — no Docker, no setup:
 | Integration tests | In-memory SQLite + synthetic data | ~ms |
 | Fuzz tests | In-memory SQLite | millions of iterations |
 | Performance benchmarks | File-based SQLite (WAL) | sustained load |
+| Scheduled DB perf trends | File-based SQLite (WAL) + Postgres 18 service container | daily CI |
 | Cross-DB validation | Postgres (testcontainers) | ~s |
 
 ```rust

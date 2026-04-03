@@ -152,6 +152,7 @@ mod tests {
     };
     use zitadel_config::{Config, password::PasswordHasherConfig};
     use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
+    use zitadel_fga::{FgaService, StoreResolver};
     use zitadel_storage::StorageRuntime;
 
     async fn test_state() -> ApiState {
@@ -173,6 +174,8 @@ mod tests {
         let storage = StorageRuntime::from_config(&config.storage, db.clone())
             .await
             .unwrap();
+        let fga = Arc::new(FgaService::new(db.clone()));
+        fga.initialize_instance(DEFAULT_INSTANCE_ID).await.unwrap();
         let oidc = zitadel_oidc::OidcState::new_with_config(
             db.clone(),
             config.server.public_origin.clone(),
@@ -182,6 +185,7 @@ mod tests {
 
         ApiState {
             db,
+            fga,
             stateful: storage.stateful.clone(),
             transient: storage.transient.clone(),
             analytics: storage.analytics.clone(),

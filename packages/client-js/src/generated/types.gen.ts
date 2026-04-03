@@ -195,6 +195,8 @@ export type FgaDeleteTuplesResponse = {
 export type FgaExpandRequest = {
   object: string;
   relation: string;
+  authorization_model_id?: string;
+  contextual_tuples?: FgaContextualTuples;
 };
 
 export type FgaExpandResponse = {
@@ -205,6 +207,8 @@ export type FgaListObjectsRequest = {
   relation: string;
   type: string;
   user: string;
+  authorization_model_id?: string;
+  contextual_tuples?: FgaContextualTuples;
 };
 
 export type FgaListObjectsResponse = {
@@ -234,19 +238,11 @@ export type FgaModelResponse = {
 };
 
 export type FgaReadTuplesResponse = {
-  tuples: Array<{
-    object?: string;
-    relation?: string;
-    user?: string;
-  }>;
+  tuples: Array<FgaTupleKey>;
 };
 
 export type FgaWriteTuplesRequest = {
-  tuples: Array<{
-    object?: string;
-    relation?: string;
-    user?: string;
-  }>;
+  tuples: Array<FgaTupleKey>;
 };
 
 export type FgaWriteTuplesResponse = {
@@ -546,6 +542,184 @@ export type UserResponse = {
   state: string;
   updated_at: string;
   user_type: string;
+};
+
+export type FgaRelationshipCondition = {
+  name: string;
+  context?: {
+    [key: string]: unknown;
+  };
+};
+
+export type FgaTupleKey = {
+  user: string;
+  relation: string;
+  object: string;
+  condition?: FgaRelationshipCondition | null;
+};
+
+export type FgaContextualTuples = {
+  tuple_keys?: Array<FgaTupleKey>;
+};
+
+export type FgaStoreResponse = {
+  store_id: string;
+  name: string;
+  instance_id: string;
+};
+
+export type FgaStoreCheckRequest = {
+  tuple_key: FgaTupleKey;
+  authorization_model_id?: string;
+  contextual_tuples?: FgaContextualTuples;
+  context?:
+    | {
+        [key: string]: unknown;
+      }
+    | Array<unknown>
+    | string
+    | number
+    | boolean
+    | null;
+};
+
+export type FgaStoreCheckResponse = {
+  allowed: boolean;
+};
+
+export type FgaBatchCheckItem = {
+  tuple_key: FgaTupleKey;
+  correlation_id?: string;
+};
+
+export type FgaStoreBatchCheckRequest = {
+  checks?: Array<FgaBatchCheckItem>;
+  authorization_model_id?: string;
+  contextual_tuples?: FgaContextualTuples;
+  context?:
+    | {
+        [key: string]: unknown;
+      }
+    | Array<unknown>
+    | string
+    | number
+    | boolean
+    | null;
+};
+
+export type FgaBatchCheckResult = {
+  correlation_id?: string;
+  allowed: boolean;
+};
+
+export type FgaStoreBatchCheckResponse = {
+  results?: Array<FgaBatchCheckResult>;
+};
+
+export type FgaTupleFilter = {
+  user?: string;
+  relation?: string;
+  object?: string;
+};
+
+export type FgaStoreReadRequest = {
+  tuple_key?: FgaTupleFilter;
+  page_size?: number;
+  continuation_token?: string;
+};
+
+export type FgaStoreTupleRecord = {
+  key: FgaTupleKey;
+  timestamp?: string;
+};
+
+export type FgaStoreReadResponse = {
+  tuples?: Array<FgaStoreTupleRecord>;
+  continuation_token?: string;
+};
+
+export type FgaTupleKeySet = {
+  tuple_keys?: Array<FgaTupleKey>;
+};
+
+export type FgaStoreWriteRequest = {
+  writes?: FgaTupleKeySet;
+  deletes?: FgaTupleKeySet;
+  authorization_model_id?: string;
+};
+
+export type FgaStoreWriteResponse = {
+  [key: string]: unknown;
+};
+
+export type FgaUserFilter = {
+  type: string;
+  relation?: string;
+};
+
+export type FgaStoreListUsersRequest = {
+  object: string;
+  relation: string;
+  user_filters?: Array<FgaUserFilter>;
+  authorization_model_id?: string;
+  contextual_tuples?: FgaContextualTuples;
+};
+
+export type FgaStoreListUsersResponse = {
+  users?: Array<string>;
+};
+
+export type FgaTupleChangeRecord = {
+  tuple_key: FgaTupleKey;
+  operation: string;
+  timestamp: string;
+};
+
+export type FgaStoreReadChangesResponse = {
+  changes?: Array<FgaTupleChangeRecord>;
+  continuation_token?: string;
+};
+
+export type FgaTypeDefinition = {
+  type: string;
+  relations?: {
+    [key: string]: unknown;
+  };
+  metadata?:
+    | {
+        [key: string]: unknown;
+      }
+    | Array<unknown>
+    | string
+    | number
+    | boolean
+    | null;
+};
+
+export type FgaAuthorizationModelWriteRequest = {
+  schema_version: string;
+  type_definitions?: Array<FgaTypeDefinition>;
+  conditions?: {
+    [key: string]: unknown;
+  };
+};
+
+export type FgaAuthorizationModelMetadata = {
+  authorization_model_id: string;
+  schema_version: string;
+  type_definitions: Array<FgaTypeDefinition>;
+  conditions?: {
+    [key: string]: unknown;
+  };
+  created_at: string;
+};
+
+export type FgaAuthorizationModelWriteResponse = {
+  authorization_model_id: string;
+};
+
+export type FgaAuthorizationModelsListResponse = {
+  authorization_models?: Array<FgaAuthorizationModelMetadata>;
 };
 
 export type ListOwnActivityData = {
@@ -1113,6 +1287,23 @@ export type FgaGetModelResponses = {
 
 export type FgaGetModelResponse =
   FgaGetModelResponses[keyof FgaGetModelResponses];
+
+export type FgaWriteModelData = {
+  body: FgaAuthorizationModelWriteRequest;
+  path?: never;
+  query?: never;
+  url: "/v1/fga/model";
+};
+
+export type FgaWriteModelResponses = {
+  /**
+   * Write authorization model
+   */
+  200: FgaAuthorizationModelWriteResponse;
+};
+
+export type FgaWriteModelResponse =
+  FgaWriteModelResponses[keyof FgaWriteModelResponses];
 
 export type FgaModelGraphData = {
   body?: never;
@@ -2078,6 +2269,237 @@ export type SetUserPasswordResponses = {
 
 export type SetUserPasswordResponse =
   SetUserPasswordResponses[keyof SetUserPasswordResponses];
+
+export type FgaDiscoverStoreData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/fga/store";
+};
+
+export type FgaDiscoverStoreResponses = {
+  /**
+   * Discover the singleton OpenFGA store for this instance
+   */
+  200: FgaStoreResponse;
+};
+
+export type FgaDiscoverStoreResponse =
+  FgaDiscoverStoreResponses[keyof FgaDiscoverStoreResponses];
+
+export type FgaStoreCheckData = {
+  body: FgaStoreCheckRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/check";
+};
+
+export type FgaStoreCheckResponses = {
+  /**
+   * Check authorization
+   */
+  200: FgaStoreCheckResponse;
+};
+
+export type FgaStoreCheckResponse2 =
+  FgaStoreCheckResponses[keyof FgaStoreCheckResponses];
+
+export type FgaStoreBatchCheckData = {
+  body: FgaStoreBatchCheckRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/batch-check";
+};
+
+export type FgaStoreBatchCheckResponses = {
+  /**
+   * Batch check authorization
+   */
+  200: FgaStoreBatchCheckResponse;
+};
+
+export type FgaStoreBatchCheckResponse2 =
+  FgaStoreBatchCheckResponses[keyof FgaStoreBatchCheckResponses];
+
+export type FgaStoreReadData = {
+  body: FgaStoreReadRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/read";
+};
+
+export type FgaStoreReadResponses = {
+  /**
+   * Read tuples
+   */
+  200: FgaStoreReadResponse;
+};
+
+export type FgaStoreReadResponse2 =
+  FgaStoreReadResponses[keyof FgaStoreReadResponses];
+
+export type FgaStoreWriteData = {
+  body: FgaStoreWriteRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/write";
+};
+
+export type FgaStoreWriteResponses = {
+  /**
+   * Write tuples
+   */
+  200: FgaStoreWriteResponse;
+};
+
+export type FgaStoreWriteResponse2 =
+  FgaStoreWriteResponses[keyof FgaStoreWriteResponses];
+
+export type FgaStoreExpandData = {
+  body: FgaExpandRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/expand";
+};
+
+export type FgaStoreExpandResponses = {
+  /**
+   * Expand relationship tree
+   */
+  200: FgaExpandResponse;
+};
+
+export type FgaStoreExpandResponse =
+  FgaStoreExpandResponses[keyof FgaStoreExpandResponses];
+
+export type FgaStoreListObjectsData = {
+  body: FgaListObjectsRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/list-objects";
+};
+
+export type FgaStoreListObjectsResponses = {
+  /**
+   * List authorized objects
+   */
+  200: FgaListObjectsResponse;
+};
+
+export type FgaStoreListObjectsResponse =
+  FgaStoreListObjectsResponses[keyof FgaStoreListObjectsResponses];
+
+export type FgaStoreListUsersData = {
+  body: FgaStoreListUsersRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/list-users";
+};
+
+export type FgaStoreListUsersResponses = {
+  /**
+   * List users
+   */
+  200: FgaStoreListUsersResponse;
+};
+
+export type FgaStoreListUsersResponse2 =
+  FgaStoreListUsersResponses[keyof FgaStoreListUsersResponses];
+
+export type FgaStoreReadChangesData = {
+  body?: never;
+  path: {
+    store_id: string;
+  };
+  query?: {
+    type?: string;
+    page_size?: number;
+    continuation_token?: string;
+  };
+  url: "/v1/fga/stores/{store_id}/changes";
+};
+
+export type FgaStoreReadChangesResponses = {
+  /**
+   * Read tuple changes
+   */
+  200: FgaStoreReadChangesResponse;
+};
+
+export type FgaStoreReadChangesResponse2 =
+  FgaStoreReadChangesResponses[keyof FgaStoreReadChangesResponses];
+
+export type FgaStoreListAuthorizationModelsData = {
+  body?: never;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/authorization-models";
+};
+
+export type FgaStoreListAuthorizationModelsResponses = {
+  /**
+   * List authorization models
+   */
+  200: FgaAuthorizationModelsListResponse;
+};
+
+export type FgaStoreListAuthorizationModelsResponse =
+  FgaStoreListAuthorizationModelsResponses[keyof FgaStoreListAuthorizationModelsResponses];
+
+export type FgaStoreWriteAuthorizationModelData = {
+  body: FgaAuthorizationModelWriteRequest;
+  path: {
+    store_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/authorization-models";
+};
+
+export type FgaStoreWriteAuthorizationModelResponses = {
+  /**
+   * Write authorization model
+   */
+  200: FgaAuthorizationModelWriteResponse;
+};
+
+export type FgaStoreWriteAuthorizationModelResponse =
+  FgaStoreWriteAuthorizationModelResponses[keyof FgaStoreWriteAuthorizationModelResponses];
+
+export type FgaStoreGetAuthorizationModelData = {
+  body?: never;
+  path: {
+    store_id: string;
+    model_id: string;
+  };
+  query?: never;
+  url: "/v1/fga/stores/{store_id}/authorization-models/{model_id}";
+};
+
+export type FgaStoreGetAuthorizationModelResponses = {
+  /**
+   * Fetch an authorization model
+   */
+  200: FgaAuthorizationModelMetadata;
+};
+
+export type FgaStoreGetAuthorizationModelResponse =
+  FgaStoreGetAuthorizationModelResponses[keyof FgaStoreGetAuthorizationModelResponses];
 
 export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {});

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js
+.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js perf-db perf-db-sqlite perf-db-postgres
 
 SEED ?= frontend
 JS_WORKSPACE_MANIFESTS := package.json package-lock.json web/package.json e2e/package.json packages/client-js/package.json
@@ -42,6 +42,9 @@ help:
 		'  oidc-conformance-rp Run the current RP OIDC daily regression lane' \
 		'  oidc-conformance Run OIDC daily coverage (OIDF OP + RP regression by default)' \
 		'  oidc-conformance-clean Stop and remove local OIDC conformance containers' \
+		'  perf-db-sqlite Run the SQLite database performance harness' \
+		'  perf-db-postgres Run the Postgres database performance harness (PG URL optional)' \
+		'  perf-db       Run the SQLite and Postgres database performance harnesses' \
 		'  rust-check    Run fmt, clippy, and Rust tests' \
 		'  docs-check    Fail on stale doc commands and local absolute links' \
 		'  quality       Run the main local quality gate' \
@@ -167,6 +170,18 @@ test:
 # Run web component tests (Vitest).
 test-web: node_modules
 	npm test -w web
+
+perf-db-sqlite: ensure-webdist
+	@mkdir -p artifacts/db-perf
+	cargo run -p zitadel --release -- perf db run --backend sqlite --profile ci --format json --output artifacts/db-perf/sqlite.json
+
+perf-db-postgres: ensure-webdist
+	@mkdir -p artifacts/db-perf
+	@db_url="$${ZITADEL_PERF_POSTGRES_URL:-$${ZITADEL_STORAGE_STATEFUL_URL:-postgres://postgres:postgres@127.0.0.1:5432/zitadel_perf}}"; \
+	echo "→ Postgres perf DB: $$db_url"; \
+	cargo run -p zitadel --release -- perf db run --backend postgres --profile ci --database-url "$$db_url" --format json --output artifacts/db-perf/postgres.json
+
+perf-db: perf-db-sqlite perf-db-postgres
 
 # Run E2E browser tests (Playwright).
 test-e2e: node_modules web

@@ -1,0 +1,180 @@
+name: DB Perf Daily
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  db-perf:
+    name: DB Perf (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - sqlite
+          - postgres
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_DB: zitadel_perf
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d zitadel_perf"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Ensure embedded web placeholder exists
+        run: make ensure-webdist
+
+      - name: Run DB perf harness
+        env:
+          PERF_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/zitadel_perf
+        run: |
+          mkdir -p artifacts/db-perf
+          if [ "${{ matrix.backend }}" = "postgres" ]; then
+            cargo run -p zitadel --release -- perf db run \
+              --backend postgres \
+              --profile ci \
+              --database-url "$PERF_POSTGRES_URL" \
+              --format json \
+              --output artifacts/db-perf/postgres.json
+          else
+            cargo run -p zitadel --release -- perf db run \
+              --backend sqlite \
+              --profile ci \
+              --format json \
+              --output artifacts/db-perf/sqlite.json
+          fi
+
+      - name: Upload DB perf artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: db-perf-${{ matrix.backend }}
+          path: artifacts/db-perf/${{ matrix.backend }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  db-perf-summary:
+    name: DB Perf Summary
+    needs: db-perf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Ensure embedded web placeholder exists
+        run: make ensure-webdist
+
+      - name: Download current DB perf artifacts
+        uses: actions/download-artifact@v4.3.0
+        with:
+          pattern: db-perf-*
+          merge-multiple: true
+          path: artifacts/current
+
+      - name: Find previous successful run
+        id: previous-run
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'db-perf-daily.yml',
+              branch: 'main',
+              status: 'completed',
+              per_page: 20,
+            });
+            const previous = runs.find((run) => run.id !== context.runId && run.conclusion === 'success');
+            core.setOutput('run_id', previous ? String(previous.id) : '');
+
+      - name: List previous artifacts
+        id: previous-artifacts
+        if: ${{ steps.previous-run.outputs.run_id != '' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const runId = Number('${{ steps.previous-run.outputs.run_id }}');
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const artifacts = data.artifacts
+              .filter((artifact) => artifact.name.startsWith('db-perf-'))
+              .map((artifact) => ({
+                name: artifact.name,
+                archive_url: artifact.archive_download_url,
+              }));
+            core.setOutput('artifacts', JSON.stringify(artifacts));
+
+      - name: Download previous DB perf artifacts
+        if: ${{ steps.previous-artifacts.outputs.artifacts != '' && steps.previous-artifacts.outputs.artifacts != '[]' }}
+        env:
+          ARTIFACTS_JSON: ${{ steps.previous-artifacts.outputs.artifacts }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p artifacts/previous
+          echo "$ARTIFACTS_JSON" | jq -c '.[]' | while read -r artifact; do
+            name=$(echo "$artifact" | jq -r '.name')
+            archive_url=$(echo "$artifact" | jq -r '.archive_url')
+            zip_path="artifacts/previous/${name}.zip"
+            unzip_dir="artifacts/previous/${name}"
+            curl -fsSL \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "$archive_url" \
+              -o "$zip_path"
+            mkdir -p "$unzip_dir"
+            unzip -o "$zip_path" -d "$unzip_dir" >/dev/null
+          done
+
+      - name: Generate DB perf markdown summary
+        run: |
+          mkdir -p artifacts
+          args=(
+            cargo run -p zitadel --release -- perf db summarize
+            --report artifacts/current/sqlite.json
+            --report artifacts/current/postgres.json
+          )
+          shopt -s nullglob
+          for previous in artifacts/previous/db-perf-*/*.json; do
+            args+=(--previous-report "$previous")
+          done
+          "${args[@]}" --output artifacts/db-perf-summary.md
+
+      - name: Upload DB perf summary
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: db-perf-summary
+          path: artifacts/db-perf-summary.md
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish DB perf summary
+        run: cat artifacts/db-perf-summary.md >> "$GITHUB_STEP_SUMMARY"

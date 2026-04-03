@@ -633,6 +633,12 @@
           },
           "relation": {
             "type": "string"
+          },
+          "authorization_model_id": {
+            "type": "string"
+          },
+          "contextual_tuples": {
+            "$ref": "#/components/schemas/FGAContextualTuples"
           }
         },
         "required": [
@@ -660,6 +666,12 @@
           },
           "user": {
             "type": "string"
+          },
+          "authorization_model_id": {
+            "type": "string"
+          },
+          "contextual_tuples": {
+            "$ref": "#/components/schemas/FGAContextualTuples"
           }
         },
         "required": [
@@ -765,54 +777,32 @@
         "type": "object"
       },
       "FGAReadTuplesResponse": {
-        "properties": {
-          "tuples": {
-            "items": {
-              "properties": {
-                "object": {
-                  "type": "string"
-                },
-                "relation": {
-                  "type": "string"
-                },
-                "user": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
+        "type": "object",
         "required": [
           "tuples"
         ],
-        "type": "object"
+        "properties": {
+          "tuples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATupleKey"
+            }
+          }
+        }
       },
       "FGAWriteTuplesRequest": {
-        "properties": {
-          "tuples": {
-            "items": {
-              "properties": {
-                "object": {
-                  "type": "string"
-                },
-                "relation": {
-                  "type": "string"
-                },
-                "user": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
+        "type": "object",
         "required": [
           "tuples"
         ],
-        "type": "object"
+        "properties": {
+          "tuples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATupleKey"
+            }
+          }
+        }
       },
       "FGAWriteTuplesResponse": {
         "properties": {
@@ -1737,6 +1727,491 @@
           "updated_at"
         ],
         "type": "object"
+      },
+      "FGARelationshipCondition": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "context": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "FGATupleKey": {
+        "type": "object",
+        "required": [
+          "user",
+          "relation",
+          "object"
+        ],
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FGARelationshipCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FGAContextualTuples": {
+        "type": "object",
+        "properties": {
+          "tuple_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATupleKey"
+            }
+          }
+        }
+      },
+      "FGAStoreResponse": {
+        "type": "object",
+        "required": [
+          "store_id",
+          "name",
+          "instance_id"
+        ],
+        "properties": {
+          "store_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreCheckRequest": {
+        "type": "object",
+        "required": [
+          "tuple_key"
+        ],
+        "properties": {
+          "tuple_key": {
+            "$ref": "#/components/schemas/FGATupleKey"
+          },
+          "authorization_model_id": {
+            "type": "string"
+          },
+          "contextual_tuples": {
+            "$ref": "#/components/schemas/FGAContextualTuples"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FGAStoreCheckResponse": {
+        "type": "object",
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FGABatchCheckItem": {
+        "type": "object",
+        "required": [
+          "tuple_key"
+        ],
+        "properties": {
+          "tuple_key": {
+            "$ref": "#/components/schemas/FGATupleKey"
+          },
+          "correlation_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreBatchCheckRequest": {
+        "type": "object",
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGABatchCheckItem"
+            }
+          },
+          "authorization_model_id": {
+            "type": "string"
+          },
+          "contextual_tuples": {
+            "$ref": "#/components/schemas/FGAContextualTuples"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FGABatchCheckResult": {
+        "type": "object",
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "correlation_id": {
+            "type": "string"
+          },
+          "allowed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FGAStoreBatchCheckResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGABatchCheckResult"
+            }
+          }
+        }
+      },
+      "FGATupleFilter": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreReadRequest": {
+        "type": "object",
+        "properties": {
+          "tuple_key": {
+            "$ref": "#/components/schemas/FGATupleFilter"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "continuation_token": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreTupleRecord": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/FGATupleKey"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreReadResponse": {
+        "type": "object",
+        "properties": {
+          "tuples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGAStoreTupleRecord"
+            }
+          },
+          "continuation_token": {
+            "type": "string"
+          }
+        }
+      },
+      "FGATupleKeySet": {
+        "type": "object",
+        "properties": {
+          "tuple_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATupleKey"
+            }
+          }
+        }
+      },
+      "FGAStoreWriteRequest": {
+        "type": "object",
+        "properties": {
+          "writes": {
+            "$ref": "#/components/schemas/FGATupleKeySet"
+          },
+          "deletes": {
+            "$ref": "#/components/schemas/FGATupleKeySet"
+          },
+          "authorization_model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreWriteResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "FGAUserFilter": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreListUsersRequest": {
+        "type": "object",
+        "required": [
+          "object",
+          "relation"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "user_filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGAUserFilter"
+            }
+          },
+          "authorization_model_id": {
+            "type": "string"
+          },
+          "contextual_tuples": {
+            "$ref": "#/components/schemas/FGAContextualTuples"
+          }
+        }
+      },
+      "FGAStoreListUsersResponse": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "FGATupleChangeRecord": {
+        "type": "object",
+        "required": [
+          "tuple_key",
+          "operation",
+          "timestamp"
+        ],
+        "properties": {
+          "tuple_key": {
+            "$ref": "#/components/schemas/FGATupleKey"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAStoreReadChangesResponse": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATupleChangeRecord"
+            }
+          },
+          "continuation_token": {
+            "type": "string"
+          }
+        }
+      },
+      "FGATypeDefinition": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "relations": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FGAAuthorizationModelWriteRequest": {
+        "type": "object",
+        "required": [
+          "schema_version"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "type_definitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATypeDefinition"
+            }
+          },
+          "conditions": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "FGAAuthorizationModelMetadata": {
+        "type": "object",
+        "required": [
+          "authorization_model_id",
+          "schema_version",
+          "type_definitions",
+          "created_at"
+        ],
+        "properties": {
+          "authorization_model_id": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "type_definitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGATypeDefinition"
+            }
+          },
+          "conditions": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAAuthorizationModelWriteResponse": {
+        "type": "object",
+        "required": [
+          "authorization_model_id"
+        ],
+        "properties": {
+          "authorization_model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FGAAuthorizationModelsListResponse": {
+        "type": "object",
+        "properties": {
+          "authorization_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FGAAuthorizationModelMetadata"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -2827,6 +3302,43 @@
         "tags": [
           "Authorization"
         ]
+      },
+      "post": {
+        "operationId": "fgaWriteModel",
+        "summary": "Write authorization model",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAAuthorizationModelWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Write authorization model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAAuthorizationModelWriteResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/fga/model/graph": {
@@ -4671,6 +5183,574 @@
         "tags": [
           "Users"
         ]
+      }
+    },
+    "/v1/fga/store": {
+      "get": {
+        "operationId": "fgaDiscoverStore",
+        "summary": "Discover the singleton OpenFGA store for this instance",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discover the singleton OpenFGA store for this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/check": {
+      "post": {
+        "operationId": "fgaStoreCheck",
+        "summary": "Check authorization in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAStoreCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Check authorization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/batch-check": {
+      "post": {
+        "operationId": "fgaStoreBatchCheck",
+        "summary": "Batch check authorization in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAStoreBatchCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch check authorization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreBatchCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/read": {
+      "post": {
+        "operationId": "fgaStoreRead",
+        "summary": "Read tuples in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAStoreReadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read tuples",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreReadResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/write": {
+      "post": {
+        "operationId": "fgaStoreWrite",
+        "summary": "Write tuples in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAStoreWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Write tuples",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreWriteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/expand": {
+      "post": {
+        "operationId": "fgaStoreExpand",
+        "summary": "Expand relationship tree in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAExpandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Expand relationship tree",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAExpandResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/list-objects": {
+      "post": {
+        "operationId": "fgaStoreListObjects",
+        "summary": "List authorized objects in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAListObjectsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List authorized objects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAListObjectsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/list-users": {
+      "post": {
+        "operationId": "fgaStoreListUsers",
+        "summary": "List users in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAStoreListUsersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreListUsersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/changes": {
+      "get": {
+        "operationId": "fgaStoreReadChanges",
+        "summary": "Read tuple changes in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "continuation_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read tuple changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAStoreReadChangesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/authorization-models": {
+      "get": {
+        "operationId": "fgaStoreListAuthorizationModels",
+        "summary": "List authorization models in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List authorization models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAAuthorizationModelsListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "fgaStoreWriteAuthorizationModel",
+        "summary": "Write authorization model in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FGAAuthorizationModelWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Write authorization model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAAuthorizationModelWriteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fga/stores/{store_id}/authorization-models/{model_id}": {
+      "get": {
+        "operationId": "fgaStoreGetAuthorizationModel",
+        "summary": "Fetch an authorization model in the canonical store-scoped API",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fetch an authorization model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FGAAuthorizationModelMetadata"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },

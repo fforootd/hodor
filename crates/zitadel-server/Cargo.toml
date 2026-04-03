@@ -7,6 +7,7 @@ edition.workspace = true
 zitadel-config = { workspace = true }
 zitadel-crypto = { workspace = true }
 zitadel-db = { workspace = true }
+zitadel-fga = { workspace = true }
 zitadel-observability = { workspace = true }
 zitadel-storage = { workspace = true }
 zitadel-api = { workspace = true }

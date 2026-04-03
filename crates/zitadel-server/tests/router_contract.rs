@@ -63,6 +63,21 @@ async fn public_surfaces_bypass_auth_and_readyz_reflects_state() -> anyhow::Resu
         }),
         "openapi should advertise the configured public origin",
     );
+    let paths = openapi_json["paths"]
+        .as_object()
+        .expect("openapi paths should be present");
+    assert!(
+        paths.contains_key("/v1/fga/store"),
+        "runtime openapi should expose FGA store discovery",
+    );
+    assert!(
+        paths.contains_key("/v1/fga/stores/{store_id}/check"),
+        "runtime openapi should expose canonical FGA check",
+    );
+    assert!(
+        paths.contains_key("/v1/fga/stores/{store_id}/authorization-models"),
+        "runtime openapi should expose canonical FGA authorization-model routes",
+    );
 
     Ok(())
 }
@@ -78,12 +93,7 @@ async fn protected_routes_follow_the_current_actor_contract() -> anyhow::Result<
     let admin_user = app.ctx.admin_user().await?;
     let admin_pat = app.ctx.create_pat(&admin_user, "route-admin").await?;
 
-    for path in [
-        "/v1/users",
-        "/v1/sessions",
-        "/v1/auth/whoami",
-        "/v1/fga/model",
-    ] {
+    for path in ["/v1/users", "/v1/sessions", "/v1/auth/whoami"] {
         let unauth = app.get(path, AuthActor::Anonymous).await?;
         assert_eq!(
             unauth.status,
@@ -119,6 +129,35 @@ async fn protected_routes_follow_the_current_actor_contract() -> anyhow::Result<
             axum::http::StatusCode::FORBIDDEN,
             "{path}"
         );
+    }
+
+    for path in ["/v1/fga/model", "/v1/fga/store"] {
+        let unauth = app.get(path, AuthActor::Anonymous).await?;
+        assert_eq!(
+            unauth.status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+        assert_eq!(
+            unauth.json_value(),
+            json!({"error": "authentication required", "code": 401}),
+            "{path} should keep the uniform 401 shape",
+        );
+
+        let user_response = app.get(path, user_session.bearer_actor()).await?;
+        assert_eq!(
+            user_response.status,
+            axum::http::StatusCode::FORBIDDEN,
+            "{path} should be PAT-only",
+        );
+        assert_eq!(
+            user_response.json_value(),
+            json!({"error": "personal access token required", "code": 403}),
+            "{path} should clearly report the PAT-only boundary",
+        );
+
+        let admin_response = app.get(path, admin_pat.actor()).await?;
+        assert_eq!(admin_response.status, axum::http::StatusCode::OK, "{path}");
     }
 
     Ok(())
@@ -204,6 +243,235 @@ async fn auth_resolution_accepts_session_pat_cookie_and_oidc_tokens() -> anyhow:
     assert_eq!(
         revoked.json_value(),
         json!({"error": "invalid or expired token", "code": 401})
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn canonical_fga_store_routes_support_model_tuple_and_change_queries() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let admin_user = app.ctx.admin_user().await?;
+    let admin_pat = app.ctx.create_pat(&admin_user, "fga-admin").await?;
+
+    let store = app.get("/v1/fga/store", admin_pat.actor()).await?;
+    assert_eq!(store.status, axum::http::StatusCode::OK);
+    let store_id = store.json_value()["store_id"]
+        .as_str()
+        .expect("store_id should be present")
+        .to_string();
+
+    let latest_model = app
+        .get(
+            &format!("/v1/fga/stores/{store_id}/authorization-models"),
+            admin_pat.actor(),
+        )
+        .await?;
+    assert_eq!(latest_model.status, axum::http::StatusCode::OK);
+    assert!(
+        latest_model.json_value()["authorization_models"]
+            .as_array()
+            .is_some_and(|models| !models.is_empty())
+    );
+
+    let custom_model = json!({
+        "schema_version": "1.1",
+        "type_definitions": [
+            {
+                "type": "user",
+                "relations": {},
+                "metadata": { "relations": {} }
+            },
+            {
+                "type": "instance",
+                "relations": {
+                    "owner": { "this": {} },
+                    "admin": { "this": {} },
+                    "viewer": { "this": {} },
+                    "parent": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }] },
+                        "parent": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "org",
+                "relations": {
+                    "owner": { "this": {} },
+                    "admin": { "this": {} },
+                    "member": { "this": {} },
+                    "viewer": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
+                        "member": { "directly_related_user_types": [{ "type": "user" }] },
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "group",
+                "relations": {
+                    "member": { "this": {} },
+                    "admin": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "member": { "directly_related_user_types": [{ "type": "user" }] },
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "project",
+                "relations": {
+                    "owner": { "this": {} },
+                    "admin": { "this": {} },
+                    "member": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
+                        "member": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "app",
+                "relations": {
+                    "admin": { "this": {} },
+                    "viewer": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "settings",
+                "relations": {
+                    "admin": { "this": {} },
+                    "viewer": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "session",
+                "relations": {
+                    "owner": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "owner": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            },
+            {
+                "type": "document",
+                "relations": {
+                    "viewer": { "this": {} }
+                },
+                "metadata": {
+                    "relations": {
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                }
+            }
+        ],
+        "conditions": {}
+    });
+
+    let written_model = app
+        .post_json(
+            &format!("/v1/fga/stores/{store_id}/authorization-models"),
+            admin_pat.actor(),
+            &custom_model,
+        )
+        .await?;
+    assert_eq!(written_model.status, axum::http::StatusCode::OK);
+    assert!(written_model.json_value()["authorization_model_id"].is_string());
+
+    let write = app
+        .post_json(
+            &format!("/v1/fga/stores/{store_id}/write"),
+            admin_pat.actor(),
+            &json!({
+                "writes": {
+                    "tuple_keys": [
+                        {
+                            "user": format!("user:{}", admin_user.user_id),
+                            "relation": "viewer",
+                            "object": "document:architecture"
+                        }
+                    ]
+                },
+                "deletes": { "tuple_keys": [] }
+            }),
+        )
+        .await?;
+    assert_eq!(write.status, axum::http::StatusCode::OK);
+    assert_eq!(write.json_value(), json!({}));
+
+    let check = app
+        .post_json(
+            &format!("/v1/fga/stores/{store_id}/check"),
+            admin_pat.actor(),
+            &json!({
+                "tuple_key": {
+                    "user": format!("user:{}", admin_user.user_id),
+                    "relation": "viewer",
+                    "object": "document:architecture"
+                }
+            }),
+        )
+        .await?;
+    assert_eq!(check.status, axum::http::StatusCode::OK);
+    assert_eq!(check.json_value(), json!({ "allowed": true }));
+
+    let tuples = app
+        .post_json(
+            &format!("/v1/fga/stores/{store_id}/read"),
+            admin_pat.actor(),
+            &json!({
+                "tuple_key": {
+                    "object": "document:architecture"
+                }
+            }),
+        )
+        .await?;
+    assert_eq!(tuples.status, axum::http::StatusCode::OK);
+    assert!(
+        tuples.json_value()["tuples"]
+            .as_array()
+            .is_some_and(|items| items.len() == 1)
+    );
+
+    let changes = app
+        .get(
+            &format!("/v1/fga/stores/{store_id}/changes?type=document"),
+            admin_pat.actor(),
+        )
+        .await?;
+    assert_eq!(changes.status, axum::http::StatusCode::OK);
+    assert!(
+        changes.json_value()["changes"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
     );
 
     Ok(())

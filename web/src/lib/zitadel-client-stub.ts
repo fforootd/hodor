@@ -23,11 +23,36 @@ export interface FgaCheckResponse { allowed: boolean; [k: string]: any }
 export interface FgaBatchTestResponse { results: any[] }
 export interface FgaModelGraphResponse { nodes: any[]; edges: any[] }
 export interface FgaModelResponse { model: string; [k: string]: any }
+export interface FgaRelationshipCondition { name: string; context?: Record<string, unknown> }
+export interface FgaTupleKey { user: string; relation: string; object: string; condition?: FgaRelationshipCondition | null }
+export interface FgaContextualTuples { tuple_keys?: FgaTupleKey[] }
+export interface FgaStoreResponse { store_id: string; name: string; instance_id: string }
+export interface FgaStoreCheckRequest { tuple_key: FgaTupleKey; authorization_model_id?: string; contextual_tuples?: FgaContextualTuples; context?: unknown }
+export interface FgaStoreCheckResponse { allowed: boolean }
+export interface FgaBatchCheckItem { tuple_key: FgaTupleKey; correlation_id?: string }
+export interface FgaStoreBatchCheckRequest { checks?: FgaBatchCheckItem[]; authorization_model_id?: string; contextual_tuples?: FgaContextualTuples; context?: unknown }
+export interface FgaStoreBatchCheckResponse { results?: Array<{ allowed: boolean; correlation_id?: string }> }
+export interface FgaTupleFilter { user?: string; relation?: string; object?: string }
+export interface FgaStoreReadRequest { tuple_key?: FgaTupleFilter; page_size?: number; continuation_token?: string }
+export interface FgaStoreReadResponse { tuples?: Array<{ key: FgaTupleKey; timestamp?: string }>; continuation_token?: string }
+export interface FgaTupleKeySet { tuple_keys?: FgaTupleKey[] }
+export interface FgaStoreWriteRequest { writes?: FgaTupleKeySet; deletes?: FgaTupleKeySet; authorization_model_id?: string }
+export interface FgaStoreWriteResponse { [k: string]: any }
+export interface FgaUserFilter { type: string; relation?: string }
+export interface FgaStoreListUsersRequest { object: string; relation: string; user_filters?: FgaUserFilter[]; authorization_model_id?: string; contextual_tuples?: FgaContextualTuples }
+export interface FgaStoreListUsersResponse { users?: string[] }
+export interface FgaStoreReadChangesResponse { changes?: Array<{ tuple_key: FgaTupleKey; operation: string; timestamp: string }>; continuation_token?: string }
+export interface FgaAuthorizationModelWriteRequest { schema_version: string; type_definitions?: Array<Record<string, unknown>>; conditions?: Record<string, unknown> }
+export interface FgaAuthorizationModelWriteResponse { authorization_model_id: string }
+export interface FgaAuthorizationModelMetadata { authorization_model_id: string; schema_version: string; type_definitions: Array<Record<string, unknown>>; conditions?: Record<string, unknown>; created_at: string }
+export interface FgaAuthorizationModelsListResponse { authorization_models?: FgaAuthorizationModelMetadata[] }
 export interface FgaReadTuplesResponse { tuples: any[] }
 export interface FgaWriteTuplesResponse { [k: string]: any }
 export interface FgaDeleteTuplesResponse { [k: string]: any }
 export interface FgaListObjectsResponse { objects: string[] }
+export interface FgaExpandRequest { object: string; relation: string; authorization_model_id?: string; contextual_tuples?: FgaContextualTuples }
 export interface FgaExpandResponse { tree: any }
+export interface FgaListObjectsRequest { user: string; relation: string; type: string; authorization_model_id?: string; contextual_tuples?: FgaContextualTuples }
 export interface SearchResponse { results: any[]; total: number }
 export interface PromoteSchemaResponse { [k: string]: any }
 export interface DiffSchemaResponse { [k: string]: any }
@@ -111,14 +136,27 @@ export const listProviderTemplates = () => wrap(api.get<{ templates: any[] }>('/
 
 // FGA
 export const fgaGetModel = () => wrap(api.get<any>('/v1/fga/model'))
+export const fgaWriteModel = (opts?: Opts) => wrap(api.post<any>('/v1/fga/model', opts?.body))
 export const fgaModelGraph = () => wrap(api.get<any>('/v1/fga/model/graph'))
 export const fgaCheck = (opts?: Opts) => wrap(api.post<any>('/v1/fga/check', opts?.body))
+export const fgaDiscoverStore = () => wrap(api.get<any>('/v1/fga/store'))
+export const fgaStoreCheck = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/check`, opts?.body))
+export const fgaStoreBatchCheck = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/batch-check`, opts?.body))
+export const fgaStoreRead = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/read`, opts?.body))
+export const fgaStoreWrite = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/write`, opts?.body))
+export const fgaStoreExpand = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/expand`, opts?.body))
+export const fgaStoreListObjects = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/list-objects`, opts?.body))
+export const fgaStoreListUsers = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/list-users`, opts?.body))
+export const fgaStoreReadChanges = (opts?: Opts) => wrap(api.get<any>(`/v1/fga/stores/${opts?.path?.store_id}/changes${qs(opts?.query)}`))
+export const fgaStoreListAuthorizationModels = (opts?: Opts) => wrap(api.get<any>(`/v1/fga/stores/${opts?.path?.store_id}/authorization-models`))
+export const fgaStoreWriteAuthorizationModel = (opts?: Opts) => wrap(api.post<any>(`/v1/fga/stores/${opts?.path?.store_id}/authorization-models`, opts?.body))
+export const fgaStoreGetAuthorizationModel = (opts?: Opts) => wrap(api.get<any>(`/v1/fga/stores/${opts?.path?.store_id}/authorization-models/${opts?.path?.model_id}`))
 export const fgaReadTuples = (opts?: Opts) => wrap(api.get<any>(`/v1/fga/tuples${qs(opts?.query)}`))
 export const fgaWriteTuples = (opts?: Opts) => wrap(api.post<any>('/v1/fga/tuples', opts?.body))
 export const fgaDeleteTuples = (opts?: Opts) => wrap(api.delete<any>('/v1/fga/tuples', opts?.body))
 export const fgaListObjects = (opts?: Opts) => wrap(api.post<any>('/v1/fga/list-objects', opts?.body))
 export const fgaExpand = (opts?: Opts) => wrap(api.post<any>('/v1/fga/expand', opts?.body))
-export const fgaBatchTest = (opts?: Opts) => wrap(api.post<any>('/v1/fga/batch-test', opts?.body))
+export const fgaBatchTest = (opts?: Opts) => wrap(api.post<any>('/v1/fga/test', opts?.body))
 
 // Orgs
 export const listOrgs = (opts?: Opts) => wrap(api.get<{ items: any[] }>(`/v1/orgs${qs(opts?.query)}`))

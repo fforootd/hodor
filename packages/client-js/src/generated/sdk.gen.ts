@@ -59,6 +59,8 @@ import type {
   FgaListObjectsResponse2,
   FgaGetModelData,
   FgaGetModelResponse,
+  FgaWriteModelData,
+  FgaWriteModelResponse,
   FgaModelGraphData,
   FgaModelGraphResponse2,
   FgaBatchTestData,
@@ -152,6 +154,30 @@ import type {
   UpdateUserResponse,
   SetUserPasswordData,
   SetUserPasswordResponse,
+  FgaDiscoverStoreData,
+  FgaDiscoverStoreResponse,
+  FgaStoreCheckData,
+  FgaStoreCheckResponse2,
+  FgaStoreBatchCheckData,
+  FgaStoreBatchCheckResponse2,
+  FgaStoreReadData,
+  FgaStoreReadResponse2,
+  FgaStoreWriteData,
+  FgaStoreWriteResponse2,
+  FgaStoreExpandData,
+  FgaStoreExpandResponse,
+  FgaStoreListObjectsData,
+  FgaStoreListObjectsResponse,
+  FgaStoreListUsersData,
+  FgaStoreListUsersResponse2,
+  FgaStoreReadChangesData,
+  FgaStoreReadChangesResponse2,
+  FgaStoreListAuthorizationModelsData,
+  FgaStoreListAuthorizationModelsResponse,
+  FgaStoreWriteAuthorizationModelData,
+  FgaStoreWriteAuthorizationModelResponse,
+  FgaStoreGetAuthorizationModelData,
+  FgaStoreGetAuthorizationModelResponse,
 } from "./types.gen";
 import { client as _heyApiClient } from "./client.gen";
 
@@ -911,6 +937,37 @@ export const fgaGetModel = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/fga/model",
     ...options,
+  });
+};
+
+/**
+ * Write authorization model
+ */
+export const fgaWriteModel = <ThrowOnError extends boolean = false>(
+  options: Options<FgaWriteModelData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaWriteModelResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/model",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
   });
 };
 
@@ -2251,5 +2308,367 @@ export const setUserPassword = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options?.headers,
     },
+  });
+};
+
+/**
+ * Discover the singleton OpenFGA store for this instance
+ */
+export const fgaDiscoverStore = <ThrowOnError extends boolean = false>(
+  options?: Options<FgaDiscoverStoreData, ThrowOnError>,
+) => {
+  return (options?.client ?? _heyApiClient).get<
+    FgaDiscoverStoreResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/store",
+    ...options,
+  });
+};
+
+/**
+ * Check authorization in the canonical store-scoped API
+ */
+export const fgaStoreCheck = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreCheckData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreCheckResponse2,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/check",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Batch check authorization in the canonical store-scoped API
+ */
+export const fgaStoreBatchCheck = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreBatchCheckData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreBatchCheckResponse2,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/batch-check",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Read tuples in the canonical store-scoped API
+ */
+export const fgaStoreRead = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreReadData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreReadResponse2,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/read",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Write tuples in the canonical store-scoped API
+ */
+export const fgaStoreWrite = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreWriteData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreWriteResponse2,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/write",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Expand relationship tree in the canonical store-scoped API
+ */
+export const fgaStoreExpand = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreExpandData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreExpandResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/expand",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * List authorized objects in the canonical store-scoped API
+ */
+export const fgaStoreListObjects = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreListObjectsData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreListObjectsResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/list-objects",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * List users in the canonical store-scoped API
+ */
+export const fgaStoreListUsers = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreListUsersData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreListUsersResponse2,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/list-users",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Read tuple changes in the canonical store-scoped API
+ */
+export const fgaStoreReadChanges = <ThrowOnError extends boolean = false>(
+  options: Options<FgaStoreReadChangesData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    FgaStoreReadChangesResponse2,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/changes",
+    ...options,
+  });
+};
+
+/**
+ * List authorization models in the canonical store-scoped API
+ */
+export const fgaStoreListAuthorizationModels = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<FgaStoreListAuthorizationModelsData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    FgaStoreListAuthorizationModelsResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/authorization-models",
+    ...options,
+  });
+};
+
+/**
+ * Write authorization model in the canonical store-scoped API
+ */
+export const fgaStoreWriteAuthorizationModel = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<FgaStoreWriteAuthorizationModelData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    FgaStoreWriteAuthorizationModelResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/authorization-models",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+};
+
+/**
+ * Fetch an authorization model in the canonical store-scoped API
+ */
+export const fgaStoreGetAuthorizationModel = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<FgaStoreGetAuthorizationModelData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).get<
+    FgaStoreGetAuthorizationModelResponse,
+    unknown,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-zitadel_session",
+        type: "apiKey",
+      },
+      {
+        scheme: "bearer",
+        type: "http",
+      },
+    ],
+    url: "/v1/fga/stores/{store_id}/authorization-models/{model_id}",
+    ...options,
   });
 };

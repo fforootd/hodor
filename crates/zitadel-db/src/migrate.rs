@@ -12,7 +12,11 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../../migrations/sqlite/00002_instance_id.sql"),
     ),
     (
-        "00003_oidc_rp_provider",
+        "00003_fga_runtime",
+        include_str!("../../../migrations/sqlite/00003_fga_runtime.sql"),
+    ),
+    (
+        "00004_oidc_rp_provider",
         include_str!("../../../migrations/sqlite/00003_oidc_rp_provider.sql"),
     ),
 ];
@@ -27,7 +31,11 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../../migrations/postgres/00002_instance_id.sql"),
     ),
     (
-        "00003_oidc_rp_provider",
+        "00003_fga_runtime",
+        include_str!("../../../migrations/postgres/00003_fga_runtime.sql"),
+    ),
+    (
+        "00004_oidc_rp_provider",
         include_str!("../../../migrations/postgres/00003_oidc_rp_provider.sql"),
     ),
 ];

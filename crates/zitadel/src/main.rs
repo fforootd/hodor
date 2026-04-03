@@ -75,6 +75,12 @@ enum Commands {
         action: OpenapiAction,
     },
 
+    /// Run performance harnesses and summaries.
+    Perf {
+        #[command(subcommand)]
+        action: PerfAction,
+    },
+
     /// Compatibility alias for `zitadel server start`.
     Start(StartArgs),
 
@@ -109,6 +115,23 @@ enum ConfigAction {
 enum OpenapiAction {
     /// Export OpenAPI 3.1 spec to stdout.
     Export(OpenapiExportArgs),
+}
+
+#[derive(Subcommand)]
+enum PerfAction {
+    /// Database performance scenarios.
+    Db {
+        #[command(subcommand)]
+        action: PerfDbAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PerfDbAction {
+    /// Run the database perf harness.
+    Run(PerfDbRunArgs),
+    /// Render a markdown summary from JSON reports.
+    Summarize(PerfDbSummaryArgs),
 }
 
 #[derive(Subcommand)]
@@ -400,6 +423,44 @@ struct ApiCallArgs {
     dry_run: bool,
 }
 
+#[derive(Args, Clone)]
+struct PerfDbRunArgs {
+    /// Backend to benchmark.
+    #[arg(long, value_parser = ["sqlite", "postgres"])]
+    backend: String,
+
+    /// Benchmark profile to run.
+    #[arg(long, default_value = "ci", value_parser = ["ci"])]
+    profile: String,
+
+    /// Optional explicit database URL. Defaults to a temp SQLite file or a local Postgres DSN.
+    #[arg(long)]
+    database_url: Option<String>,
+
+    /// Output format.
+    #[arg(long, default_value = "json", value_parser = ["json"])]
+    format: String,
+
+    /// Write the report to a file instead of stdout.
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Args, Clone)]
+struct PerfDbSummaryArgs {
+    /// Current run JSON report(s).
+    #[arg(long = "report", required = true)]
+    reports: Vec<PathBuf>,
+
+    /// Previous run JSON report(s) for comparison.
+    #[arg(long = "previous-report")]
+    previous_reports: Vec<PathBuf>,
+
+    /// Write the markdown summary to a file instead of stdout.
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -562,6 +623,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Openapi { action } => match action {
             OpenapiAction::Export(args) => run_openapi_export(args)?,
         },
+        Commands::Perf { action } => match action {
+            PerfAction::Db { action } => match action {
+                PerfDbAction::Run(args) => run_perf_db_run(args)?,
+                PerfDbAction::Summarize(args) => run_perf_db_summarize(args)?,
+            },
+        },
         Commands::Start(args) => run_start(args)?,
         Commands::Migrate(args) => run_migrate(args)?,
         Commands::OpenapiExport(args) => run_openapi_export(args)?,
@@ -691,6 +758,51 @@ fn run_openapi_export(args: OpenapiExportArgs) -> anyhow::Result<()> {
         anyhow::Ok(document)
     })?;
     println!("{}", serde_json::to_string_pretty(&document)?);
+    Ok(())
+}
+
+fn run_perf_db_run(args: PerfDbRunArgs) -> anyhow::Result<()> {
+    let backend = match args.backend.as_str() {
+        "sqlite" => zitadel_perf::PerfBackend::Sqlite,
+        "postgres" => zitadel_perf::PerfBackend::Postgres,
+        other => return Err(anyhow::anyhow!("unsupported perf backend {other}")),
+    };
+    let profile = match args.profile.as_str() {
+        "ci" => zitadel_perf::BenchmarkProfile::Ci,
+        other => return Err(anyhow::anyhow!("unsupported perf profile {other}")),
+    };
+    if args.format != "json" {
+        return Err(anyhow::anyhow!(
+            "unsupported perf output format {}; expected json",
+            args.format
+        ));
+    }
+
+    let rt = tokio::runtime::Runtime::new()?;
+    let report = rt.block_on(zitadel_perf::run_db_benchmark(zitadel_perf::RunOptions {
+        backend,
+        profile,
+        database_url: args.database_url,
+    }))?;
+
+    if let Some(output) = args.output {
+        zitadel_perf::write_report(&output, &report)?;
+    } else {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    }
+    Ok(())
+}
+
+fn run_perf_db_summarize(args: PerfDbSummaryArgs) -> anyhow::Result<()> {
+    let markdown = zitadel_perf::summarize_report_files(&args.reports, &args.previous_reports)?;
+    if let Some(output) = args.output {
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(output, markdown)?;
+    } else {
+        println!("{markdown}");
+    }
     Ok(())
 }
 
@@ -989,6 +1101,29 @@ mod tests {
             cli.command,
             Commands::Auth {
                 action: AuthAction::Token { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_perf_db_run_command() {
+        let cli = Cli::try_parse_from([
+            "zitadel",
+            "perf",
+            "db",
+            "run",
+            "--backend",
+            "sqlite",
+            "--profile",
+            "ci",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Perf {
+                action: PerfAction::Db {
+                    action: PerfDbAction::Run(_)
+                }
             }
         ));
     }
