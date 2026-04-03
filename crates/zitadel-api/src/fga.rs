@@ -1,7 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, Request, State},
-    middleware::Next,
+    extract::{Path, Query, State},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -15,7 +14,7 @@ use zitadel_fga::{
     TupleKeySet, TupleRepository, WriteRequest,
 };
 
-use crate::{ApiState, middleware, response};
+use crate::{ApiState, response};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -54,25 +53,6 @@ pub fn routes() -> Router<ApiState> {
             "/fga/stores/{store_id}/authorization-models/{model_id}",
             get(read_authorization_model_store),
         )
-        .layer(axum::middleware::from_fn(pat_only))
-}
-
-async fn pat_only(req: Request, next: Next) -> Response {
-    let identity = middleware::identity_from_request(&req);
-    if identity.is_none() {
-        return response::error(
-            axum::http::StatusCode::UNAUTHORIZED,
-            "authentication required",
-        );
-    }
-    #[allow(clippy::nonminimal_bool)]
-    if !identity.is_some_and(|identity| identity.token_type == "pat") {
-        return response::error(
-            axum::http::StatusCode::FORBIDDEN,
-            "personal access token required",
-        );
-    }
-    next.run(req).await
 }
 
 fn fga_error_response(error: FgaError) -> Response {
