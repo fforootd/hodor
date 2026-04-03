@@ -1,9 +1,9 @@
 use axum::{Extension, Router, response::Response, routing::get};
 use serde::Serialize;
 
-use crate::{middleware::Identity, response};
+use crate::{ApiState, middleware::Identity, response};
 
-pub fn routes() -> Router {
+pub fn routes() -> Router<ApiState> {
     Router::new().route("/auth/whoami", get(whoami))
 }
 

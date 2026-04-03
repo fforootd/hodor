@@ -231,6 +231,9 @@ mod tests {
         assert_eq!(cfg.server.port, 8080);
         assert_eq!(cfg.database.url, "sqlite://./data/zitadel.db");
         assert_eq!(cfg.observability.log_level, "info");
+        assert_eq!(cfg.observability.cache_path, "./data/zitadel-cache.db");
+        assert_eq!(cfg.observability.streams.request.mode, "sampled");
+        assert_eq!(cfg.observability.sinks.analytics.drain_batch, 500);
         assert_eq!(cfg.session.max_age_secs, 86400);
         assert_eq!(cfg.oidc.access_token_lifetime_secs, 12 * 3600);
     }

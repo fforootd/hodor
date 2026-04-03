@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod health;
+pub mod openapi;
 
 use axum::Router;
 use std::net::SocketAddr;
@@ -24,6 +25,8 @@ pub fn build_router(
     login_state: zitadel_login::LoginState,
 ) -> Router {
     Router::new()
+        // Runtime OpenAPI document
+        .merge(openapi::routes(state.clone()))
         // Health probes
         .merge(health::routes(state.clone()))
         // OIDC provider (discovery, authorize, token, userinfo, JWKS)
@@ -123,8 +126,12 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     } else {
         "/login".to_string()
     };
-    let oidc_state =
-        zitadel_oidc::OidcState::new_with_config(db.clone(), issuer.clone(), login_path, &config.oidc);
+    let oidc_state = zitadel_oidc::OidcState::new_with_config(
+        db.clone(),
+        issuer.clone(),
+        login_path,
+        &config.oidc,
+    );
 
     let stateful = Arc::new(zitadel_storage::DefaultStatefulStorage::new(
         zitadel_storage::SqlStateDb::new(db.clone()),

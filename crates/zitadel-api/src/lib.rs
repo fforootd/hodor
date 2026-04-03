@@ -9,6 +9,7 @@ pub mod fga;
 pub mod groups;
 pub mod login_flows;
 pub mod middleware;
+pub mod openapi;
 pub mod orgs;
 pub mod pats;
 pub mod projects;

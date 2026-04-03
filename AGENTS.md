@@ -17,8 +17,19 @@ If your task involves frontend assets, design updates, or marketing copy, you **
 
 ## Code Conventions
 
-- **Pure Go**: The core engine is a pure Go binary. Avoid heavy external dependencies unless specified by ADRs.
+- **Single Rust Binary**: The core engine is the `zitadel` Rust binary. Keep Level 0 local startup SQLite-first with no required external services.
 - **Frontend**: The embedded UIs (Login, Console) are Vue SPAs built using `shadcn-vue` and Tailwind CSS.
 - **REST over ConnectRPC**: Service schemas define the API.
 - **Analytics Separation**: OLTP storage is distinct from analytical data paths.
-- Follow standard Go idioms, and check `docs/design/developer-experience.md` for our zero-config philosophy.
+- Follow standard Rust idioms, and check `docs/design/developer-experience.md` for our zero-config philosophy.
+
+## CLI Guidance
+
+- Prefer canonical namespaced commands such as `zitadel server start`, `zitadel db migrate`, `zitadel auth login`, `zitadel users create`.
+- Treat `zitadel.toml` as server-runtime config only. Remote CLI profiles live in `$XDG_CONFIG_HOME/zitadel/client.toml`.
+- The CLI is used by humans and AI agents. Favor machine-readable flows:
+  - `--json` for request bodies
+  - `--params` for query objects
+  - `--dry-run` before mutating remote resources
+  - `zitadel schemas inspect` and `zitadel openapi export` for runtime introspection
+- Always assume agent input can be adversarial. Validate identifiers, paths, and control characters before sending API requests.

@@ -14,6 +14,7 @@ FROM rust:1.94-bookworm AS builder
 WORKDIR /app
 # Cache dependencies by building a dummy first.
 COPY Cargo.toml Cargo.lock ./
+COPY zitadel.reference.toml ./
 COPY crates/ crates/
 # Copy migration SQL files (referenced by include_str!).
 COPY migrations/ migrations/

@@ -7,7 +7,7 @@
 ### 1. Zero-Config First Run
 
 ```bash
-cargo run -p zitadel -- start
+cargo run -p zitadel -- server start
 # → SQLite at ./data/zitadel.db (auto-created)
 # → Schema auto-migrated
 # → Default org/admin record bootstrapped
@@ -42,7 +42,7 @@ The root instance (`inst_root`) is the operator's own instance. Its owners bypas
 | `"check"` | Version check only, fail if behind — opt-in for production PG |
 | `"skip"` | No check — fastest cold-start for autoscaler pods |
 
-For production Postgres: run `zitadel migrate` as a K8s Job, then `zitadel start` with `migrate=check`.
+For production Postgres: run `zitadel db migrate` as a K8s Job, then `zitadel server start` with `database.migrate=check`.
 
 ### 2. Single Rust Binary
 
@@ -53,7 +53,7 @@ One Rust binary, cross-compiles to common platforms, and keeps Level 0 local sta
 | SQLite-first | `sqlx` talks to SQLite by default, Postgres when configured |
 | No external processes (Level 0) | local defaults and in-process services keep startup simple |
 | Embedded assets | `rust-embed` serves `web/dist` from the binary |
-| Self-contained CLI/config | `clap` + `figment` keep startup, config, and subcommands in one binary |
+| Self-contained CLI/config | `clap` + `figment` keep startup, config, subcommands, and remote client flows in one binary |
 
 > **Scaling beyond a single process:** As deployments grow (Level 1-3), the same binary connects to external infrastructure — Postgres, Redis, dedicated queues — without code changes. The four storage primitives (OLTP, KV, Queue, OLAP) are interface-driven; deployment configuration selects implementations. See [Storage Architecture](storage-architecture.md) for the full progression.
 >
@@ -69,38 +69,62 @@ An IAM should be boring infrastructure. It should not:
 
 Every background job logs its name and completion time. Every startup step is logged. Every config value has a default that works.
 
+## CLI Shape
+
+`zitadel` is one binary with two execution modes:
+
+- Local operator commands: `server`, `db`, `seed`, `config`, `openapi`
+- Remote client commands: `auth`, `users`, `schemas`, `api`
+
+Operator commands read server runtime config. Remote client commands read a separate client profile file and auth state:
+
+- Server config: `./zitadel.toml` or `-c/--config`
+- Client profiles: `$XDG_CONFIG_HOME/zitadel/client.toml`
+- Client auth state: `$XDG_STATE_HOME/zitadel/<profile>.json`
+
+Compatibility aliases such as `zitadel start` and `zitadel migrate` still exist, but the namespaced form is canonical.
+
 ## Configuration Cascade
 
 ```
-CLI flags → Environment vars → Config file → Defaults
-(highest priority)                          (lowest priority)
+Server commands: CLI flags → Environment vars → Config file → Defaults
+Remote commands: CLI flags → Environment vars → Client profile → Defaults
 ```
 
 ```toml
 # zitadel.toml (optional — everything has defaults)
+# Full reference: ../../zitadel.reference.toml
 
 [server]
-host = "0.0.0.0"
 port = 8080
 external_domain = "auth.example.com"
 
 [database]
-dialect = "sqlite"          # "sqlite" | "postgres"
 url = "sqlite://./data/zitadel.db"
-
-[session]
-lifetime = "24h"
-cookie_name = "zitadel_session"
-
-[analytics]
-backend = "oltp"            # default: query same DB
 
 [observability]
 cache_path = "./data/zitadel-cache.db"
-otlp_endpoint = ""          # empty = no export
+
+[observability.sinks.otel]
+endpoint = ""               # empty = no OTEL export
+
+[observability.streams.request]
+mode = "sampled"
+sample_rate = 0.01
 ```
 
+`zitadel.reference.toml` is the full server-runtime reference. It is intentionally separate from remote CLI profiles so operators do not have to mix server settings, desktop login state, and tokens in one file.
+
 **Every field is optional.** If you don't provide a config file, defaults work. If you provide a partial config, only those values override.
+
+For remote CLI use, the raw-payload path is first-class:
+
+- `zitadel auth login`
+- `zitadel auth token set --token-value "$TOKEN"`
+- `zitadel users create --json @user.json`
+- `zitadel api call POST /v1/users --json @payload.json --dry-run`
+- `zitadel schemas inspect --meta`
+- `zitadel openapi export`
 
 ## Testing Philosophy
 
@@ -127,7 +151,7 @@ Use battle-tested Rust crates instead of building from scratch:
 |---|---|
 | `axum` | HTTP routing and middleware |
 | `sqlx` | SQLite/Postgres access with one async query layer |
-| `clap` | CLI parsing for `start`, `migrate`, and `seed` workflows |
+| `clap` | CLI parsing for local operator commands and remote client workflows |
 | `serde` + `figment` | config loading and serialization |
 | `rust-embed` | embedded frontend assets from `web/dist` |
 | `jsonwebtoken` | JWT signing and verification |

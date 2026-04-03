@@ -4,6 +4,7 @@
 # This is a REFERENCE file. Copy it to zitadel.toml and adjust to your needs.
 # All values shown are defaults unless otherwise noted.
 # Environment variables (ZITADEL_ prefix) override TOML settings.
+# Remote CLI profiles live in ~/.config/zitadel/client.toml and are NOT configured here.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -163,9 +164,62 @@ url = "sqlite://./data/zitadel.db"
 [observability]
 log_level = "info"  # debug, info, warn, error
 log_format = "text" # text, json
+cache_path = "./data/zitadel-cache.db"
+cache_max = 50000
 
-# OpenTelemetry OTLP endpoint for traces, metrics, and logs.
-# otlp_endpoint = "localhost:4317"
+# ─────────────────────────────────────────────────────────────────────────────
+# Streams — routing rules applied before sink fan-out
+# ─────────────────────────────────────────────────────────────────────────────
+[observability.streams.runtime]
+sinks = ["stdout", "analytics"]
+mode = "buffered"
+sample_rate = 0.0
+
+[observability.streams.request]
+sinks = ["stdout", "otel", "analytics"]
+mode = "sampled"
+sample_rate = 0.01
+
+[observability.streams.jobs]
+sinks = ["stdout", "analytics"]
+mode = "buffered"
+sample_rate = 0.0
+
+# Legacy alias for `jobs`. Only set this when migrating old config names.
+# [observability.streams.queue]
+# sinks = ["stdout", "analytics"]
+# mode = "buffered"
+# sample_rate = 0.0
+
+[observability.streams.event_handler]
+sinks = ["stdout", "analytics"]
+mode = "buffered"
+sample_rate = 0.0
+
+[observability.streams.event_pusher]
+sinks = ["stdout"]
+mode = "off"
+sample_rate = 0.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sinks — best-effort export and analytics drain configuration
+# ─────────────────────────────────────────────────────────────────────────────
+[observability.sinks.otel]
+endpoint = ""
+protocol = "http" # http | grpc
+
+[observability.sinks.analytics]
+enabled = true
+drain_interval = "5s"
+drain_batch = 500
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Redaction — structured log field and IP sanitization
+# ─────────────────────────────────────────────────────────────────────────────
+[observability.redaction]
+keys = ["password", "secret", "token", "client_secret", "private_key"]
+mask = "***REDACTED***"
+ip_mode = "keep" # keep | redact | hash | mask
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WORKERS — Background task processing
