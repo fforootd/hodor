@@ -140,7 +140,10 @@ class FallbackTracer implements TelemetryProvider {
     if (this.spans.length === 0) return
 
     const batch = this.spans.splice(0)
-    const endpoint = this.config.otelEndpoint || `${this.config.baseUrl}/v1/otel/traces`
+    // Only flush if an explicit OTEL endpoint is configured.
+    // The default /v1/otel/traces endpoint may not exist in dev mode.
+    const endpoint = this.config.otelEndpoint
+    if (!endpoint) return
 
     // All spans in this batch share the flow's trace_id.
     const traceId = flowTraceId

@@ -96,14 +96,16 @@ async fn ingest_fingerprint(
         req.id
     };
     let type_ = if req.type_.is_empty() {
-        "thumbmark".to_string()
+        "fingerprintjs".to_string()
     } else {
         req.type_
     };
     let raw_data = serde_json::to_string(&req.raw_data).unwrap_or_else(|_| "{}".into());
+    // Upsert: update raw_data if the fingerprint ID already exists (same device, new login).
     let sql = format!(
         "INSERT INTO fingerprints (id, instance_id, type, raw_data, created_at) \
-         VALUES ($1, $2, $3, {}, {})",
+         VALUES ($1, $2, $3, {}, {}) \
+         ON CONFLICT (id) DO UPDATE SET raw_data = excluded.raw_data, type = excluded.type",
         scoped.json_bind(4),
         scoped.timestamp_now(),
     );
