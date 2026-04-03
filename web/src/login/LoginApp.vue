@@ -416,7 +416,7 @@
     submitError.value = message
   }
 
-  async function submitAction(action: string, extra?: Record<string, string>) {
+  async function submitAction(action: string, extra?: Record<string, unknown>) {
     if (!flowStep.value) return
     loading.value = true
     if (action !== 'captcha_submit') {
@@ -487,44 +487,41 @@
     submitError.value = ''
 
     try {
-      const challenge = await flowApi.captchaChallenge(
-        props.apiBaseUrl || '',
-        flowStep.value.flow_id,
-      )
-      const digestAlgorithm = normalizeAltchaDigest(String(challenge.algorithm || 'SHA-256'))
+      // Look for an embedded captcha_challenge node in the current flow step.
+      const challengeNode = flowStep.value.nodes.find(
+        (n: any) => n.type === 'captcha_challenge',
+      ) as any | undefined
 
-      const startTime = performance.now()
-      let solution = -1
-      const maxNumber = Number(challenge.maxnumber ?? 0)
-      for (let i = 0; i <= maxNumber; i++) {
-        const input = String(challenge.salt || '') + String(i)
-        const hashBuf = await crypto.subtle.digest(digestAlgorithm, new TextEncoder().encode(input))
-        const hashHex = Array.from(new Uint8Array(hashBuf))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')
-        if (hashHex === String(challenge.challenge || '')) {
-          solution = i
-          break
-        }
-      }
-      const took = Math.round(performance.now() - startTime)
-
-      if (solution === -1) {
-        captchaSolving.value = false
-        submitError.value = 'Captcha challenge could not be solved'
-        return
+      let challenge: any
+      if (challengeNode) {
+        // Use the challenge embedded in the flow response (from risk scoring).
+        challenge = challengeNode
+      } else {
+        // Fallback: fetch from the legacy challenge endpoint.
+        challenge = await flowApi.captchaChallenge(
+          props.apiBaseUrl || '',
+          flowStep.value.flow_id,
+        )
       }
 
-      const payload = JSON.stringify({
-        algorithm: String(challenge.algorithm || ''),
-        challenge: String(challenge.challenge || ''),
-        number: solution,
+      // Solve the POW challenge using the imported solver.
+      const { solveChallenge } = await import('@/lib/pow-solver')
+      const result = await solveChallenge({
+        algorithm: String(challenge.algorithm || 'SHA-256'),
         salt: String(challenge.salt || ''),
+        challenge: String(challenge.challenge || ''),
+        maxnumber: Number(challenge.maxnumber ?? 0),
         signature: String(challenge.signature || ''),
-        took,
       })
 
-      await submitAction('captcha_submit', { altcha_payload: payload })
+      // Submit the solution as altcha_payload.
+      await submitAction('captcha_submit', {
+        altcha_payload: {
+          salt: result.salt,
+          nonce: result.nonce,
+          signature: result.signature,
+        },
+      })
     } catch (err) {
       const detail = toLoginErrorDetail(err)
       if (

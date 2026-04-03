@@ -27,7 +27,6 @@ pub(crate) enum UINode {
     Avatar { initial: String, text: String },
     #[serde(rename = "fingerprint_collect")]
     FingerprintCollect,
-    #[allow(dead_code)]
     #[serde(rename = "captcha_challenge")]
     CaptchaChallenge {
         algorithm: String,

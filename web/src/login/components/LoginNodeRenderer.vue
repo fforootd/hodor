@@ -281,6 +281,9 @@
 
         <div v-else-if="node.type === 'fingerprint_collect'" class="hidden" />
 
+        <!-- POW challenge node — invisible, auto-solved by LoginApp -->
+        <div v-else-if="node.type === 'captcha_challenge'" class="hidden" />
+
         <div v-else-if="node.type === 'group'" class="space-y-4">
           <template v-for="(child, ci) in node.children || []" :key="'g' + ci">
             <div v-if="child.type === 'input'" class="space-y-1.5">

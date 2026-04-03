@@ -16,6 +16,46 @@ use crate::ui::{
     UINode, default_branding, identifier_step_nodes, password_step_nodes, session_reuse_nodes,
 };
 
+/// Extract bot-detection signals from HTTP request headers.
+fn extract_request_signals(headers: &axum::http::HeaderMap) -> zitadel_botdetect::RequestSignals {
+    let header_keys: Vec<&str> = headers.keys().map(|k| k.as_str()).collect();
+    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
+    zitadel_botdetect::RequestSignals {
+        header_order_hash: zitadel_botdetect::signals::hash_header_order(&header_keys),
+        accept_language: headers
+            .get("accept-language")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string(),
+        accept_encoding: headers
+            .get("accept-encoding")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string(),
+        user_agent: headers
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string(),
+        http_version: String::new(), // not available from HeaderMap alone
+        has_private_access_token: zitadel_botdetect::has_private_access_token(auth_header),
+        ..Default::default()
+    }
+}
+
+/// Build a POW challenge node for the login flow.
+fn build_challenge_node(secret: &str, risk_score: f64) -> UINode {
+    let difficulty = zitadel_botdetect::Difficulty::from_risk_score(risk_score);
+    let challenge = zitadel_botdetect::generate_challenge(secret.as_bytes(), difficulty);
+    UINode::CaptchaChallenge {
+        algorithm: challenge.algorithm,
+        salt: challenge.salt,
+        challenge: challenge.challenge,
+        maxnumber: challenge.maxnumber,
+        signature: challenge.signature,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Login step enum
 // ---------------------------------------------------------------------------
@@ -233,11 +273,23 @@ pub(crate) async fn flow_create(
 
     let initial_step_str = initial_step.as_str().to_string();
 
+    // Extract request signals and compute risk score for bot detection.
+    let signals = extract_request_signals(&headers);
+    let risk = zitadel_botdetect::score_request(&signals);
+    tracing::debug!(
+        risk_score = risk.score,
+        signals = ?risk.signals,
+        recommendation = ?risk.recommendation,
+        "login flow risk assessment"
+    );
+
     let mut data = serde_json::json!({
         "step": initial_step_str,
         "redirect_uri": req.redirect_uri,
         "state": req.state,
         "fingerprint": req.fingerprint,
+        "risk_score": risk.score,
+        "risk_signals": risk.signals,
     });
     if !req.auth_request_id.is_empty() {
         data["auth_request_id"] = serde_json::Value::String(req.auth_request_id.clone());
@@ -478,15 +530,33 @@ pub(crate) async fn handle_identifier_step(
         }
     }
 
-    Json(FlowStepResponse {
+    // Check if captcha is required based on risk score.
+    let risk_score = data
+        .get("risk_score")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.5);
+    let captcha_verified = data
+        .get("captcha_verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let needs_captcha = risk_score >= 0.3 && !captcha_verified;
+
+    let mut resp = FlowStepResponse {
         flow_id: flow_id.to_string(),
         step: LoginStep::Password.as_str().into(),
         nodes: password_step_nodes(&req.identifier),
         redirect_uri: None,
         branding: Some(default_branding()),
         ..Default::default()
-    })
-    .into_response()
+    };
+
+    if needs_captcha {
+        resp.captcha_required = Some(true);
+        resp.nodes
+            .push(build_challenge_node(&state.pow_secret, risk_score));
+    }
+
+    Json(resp).into_response()
 }
 
 pub(crate) async fn handle_password_step(
