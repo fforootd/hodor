@@ -456,7 +456,8 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         .fetch_optional(pool)
         .await?;
 
-        let auth_methods = serde_json::to_string(&flow.auth_methods).unwrap_or_else(|_| "{}".into());
+        let auth_methods =
+            serde_json::to_string(&flow.auth_methods).unwrap_or_else(|_| "{}".into());
         let config = serde_json::to_string(&flow.config).unwrap_or_else(|_| "{}".into());
 
         if let Some(row) = existing {
@@ -522,181 +523,12 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         tracing::debug!(type_ = setting.type_, "seeded setting");
     }
 
-    // Seed observability data (events + fingerprints) if no seeded events exist.
-    // We check for a specific seeded event type to avoid counting log.* entries
-    // that the observability layer writes during startup.
-    let seeded_event_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM events WHERE instance_id = 'default' AND event_type = 'user.login.succeeded'",
-    )
-    .fetch_one(pool)
-    .await?;
-    if seeded_event_count.0 == 0 {
-        seed_observability(pool, &org_id, &seed).await?;
-    }
-
     tracing::info!(
         users = seed.users.len(),
         apps = seed.apps.len(),
         providers = seed.providers.len(),
         login_flows = seed.login_flows.len(),
         "seed applied"
-    );
-    Ok(())
-}
-
-/// Seed realistic events and fingerprints so observability views have data.
-async fn seed_observability(
-    pool: &sqlx::AnyPool,
-    org_id: &str,
-    seed: &SeedFile,
-) -> anyhow::Result<()> {
-    // Collect seeded user IDs.
-    let mut user_ids: Vec<(String, String)> = Vec::new();
-    for user in &seed.users {
-        if let Some(row) = sqlx::query_as::<_, (String,)>(
-            "SELECT id FROM users WHERE instance_id = 'default' AND identifier = $1",
-        )
-        .bind(&user.identifier)
-        .fetch_optional(pool)
-        .await?
-        {
-            user_ids.push((row.0, user.identifier.clone()));
-        }
-    }
-    if user_ids.is_empty() {
-        return Ok(());
-    }
-
-    // Collect app client_ids.
-    let app_clients: Vec<String> = seed.apps.iter().map(|a| a.client_id.clone()).collect();
-
-    // Generate fingerprints (FingerprintJS OSS v5 format).
-    let fingerprints = [
-        (
-            "fp_browser_chrome_win",
-            "fingerprintjs",
-            r#"{"visitorId":"a3c1e8f04b7d29561f8c0da2e7b634f1","components":{"screenResolution":{"value":[1920,1080]},"colorDepth":{"value":24},"hardwareConcurrency":{"value":8},"deviceMemory":{"value":8},"timezone":{"value":"America/New_York"},"languages":{"value":[["en-US","en"]]},"platform":{"value":"Win32"},"webGlBasics":{"value":{"vendor":"Google Inc. (NVIDIA)","renderer":"ANGLE (NVIDIA, NVIDIA GeForce RTX 3070, D3D11)"}}},"confidence":{"score":0.995},"collectedAt":1719500000}"#,
-        ),
-        (
-            "fp_browser_firefox_mac",
-            "fingerprintjs",
-            r#"{"visitorId":"7f2b9d0e15a84c3f6e1d0b8a24c97e53","components":{"screenResolution":{"value":[2560,1600]},"colorDepth":{"value":30},"hardwareConcurrency":{"value":12},"deviceMemory":{"value":16},"timezone":{"value":"America/Los_Angeles"},"languages":{"value":[["en-US"]]},"platform":{"value":"MacIntel"},"webGlBasics":{"value":{"vendor":"Google Inc. (Apple)","renderer":"ANGLE (Apple, Apple M2 Pro, OpenGL 4.1)"}}},"confidence":{"score":0.992},"collectedAt":1719503600}"#,
-        ),
-        (
-            "fp_mobile_ios",
-            "fingerprintjs",
-            r#"{"visitorId":"d4e6f8a12c3b5970e8d1f4a6b9c2d7e0","components":{"screenResolution":{"value":[1179,2556]},"colorDepth":{"value":32},"hardwareConcurrency":{"value":6},"deviceMemory":{"value":6},"timezone":{"value":"Europe/London"},"languages":{"value":[["en-GB","en"]]},"platform":{"value":"iPhone"},"webGlBasics":{"value":{"vendor":"Apple Inc.","renderer":"Apple GPU"}}},"confidence":{"score":0.988},"collectedAt":1719507200}"#,
-        ),
-    ];
-    for (id, type_, raw) in &fingerprints {
-        sqlx::query(
-            "INSERT OR IGNORE INTO fingerprints (id, instance_id, type, raw_data) VALUES ($1, 'default', $2, $3)",
-        )
-        .bind(id)
-        .bind(type_)
-        .bind(raw)
-        .execute(pool)
-        .await?;
-    }
-
-    // Event templates: (event_type, category, actor_type, resource_type, delegation_type)
-    let event_types = [
-        ("user.login.succeeded", "auth", "human", "session", "direct"),
-        ("user.login.failed", "auth", "human", "session", "direct"),
-        ("token.issued", "auth", "human", "token", "direct"),
-        ("session.created", "session", "human", "session", "direct"),
-        ("session.refreshed", "session", "human", "session", "direct"),
-        ("user.updated", "identity", "human", "user", "direct"),
-        (
-            "user.password.changed",
-            "identity",
-            "human",
-            "user",
-            "direct",
-        ),
-        ("org.member.added", "identity", "human", "org", "direct"),
-        (
-            "app.token.exchanged",
-            "auth",
-            "service",
-            "token",
-            "exchanged",
-        ),
-        (
-            "user.login.succeeded",
-            "auth",
-            "human",
-            "session",
-            "pat_shared",
-        ),
-    ];
-
-    let ips = ["192.168.1.42", "10.0.0.15", "172.16.0.100", "203.0.113.50"];
-    let sdks = [("zitadel-js", "2.1.0"), ("zitadel-go", "1.4.0"), ("", "")];
-
-    let mut seq = 1i64;
-    // Generate events spread over the last 24 hours.
-    for i in 0..60 {
-        let minutes_ago = (60 - i) * 24; // spread over ~24h
-        let (user_id, identifier) = &user_ids[i % user_ids.len()];
-        let (event_type, category, actor_type, resource_type, delegation) =
-            event_types[i % event_types.len()];
-        let fp = fingerprints[i % fingerprints.len()].0;
-        let ip = ips[i % ips.len()];
-        let (sdk_name, sdk_version) = sdks[i % sdks.len()];
-        let client_id = if !app_clients.is_empty() {
-            &app_clients[i % app_clients.len()]
-        } else {
-            ""
-        };
-
-        let event_id = Uuid::new_v4().to_string();
-        let request_id = Uuid::new_v4().to_string();
-        let flow_id = if category == "auth" {
-            Uuid::new_v4().to_string()
-        } else {
-            String::new()
-        };
-
-        sqlx::query(
-            "INSERT INTO events (id, instance_id, event_type, category, org_id, actor_id, actor_type, \
-             aggregate_id, aggregate_type, resource_type, \
-             payload, metadata, request_id, session_id, flow_id, fingerprint, \
-             client_id, delegation_type, sdk_name, sdk_version, sequence, \
-             created_at) \
-             VALUES ($1, 'default', $2, $3, $4, $5, $6, $7, $8, $9, \
-             '{}', $10, $11, '', $12, $13, $14, $15, $16, $17, $18, \
-             datetime('now', $19))",
-        )
-        .bind(&event_id)
-        .bind(event_type)
-        .bind(category)
-        .bind(org_id)
-        .bind(user_id)
-        .bind(actor_type)
-        .bind(user_id)     // aggregate_id
-        .bind("user")      // aggregate_type
-        .bind(resource_type)
-        .bind(format!(r#"{{"ip":"{}","identifier":"{}"}}"#, ip, identifier))
-        .bind(&request_id)
-        .bind(&flow_id)
-        .bind(fp)
-        .bind(client_id)
-        .bind(delegation)
-        .bind(sdk_name)
-        .bind(sdk_version)
-        .bind(seq)
-        .bind(format!("-{minutes_ago} minutes"))
-        .execute(pool)
-        .await?;
-
-        seq += 1;
-    }
-
-    tracing::info!(
-        events = 60,
-        fingerprints = fingerprints.len(),
-        "seeded observability data"
     );
     Ok(())
 }

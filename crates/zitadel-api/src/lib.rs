@@ -10,6 +10,7 @@ pub mod groups;
 pub mod jobs;
 pub mod login_flows;
 pub mod middleware;
+pub mod observability;
 pub mod openapi;
 pub mod orgs;
 pub mod pats;
@@ -82,6 +83,8 @@ pub fn routes(state: ApiState) -> Router {
         .merge(fga::routes())
         // Analytics (query + schema browser)
         .merge(analytics::routes())
+        // Observability overview
+        .merge(observability::routes())
         // Actions
         .merge(actions::routes())
         // Telemetry (fingerprints)

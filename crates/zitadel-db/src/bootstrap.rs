@@ -82,7 +82,11 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
     tx.commit().await?;
 
     if changed {
-        tracing::info!(org_id, admin_id, "bootstrapped default org, admin user, and login flow");
+        tracing::info!(
+            org_id,
+            admin_id,
+            "bootstrapped default org, admin user, and login flow"
+        );
     } else {
         tracing::debug!("bootstrap skipped — defaults already exist");
     }

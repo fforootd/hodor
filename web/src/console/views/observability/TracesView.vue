@@ -461,11 +461,12 @@ async function fetchRecentTraces() {
       MIN(created_at) as started_at, 
       COUNT(*) as span_count,
       MAX(payload) as sample_payload
-    FROM events 
+    FROM events
     WHERE created_at >= '${cutoff}'
+      AND event_type NOT LIKE 'log.%'
       AND ((request_id != '' AND request_id IS NOT NULL) OR (session_id != '' AND session_id IS NOT NULL) OR (actor_id != '' AND actor_id IS NOT NULL) OR (flow_id != '' AND flow_id IS NOT NULL) OR (fingerprint != '' AND fingerprint IS NOT NULL))
     GROUP BY ${ge}
-    ORDER BY started_at DESC 
+    ORDER BY started_at DESC
     LIMIT 50
   `
   try {
@@ -478,7 +479,7 @@ async function fetchRecentTraces() {
         return r
       })
 
-      traceGroups.value = await Promise.all(raw.map(async (r: any) => {
+      const groups: TraceGroup[] = raw.map((r: any) => {
         let payload: any = {}
         try { payload = JSON.parse(r.sample_payload || '{}') } catch {}
 
@@ -504,12 +505,21 @@ async function fetchRecentTraces() {
         if (group.actor_id && (!group.actor_id.includes('-') || group.actor_id === group.request_id)) {
           group.actor_id = ''
         }
-
-        if (group.actor_id) {
-          group.identity = await resolveIdentity(group.actor_id)
-        }
         return group
-      }))
+      })
+
+      // Batch-resolve identities instead of N sequential API calls.
+      const uniqueActorIds = [...new Set(groups.map(g => g.actor_id).filter(id => id && !identityCache.value[id]))]
+      const results = await Promise.allSettled(uniqueActorIds.map(id => resolveIdentity(id)))
+      results.forEach((result, i) => {
+        identityCache.value[uniqueActorIds[i]] = result.status === 'fulfilled' ? result.value : null
+      })
+      for (const group of groups) {
+        if (group.actor_id) {
+          group.identity = identityCache.value[group.actor_id] ?? null
+        }
+      }
+      traceGroups.value = groups
     } else {
       traceGroups.value = []
     }
@@ -542,11 +552,12 @@ async function fetchFilteredTraces() {
       MIN(created_at) as started_at, 
       COUNT(*) as span_count,
       MAX(payload) as sample_payload
-    FROM events 
+    FROM events
     WHERE created_at >= '${cutoff}'
+      AND event_type NOT LIKE 'log.%'
       AND ${buildTraceWhereClause(val, searchMode.value)}
     GROUP BY ${ge}
-    ORDER BY started_at DESC 
+    ORDER BY started_at DESC
     LIMIT 50
   `
   try {
@@ -559,7 +570,7 @@ async function fetchFilteredTraces() {
         return r
       })
 
-      traceGroups.value = await Promise.all(raw.map(async (r: any) => {
+      const groups: TraceGroup[] = raw.map((r: any) => {
         let payload: any = {}
         try { payload = JSON.parse(r.sample_payload || '{}') } catch {}
 
@@ -585,12 +596,20 @@ async function fetchFilteredTraces() {
         if (group.actor_id && (!group.actor_id.includes('-') || group.actor_id === group.request_id)) {
           group.actor_id = ''
         }
-
-        if (group.actor_id) {
-          group.identity = await resolveIdentity(group.actor_id)
-        }
         return group
-      }))
+      })
+
+      const uniqueActorIds = [...new Set(groups.map(g => g.actor_id).filter(id => id && !identityCache.value[id]))]
+      const results = await Promise.allSettled(uniqueActorIds.map(id => resolveIdentity(id)))
+      results.forEach((result, i) => {
+        identityCache.value[uniqueActorIds[i]] = result.status === 'fulfilled' ? result.value : null
+      })
+      for (const group of groups) {
+        if (group.actor_id) {
+          group.identity = identityCache.value[group.actor_id] ?? null
+        }
+      }
+      traceGroups.value = groups
     } else {
       traceGroups.value = []
     }

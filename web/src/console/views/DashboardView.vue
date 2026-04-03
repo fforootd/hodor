@@ -115,7 +115,7 @@ onMounted(async () => {
         time_ago: timeAgo(e.created_at),
       }))
     }
-  } catch { /* demo fallback */ }
+  } catch (err) { console.warn('Dashboard load failed:', err) }
 })
 </script>
 

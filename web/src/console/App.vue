@@ -674,18 +674,6 @@
       })
     }
 
-    if (!items.find((item) => item.type === 'notification')) {
-      items.push({
-        type: 'notification',
-        label: 'Notifications',
-        sortOrder: 68,
-        storage: 'settings',
-        route: '/notifications',
-        countable: false,
-        navGroup: 'system',
-      })
-    }
-
     navItems.value = items.sort((a, b) => a.sortOrder - b.sortOrder)
   }
 

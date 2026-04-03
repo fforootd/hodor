@@ -127,7 +127,7 @@ size="sm" :variant="isLive ? 'default' : 'outline'" :class="isLive ? 'bg-red-600
                   <p class="text-xs font-mono">
                     <span class="text-muted-foreground">{{ row.original.aggregate_type }}</span>
                     <span class="text-muted-foreground mx-1">→</span>
-                    <RouterLink v-if="row.original.aggregate_type === 'session'" :to="`/console/sessions`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink>
+                    <RouterLink v-if="row.original.aggregate_type === 'session'" :to="`/sessions`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink>
                     <RouterLink v-else-if="row.original.aggregate_type === 'user' || row.original.aggregate_type === 'identity'" :to="`/users/${row.original.aggregate_id}`" class="text-primary hover:underline">{{ row.original.aggregate_id }}</RouterLink>
                     <span v-else>{{ row.original.aggregate_id }}</span>
                   </p>
@@ -137,7 +137,7 @@ size="sm" :variant="isLive ? 'default' : 'outline'" :class="isLive ? 'bg-red-600
             <div v-if="row.original.request_id || row.original.client_id || row.original.delegation_type" class="grid grid-cols-3 gap-4 pt-2">
                <div v-if="row.original.request_id">
                   <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Request ID</h4>
-                  <RouterLink :to="`/console/traces?id=${row.original.request_id}`" class="text-xs font-mono text-primary hover:underline">{{ row.original.request_id.slice(0, 16) }}…</RouterLink>
+                  <RouterLink :to="`/traces?id=${row.original.request_id}`" class="text-xs font-mono text-primary hover:underline">{{ row.original.request_id.slice(0, 16) }}…</RouterLink>
                </div>
                <div v-if="row.original.client_id">
                   <h4 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Client / App</h4>
@@ -505,7 +505,7 @@ const columns = [
       const val = info.getValue()
       if (!val) return h('span', { class: 'text-xs text-muted-foreground' }, '—')
       return h(RouterLink, {
-        to: `/console/traces?id=${val}`,
+        to: `/traces?id=${val}`,
         class: 'text-xs font-mono text-primary hover:underline truncate max-w-[120px] block',
         title: val,
       }, () => val.slice(0, 12) + '…')
@@ -547,7 +547,7 @@ const columns = [
       const val = info.getValue()
       if (!val) return h('span', { class: 'text-xs text-muted-foreground' }, '—')
       return h(RouterLink, {
-        to: `/console/events?fingerprint=${val}`,
+        to: `/events?fingerprint=${val}`,
         class: 'text-xs font-mono text-primary hover:underline truncate max-w-[80px] block',
         title: val,
       }, () => val.slice(0, 8) + '…')
@@ -580,7 +580,7 @@ const columns = [
           h(DropdownMenuItem, { asChild: true, class: 'cursor-pointer' }, () => 
             h(RouterLink, { 
               to: {
-                path: '/console/observability/explore',
+                path: '/observability/explore',
                 query: {
                   table: 'events',
                   func: 'NONE',

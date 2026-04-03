@@ -175,10 +175,8 @@ v-for="item in delegationData" :key="item.name"
 import { ref, computed, onMounted, watch } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
-import { Activity, Users, KeyRound, Shield, Search } from 'lucide-vue-next'
+import { Activity, Users, KeyRound, Shield } from 'lucide-vue-next'
 import { api } from '@/api/client'
-import { RouterLink } from 'vue-router'
 
 const timeRange = ref('12h')
 
@@ -226,44 +224,6 @@ function formatNumber(n: number): string {
   return String(n)
 }
 
-function getThreshold(range: string, multiplier = 1): string {
-  const msPerHr = 3600000;
-  let hrs = 12;
-  if (range === '1h') hrs = 1;
-  else if (range === '24h') hrs = 24;
-  else if (range === '7d') hrs = 24 * 7;
-  else if (range === '30d') hrs = 24 * 30;
-  
-  const d = new Date(Date.now() - (hrs * multiplier * msPerHr));
-  return d.toISOString().replace('T', ' ').slice(0, 19);
-}
-
-async function fetchCount(sql: string): Promise<number> {
-  try {
-    const res = await api.post<any>('/v1/analytics/query', { sql });
-    if (res.error || !res.rows || res.rows.length === 0) return 0;
-    const r = res.rows[0];
-    // Zipped extraction to support arrays
-    const rawVal = Array.isArray(r) ? r[0] : Object.values(r)[0];
-    return Number(rawVal || 0);
-  } catch {
-    return 0;
-  }
-}
-
-async function fetchTimestamps(sql: string): Promise<number[]> {
-  try {
-    const res = await api.post<any>('/v1/analytics/query', { sql, limit: 10000 });
-    if (res.error || !res.rows) return [];
-    return res.rows.map((r: any) => {
-      const ts = Array.isArray(r) ? r[0] : Object.values(r)[0];
-      return new Date(ts).getTime();
-    });
-  } catch {
-    return [];
-  }
-}
-
 function generateBuckets(timestamps: number[], bucketCount: number, startMs: number, endMs: number): number[] {
   const buckets = new Array(bucketCount).fill(0);
   const interval = (endMs - startMs) / bucketCount;
@@ -277,51 +237,28 @@ function generateBuckets(timestamps: number[], bucketCount: number, startMs: num
     if (buckets[idx] > maxCount) maxCount = buckets[idx];
   }
 
-  // Convert to percentage (min 5% for visibility if > 0)
   return buckets.map(count => {
     if (count === 0) return 0;
     return Math.max(5, Math.round((count / maxCount) * 100));
   });
 }
 
-async function fetchData() {
-  const curTime = getThreshold(timeRange.value, 1)
-  const prevTime = getThreshold(timeRange.value, 2)
-  const startMs = new Date(curTime).getTime()
-  const endMs = new Date().getTime()
-  const bucketCount = timeRange.value === '1h' ? 12 : timeRange.value === '24h' ? 24 : timeRange.value === '7d' ? 14 : timeRange.value === '30d' ? 30 : 12;
-  
-  try {
-    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+function rangeToHours(range: string): number {
+  if (range === '1h') return 1;
+  if (range === '24h') return 24;
+  if (range === '7d') return 24 * 7;
+  if (range === '30d') return 24 * 30;
+  return 12;
+}
 
-    const [
-      authPrev,
-      sessPrev,
-      tokPrev,
-      failPrev,
-      authTs,
-      sessTs,
-      tokTs,
-      failTs,
-      opsRes, usersRes, ipsRes, clientsRes, sdksRes, delegationRes
-    ] = await Promise.all([
-      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      fetchCount(`SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      fetchCount(`SELECT COUNT(*) FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${prevTime}' AND created_at < '${curTime}'`),
-      
-      fetchTimestamps(`SELECT created_at FROM events WHERE event_type LIKE 'auth.%' AND created_at >= '${curTime}'`),
-      fetchTimestamps(`SELECT created_at FROM sessions WHERE revoked_at IS NULL AND expires_at > '${now}' AND created_at >= '${curTime}'`),
-      fetchTimestamps(`SELECT created_at FROM events WHERE event_type = 'auth.token_issued' AND created_at >= '${curTime}'`),
-      fetchTimestamps(`SELECT created_at FROM events WHERE event_type = 'auth.login_failed' AND created_at >= '${curTime}'`),
-      
-      api.post<any>('/v1/analytics/query', { sql: `SELECT event_type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND event_type != '' AND category != 'log' GROUP BY event_type ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(actor_id, ''), 'Anonymous'), COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY actor_id ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT ip_address, COUNT(*) as count FROM sessions WHERE created_at >= '${curTime}' AND ip_address IS NOT NULL AND ip_address != '' GROUP BY ip_address ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(client_id, ''), 'Console') as name, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY client_id ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(sdk_name, ''), 'Browser') as name, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY sdk_name ORDER BY count DESC LIMIT 8` }),
-      api.post<any>('/v1/analytics/query', { sql: `SELECT COALESCE(NULLIF(delegation_type, ''), 'direct') as type, COUNT(*) as count FROM events WHERE created_at >= '${curTime}' AND category != 'log' GROUP BY delegation_type ORDER BY count DESC` }),
-    ]);
+async function fetchData() {
+  const hours = rangeToHours(timeRange.value);
+  const startMs = Date.now() - hours * 3600000;
+  const endMs = Date.now();
+  const bucketCount = timeRange.value === '1h' ? 12 : timeRange.value === '24h' ? 24 : timeRange.value === '7d' ? 14 : timeRange.value === '30d' ? 30 : 12;
+
+  try {
+    const data = await api.get<any>(`/v1/observability/overview?range=${timeRange.value}`);
 
     const computeChange = (cur: number, prev: number) => {
       if (prev === 0 && cur === 0) return 0;
@@ -329,40 +266,31 @@ async function fetchData() {
       return Math.round(((cur - prev) / prev) * 100);
     }
 
-    metrics.value[0].value = authTs.length
-    metrics.value[0].change = computeChange(authTs.length, authPrev)
-    metrics.value[0].sparkline = generateBuckets(authTs, bucketCount, startMs, endMs)
+    const m = data.metrics;
+    metrics.value[0].value = m.auth.current;
+    metrics.value[0].change = computeChange(m.auth.current, m.auth.previous);
+    metrics.value[0].sparkline = generateBuckets(m.auth.timestamps || [], bucketCount, startMs, endMs);
 
-    metrics.value[1].value = sessTs.length
-    metrics.value[1].change = computeChange(sessTs.length, sessPrev)
-    metrics.value[1].sparkline = generateBuckets(sessTs, bucketCount, startMs, endMs)
+    metrics.value[1].value = m.sessions.current;
+    metrics.value[1].change = computeChange(m.sessions.current, m.sessions.previous);
+    metrics.value[1].sparkline = generateBuckets(m.sessions.timestamps || [], bucketCount, startMs, endMs);
 
-    metrics.value[2].value = tokTs.length
-    metrics.value[2].change = computeChange(tokTs.length, tokPrev)
-    metrics.value[2].sparkline = generateBuckets(tokTs, bucketCount, startMs, endMs)
+    metrics.value[2].value = m.tokens.current;
+    metrics.value[2].change = computeChange(m.tokens.current, m.tokens.previous);
+    metrics.value[2].sparkline = generateBuckets(m.tokens.timestamps || [], bucketCount, startMs, endMs);
 
-    metrics.value[3].value = failTs.length
-    metrics.value[3].change = computeChange(failTs.length, failPrev)
-    metrics.value[3].sparkline = generateBuckets(failTs, bucketCount, startMs, endMs)
+    metrics.value[3].value = m.failed.current;
+    metrics.value[3].change = computeChange(m.failed.current, m.failed.previous);
+    metrics.value[3].sparkline = generateBuckets(m.failed.timestamps || [], bucketCount, startMs, endMs);
 
-    // Parse analytics response supporting the 2D array Rows structure
-    const parseList = (res: any) => {
-      if (res && res.rows) {
-        return res.rows.map((r: any) => ({
-          name: Array.isArray(r) ? r[0] : Object.values(r)[0],
-          count: Number(Array.isArray(r) ? r[1] : Object.values(r)[1])
-        }));
-      }
-      return [];
-    }
-    
-    topOperations.value = parseList(opsRes);
-    topUsers.value = parseList(usersRes);
-    topIps.value = parseList(ipsRes);
-    topClients.value = parseList(clientsRes);
-    topSdks.value = parseList(sdksRes);
-    delegationData.value = parseList(delegationRes);
-    
+    const b = data.breakdowns;
+    topOperations.value = b.operations || [];
+    topUsers.value = b.users || [];
+    topIps.value = b.ips || [];
+    topClients.value = b.clients || [];
+    topSdks.value = b.sdks || [];
+    delegationData.value = b.delegation || [];
+
   } catch (err) {
     console.error("Failed to load overview data:", err)
   }
