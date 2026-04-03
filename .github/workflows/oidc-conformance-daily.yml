@@ -34,7 +34,7 @@ jobs:
       run_fast_rust: false
       run_fast_web: false
       run_extended_e2e: false
-      run_browser_artifacts: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+      run_browser_artifacts: ${{ github.event_name != 'workflow_dispatch' || inputs.surface != 'op' }}
       artifact_prefix: compliance-oidc
 
   prepare-conformance-image:
@@ -49,6 +49,10 @@ jobs:
         name: Set image metadata
         run: echo "image_tag=zitadel-oidc-conformance:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
+      - name: Create CI temp directory
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        run: mkdir -p "$GITHUB_WORKSPACE/.ci-tmp"
+
       - uses: docker/setup-buildx-action@v3
         if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
 
@@ -59,20 +63,20 @@ jobs:
           context: .
           file: ./Dockerfile
           tags: ${{ steps.image_meta.outputs.image_tag }}
-          outputs: type=docker,dest=${{ runner.temp }}/zitadel-oidc-conformance.tar
+          outputs: type=docker,dest=${{ github.workspace }}/.ci-tmp/zitadel-oidc-conformance.tar
           cache-from: type=gha,scope=compliance-oidc-image
           cache-to: type=gha,mode=max,scope=compliance-oidc-image
 
       - name: Compress conformance image
         if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
-        run: gzip -1 "$RUNNER_TEMP/zitadel-oidc-conformance.tar"
+        run: gzip -1 "$GITHUB_WORKSPACE/.ci-tmp/zitadel-oidc-conformance.tar"
 
       - name: Upload conformance image artifact
         if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
         uses: actions/upload-artifact@v4.6.2
         with:
           name: compliance-oidc-image
-          path: ${{ runner.temp }}/zitadel-oidc-conformance.tar.gz
+          path: ${{ github.workspace }}/.ci-tmp/zitadel-oidc-conformance.tar.gz
           retention-days: 1
 
   compliance-oidc:
@@ -85,7 +89,8 @@ jobs:
       OIDC_CONFORMANCE_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/oidc-conformance
       OIDC_CONFORMANCE_SUMMARY_MD: ${{ github.workspace }}/artifacts/oidc-conformance/summary.md
       OIDC_CONFORMANCE_SUMMARY_JSON: ${{ github.workspace }}/artifacts/oidc-conformance/summary.json
-      ZITADEL_E2E_BINARY: ${{ runner.temp }}/zitadel-bin/zitadel
+      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
+      ZITADEL_E2E_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
       OIDC_CONFORMANCE_ZITADEL_IMAGE: ${{ needs.prepare-conformance-image.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v6.0.2
@@ -107,19 +112,19 @@ jobs:
       - name: Extract prepared zitadel binary
         if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
         run: |
-          mkdir -p "$RUNNER_TEMP/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$RUNNER_TEMP/zitadel-bin"
+          mkdir -p "$CI_TMP_DIR/zitadel-bin"
+          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
 
       - name: Restore prepared conformance image
         if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
         uses: actions/download-artifact@v4.3.0
         with:
           name: compliance-oidc-image
-          path: ${{ runner.temp }}/compliance-image
+          path: ${{ github.workspace }}/.ci-tmp/compliance-image
 
       - name: Load prepared conformance image
         if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
-        run: gunzip -c "$RUNNER_TEMP/compliance-image/zitadel-oidc-conformance.tar.gz" | docker load
+        run: gunzip -c "$CI_TMP_DIR/compliance-image/zitadel-oidc-conformance.tar.gz" | docker load
 
       - uses: actions/setup-node@v6.3.0
         if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}

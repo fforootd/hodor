@@ -212,7 +212,8 @@ jobs:
     needs: prepare-rust-binary
     runs-on: ubuntu-latest
     env:
-      ZITADEL_E2E_BINARY: ${{ runner.temp }}/zitadel-bin/zitadel
+      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
+      ZITADEL_E2E_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -224,8 +225,8 @@ jobs:
 
       - name: Extract zitadel binary
         run: |
-          mkdir -p "$RUNNER_TEMP/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$RUNNER_TEMP/zitadel-bin"
+          mkdir -p "$CI_TMP_DIR/zitadel-bin"
+          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
 
       - uses: actions/setup-node@v6.3.0
         with:
