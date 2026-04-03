@@ -16,6 +16,108 @@ use crate::ui::{
     UINode, default_branding, identifier_step_nodes, password_step_nodes, session_reuse_nodes,
 };
 
+/// Bot protection setting loaded from the settings table.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct BotProtectionSetting {
+    #[serde(default)]
+    mode: String,
+    #[serde(default = "default_threshold")]
+    risk_threshold: f64,
+    #[serde(default = "default_action")]
+    action: String,
+    #[serde(default = "default_provider")]
+    provider: String,
+    #[serde(default)]
+    provider_config: serde_json::Value,
+}
+
+fn default_threshold() -> f64 {
+    0.5
+}
+fn default_action() -> String {
+    "challenge".into()
+}
+fn default_provider() -> String {
+    "pow".into()
+}
+
+impl Default for BotProtectionSetting {
+    fn default() -> Self {
+        Self {
+            mode: "disabled".into(),
+            risk_threshold: 0.5,
+            action: "challenge".into(),
+            provider: "pow".into(),
+            provider_config: serde_json::Value::Object(Default::default()),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl BotProtectionSetting {
+    fn is_disabled(&self) -> bool {
+        self.mode.is_empty() || self.mode == "disabled"
+    }
+    fn is_observe(&self) -> bool {
+        self.mode == "observe"
+    }
+    fn is_enforce(&self) -> bool {
+        self.mode == "enforce"
+    }
+}
+
+/// Load bot protection setting from the settings table.
+async fn load_bot_protection(pool: &sqlx::AnyPool, instance_id: &str) -> BotProtectionSetting {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT data FROM settings WHERE instance_id = $1 AND type = 'bot_protection' LIMIT 1",
+    )
+    .bind(instance_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+
+    match row {
+        Some((data,)) => serde_json::from_str(&data).unwrap_or_default(),
+        None => BotProtectionSetting::default(),
+    }
+}
+
+/// Emit a bot_detection event to the events table.
+async fn emit_bot_detection_event(
+    pool: &sqlx::AnyPool,
+    instance_id: &str,
+    flow_id: &str,
+    fingerprint: &str,
+    risk: &zitadel_botdetect::RiskScore,
+    bp: &BotProtectionSetting,
+    action_taken: &str,
+) {
+    let event_id = Uuid::new_v4().to_string();
+    let payload = serde_json::json!({
+        "risk_score": risk.score,
+        "signals": risk.signals,
+        "recommendation": format!("{:?}", risk.recommendation),
+        "action_taken": action_taken,
+        "provider": bp.provider,
+    });
+    let metadata = serde_json::json!({
+        "mode": bp.mode,
+        "threshold": bp.risk_threshold,
+    });
+    let _ = sqlx::query(
+        "INSERT INTO events (id, instance_id, event_type, category, flow_id, fingerprint, payload, metadata) \
+         VALUES ($1, $2, 'bot_detection', 'security', $3, $4, $5, $6)",
+    )
+    .bind(&event_id)
+    .bind(instance_id)
+    .bind(flow_id)
+    .bind(fingerprint)
+    .bind(serde_json::to_string(&payload).unwrap_or_default())
+    .bind(serde_json::to_string(&metadata).unwrap_or_default())
+    .execute(pool)
+    .await;
+}
+
 /// Extract bot-detection signals from HTTP request headers.
 fn extract_request_signals(headers: &axum::http::HeaderMap) -> zitadel_botdetect::RequestSignals {
     let header_keys: Vec<&str> = headers.keys().map(|k| k.as_str()).collect();
@@ -273,23 +375,57 @@ pub(crate) async fn flow_create(
 
     let initial_step_str = initial_step.as_str().to_string();
 
-    // Extract request signals and compute risk score for bot detection.
-    let signals = extract_request_signals(&headers);
-    let risk = zitadel_botdetect::score_request(&signals);
-    tracing::debug!(
-        risk_score = risk.score,
-        signals = ?risk.signals,
-        recommendation = ?risk.recommendation,
-        "login flow risk assessment"
-    );
+    // Load bot protection setting from DB.
+    let bp = load_bot_protection(state.db.pool(), DEFAULT_INSTANCE_ID).await;
+
+    // Conditionally score request based on bot protection mode.
+    let (risk_score, risk_signals) = if !bp.is_disabled() {
+        let signals = extract_request_signals(&headers);
+        let risk = zitadel_botdetect::score_request(&signals);
+        tracing::debug!(
+            mode = bp.mode,
+            risk_score = risk.score,
+            signals = ?risk.signals,
+            recommendation = ?risk.recommendation,
+            "login flow risk assessment"
+        );
+
+        // Emit bot_detection event in observe + enforce modes.
+        let action_taken = if bp.is_observe() {
+            "observe"
+        } else if risk.score >= bp.risk_threshold {
+            &bp.action
+        } else {
+            "allow"
+        };
+        emit_bot_detection_event(
+            state.db.pool(),
+            DEFAULT_INSTANCE_ID,
+            &flow_id,
+            &req.fingerprint,
+            &risk,
+            &bp,
+            action_taken,
+        )
+        .await;
+
+        (risk.score, risk.signals)
+    } else {
+        (0.0, vec![])
+    };
 
     let mut data = serde_json::json!({
         "step": initial_step_str,
         "redirect_uri": req.redirect_uri,
         "state": req.state,
         "fingerprint": req.fingerprint,
-        "risk_score": risk.score,
-        "risk_signals": risk.signals,
+        "risk_score": risk_score,
+        "risk_signals": risk_signals,
+        "bot_protection_mode": bp.mode,
+        "bot_protection_threshold": bp.risk_threshold,
+        "bot_protection_action": bp.action,
+        "bot_protection_provider": bp.provider,
+        "bot_protection_provider_config": bp.provider_config,
     });
     if !req.auth_request_id.is_empty() {
         data["auth_request_id"] = serde_json::Value::String(req.auth_request_id.clone());
@@ -530,16 +666,48 @@ pub(crate) async fn handle_identifier_step(
         }
     }
 
-    // Check if captcha is required based on risk score.
+    // Check if captcha is required based on bot protection setting + risk score.
+    let bp_mode = data
+        .get("bot_protection_mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("disabled");
     let risk_score = data
         .get("risk_score")
         .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let threshold = data
+        .get("bot_protection_threshold")
+        .and_then(|v| v.as_f64())
         .unwrap_or(0.5);
+    let bp_action = data
+        .get("bot_protection_action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("challenge");
+    let bp_provider = data
+        .get("bot_protection_provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pow");
     let captcha_verified = data
         .get("captcha_verified")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let needs_captcha = risk_score >= 0.3 && !captcha_verified;
+
+    let needs_captcha = bp_mode == "enforce"
+        && risk_score >= threshold
+        && !captcha_verified
+        && bp_action == "challenge";
+
+    // Block mode: reject outright if score exceeds threshold.
+    if bp_mode == "enforce" && risk_score >= threshold && bp_action == "block" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "request_blocked",
+                "error_description": "Request blocked by bot protection",
+            })),
+        )
+            .into_response();
+    }
 
     let mut resp = FlowStepResponse {
         flow_id: flow_id.to_string(),
@@ -552,8 +720,25 @@ pub(crate) async fn handle_identifier_step(
 
     if needs_captcha {
         resp.captcha_required = Some(true);
-        resp.nodes
-            .push(build_challenge_node(&state.pow_secret, risk_score));
+        match bp_provider {
+            "pow" => {
+                resp.nodes
+                    .push(build_challenge_node(&state.pow_secret, risk_score));
+            }
+            provider @ ("recaptcha" | "hcaptcha" | "turnstile") => {
+                // Load site_key from provider_config stored in flow data.
+                let site_key = data
+                    .get("bot_protection_provider_config")
+                    .and_then(|c| c.get("site_key"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                resp.nodes.push(UINode::CaptchaWidget {
+                    provider: provider.into(),
+                    site_key: site_key.into(),
+                });
+            }
+            _ => {}
+        }
     }
 
     Json(resp).into_response()
@@ -891,7 +1076,61 @@ async fn handle_captcha_submit(
         }
     }
 
-    // Third-party captcha tokens: still a stub for future provider integration.
+    // Third-party captcha provider verification.
+    if has_token {
+        let token = req
+            ._extra
+            .get("captcha_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let provider = flow
+            .data
+            .get("bot_protection_provider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pow");
+        let secret_key = flow
+            .data
+            .get("bot_protection_provider_config")
+            .and_then(|c| c.get("secret_key"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+
+        if matches!(provider, "recaptcha" | "hcaptcha" | "turnstile") && !secret_key.is_empty() {
+            let verify_url = match provider {
+                "recaptcha" => "https://www.google.com/recaptcha/api/siteverify",
+                "hcaptcha" => "https://api.hcaptcha.com/siteverify",
+                "turnstile" => "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                _ => "",
+            };
+            if !verify_url.is_empty() {
+                let client = reqwest::Client::new();
+                let resp = client
+                    .post(verify_url)
+                    .form(&[("secret", secret_key), ("response", token)])
+                    .send()
+                    .await;
+                let verified: bool = match resp {
+                    Ok(r) => {
+                        let body: serde_json::Value = r.json().await.unwrap_or_default();
+                        body.get("success")
+                            .and_then(|s| s.as_bool())
+                            .unwrap_or(false)
+                    }
+                    Err(e) => {
+                        tracing::warn!(provider, %e, "captcha provider verification failed");
+                        false
+                    }
+                };
+                if !verified {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({"error": "captcha verification failed"})),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
 
     let mut data = flow.data.clone();
     data["captcha_verified"] = serde_json::Value::Bool(true);

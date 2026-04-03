@@ -47,3 +47,12 @@ users:
     profile:
       email: alice@example.com
       display_name: Alice Wonder
+
+# Instance-level settings
+settings:
+  - type: bot_protection
+    data:
+      mode: observe
+      risk_threshold: 0.5
+      action: challenge
+      provider: pow

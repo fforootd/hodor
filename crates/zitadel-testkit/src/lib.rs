@@ -37,7 +37,19 @@ pub struct TestDb {
 
 impl TestDb {
     pub async fn new() -> anyhow::Result<Self> {
-        let db = Db::open("").await.context("open in-memory test db")?;
+        let config = zitadel_config::StatefulStorageConfig {
+            url: "sqlite://:memory:".into(),
+            ..Default::default()
+        };
+        Self::open_with_config(&config).await
+    }
+
+    pub async fn open_with_config(
+        config: &zitadel_config::StatefulStorageConfig,
+    ) -> anyhow::Result<Self> {
+        let db = Db::open_with_config(&config.url, config)
+            .await
+            .with_context(|| format!("open test db {}", config.url))?;
         zitadel_db::migrate::migrate(&db)
             .await
             .context("run test migrations")?;
@@ -138,9 +150,14 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn new() -> anyhow::Result<Self> {
-        let db = TestDb::new().await?;
-
         let mut config = Config::default();
+        config.storage.stateful.url = "sqlite://:memory:".into();
+        Self::with_config(config).await
+    }
+
+    pub async fn with_config(mut config: Config) -> anyhow::Result<Self> {
+        let db = TestDb::open_with_config(&config.storage.stateful).await?;
+
         config.server.external_domain = "localhost".into();
         config.server.public_origin = "http://localhost:18080".into();
         config.server.force_insecure_cookies = true;

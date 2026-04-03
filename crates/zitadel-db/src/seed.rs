@@ -20,6 +20,16 @@ pub struct SeedFile {
     pub apps: Vec<SeedApp>,
     #[serde(default)]
     pub providers: Vec<SeedProvider>,
+    #[serde(default)]
+    pub settings: Vec<SeedSetting>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeedSetting {
+    #[serde(rename = "type")]
+    pub type_: String,
+    #[serde(default)]
+    pub data: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,6 +414,26 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
             name = payload.display_name,
             "seeded provider"
         );
+    }
+
+    // Seed settings (bot_protection, branding, etc.).
+    for setting in &seed.settings {
+        let id = Uuid::new_v4().to_string();
+        let data_str = serde_json::to_string(&setting.data).unwrap_or_else(|_| "{}".into());
+        let json_bind = scoped.json_bind(4);
+        let sql = format!(
+            "INSERT INTO settings (id, instance_id, type, scope, scope_id, data) \
+             VALUES ($1, $2, $3, 'instance', '', {json_bind}) \
+             ON CONFLICT(instance_id, type, scope, scope_id) DO UPDATE SET data = {json_bind}"
+        );
+        sqlx::query(&sql)
+            .bind(&id)
+            .bind(scoped.instance_id())
+            .bind(&setting.type_)
+            .bind(&data_str)
+            .execute(pool)
+            .await?;
+        tracing::debug!(type_ = setting.type_, "seeded setting");
     }
 
     // Seed observability data (events + fingerprints) if no seeded events exist.

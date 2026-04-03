@@ -35,6 +35,9 @@ pub(crate) enum UINode {
         maxnumber: u64,
         signature: String,
     },
+    /// External captcha provider widget (reCAPTCHA, hCaptcha, Turnstile).
+    #[serde(rename = "captcha_widget")]
+    CaptchaWidget { provider: String, site_key: String },
 }
 
 pub(crate) fn identifier_step_nodes() -> Vec<UINode> {
