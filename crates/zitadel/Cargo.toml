@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 zitadel-config = { workspace = true }
+zitadel-db = { workspace = true }
 zitadel-server = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }

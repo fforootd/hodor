@@ -15,7 +15,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: './e2e/scripts/start-zitadel-e2e.sh',
+    command: './e2e/scripts/start-e2e-stack.sh',
     cwd: '..',
     url: `${baseURL}/healthz`,
     reuseExistingServer: false,

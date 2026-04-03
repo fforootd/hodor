@@ -1,10 +1,4 @@
-use axum::{
-    Router,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 

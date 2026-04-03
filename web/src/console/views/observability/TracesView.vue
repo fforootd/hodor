@@ -267,7 +267,7 @@ class="absolute h-full rounded-sm transition-all"
                           <span class="text-muted-foreground">Request ID</span>
                           <span class="truncate text-primary cursor-pointer hover:underline" @click.stop="jumpToTrace(span.request_id)">{{ span.request_id || '—' }}</span>
                           <span class="text-muted-foreground">Session ID</span>
-                          <RouterLink v-if="span.session_id" to="/console/sessions" class="truncate text-primary hover:underline" @click.stop>{{ span.session_id }}</RouterLink>
+                          <RouterLink v-if="span.session_id" to="/sessions" class="truncate text-primary hover:underline" @click.stop>{{ span.session_id }}</RouterLink>
                           <span v-else>—</span>
 
                           <template v-if="span.client_id">
@@ -286,13 +286,13 @@ class="absolute h-full rounded-sm transition-all"
                           </template>
 
                           <span v-if="span.fingerprint" class="text-muted-foreground">Fingerprint</span>
-                          <RouterLink v-if="span.fingerprint" :to="`/console/events?fingerprint=${span.fingerprint}`" class="truncate font-mono text-primary hover:underline" @click.stop>{{ span.fingerprint }}</RouterLink>
+                          <RouterLink v-if="span.fingerprint" :to="`/events?fingerprint=${span.fingerprint}`" class="truncate font-mono text-primary hover:underline" @click.stop>{{ span.fingerprint }}</RouterLink>
 
                           <span v-if="span.actor_id" class="text-muted-foreground">Actor ID</span>
                           <RouterLink v-if="span.actor_id" :to="`/users/${span.actor_id}`" class="truncate text-primary hover:underline" @click.stop>{{ span.actor_id }}</RouterLink>
                         </div>
                         <RouterLink
-:to="`/console/events?id=${span.id}`" 
+:to="`/events?id=${span.id}`" 
                                     class="inline-flex items-center gap-1.5 text-[11px] text-primary hover:underline mt-2"
                                     @click.stop>
                           <ExternalLink class="w-3 h-3" />

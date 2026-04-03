@@ -1,0 +1,61 @@
+{
+  "type": "provider",
+  "version": "1.0.0",
+  "name": "GitLab",
+  "description": "GitLab OIDC provider for developer sign-in. Supports both GitLab.com and self-hosted instances. Maps GitLab profile claims including username, email, and avatar.",
+  "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider instance (shown on the login screen)",
+      "default": "GitLab"
+    },
+    "gitlab_url": {
+      "type": "string",
+      "description": "GitLab instance URL (use https://gitlab.com for SaaS)",
+      "default": "https://gitlab.com"
+    },
+    "client_id": {
+      "type": "string",
+      "description": "GitLab Application ID (from GitLab > Admin > Applications)"
+    },
+    "client_secret": {
+      "type": "string",
+      "description": "GitLab Application Secret",
+      "sensitive": true
+    }
+  },
+  "payload": {
+    "display_name": "{{provider_name}}",
+    "kind": "gitlab",
+    "protocol": "oidc",
+    "connection": {
+      "issuer": "{{gitlab_url}}",
+      "client_id": "{{client_id}}",
+      "client_secret": "{{client_secret}}",
+      "scopes": ["openid", "profile", "email"]
+    },
+    "mapping": {
+      "claims": {
+        "email": "claims.email",
+        "email_verified": "claims.email_verified",
+        "display_name": "claims.name",
+        "username": "claims.nickname",
+        "picture": "claims.picture",
+        "profile_url": "claims.profile",
+        "groups": "claims.groups"
+      }
+    },
+    "target": {
+      "schema_type": "human_user"
+    },
+    "linking": {
+      "mode": "create_or_link",
+      "match_by": "verified_email"
+    },
+    "session": {},
+    "ui": {
+      "display_order": 40
+    },
+    "enabled": true
+  }
+}

@@ -9,11 +9,11 @@
 ## Quick Start
 
 ```bash
-# Fresh clone: install web deps, build embedded assets, start Go + Vite
+# Fresh clone: install web deps, build embedded assets, start Rust + Vite
 make dev
 ```
 
-Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` for the Go API / OIDC endpoints.
+Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` for the Rust API / OIDC endpoints.
 
 ## Local Development
 
@@ -28,19 +28,19 @@ Default local credentials:
 - `admin / admin123`
 - PAT: `zitadel-dev-pat-do-not-use-in-production`
 
-### Go-only dev
+### Backend-only dev
 
 ```bash
-make dev-go
+make dev-embed
 ```
 
-This reuses embedded web assets when they already exist. If you have not built them yet, run `make webdist` or `make dev` once first.
+This builds `web/dist` and serves the embedded frontend directly from the Rust binary on `http://localhost:8080`.
 
 ### Frontend dev
 
 ```bash
 # Start the backend in another terminal
-make dev-go
+make dev-embed
 
 # Then run Vite HMR
 make dev-web
@@ -71,33 +71,29 @@ make dev-seed SEED=minimal
 make dev-seed SEED=e2e
 ```
 
-Named seed packs live in [`fixtures/seeds`](/Users/ffo/git/hodor/zitadel/fixtures/seeds). Validate one without touching the DB:
+Named seed packs live in [fixtures/seeds](fixtures/seeds). Validate one without touching the DB:
 
 ```bash
-go run ./cmd/zitadel seed validate --file fixtures/seeds/frontend.yaml
+cargo run -p zitadel -- seed validate --file fixtures/seeds/frontend.yaml
 ```
 
-### Standalone Go binary
+### Standalone binary
 
 The zero-config path still works:
 
 ```bash
-go run ./cmd/zitadel start
+cargo run -p zitadel -- start
 ```
 
-That uses SQLite at `./data/zitadel.db` with no required config file.
+That uses SQLite at `./data/zitadel.db` with no required config file. For deterministic local credentials such as `admin / admin123`, prefer `make dev` or run with `fixtures/zitadel.dev.toml`, which applies the frontend seed pack on startup.
 
-For self-hosted operator flows, prefer the explicit bootstrap and recovery commands:
+For an explicit migration + bootstrap pass before serving, use:
 
 ```bash
-printf '%s\n' 'super-secret-password' | \
-  go run ./cmd/zitadel bootstrap admin --password-stdin
-
-printf '%s\n' 'new-secret-password' | \
-  go run ./cmd/zitadel recover admin --identifier admin --password-stdin
+cargo run -p zitadel -- migrate -c fixtures/zitadel.dev.toml --bootstrap
 ```
 
-The interactive `start` bootstrap path remains available for local DX, but the explicit commands are the recommended operator workflow.
+The current Rust CLI does not yet expose the old `bootstrap admin` or `recover admin` subcommands. The current operator flow and its limits are documented in [docs/guides/bootstrap-recovery.md](docs/guides/bootstrap-recovery.md).
 
 More contributor detail lives in [docs/guides/local-development.md](docs/guides/local-development.md).
 Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guides/bootstrap-recovery.md).
@@ -116,15 +112,18 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 ## Testing
 
 ```bash
-# Run all tests
-go test ./...
+# Run Rust tests
+make test
 
-# Run with verbose output
-go test -v ./...
+# Run the local Rust quality gate
+make rust-check
 
-# Run fuzz tests
-go test -fuzz FuzzParseIDTokenClaims ./internal/login/ -fuzztime 30s
-go test -fuzz FuzzMapClaims ./internal/login/ -fuzztime 30s
+# Run web unit tests
+make test-web
+
+# Run browser smoke or full suites
+make e2e-smoke
+make test-e2e
 ```
 
 ## Configuration

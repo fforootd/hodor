@@ -5,7 +5,11 @@ edition.workspace = true
 
 [dependencies]
 zitadel-db = { workspace = true }
+zitadel-storage = { workspace = true }
 zitadel-auth = { workspace = true }
+zitadel-expr = { workspace = true }
+zitadel-oidc = { workspace = true }
+zitadel-schema = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -13,3 +17,11 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+sha2 = { workspace = true }
+base64 = "0.22"
+rand = "0.8"
+url = "2"
+hex = "0.4"
+
+[dev-dependencies]
+tokio = { workspace = true }

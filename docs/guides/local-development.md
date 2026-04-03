@@ -8,7 +8,7 @@ make dev
 
 That starts:
 
-- the Go API on `http://localhost:8080`
+- the Rust API on `http://localhost:8080`
 - the Vite dev server on `http://localhost:5173`
 - mock OIDC for local SSO testing
 - stdout-backed email and SMS notification channels
@@ -18,23 +18,17 @@ That starts:
 
 | Command | Use it for |
 |---|---|
-| `make dev` | The default flow: Go API + Vite HMR + frontend seed data |
-| `make dev-go` | Backend work when you do not need Vite |
+| `make dev` | The default flow: Rust API + Vite HMR + frontend seed data |
+| `make dev-embed` | Backend work when you do not need Vite |
 | `make dev-web` | Frontend-only work against an already running API |
 | `make dev-embed` | Parity mode with embedded web assets instead of Vite |
 | `make dev-reset` | Wipe `./data` SQLite files and restart local dev |
 | `make dev-seed SEED=<name>` | Reapply a named seed pack without wiping the DB |
 | `make dev-status` | Print the current local dev paths, credentials, and seed pack |
 
-Deprecated aliases still work:
-
-- `make dev-hot` → `make dev`
-- `make dev-full` → `make dev-embed`
-- `make dev-clean` → `make dev-reset`
-
 ## Seed Packs
 
-Seed packs live in [`fixtures/seeds`](/Users/ffo/git/hodor/zitadel/fixtures/seeds):
+Seed packs live in [fixtures/seeds](../../fixtures/seeds):
 
 | Pack | Purpose |
 |---|---|
@@ -53,8 +47,8 @@ make dev-seed SEED=e2e
 The CLI entrypoint is also available directly:
 
 ```bash
-go run ./cmd/zitadel seed validate --file fixtures/seeds/frontend.yaml
-go run ./cmd/zitadel seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/frontend.yaml
+cargo run -p zitadel -- seed validate --file fixtures/seeds/frontend.yaml
+cargo run -p zitadel -- seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/frontend.yaml
 ```
 
 `seed apply` is safe to use on a fresh local SQLite database because it runs migrations first, ensures built-in schemas exist, and then applies the seed file.
@@ -63,8 +57,8 @@ go run ./cmd/zitadel seed apply -c fixtures/zitadel.dev.toml --file fixtures/see
 
 Local development is standardized around repo-root `./data`:
 
-- database: [`data/zitadel.db`](/Users/ffo/git/hodor/zitadel/data/zitadel.db)
-- analytics cache: [`data/zitadel-cache.db`](/Users/ffo/git/hodor/zitadel/data/zitadel-cache.db)
+- database: `data/zitadel.db`
+- analytics cache: `data/zitadel-cache.db`
 
 `make dev-reset` removes those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and refuses to run when `ZITADEL_DATABASE_URL` is not SQLite.
 
@@ -76,29 +70,25 @@ Default local credentials:
 - password: `admin123`
 - PAT: `zitadel-dev-pat-do-not-use-in-production`
 
-Mock OIDC is enabled in [`fixtures/zitadel.dev.toml`](/Users/ffo/git/hodor/zitadel/fixtures/zitadel.dev.toml), so local SSO provider testing is available in the standard dev workflow.
+Mock OIDC is enabled in [fixtures/zitadel.dev.toml](../../fixtures/zitadel.dev.toml), so local SSO provider testing is available in the standard dev workflow.
 
 ## Standalone Binary
 
 The zero-config path is still valid:
 
 ```bash
-go run ./cmd/zitadel start
+cargo run -p zitadel -- start
 ```
 
-That keeps the original DX promise: SQLite-first startup with no Docker or external services required.
+That keeps the original DX promise: SQLite-first startup with no Docker or external services required. The server auto-migrates and ensures the default org/admin record exists. Deterministic local credentials such as `admin / admin123` still come from seed packs such as `fixtures/zitadel.dev.toml`.
 
-For explicit self-hosted operator flows, use:
+For the current explicit bootstrap pass, use:
 
 ```bash
-printf '%s\n' 'super-secret-password' | \
-  go run ./cmd/zitadel bootstrap admin --password-stdin
-
-printf '%s\n' 'new-secret-password' | \
-  go run ./cmd/zitadel recover admin --identifier admin --password-stdin
+cargo run -p zitadel -- migrate -c fixtures/zitadel.dev.toml --bootstrap
 ```
 
-That path is documented in [Bootstrap and Recovery](/Users/ffo/git/hodor/zitadel/docs/guides/bootstrap-recovery.md). The interactive `start` bootstrap flow remains in place for local DX compatibility.
+The current bootstrap/recovery status is documented in [Bootstrap and Recovery](bootstrap-recovery.md). Dedicated `recover admin` commands are planned separately and are not part of the current Rust binary.
 
 ## Notifications In Local Dev
 
@@ -108,7 +98,7 @@ Local notification delivery is zero-config by default:
 - SMS resolves to the `dev_stdout` channel
 - rendered output is written to the server log instead of requiring SMTP or an SMS gateway
 
-You can inspect and override both through the Console at [`/console/notifications`](/Users/ffo/git/hodor/zitadel/web/src/console/views/NotificationsView.vue).
+You can inspect and override both through the Console at [NotificationsView.vue](../../web/src/console/views/NotificationsView.vue).
 
 If you want to try a real integration locally, add an instance or org override for:
 

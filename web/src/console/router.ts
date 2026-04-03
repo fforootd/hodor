@@ -125,6 +125,11 @@ const router = createRouter({
       component: () => import('./views/MarketplaceView.vue'),
     },
     {
+      path: '/marketplace/:id',
+      name: 'marketplace-detail',
+      component: () => import('./views/MarketplaceDetailView.vue'),
+    },
+    {
       path: '/providers',
       name: 'providers',
       component: () => import('./views/ProviderListView.vue'),
@@ -201,6 +206,11 @@ const router = createRouter({
       name: 'actions',
       component: () => import('./views/IdentityListView.vue'),
       props: () => ({ schemaType: 'action' }),
+    },
+    {
+      path: '/actions/:id',
+      name: 'action-detail',
+      component: () => import('./views/ActionDetailView.vue'),
     },
     // Login Flow editor with live preview
     {

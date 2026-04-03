@@ -555,7 +555,7 @@ function resolveRefLink(refInfo: any, row: Record<string, any>): string {
   // For session references, link to sessions view.
   if (refInfo.resource === 'sessions') {
     const sessionId = row['session_id'] || ''
-    return `/console/sessions?id=${sessionId}`
+    return `/sessions?id=${sessionId}`
   }
 
   return '#'

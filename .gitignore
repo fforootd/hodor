@@ -24,6 +24,7 @@ node_modules/
 web/dist/
 
 # E2E (Playwright)
+test-results/
 e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
@@ -45,3 +46,7 @@ bench-results/
 
 # Rust
 /target/
+
+# OIDC conformance
+/.cache/oidc-conformance/
+/artifacts/oidc-conformance/

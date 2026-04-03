@@ -83,9 +83,9 @@ When customers point their domain (e.g., `login.acme.com`) at Zitadel:
 - For **embedded** (cross-origin) deployment, the server returns CORS headers
 - The flow stores the OIDC `redirect_uri` and `state` — on completion, redirects to the stored URI
 
-### 7. `go:embed` for distribution
+### 7. `rust-embed` for distribution
 
-The built WC bundle lands in `web/dist/assets/` alongside other Vite outputs. The `Makefile` copies this to `internal/server/webdist/`. The Go binary serves it via `//go:embed all:webdist` + `http.FileServer`. No additional serving infrastructure needed.
+The built WC bundle lands in `web/dist/assets/` alongside other Vite outputs. The Rust binary serves `web/dist` directly via `rust-embed`. No additional serving infrastructure is needed.
 
 ## UINode Type Registry
 

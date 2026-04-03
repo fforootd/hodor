@@ -32,7 +32,9 @@ impl Passwords {
     /// Hash a plaintext password. Returns PHC-format encoded string.
     pub fn hash(&self, plain: &str) -> anyhow::Result<String> {
         let salt = SaltString::generate(&mut OsRng);
-        let hash = self.params.hash_password(plain.as_bytes(), &salt)
+        let hash = self
+            .params
+            .hash_password(plain.as_bytes(), &salt)
             .map_err(|e| anyhow::anyhow!("hash password: {e}"))?;
         Ok(hash.to_string())
     }
@@ -49,7 +51,9 @@ impl Passwords {
             Ok(h) => h,
             Err(_) => return false,
         };
-        self.params.verify_password(plain.as_bytes(), &parsed).is_ok()
+        self.params
+            .verify_password(plain.as_bytes(), &parsed)
+            .is_ok()
     }
 }
 

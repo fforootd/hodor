@@ -4,6 +4,7 @@ members = [
     "crates/zitadel",
     "crates/zitadel-server",
     "crates/zitadel-api",
+    "crates/zitadel-storage",
     "crates/zitadel-db",
     "crates/zitadel-oidc",
     "crates/zitadel-login",
@@ -17,6 +18,7 @@ members = [
     "crates/zitadel-schema",
     "crates/zitadel-risk",
     "crates/zitadel-ratelimit",
+    "crates/zitadel-expr",
 ]
 
 [workspace.package]
@@ -71,6 +73,7 @@ mime_guess = "2"
 zitadel-config = { path = "crates/zitadel-config" }
 zitadel-server = { path = "crates/zitadel-server" }
 zitadel-api = { path = "crates/zitadel-api" }
+zitadel-storage = { path = "crates/zitadel-storage" }
 zitadel-db = { path = "crates/zitadel-db" }
 zitadel-oidc = { path = "crates/zitadel-oidc" }
 zitadel-login = { path = "crates/zitadel-login" }
@@ -83,3 +86,4 @@ zitadel-catalog = { path = "crates/zitadel-catalog" }
 zitadel-schema = { path = "crates/zitadel-schema" }
 zitadel-risk = { path = "crates/zitadel-risk" }
 zitadel-ratelimit = { path = "crates/zitadel-ratelimit" }
+zitadel-expr = { path = "crates/zitadel-expr" }

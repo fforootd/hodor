@@ -1,0 +1,20 @@
+services:
+  zitadel:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - start
+      - -c
+      - /conformance/zitadel.conformance.toml
+      - --seed
+      - /conformance/oidc-conformance.yaml
+    ports:
+      - "18081:8080"
+    volumes:
+      - ../../fixtures/zitadel.conformance.toml:/conformance/zitadel.conformance.toml:ro
+      - ../../fixtures/seeds/oidc-conformance.yaml:/conformance/oidc-conformance.yaml:ro
+      - oidc-conformance-data:/data
+
+volumes:
+  oidc-conformance-data:

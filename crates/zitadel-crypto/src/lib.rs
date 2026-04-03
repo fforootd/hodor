@@ -19,8 +19,8 @@ impl SecretBox {
     pub fn new(active_key_id: &str, keys: &HashMap<String, String>) -> anyhow::Result<Self> {
         let mut decoded = HashMap::new();
         for (id, hex_key) in keys {
-            let bytes = hex::decode(hex_key)
-                .map_err(|e| anyhow::anyhow!("key {id}: invalid hex: {e}"))?;
+            let bytes =
+                hex::decode(hex_key).map_err(|e| anyhow::anyhow!("key {id}: invalid hex: {e}"))?;
             if bytes.len() != 32 {
                 anyhow::bail!("key {id}: must be 32 bytes (got {})", bytes.len());
             }
@@ -53,17 +53,20 @@ impl SecretBox {
             });
         }
 
-        let key = self.keys.get(&self.active_key_id)
+        let key = self
+            .keys
+            .get(&self.active_key_id)
             .ok_or_else(|| anyhow::anyhow!("active key {} not found", self.active_key_id))?;
 
-        let cipher = Aes256Gcm::new_from_slice(key)
-            .map_err(|e| anyhow::anyhow!("create cipher: {e}"))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("create cipher: {e}"))?;
 
         let mut nonce_bytes = [0u8; 12];
         rand::fill(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = cipher.encrypt(nonce, plaintext)
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext)
             .map_err(|e| anyhow::anyhow!("encrypt: {e}"))?;
 
         Ok(SealedSecret {
@@ -79,14 +82,17 @@ impl SecretBox {
             return Ok(ciphertext.to_vec());
         }
 
-        let key = self.keys.get(key_id)
+        let key = self
+            .keys
+            .get(key_id)
             .ok_or_else(|| anyhow::anyhow!("key {key_id} not found in ring"))?;
 
-        let cipher = Aes256Gcm::new_from_slice(key)
-            .map_err(|e| anyhow::anyhow!("create cipher: {e}"))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("create cipher: {e}"))?;
 
         let nonce = Nonce::from_slice(nonce);
-        cipher.decrypt(nonce, ciphertext)
+        cipher
+            .decrypt(nonce, ciphertext)
             .map_err(|e| anyhow::anyhow!("decrypt failed: {e}"))
     }
 }
@@ -96,6 +102,15 @@ pub fn random_hex(byte_len: usize) -> String {
     let mut bytes = vec![0u8; byte_len];
     rand::fill(bytes.as_mut_slice());
     hex::encode(&bytes)
+}
+
+/// Hash a token for storage using SHA-256 and the shared `sha256:` prefix.
+pub fn token_hash(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 #[cfg(test)]
@@ -109,7 +124,9 @@ mod tests {
         let sealed = sb.seal(b"hello").unwrap();
         assert_eq!(sealed.ciphertext, b"hello");
         assert!(sealed.key_id.is_empty());
-        let opened = sb.open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id).unwrap();
+        let opened = sb
+            .open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id)
+            .unwrap();
         assert_eq!(opened, b"hello");
     }
 
@@ -124,7 +141,9 @@ mod tests {
         assert_ne!(sealed.ciphertext, b"secret data");
         assert_eq!(sealed.key_id, "k1");
 
-        let opened = sb.open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id).unwrap();
+        let opened = sb
+            .open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id)
+            .unwrap();
         assert_eq!(opened, b"secret data");
     }
 
@@ -141,7 +160,9 @@ mod tests {
 
         // New SecretBox with k2 as active can still decrypt k1
         let sb2 = SecretBox::new("k2", &keys).unwrap();
-        let opened = sb2.open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id).unwrap();
+        let opened = sb2
+            .open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id)
+            .unwrap();
         assert_eq!(opened, b"data");
     }
 
@@ -155,12 +176,22 @@ mod tests {
         let mut keys2 = HashMap::new();
         keys2.insert("k1".to_string(), "b".repeat(64)); // different key bytes
         let sb2 = SecretBox::new("k1", &keys2).unwrap();
-        assert!(sb2.open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id).is_err());
+        assert!(
+            sb2.open(&sealed.ciphertext, &sealed.nonce, &sealed.key_id)
+                .is_err()
+        );
     }
 
     #[test]
     fn random_hex_length() {
         let h = random_hex(16);
         assert_eq!(h.len(), 32); // 16 bytes = 32 hex chars
+    }
+
+    #[test]
+    fn token_hash_is_stable() {
+        assert_eq!(token_hash("abc"), token_hash("abc"));
+        assert_ne!(token_hash("abc"), token_hash("def"));
+        assert!(token_hash("abc").starts_with("sha256:"));
     }
 }

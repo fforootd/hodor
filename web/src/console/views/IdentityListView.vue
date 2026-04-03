@@ -447,19 +447,25 @@
             },
             () => ['Identifier', h(getSortIcon(column), { class: 'ml-2 h-4 w-4' })],
           ),
-        cell: (info) =>
-          h(
+        cell: (info) => {
+          const detailPath = isApp
+            ? `/applications/${info.row.original.id}`
+            : props.schemaType === 'action'
+              ? `/actions/${info.row.original.id}`
+              : props.schemaType === 'org'
+                ? `/orgs/${info.row.original.id}`
+                : `/users/${info.row.original.id}`
+          return h(
             RouterLink,
             {
-              to: isApp
-                ? `/applications/${info.row.original.id}`
-                : `/users/${info.row.original.id}`,
+              to: detailPath,
               class: isApp
                 ? 'font-mono text-sm text-primary hover:underline'
                 : 'font-medium hover:underline',
             },
-            () => info.getValue(),
-          ),
+            () => info.getValue() || '—',
+          )
+        },
       }),
       columnHelper.accessor(
         (row) =>

@@ -95,7 +95,7 @@ This enables deployments where the admin console is restricted to internal netwo
 
 ### 5. Frontend Base Path Injection
 
-The frontend uses `window.__ZITADEL_BASE_PATH__` injected at runtime by the Go server. This means:
+The frontend uses `window.__ZITADEL_BASE_PATH__` injected at runtime by the Rust server. This means:
 - A single frontend build works across all deployment paths
 - No build-time configuration needed
 - The Vue router and API client dynamically construct correct URLs
@@ -114,7 +114,7 @@ The order ensures:
 
 ## Configuration
 
-See [`zitadel.reference.toml`](../zitadel.reference.toml) for the complete configuration reference.
+See [`zitadel.reference.toml`](../../zitadel.reference.toml) for the complete configuration reference.
 
 ### Environment Variable Overrides
 

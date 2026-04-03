@@ -13,20 +13,26 @@ pub struct ScopedDb {
 
 impl ScopedDb {
     pub fn new(pool: AnyPool, dialect: Dialect, instance_id: String) -> Self {
-        Self { pool, dialect, instance_id }
+        Self {
+            pool,
+            dialect,
+            instance_id,
+        }
     }
 
-    pub fn pool(&self) -> &AnyPool { &self.pool }
-    pub fn dialect(&self) -> Dialect { self.dialect }
-    pub fn instance_id(&self) -> &str { &self.instance_id }
+    pub fn pool(&self) -> &AnyPool {
+        &self.pool
+    }
+    pub fn dialect(&self) -> Dialect {
+        self.dialect
+    }
+    pub fn instance_id(&self) -> &str {
+        &self.instance_id
+    }
 
-    /// Returns dialect-specific parameter placeholder.
-    /// SQLite: `?`, Postgres: `$n`
+    /// Returns a positional parameter placeholder accepted by SQLite and Postgres.
     pub fn placeholder(&self, n: usize) -> String {
-        match self.dialect {
-            Dialect::Postgres => format!("${n}"),
-            Dialect::Sqlite => "?".to_string(),
-        }
+        format!("${n}")
     }
 
     /// Returns dialect-specific JSON extraction.
@@ -38,12 +44,33 @@ impl ScopedDb {
         }
     }
 
+    /// Returns a placeholder expression suitable for inserting/updating JSON values.
+    /// SQLite stores JSON as text; Postgres casts the bound text to JSONB.
+    pub fn json_bind(&self, n: usize) -> String {
+        match self.dialect {
+            Dialect::Postgres => format!("CAST(${n} AS JSONB)"),
+            Dialect::Sqlite => format!("${n}"),
+        }
+    }
+
+    /// Cast a column/expression to text so handlers can decode through `sqlx::Any`.
+    pub fn as_text(&self, expr: &str) -> String {
+        format!("CAST({expr} AS TEXT)")
+    }
+
+    /// Normalize booleans to integer 0/1 across SQLite and Postgres.
+    pub fn bool_as_int(&self, expr: &str) -> String {
+        format!("CASE WHEN {expr} THEN 1 ELSE 0 END")
+    }
+
     /// Returns dialect-specific current timestamp expression.
     pub fn timestamp_now(&self) -> &str {
-        match self.dialect {
-            Dialect::Postgres => "NOW()",
-            Dialect::Sqlite => "datetime('now')",
-        }
+        "CURRENT_TIMESTAMP"
+    }
+
+    /// Convenience: returns `(as_text("created_at"), as_text("updated_at"))`.
+    pub fn select_timestamps(&self) -> (String, String) {
+        (self.as_text("created_at"), self.as_text("updated_at"))
     }
 
     /// Rewrite `?` placeholders to dialect-specific format.

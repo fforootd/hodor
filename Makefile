@@ -1,4 +1,6 @@
-.PHONY: install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e typecheck lint-web build clean web ensure-webdist quality check generate openapi-export client-js
+.DEFAULT_GOAL := help
+
+.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check docs-check generate openapi-export client-js
 
 SEED ?= frontend
 DEV_CONFIG := fixtures/zitadel.dev.toml
@@ -16,6 +18,33 @@ DEV_CACHE_FILE := data/zitadel-cache.db
 #   make quality       (CI-equivalent: fmt → clippy → test → typecheck → vitest)
 
 # ─── Web (Vue/Vite) ────────────────────────────────────────
+
+# Print the supported developer interface.
+help:
+	@printf '%s\n' \
+		'Supported targets:' \
+		'  install       Install Node workspace dependencies' \
+		'  web           Build embedded frontend assets into web/dist' \
+		'  ensure-webdist Create placeholder embedded assets for Rust builds' \
+		'  dev           Run Rust API on :8080 with Vite HMR on :5173' \
+		'  dev-embed     Run the embedded frontend + Rust API on :8080' \
+		'  dev-web       Run only the Vite frontend against an existing API' \
+		'  dev-reset     Remove local SQLite dev data and restart dev' \
+		'  dev-seed      Validate and apply a named seed pack' \
+		'  dev-status    Print local dev paths, credentials, and seed pack' \
+		'  build         Build the release zitadel binary' \
+		'  test          Run the Rust workspace test suite' \
+		'  test-web      Run web Vitest tests' \
+		'  e2e-smoke     Run Playwright smoke tests' \
+		'  test-e2e      Run the full Playwright suite' \
+		'  oidc-conformance-op Run the Dockerized OIDC provider conformance lane' \
+		'  oidc-conformance-rp Run the current RP OIDC daily regression lane' \
+		'  oidc-conformance Run OIDC daily coverage (OIDF OP + RP regression by default)' \
+		'  oidc-conformance-clean Stop and remove local OIDC conformance containers' \
+		'  rust-check    Run fmt, clippy, and Rust tests' \
+		'  docs-check    Fail on stale doc commands and local absolute links' \
+		'  quality       Run the main local quality gate' \
+		'  generate      Generate the client SDK'
 
 # Install all workspace dependencies.
 install: package.json
@@ -45,7 +74,7 @@ ensure-webdist:
 # Canonical development flow — Vite HMR + Rust API with deterministic seed data.
 dev: node_modules ensure-webdist
 	@mkdir -p data
-	cargo build
+	cargo build -p zitadel
 	@echo "─── Zitadel local dev ───"
 	@echo "→ Console / Login / Account: http://localhost:5173"
 	@echo "→ API / OIDC:               http://localhost:8080"
@@ -60,7 +89,7 @@ dev: node_modules ensure-webdist
 # Embedded-assets development — parity mode without Vite.
 dev-embed: web ensure-webdist
 	@mkdir -p data
-	cargo build
+	cargo build -p zitadel
 	@echo "→ Embedded UI + API: http://localhost:8080"
 	@echo "→ Seed pack:         $(SEED)"
 	ZITADEL_SEED_FILE="$(DEV_SEED_FILE)" ./target/debug/zitadel start -c $(DEV_CONFIG)
@@ -73,6 +102,11 @@ dev-web: node_modules
 
 # Wipe DB and restart fresh.
 dev-reset:
+	@db_url="$${ZITADEL_DATABASE_URL:-sqlite://$(CURDIR)/$(DEV_DB_FILE)}"; \
+	case "$$db_url" in \
+		sqlite://*) ;; \
+		*) echo "refusing to delete local SQLite files for non-SQLite ZITADEL_DATABASE_URL=$$db_url"; exit 1 ;; \
+	esac
 	@echo "→ stopping local dev services on :8080 and :5173 (if running)"
 	@for port in 8080 5173; do \
 		if command -v lsof >/dev/null 2>&1; then \
@@ -86,6 +120,10 @@ dev-reset:
 
 dev-seed:
 	@test -f "$(DEV_SEED_FILE)" || (echo "unknown seed pack '$(SEED)' (expected $(DEV_SEED_FILE))" && exit 1)
+	@if [ ! -x ./target/debug/zitadel ]; then \
+		echo "→ building debug binary"; \
+		cargo build -p zitadel; \
+	fi
 	@echo "→ validating $(DEV_SEED_FILE)"
 	@./target/debug/zitadel seed validate --file "$(DEV_SEED_FILE)"
 	@echo "→ applying $(DEV_SEED_FILE)"
@@ -117,8 +155,37 @@ test-web: node_modules
 	npm test -w web
 
 # Run E2E browser tests (Playwright).
-test-e2e: node_modules ensure-webdist
+test-e2e: node_modules web
+	cargo build -p zitadel
 	npm test -w e2e
+
+# Run Playwright smoke tests.
+e2e-smoke: node_modules web
+	cargo build -p zitadel
+	npm run test:smoke -w e2e
+
+# Run the Dockerized OIDC provider conformance lane.
+oidc-conformance-op:
+	./conformance/oidc/scripts/run-op.sh
+
+# Run the current RP daily regression lane.
+oidc-conformance-rp: node_modules web
+	cargo build -p zitadel
+	./conformance/oidc/scripts/run-rp.sh
+
+# Run OIDC daily coverage. Set OIDC_CONFORMANCE_SURFACE=op|rp|both (default both).
+oidc-conformance:
+	@surface="$${OIDC_CONFORMANCE_SURFACE:-both}"; \
+	case "$$surface" in \
+		op) $(MAKE) oidc-conformance-op ;; \
+		rp) $(MAKE) oidc-conformance-rp ;; \
+		both) $(MAKE) oidc-conformance-op && $(MAKE) oidc-conformance-rp ;; \
+		*) echo "invalid OIDC_CONFORMANCE_SURFACE=$$surface (expected op, rp, or both)"; exit 1 ;; \
+	esac
+
+# Stop and remove local OIDC conformance containers.
+oidc-conformance-clean:
+	./conformance/oidc/scripts/clean.sh
 
 # TypeScript typecheck (vue-tsc).
 typecheck: node_modules
@@ -142,18 +209,12 @@ client-js: node_modules
 generate: client-js
 	@echo "✅ SDK generated"
 
-# ─── Quality (all-in-one CI gate) ─────────────────────────
+# ─── Quality (local gate) ─────────────────────────────────
 #
-# Runs the same checks as CI. Use before committing.
-#
-#   1. cargo fmt        — formatting
-#   2. cargo clippy     — linting
-#   3. cargo test       — Rust tests
-#   4. typecheck        — vue-tsc
-#   5. lint-web         — eslint
-#   6. test-web         — Vitest
+# Runs the main local checks that should stay green before committing.
+# CI additionally runs docs validation and Playwright suites in dedicated jobs.
 
-quality: ensure-webdist node_modules
+rust-check: ensure-webdist
 	@echo "═══ cargo fmt ═══"
 	cargo fmt --check
 	@echo ""
@@ -162,6 +223,28 @@ quality: ensure-webdist node_modules
 	@echo ""
 	@echo "═══ cargo test ═══"
 	cargo test --workspace
+
+docs-check:
+	@echo "═══ stale doc command checks ═══"
+	@! rg -n \
+		-e 'go run \./cmd/zitadel' \
+		-e 'go test \./\.\.\.' \
+		-e 'make dev-go' \
+		-e 'dev-hot' \
+		-e 'dev-full' \
+		-e 'dev-clean' \
+		README.md docs .github/workflows
+	@! rg -n \
+		-e 'make webdist-only' \
+		-e 'make webdist([^A-Za-z0-9_-]|$$)' \
+		README.md docs .github/workflows
+	@! rg -n '\]\((/Users/|/home/)' README.md docs
+
+quality: ensure-webdist node_modules
+	@$(MAKE) rust-check
+	@echo ""
+	@echo "═══ docs checks ═══"
+	@$(MAKE) docs-check
 	@echo ""
 	@echo "═══ typecheck (vue-tsc) ═══"
 	npm run typecheck -w web
@@ -172,7 +255,7 @@ quality: ensure-webdist node_modules
 	@echo "═══ web tests (vitest) ═══"
 	npm test -w web
 	@echo ""
-	@echo "✅ quality gate passed"
+	@echo "✅ local quality gate passed"
 
 # Alias for quality.
 check: quality

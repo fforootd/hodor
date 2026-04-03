@@ -3,69 +3,103 @@
 
 providers:
   - id: prov_mock_oidc
-    name: Mock OIDC (dev)
+    display_name: Mock OIDC (dev)
+    kind: custom
     protocol: oidc
-    template: custom
-    config:
+    connection:
       issuer: http://127.0.0.1:19998
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: create_or_link
+      match_by: verified_email
   - id: prov_mock_oidc_existing_user
-    name: Mock OIDC Existing User
+    display_name: Mock OIDC Existing User
+    kind: custom
     protocol: oidc
-    template: custom
-    config:
+    connection:
       issuer: http://127.0.0.1:19998/scenarios/verified-email-existing-user
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: create_or_link
+      match_by: verified_email
   - id: prov_mock_oidc_link_only
-    name: Mock OIDC Link Only
+    display_name: Mock OIDC Link Only
+    kind: custom
     protocol: oidc
-    template: custom
-    auto_register: false
-    config:
+    connection:
       issuer: http://127.0.0.1:19998/scenarios/link-only-failure
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: link_only
+      match_by: verified_email
   - id: prov_mock_oidc_userinfo_only
-    name: Mock OIDC UserInfo Only
+    display_name: Mock OIDC UserInfo Only
+    kind: custom
     protocol: oidc
-    template: custom
-    config:
+    connection:
       issuer: http://127.0.0.1:19998/scenarios/userinfo-only
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: create_or_link
+      match_by: verified_email
   - id: prov_mock_oidc_nonce_mismatch
-    name: Mock OIDC Nonce Mismatch
+    display_name: Mock OIDC Nonce Mismatch
+    kind: custom
     protocol: oidc
-    template: custom
-    config:
+    connection:
       issuer: http://127.0.0.1:19998/scenarios/nonce-mismatch
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: create_or_link
+      match_by: verified_email
   - id: prov_mock_oidc_token_failure
-    name: Mock OIDC Token Failure
+    display_name: Mock OIDC Token Failure
+    kind: custom
     protocol: oidc
-    template: custom
-    config:
+    connection:
       issuer: http://127.0.0.1:19998/scenarios/token-failure
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: create_or_link
+      match_by: verified_email
   - id: prov_mock_oidc_access_denied
-    name: Mock OIDC Access Denied
+    display_name: Mock OIDC Access Denied
+    kind: custom
     protocol: oidc
-    template: custom
-    config:
+    connection:
       issuer: http://127.0.0.1:19998/scenarios/access-denied
       client_id: mock-client-id
       client_secret: mock-client-secret
       scopes: openid email profile
+    target:
+      schema_type: human_user
+    linking:
+      mode: create_or_link
+      match_by: verified_email
 
 apps:
   - name: E2E Browser Client

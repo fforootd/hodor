@@ -1,0 +1,11 @@
+[package]
+name = "zitadel-expr"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+cel-interpreter = "0.10"
+cel-parser = "0.10"
+
+[dev-dependencies]

@@ -53,7 +53,7 @@ Identity is your new perimeter. Zitadel natively streams server events and SDK t
 |---|---|---|---|---|
 | Self-hosted | ❌ | ❌ | ✅ | ✅ |
 | Cloud | ✅ | ✅ | ❌ | ✅ |
-| Single binary | ❌ | ❌ | ❌ (Java/Docker) | ✅ (Go, ~30MB) |
+| Single binary | ❌ | ❌ | ❌ (Java/Docker) | ✅ (Rust) |
 | SQLite dev mode | ❌ | ❌ | ❌ | ✅ |
 | Agent identity | ❌ (service accounts) | ❌ | ❌ | ✅ (first-class) |
 | Token delegation | ❌ | ❌ | ❌ | ✅ (RFC 8693) |
@@ -70,7 +70,7 @@ Identity is your new perimeter. Zitadel natively streams server events and SDK t
 
 2. **Delegation Chains → Agent Governance**: Per-user delegation tokens as a first-class primitive. This is the exact problem every AI developer is hacking together with custom DB tables.
 
-3. **Single Binary → Developer Adoption**: One Go binary that bundles API, UI, and migrations. Downloads and runs in under 60 seconds. Mirrors the success of Tailscale, PocketBase, and similar hyper-adopted tools.
+3. **Single Binary → Developer Adoption**: One Rust binary that bundles API, UI, and migrations. Downloads and runs in under 60 seconds. Mirrors the success of Tailscale, PocketBase, and similar hyper-adopted tools.
 
 ## Target Audiences
 

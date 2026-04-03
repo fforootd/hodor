@@ -1,6 +1,6 @@
 # System Architecture
 
-Zitadel is a single Go binary (~30MB) that bundles authentication, authorization, user and application management, and observability. At Level 0 (local/SQLite), everything runs in one process with zero external dependencies. As deployments scale, the same binary connects to external storage primitives (Postgres, Redis, queues) without code changes. See [Storage Architecture](../design/storage-architecture.md) for deployment profiles.
+Zitadel is a single Rust binary that bundles authentication, authorization, user and application management, and observability. At Level 0 (local/SQLite), everything runs in one process with zero external dependencies. As deployments scale, the same binary connects to external storage primitives (Postgres, Redis, queues) without code changes. See [Storage Architecture](../design/storage-architecture.md) for deployment profiles.
 
 ## High-Level Architecture
 
@@ -9,7 +9,7 @@ graph TB
     subgraph Clients
         Browser["Browser / Login UI"]
         SPA["SPA / Web Components"]
-        SDK_GO["Go SDK + OTel"]
+        SDK_RS["Rust SDK + OTel"]
         SDK_TS["TS SDK + OTel"]
         CLI["CLI / MCP"]
         Agent["AI Agent"]
@@ -29,7 +29,7 @@ graph TB
             SessionAPI["Session API"]
             IdentityAPI["Identity Service"]
             CatalogAPI["Catalog / Marketplace API"]
-            OIDC_EP["OIDC Provider<br/>(zitadel/oidc)"]
+            OIDC_EP["OIDC Provider<br/>(built-in)"]
             SCIM_EP["SCIM API"]
             MgmtAPI["Management API"]
             AnalyticsAPI["Analytics API"]
@@ -37,7 +37,7 @@ graph TB
 
         subgraph Auth["Auth Engine"]
             Password["Password<br/>(argon2id)"]
-            Passkey["Passkeys<br/>(go-webauthn)"]
+            Passkey["Passkeys"]
             TOTP_E["TOTP<br/>(pquerna/otp)"]
             MagicLink["Magic Links"]
             Captcha["CAPTCHA"]
@@ -68,7 +68,7 @@ graph TB
     subgraph Storage["Storage (Four Primitives)"]
         OLTP_S["OLTP<br/>(SQLite or Postgres)"]
         KV_S["EdgeKV<br/>(in-memory, Redis, platform-native)"]
-        Queue_S["EdgeSink / Queue<br/>(go channel, PG table, SQS/Kafka)"]
+        Queue_S["EdgeSink / Queue<br/>(tokio notify, PG table, SQS/Kafka)"]
         OLAP_S["OLAP<br/>(same DB or dedicated)"]
     end
 
@@ -84,7 +84,7 @@ graph TB
 
     Browser --> DomainResolver
     SPA --> DomainResolver
-    SDK_GO --> DomainResolver
+    SDK_RS --> DomainResolver
     SDK_TS --> DomainResolver
     CLI --> DomainResolver
     Agent --> DomainResolver

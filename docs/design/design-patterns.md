@@ -22,7 +22,7 @@ Schemas define what an entity looks like (JSON Schema), how it authenticates (`x
 
 **Any combination is possible.** A human with an API key. An agent with a password for admin access. The schema defines the capabilities.
 
-See [ADR-002](../002-schema-driven-login.md) and [ADR-006](../006-entity-naming-model.md).
+See [ADR-002](../adr/002-schema-driven-login.md) and [ADR-006](../adr/006-entity-naming-model.md).
 
 ## 2. I18n: Three Simple Rules
 
@@ -37,7 +37,7 @@ Return structured error codes. Let the client translate.
 }
 ```
 
-### Rule 2: Login UI uses server-side i18n with `go:embed`
+### Rule 2: Login UI uses server-side i18n with binary-embedded assets
 JSON translation files embedded in the binary. Language determined by: `Accept-Language` → user preference → org default → instance default.
 
 ### Rule 3: Notification templates are per-org, per-language
@@ -54,7 +54,7 @@ type NotificationChannel interface {
 
 **Built-in channels:** SMTP, webhook, log (dev mode).
 
-**BYOC (Bring Your Own Channel):** Configure a webhook channel, receive full event context as JSON, route to Twilio/SendGrid/Slack/whatever. Templates use Go `text/template`.
+**BYOC (Bring Your Own Channel):** Configure a webhook channel, receive full event context as JSON, route to Twilio/SendGrid/Slack/whatever. Templates use plain text templating primitives.
 
 ## 4. Magic Links = Just Another Auth Method
 
@@ -77,7 +77,7 @@ Magic links are a capability on the identity, not a special flow.
               (source of truth, one contract)
                   ↑                    ↑
     Layer A: Vue SPA              Layer B: Web Components
-    (Console, go:embed)           (@zitadel/elements, npm)
+    (Console, rust-embed)         (@zitadel/elements, npm)
 ```
 
 **Layer A** — Console UI and Login UI ship in the binary. This is a Vue SPA built with `shadcn-vue` and Tailwind for its component system. Same server, same session, FGA-gated.

@@ -22,7 +22,7 @@
 | [011](adr/011-security-testing-philosophy.md) | Security Testing Philosophy — OWASP-Grounded | Accepted | 2026-03-27 |
 | [012](adr/012-path-based-deployment.md) | Path-Based Deployment Architecture | Accepted | 2026-03-28 |
 | [013](adr/013-id-generation-strategy.md) | ID Generation — Replace Sonyflake with UUIDv7 | Proposed | 2026-03-28 |
-| [014](adr/014-performance-testing.md) | Performance Testing Strategy — vCPU Scaling | Proposed | 2026-03-28 |
+| 014 | Performance Testing Strategy — vCPU Scaling | Proposed | 2026-03-28 |
 | [015](adr/015-actions-catalog.md) | Actions, Templates & Catalog | Proposed | 2026-03-28 |
 | [016](adr/016-uniqueness-constraints.md) | Schema-Driven Uniqueness & Identifier Resolution | Proposed | 2026-03-28 |
 | [017](adr/017-caching-tiers.md) | Tiered Caching Architecture | Proposed | 2026-03-28 |
@@ -37,6 +37,7 @@
 | [024](adr/024-risk-evaluation-policy-consumers.md) | Risk Evaluation and Policy Consumers | Accepted | 2026-03-30 |
 | [025](adr/025-explicit-bootstrap-and-local-recovery.md) | Explicit Bootstrap and Local Break-Glass Recovery | Proposed | 2026-03-31 |
 | [026](adr/026-cloud-container-per-tenant.md) | Cloud Deployment — Container-per-Tenant with D1 | Proposed | 2026-03-31 |
+| [027](adr/027-fips-compliance.md) | FIPS Compliance — Opt-in Compile Target | Proposed | 2026-04-02 |
 
 ## Architecture
 
@@ -49,7 +50,7 @@
 
 | Document | Summary |
 |---|---|
-| [Developer Experience](design/developer-experience.md) | Zero-config, pure Go binary, config cascade, testing philosophy |
+| [Developer Experience](design/developer-experience.md) | Zero-config, Rust-first single binary, config cascade, testing philosophy |
 | [Design Decisions](design/design-decisions.md) | Resolved architecture and product decisions with rationale |
 | [Design Patterns](design/design-patterns.md) | Unified identity, i18n, notifications, schemas, UI architecture |
 | [Storage Architecture](design/storage-architecture.md) | Four storage primitives (OLTP, KV, Queue, OLAP) across four deployment profiles (Level 0-3: local, scale-out, dedicated KV, multi-region). Canonical reference for data architecture. |
@@ -60,7 +61,8 @@
 | Document | Summary |
 |---|---|
 | [Local Development](guides/local-development.md) | Canonical `make dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
-| [Bootstrap and Recovery](guides/bootstrap-recovery.md) | Recommended self-hosted bootstrap flow and local break-glass recovery commands |
+| [Bootstrap and Recovery](guides/bootstrap-recovery.md) | Current Rust bootstrap flow and recovery limitations |
+| [OIDC Daily Coverage](guides/oidc-conformance.md) | Daily OIDC provider conformance and RP regression targets via top-level `make` commands |
 | [Zitadel Login Web Component](guides/zitadel-login-wc.md) | Embed and customize the server-driven login web component |
 
 ## Vision
@@ -108,4 +110,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 027
+- **Next ADR number**: 028

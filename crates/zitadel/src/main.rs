@@ -39,6 +39,10 @@ enum Commands {
         /// Print current schema version and exit.
         #[arg(long)]
         status: bool,
+
+        /// Bootstrap the default org/admin after migrations.
+        #[arg(long)]
+        bootstrap: bool,
     },
 
     /// Manage declarative seed files.
@@ -110,25 +114,63 @@ fn main() -> anyhow::Result<()> {
             rt.block_on(zitadel_server::run(cfg))?;
         }
 
-        Commands::Migrate { config, status } => {
-            let cfg = load_config(config.as_deref())?;
+        Commands::Migrate {
+            config,
+            status,
+            bootstrap,
+        } => {
+            let mut cfg = load_config(config.as_deref())?;
+            resolve_paths(&mut cfg, config.as_deref());
             init_tracing(&cfg.observability.log_level, &cfg.observability.log_format);
+            let rt = tokio::runtime::Runtime::new()?;
+            let db = rt.block_on(zitadel_db::Db::open_with_config(
+                &cfg.database.url,
+                &cfg.database,
+            ))?;
 
             if status {
-                tracing::info!("migration status check (not yet implemented)");
+                rt.block_on(zitadel_db::migrate::check_version(&db))?;
+                tracing::info!("schema is up to date");
             } else {
-                tracing::info!("running migrations (not yet implemented)");
+                rt.block_on(zitadel_db::migrate::migrate(&db))?;
+                if bootstrap {
+                    let changed = rt.block_on(zitadel_db::bootstrap::bootstrap(&db))?;
+                    tracing::info!(bootstrapped = changed, "migration command completed");
+                } else {
+                    tracing::info!("migration command completed");
+                }
             }
+
+            rt.block_on(db.close());
         }
 
         Commands::Seed { action } => match action {
             SeedAction::Apply { config, file } => {
-                let cfg = load_config(config.as_deref())?;
+                let mut cfg = load_config(config.as_deref())?;
+                resolve_paths(&mut cfg, config.as_deref());
                 init_tracing(&cfg.observability.log_level, &cfg.observability.log_format);
-                tracing::info!(file = %file.display(), "applying seed (not yet implemented)");
+                let rt = tokio::runtime::Runtime::new()?;
+                let db = rt.block_on(zitadel_db::Db::open_with_config(
+                    &cfg.database.url,
+                    &cfg.database,
+                ))?;
+                let file = if file.is_absolute() {
+                    file
+                } else {
+                    std::env::current_dir()?.join(file)
+                };
+                rt.block_on(zitadel_db::seed::apply(&db, &file))?;
+                rt.block_on(db.close());
+                tracing::info!(file = %file.display(), "seed applied");
             }
             SeedAction::Validate { file } => {
-                tracing::info!(file = %file.display(), "validating seed (not yet implemented)");
+                let file = if file.is_absolute() {
+                    file
+                } else {
+                    std::env::current_dir()?.join(file)
+                };
+                let seed = zitadel_db::seed::validate(&file)?;
+                tracing::info!(file = %file.display(), users = seed.users.len(), "seed valid");
             }
         },
 
@@ -156,7 +198,11 @@ fn resolve_paths(cfg: &mut zitadel_config::Config, config_path: Option<&std::pat
     if let Some(path) = cfg.database.url.strip_prefix("sqlite://") {
         if !path.is_empty() && path != ":memory:" {
             let p = std::path::Path::new(path);
-            let joined = if p.is_absolute() { p.to_path_buf() } else { base_dir.join(path) };
+            let joined = if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                base_dir.join(path)
+            };
             // Normalize away any ".." components.
             let resolved = normalize_path(&joined);
             if let Some(parent) = resolved.parent() {
@@ -169,7 +215,9 @@ fn resolve_paths(cfg: &mut zitadel_config::Config, config_path: Option<&std::pat
     // Resolve seed file path.
     if !cfg.dev.seed_file.is_empty() && !std::path::Path::new(&cfg.dev.seed_file).is_absolute() {
         // Try CWD first, then config dir.
-        let cwd_path = std::env::current_dir().unwrap_or_default().join(&cfg.dev.seed_file);
+        let cwd_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join(&cfg.dev.seed_file);
         if cwd_path.exists() {
             cfg.dev.seed_file = cwd_path.to_string_lossy().into_owned();
         } else {
@@ -193,8 +241,10 @@ fn normalize_path(path: &std::path::Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
         match component {
-            Component::ParentDir => { components.pop(); },
-            Component::CurDir => {},
+            Component::ParentDir => {
+                components.pop();
+            }
+            Component::CurDir => {}
             c => components.push(c),
         }
     }
@@ -202,8 +252,7 @@ fn normalize_path(path: &std::path::Path) -> PathBuf {
 }
 
 fn init_tracing(level: &str, format: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(filter)

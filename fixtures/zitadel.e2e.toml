@@ -13,6 +13,4 @@ url = "sqlite://../data/zitadel-e2e.db"
 cache_path = "../data/zitadel-e2e-cache.db"
 
 [dev]
-mock_oidc = true
-mock_oidc_port = 19998
 seed_file = "./seeds/e2e.yaml"

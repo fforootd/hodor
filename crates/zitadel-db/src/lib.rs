@@ -1,7 +1,8 @@
-pub mod scoped;
-pub mod migrate;
-pub mod seed;
 pub mod bootstrap;
+pub mod migrate;
+pub mod provider;
+pub mod scoped;
+pub mod seed;
 
 use sqlx::{AnyPool, any::AnyPoolOptions};
 use std::fmt;
@@ -62,11 +63,17 @@ impl Db {
             .await?;
 
         if dialect == Dialect::Sqlite && !is_memory {
-            sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await?;
+            sqlx::query("PRAGMA journal_mode = WAL")
+                .execute(&pool)
+                .await?;
         }
         if dialect == Dialect::Sqlite {
-            sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
-            sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await?;
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA busy_timeout = 5000")
+                .execute(&pool)
+                .await?;
         }
 
         Ok(Self { pool, dialect })
@@ -96,20 +103,34 @@ impl Db {
             .await?;
 
         if dialect == Dialect::Sqlite {
-            sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await?;
-            sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
-            sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await?;
+            sqlx::query("PRAGMA journal_mode = WAL")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA busy_timeout = 5000")
+                .execute(&pool)
+                .await?;
         }
 
         Ok(Self { pool, dialect })
     }
 
-    pub fn pool(&self) -> &AnyPool { &self.pool }
-    pub fn dialect(&self) -> Dialect { self.dialect }
+    pub fn pool(&self) -> &AnyPool {
+        &self.pool
+    }
+    pub fn dialect(&self) -> Dialect {
+        self.dialect
+    }
 
     /// ScopedDb bound to the default instance ID (for startup operations).
     pub fn scoped_default(&self) -> scoped::ScopedDb {
-        scoped::ScopedDb::new(self.pool.clone(), self.dialect, DEFAULT_INSTANCE_ID.to_string())
+        scoped::ScopedDb::new(
+            self.pool.clone(),
+            self.dialect,
+            DEFAULT_INSTANCE_ID.to_string(),
+        )
     }
 
     /// ScopedDb bound to a specific instance ID.
@@ -147,7 +168,9 @@ fn parse_connection_string(conn_str: &str) -> anyhow::Result<(Dialect, String)> 
                 // File doesn't exist yet — normalize parent, append filename.
                 if let Some(parent) = p.parent() {
                     if parent.exists() {
-                        let canon_parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+                        let canon_parent = parent
+                            .canonicalize()
+                            .unwrap_or_else(|_| parent.to_path_buf());
                         canon_parent.join(p.file_name().unwrap_or_default())
                     } else {
                         p.to_path_buf()

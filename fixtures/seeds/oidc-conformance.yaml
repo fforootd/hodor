@@ -1,0 +1,39 @@
+# Dedicated seed pack for OIDC conformance runs.
+# Keeps the OP-side client registration static and deterministic.
+
+apps:
+  - name: OIDC Conformance Client 1
+    client_id: oidc-conformance-client-1
+    client_secret: oidc-conformance-secret-1
+    app_type: web
+    redirect_uris:
+      - https://nginx:8443/test/a/zitadel-oidc-op/callback
+    post_logout_redirect_uris:
+      - https://nginx:8443/test/a/zitadel-oidc-op/post
+    grant_types: [authorization_code]
+    response_types: [code]
+    on_conflict: update
+
+  - name: OIDC Conformance Client 2
+    client_id: oidc-conformance-client-2
+    client_secret: oidc-conformance-secret-2
+    app_type: web
+    redirect_uris:
+      - https://nginx:8443/test/a/zitadel-oidc-op/callback
+    post_logout_redirect_uris:
+      - https://nginx:8443/test/a/zitadel-oidc-op/post
+    grant_types: [authorization_code]
+    response_types: [code]
+    on_conflict: update
+
+users:
+  - identifier: oidc-user@example.com
+    display_name: OIDC Conformance User
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: oidc-user@example.com
+      display_name: OIDC Conformance User
+      locale: en-US

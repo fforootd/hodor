@@ -1,0 +1,14 @@
+# Dedicated config for Dockerized OIDC conformance runs.
+# Uses an internal hostname on the Compose network and a private SQLite DB.
+
+[server]
+port = 8080
+external_domain = "zitadel"
+force_insecure_cookies = true
+cookie_secrets = ["zitadel-oidc-conformance-cookie-secret-do-not-use-in-production"]
+
+[database]
+url = "sqlite:///data/zitadel-conformance.db"
+
+[observability]
+cache_path = "/data/zitadel-conformance-cache.db"

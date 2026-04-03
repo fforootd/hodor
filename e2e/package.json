@@ -4,11 +4,18 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:op": "playwright test tests/oidc-op.spec.ts",
+    "test:rp": "playwright test tests/oidc-rp.spec.ts",
     "test:smoke": "playwright test --grep @smoke",
     "test:headed": "playwright test --headed",
-    "test:debug": "playwright test --debug"
+    "test:debug": "playwright test --debug",
+    "mock-oidc": "node support/mock-oidc-server.cjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0"
+  },
+  "dependencies": {
+    "oidc-provider": "^9.7.1",
+    "openid-client": "^6.8.2"
   }
 }

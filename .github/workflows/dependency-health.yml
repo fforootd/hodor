@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - go.mod
       - package.json
       - web/package.json
       - e2e/package.json
@@ -31,7 +30,6 @@ jobs:
         with:
           fail-threshold: 0
           files: |
-            go.mod
             package.json
             web/package.json
             e2e/package.json

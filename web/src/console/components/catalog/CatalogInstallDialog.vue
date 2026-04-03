@@ -104,7 +104,10 @@
           </div>
         </div>
 
-        <div v-else-if="!isProviderTemplate && genericVariableKeys.length > 0" class="space-y-3">
+        <div
+          v-else-if="!isProviderTemplate && hasRequiredVariables && genericVariableKeys.length > 0"
+          class="space-y-3"
+        >
           <h4 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             Configuration
           </h4>
@@ -301,6 +304,12 @@
   )
 
   const isProviderTemplate = computed(() => detail.value?.template?.type === 'provider')
+
+  // True if any variable lacks a default value (user must fill it in).
+  const hasRequiredVariables = computed(() => {
+    if (!detail.value?.variables) return false
+    return Object.values(detail.value.variables).some((v) => v.default === undefined)
+  })
   const genericVariableKeys = computed(() => variableKeys.value)
 
   const providerPrimaryVariableKeys = computed(() =>
@@ -325,11 +334,12 @@
     ),
   )
 
-  const dialogTitle = computed(() =>
-    isProviderTemplate.value
-      ? `Create provider from ${detail.value?.template?.name || props.templateId}`
-      : `Install ${detail.value?.template?.name || props.templateId}`,
-  )
+  const dialogTitle = computed(() => {
+    const name = detail.value?.template?.name || props.templateId
+    if (isProviderTemplate.value) return `Create provider from ${name}`
+    if (!hasRequiredVariables.value) return `Add ${name}`
+    return `Configure ${name}`
+  })
 
   const dialogDescription = computed(() => {
     if (!detail.value?.template?.description) return ''
@@ -339,9 +349,10 @@
 
   const actionLabel = computed(() => {
     if (installing.value) {
-      return isProviderTemplate.value ? 'Creating provider…' : 'Installing…'
+      return isProviderTemplate.value ? 'Creating provider…' : 'Adding…'
     }
-    return isProviderTemplate.value ? 'Create provider' : 'Install'
+    if (isProviderTemplate.value) return 'Create provider'
+    return hasRequiredVariables.value ? 'Add & Configure' : 'Add'
   })
 
   const providerClaimMappings = computed(() => {

@@ -1,8 +1,7 @@
-# Docker build context exclusions — keep only what the Go build needs.
+# Docker build context exclusions — keep only what the Rust build needs.
 # This drops context from ~960MB to ~15MB.
 
 node_modules/
-web/src/
 web/node_modules/
 .git/
 .claude/
@@ -13,3 +12,8 @@ docs/
 .wrangler/
 .vscode/
 .idea/
+target/
+.cache/
+artifacts/
+e2e/playwright-report/
+e2e/test-results/

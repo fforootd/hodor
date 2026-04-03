@@ -249,7 +249,7 @@
             <CommandItem
               v-for="r in searchResults"
               :key="r.resource_type + r.id"
-              :value="`result-${r.resource_type}-${r.id}`"
+              :value="`result-${r.resource_type}-${r.id}-${r.title}-${r.subtitle}`"
               @select="goToResult(r)"
             >
               <component :is="getResultIcon(r.resource_type)" class="mr-2 size-4 shrink-0" />
@@ -261,46 +261,44 @@
           </CommandGroup>
 
           <!-- Navigation shortcuts -->
-          <template v-if="!commandQuery">
-            <CommandGroup heading="Navigation">
-              <CommandItem value="nav-dashboard" @select="navigateTo('/')">
-                <LayoutDashboard class="mr-2 size-4 shrink-0" />
-                <span>Dashboard</span>
-              </CommandItem>
-              <CommandItem
-                v-for="item in navItems"
-                :key="item.type"
-                :value="`nav-${item.type}`"
-                @select="navigateTo(item.route)"
-              >
-                <component :is="getIcon(item.type)" class="mr-2 size-4 shrink-0" />
-                <span>{{ item.label }}</span>
-              </CommandItem>
-            </CommandGroup>
+          <CommandGroup heading="Navigation">
+            <CommandItem value="nav-dashboard Dashboard" @select="navigateTo('/')">
+              <LayoutDashboard class="mr-2 size-4 shrink-0" />
+              <span>Dashboard</span>
+            </CommandItem>
+            <CommandItem
+              v-for="item in navItems"
+              :key="item.type"
+              :value="`nav-${item.type} ${item.label}`"
+              @select="navigateTo(item.route)"
+            >
+              <component :is="getIcon(item.type)" class="mr-2 size-4 shrink-0" />
+              <span>{{ item.label }}</span>
+            </CommandItem>
+          </CommandGroup>
 
-            <CommandGroup heading="Quick Actions">
-              <CommandItem value="action-create-user" @select="navigateTo('/users/new')">
-                <Users class="mr-2 size-4 shrink-0" />
-                <span>Create User</span>
-              </CommandItem>
-              <CommandItem value="action-create-app" @select="navigateTo('/applications/new')">
-                <AppWindow class="mr-2 size-4 shrink-0" />
-                <span>Create Application</span>
-              </CommandItem>
-              <CommandItem value="action-schemas" @select="navigateTo('/schemas')">
-                <FileJson class="mr-2 size-4 shrink-0" />
-                <span>View Schemas</span>
-              </CommandItem>
-              <CommandItem value="action-marketplace" @select="navigateTo('/marketplace')">
-                <Package class="mr-2 size-4 shrink-0" />
-                <span>Browse Marketplace</span>
-              </CommandItem>
-              <CommandItem value="action-events" @select="navigateTo('/events')">
-                <Activity class="mr-2 size-4 shrink-0" />
-                <span>View Audit Log</span>
-              </CommandItem>
-            </CommandGroup>
-          </template>
+          <CommandGroup heading="Quick Actions">
+            <CommandItem value="action-create-user Create User" @select="navigateTo('/users/new')">
+              <Users class="mr-2 size-4 shrink-0" />
+              <span>Create User</span>
+            </CommandItem>
+            <CommandItem value="action-create-app Create Application" @select="navigateTo('/applications/new')">
+              <AppWindow class="mr-2 size-4 shrink-0" />
+              <span>Create Application</span>
+            </CommandItem>
+            <CommandItem value="action-schemas View Schemas" @select="navigateTo('/schemas')">
+              <FileJson class="mr-2 size-4 shrink-0" />
+              <span>View Schemas</span>
+            </CommandItem>
+            <CommandItem value="action-marketplace Browse Marketplace" @select="navigateTo('/marketplace')">
+              <Package class="mr-2 size-4 shrink-0" />
+              <span>Browse Marketplace</span>
+            </CommandItem>
+            <CommandItem value="action-events View Audit Log" @select="navigateTo('/events')">
+              <Activity class="mr-2 size-4 shrink-0" />
+              <span>View Audit Log</span>
+            </CommandItem>
+          </CommandGroup>
         </CommandList>
       </CommandDialog>
 

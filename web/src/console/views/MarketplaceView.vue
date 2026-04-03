@@ -4,8 +4,8 @@
       <div>
         <h1 class="text-2xl font-semibold tracking-tight">Marketplace</h1>
         <p class="text-sm text-muted-foreground mt-1">
-          Browse catalog templates for providers, actions, schemas, and more, then create the
-          resources you need from them.
+          Find identity providers, actions, login flows, and more. Add them to your Zitadel
+          instance with one click.
         </p>
       </div>
       <Button
@@ -48,56 +48,65 @@
       </span>
     </div>
 
-    <!-- Template cards grid -->
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <Card
-        v-for="tpl in filteredTemplates"
-        :key="tpl.id"
-        class="group cursor-pointer transition-all hover:shadow-md hover:border-primary/30"
-        @click="openTemplate(tpl)"
-      >
-        <CardHeader class="pb-2">
-          <div class="flex items-center justify-between">
-            <CardTitle class="text-sm font-semibold group-hover:text-primary transition-colors">{{
-              tpl.name
-            }}</CardTitle>
-            <Badge variant="secondary" class="text-[10px] shrink-0 capitalize">{{
-              tpl.type === 'provider' ? 'provider template' : tpl.type
-            }}</Badge>
-          </div>
-          <p class="text-xs text-muted-foreground line-clamp-2">{{ tpl.description }}</p>
-        </CardHeader>
-        <CardContent class="pt-0 pb-3">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <Badge
-              v-for="tag in tpl.tags?.slice(0, 3)"
-              :key="tag"
-              variant="outline"
-              class="text-[10px] font-normal"
-            >
-              {{ tag }}
-            </Badge>
-            <Badge
-              v-if="tpl.tags?.length > 3"
-              variant="outline"
-              class="text-[10px] font-normal text-muted-foreground"
-            >
-              +{{ tpl.tags.length - 3 }}
-            </Badge>
-            <span class="ml-auto text-[10px] text-muted-foreground">
-              <span class="font-mono">v{{ tpl.version }}</span>
-              <span v-if="tpl.source" class="ml-1.5 opacity-60">{{ tpl.source }}</span>
-            </span>
-          </div>
-          <p
-            v-if="tpl.type === 'provider'"
-            class="mt-3 text-[11px] font-medium text-primary/80 group-hover:text-primary"
+    <!-- Grouped template sections -->
+    <template v-for="group in groupedTemplates" :key="group.type">
+      <div class="space-y-3">
+        <div class="flex items-center gap-2">
+          <component :is="typeIcons[group.type] || Package" class="size-4 text-muted-foreground" />
+          <h2 class="text-sm font-semibold tracking-tight">{{ group.label }}</h2>
+          <span class="text-xs text-muted-foreground">{{ group.items.length }}</span>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Card
+            v-for="tpl in group.items"
+            :key="tpl.id"
+            class="group cursor-pointer transition-all hover:shadow-md hover:border-primary/30"
+            @click="openTemplate(tpl)"
           >
-            Create provider in Providers
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+            <CardHeader class="pb-2">
+              <div class="flex items-center justify-between">
+                <CardTitle
+                  class="text-sm font-semibold group-hover:text-primary transition-colors"
+                  >{{ tpl.name }}</CardTitle
+                >
+                <Badge variant="secondary" class="text-[10px] shrink-0 capitalize">{{
+                  tpl.type === 'login_flow' ? 'Login Flow' : tpl.type
+                }}</Badge>
+              </div>
+              <p class="text-xs text-muted-foreground line-clamp-2">{{ tpl.description }}</p>
+            </CardHeader>
+            <CardContent class="pt-0 pb-3">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <Badge
+                  v-for="tag in tpl.tags?.slice(0, 3)"
+                  :key="tag"
+                  variant="outline"
+                  class="text-[10px] font-normal"
+                >
+                  {{ tag }}
+                </Badge>
+                <Badge
+                  v-if="tpl.tags?.length > 3"
+                  variant="outline"
+                  class="text-[10px] font-normal text-muted-foreground"
+                >
+                  +{{ tpl.tags.length - 3 }}
+                </Badge>
+                <span class="ml-auto text-[10px] text-muted-foreground">
+                  <span class="font-mono">v{{ tpl.version }}</span>
+                  <span v-if="tpl.source" class="ml-1.5 opacity-60">{{ tpl.source }}</span>
+                </span>
+              </div>
+              <p
+                class="mt-3 text-[11px] font-medium text-primary/80 group-hover:text-primary"
+              >
+                {{ addLabel(tpl.type) }}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </template>
 
     <!-- Empty states -->
     <div
@@ -209,39 +218,78 @@
     return result
   })
 
+  const typeLabels: Record<string, string> = {
+    provider: 'Identity Providers',
+    action: 'Actions',
+    login_flow: 'Login Flows',
+    authorization: 'Authorization',
+    schema: 'Schemas',
+  }
+
+  const typeOrder = ['provider', 'action', 'login_flow', 'authorization', 'schema']
+
+  const groupedTemplates = computed(() => {
+    const groups = new Map<string, CatalogTemplate[]>()
+    for (const tpl of filteredTemplates.value) {
+      if (!groups.has(tpl.type)) groups.set(tpl.type, [])
+      groups.get(tpl.type)!.push(tpl)
+    }
+    return typeOrder
+      .filter((t) => groups.has(t))
+      .map((t) => ({
+        type: t,
+        label: typeLabels[t] || t,
+        items: groups.get(t)!,
+      }))
+  })
+
+  function addLabel(type: string): string {
+    const labels: Record<string, string> = {
+      provider: 'Add Provider',
+      action: 'Add Action',
+      login_flow: 'Add Login Flow',
+      authorization: 'Add to Authorization',
+      schema: 'Add Schema',
+    }
+    return labels[type] || 'Add'
+  }
+
   // ─── Actions ───
   function openTemplate(template: CatalogTemplate) {
-    if (template.type === 'provider') {
-      void router.push({
-        path: '/providers/new',
-        query: {
-          template: template.id,
-          source: 'marketplace',
-        },
-      })
-      return
-    }
-    installTemplateId.value = template.id
-    showInstallDialog.value = true
+    router.push(`/marketplace/${template.id}`)
   }
 
   function onInstalled(result: { id: string; template_id: string; type: string }) {
-    const successTitle = result.type === 'provider' ? 'Provider created' : 'Template installed'
+    const typeNames: Record<string, string> = {
+      provider: 'Provider',
+      action: 'Action',
+      login_flow: 'Login Flow',
+      authorization: 'Authorization',
+    }
+    const typeName = typeNames[result.type] || 'Resource'
+    const successTitle = `${typeName} added`
     const successDescription =
       result.type === 'provider'
         ? `${result.template_id} was used to create a new provider instance.`
         : `${result.template_id} is now available.`
     toast.success(successTitle, { description: successDescription })
-    // Navigate to the resource type's list view
-    const typeRoutes: Record<string, string> = {
-      action: '/actions',
-      provider: '/providers',
+    // Navigate to the resource's detail or list view
+    const detailRoutes: Record<string, (id: string) => string> = {
+      action: (id) => `/actions/${id}`,
+      provider: (id) => `/providers/${id}`,
+    }
+    const listRoutes: Record<string, string> = {
       schema: '/schemas',
       authorization: '/authorization',
       login_flow: '/login-flows',
     }
-    const target = typeRoutes[result.type]
-    if (target) router.push(target)
+    const detailRoute = detailRoutes[result.type]
+    if (detailRoute && result.id) {
+      router.push(detailRoute(result.id))
+    } else {
+      const target = listRoutes[result.type]
+      if (target) router.push(target)
+    }
   }
 
   async function refreshCatalog() {

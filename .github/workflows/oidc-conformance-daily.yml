@@ -1,0 +1,76 @@
+name: OIDC Daily Coverage
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      surface:
+        description: Which OIDC surface to run
+        required: true
+        default: both
+        type: choice
+        options:
+          - op
+          - rp
+          - both
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  oidc-daily:
+    name: OIDC Daily Coverage
+    runs-on: ubuntu-latest
+    env:
+      OIDC_CONFORMANCE_SURFACE: ${{ github.event_name == 'workflow_dispatch' && inputs.surface || 'both' }}
+      OIDC_CONFORMANCE_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/oidc-conformance
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+
+      - name: Cache Playwright browsers
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+        uses: actions/cache@v4.2.4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Chromium
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Run daily OIDC coverage
+        run: make oidc-conformance
+
+      - name: Upload OIDC daily coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: oidc-daily-coverage-${{ env.OIDC_CONFORMANCE_SURFACE }}
+          path: |
+            artifacts/oidc-conformance
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: warn
+          retention-days: 7

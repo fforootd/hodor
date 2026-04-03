@@ -27,6 +27,7 @@ pub struct Config {
 pub struct ServerConfig {
     pub port: u16,
     pub external_domain: String,
+    pub force_insecure_cookies: bool,
     pub management_secret: String,
     pub tls_cert: String,
     pub tls_key: String,
@@ -46,6 +47,7 @@ impl Default for ServerConfig {
         Self {
             port: 8080,
             external_domain: "localhost".into(),
+            force_insecure_cookies: false,
             management_secret: String::new(),
             tls_cert: String::new(),
             tls_key: String::new(),
@@ -501,21 +503,36 @@ fn flat_env_overrides() -> Serialized<serde_json::Value> {
     // Server
     if let Ok(v) = env::var("ZITADEL_PORT") {
         if let Ok(port) = v.parse::<u16>() {
-            overrides.insert(
-                "server".into(),
-                json!({"port": port}),
-            );
+            overrides.insert("server".into(), json!({"port": port}));
         }
     }
     if let Ok(v) = env::var("ZITADEL_EXTERNAL_DOMAIN") {
-        merge_into(&mut overrides, "server", "external_domain", Value::String(v));
+        merge_into(
+            &mut overrides,
+            "server",
+            "external_domain",
+            Value::String(v),
+        );
     }
     if let Ok(v) = env::var("ZITADEL_MANAGEMENT_SECRET") {
-        merge_into(&mut overrides, "server", "management_secret", Value::String(v));
+        merge_into(
+            &mut overrides,
+            "server",
+            "management_secret",
+            Value::String(v),
+        );
     }
     if let Ok(v) = env::var("ZITADEL_COOKIE_SECRETS") {
-        let secrets: Vec<Value> = v.split(',').map(|s| Value::String(s.trim().to_string())).collect();
-        merge_into(&mut overrides, "server", "cookie_secrets", Value::Array(secrets));
+        let secrets: Vec<Value> = v
+            .split(',')
+            .map(|s| Value::String(s.trim().to_string()))
+            .collect();
+        merge_into(
+            &mut overrides,
+            "server",
+            "cookie_secrets",
+            Value::Array(secrets),
+        );
     }
 
     // Database
@@ -528,10 +545,20 @@ fn flat_env_overrides() -> Serialized<serde_json::Value> {
 
     // Observability
     if let Ok(v) = env::var("ZITADEL_LOG_LEVEL") {
-        merge_into(&mut overrides, "observability", "log_level", Value::String(v));
+        merge_into(
+            &mut overrides,
+            "observability",
+            "log_level",
+            Value::String(v),
+        );
     }
     if let Ok(v) = env::var("ZITADEL_LOG_FORMAT") {
-        merge_into(&mut overrides, "observability", "log_format", Value::String(v));
+        merge_into(
+            &mut overrides,
+            "observability",
+            "log_format",
+            Value::String(v),
+        );
     }
 
     // Dev

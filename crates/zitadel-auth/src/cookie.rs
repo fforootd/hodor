@@ -18,8 +18,13 @@ pub struct CookieConfig {
 }
 
 impl CookieConfig {
-    pub fn new(secrets: Vec<String>, external_domain: &str) -> Self {
-        let secure = !external_domain.is_empty()
+    pub fn new(
+        secrets: Vec<String>,
+        external_domain: &str,
+        force_insecure_cookies: bool,
+    ) -> Self {
+        let secure = !force_insecure_cookies
+            && !external_domain.is_empty()
             && external_domain != "localhost"
             && external_domain != "127.0.0.1";
 
@@ -33,7 +38,11 @@ impl CookieConfig {
     }
 
     pub fn cookie_name(&self) -> &str {
-        if self.secure { SECURE_COOKIE_NAME } else { DEV_COOKIE_NAME }
+        if self.secure {
+            SECURE_COOKIE_NAME
+        } else {
+            DEV_COOKIE_NAME
+        }
     }
 
     /// All accepted cookie names (for reading during transition).
@@ -44,8 +53,8 @@ impl CookieConfig {
 
 /// Sign a token for cookie storage: base64url(token.hex(hmac)).
 pub fn sign(token: &str, secret: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
     mac.update(token.as_bytes());
     let sig = hex::encode(mac.finalize().into_bytes());
     let payload = format!("{token}.{sig}");
@@ -60,8 +69,8 @@ pub fn verify(cookie_value: &str, secrets: &[String]) -> Option<String> {
     let (token, provided_sig) = decoded.split_once('.')?;
 
     for secret in secrets {
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-            .expect("HMAC accepts any key length");
+        let mut mac =
+            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
         mac.update(token.as_bytes());
         let expected_sig = hex::encode(mac.finalize().into_bytes());
 
@@ -122,7 +131,7 @@ mod tests {
 
     #[test]
     fn cookie_config_dev() {
-        let cfg = CookieConfig::new(vec![], "localhost");
+        let cfg = CookieConfig::new(vec![], "localhost", false);
         assert!(!cfg.secure);
         assert_eq!(cfg.cookie_name(), DEV_COOKIE_NAME);
         assert!(!cfg.secrets.is_empty()); // Random key generated
@@ -130,8 +139,15 @@ mod tests {
 
     #[test]
     fn cookie_config_production() {
-        let cfg = CookieConfig::new(vec!["my-secret".into()], "auth.example.com");
+        let cfg = CookieConfig::new(vec!["my-secret".into()], "auth.example.com", false);
         assert!(cfg.secure);
         assert_eq!(cfg.cookie_name(), SECURE_COOKIE_NAME);
+    }
+
+    #[test]
+    fn cookie_config_force_insecure() {
+        let cfg = CookieConfig::new(vec!["my-secret".into()], "auth.example.com", true);
+        assert!(!cfg.secure);
+        assert_eq!(cfg.cookie_name(), DEV_COOKIE_NAME);
     }
 }

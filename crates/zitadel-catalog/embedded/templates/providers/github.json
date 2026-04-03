@@ -1,0 +1,56 @@
+{
+  "type": "provider",
+  "version": "1.0.0",
+  "name": "GitHub",
+  "description": "GitHub OAuth provider for developer sign-in. Maps GitHub user profile including login, email, avatar, and organization memberships.",
+  "variables": {
+    "provider_name": {
+      "type": "string",
+      "description": "Display name for this provider instance (shown on the login screen)",
+      "default": "GitHub"
+    },
+    "client_id": {
+      "type": "string",
+      "description": "GitHub OAuth App Client ID (from GitHub Settings > Developer settings)"
+    },
+    "client_secret": {
+      "type": "string",
+      "description": "GitHub OAuth App Client Secret",
+      "sensitive": true
+    }
+  },
+  "payload": {
+    "display_name": "{{provider_name}}",
+    "kind": "github",
+    "protocol": "oauth2",
+    "connection": {
+      "authorization_url": "https://github.com/login/oauth/authorize",
+      "token_url": "https://github.com/login/oauth/access_token",
+      "userinfo_url": "https://api.github.com/user",
+      "client_id": "{{client_id}}",
+      "client_secret": "{{client_secret}}",
+      "scopes": ["user:email", "read:user"]
+    },
+    "mapping": {
+      "claims": {
+        "email": "claims.email",
+        "display_name": "claims.name ?? claims.login",
+        "username": "claims.login",
+        "picture": "claims.avatar_url",
+        "profile_url": "claims.html_url"
+      }
+    },
+    "target": {
+      "schema_type": "human_user"
+    },
+    "linking": {
+      "mode": "create_or_link",
+      "match_by": "verified_email"
+    },
+    "session": {},
+    "ui": {
+      "display_order": 30
+    },
+    "enabled": true
+  }
+}

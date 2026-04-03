@@ -5,6 +5,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use zitadel_db::DEFAULT_INSTANCE_ID;
 
 use crate::ApiState;
 use crate::response;
@@ -37,15 +38,12 @@ pub async fn auth_gate(
     };
 
     // Resolve token against database.
-    let scoped = state.db.scoped_default();
-    match resolve_token(&scoped, &raw_token).await {
+    match resolve_token(&state, &raw_token).await {
         Ok(Some(identity)) => {
             req.extensions_mut().insert(identity);
             next.run(req).await
         }
-        Ok(None) => {
-            response::error(StatusCode::UNAUTHORIZED, "invalid or expired token")
-        }
+        Ok(None) => response::error(StatusCode::UNAUTHORIZED, "invalid or expired token"),
         Err(e) => {
             tracing::error!(error = %e, "token resolution failed");
             response::error(StatusCode::INTERNAL_SERVER_ERROR, "authentication error")
@@ -69,7 +67,9 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
         for part in cookie_header.split(';') {
             let part = part.trim();
             if let Some(value) = part.strip_prefix(name).and_then(|s| s.strip_prefix('=')) {
-                if let Some(token) = zitadel_auth::cookie::verify(value, &state.cookie_config.secrets) {
+                if let Some(token) =
+                    zitadel_auth::cookie::verify(value, &state.cookie_config.secrets)
+                {
                     return Some(token);
                 }
             }
@@ -80,50 +80,30 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
 }
 
 /// Resolve a raw token (PAT or session token) to an Identity.
-async fn resolve_token(
-    scoped: &zitadel_db::scoped::ScopedDb,
-    raw_token: &str,
-) -> anyhow::Result<Option<Identity>> {
-    let token_hash = zitadel_auth::session::hash_token(raw_token);
-
-    // Check tokens table (PATs and session tokens).
-    let row: Option<(String, String, Option<String>, String)> = sqlx::query_as(
-        "SELECT t.user_id, t.type, t.session_id, COALESCE(u.org_id, '') \
-         FROM tokens t \
-         JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
-         WHERE t.instance_id = ? AND t.token_hash = ? AND t.revoked_at IS NULL",
-    )
-    .bind(scoped.instance_id())
-    .bind(&token_hash)
-    .fetch_optional(scoped.pool())
-    .await?;
-
-    if let Some((user_id, token_type, session_id, org_id)) = row {
+async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Option<Identity>> {
+    if let Some(identity) = state
+        .stateful
+        .resolve_pat_token(DEFAULT_INSTANCE_ID, raw_token)
+        .await?
+    {
         return Ok(Some(Identity {
-            user_id,
-            session_id: session_id.unwrap_or_default(),
-            token_type,
-            org_id,
+            user_id: identity.user_id,
+            session_id: identity.session_id,
+            token_type: identity.token_type,
+            org_id: identity.org_id,
         }));
     }
 
-    // Check sessions table (direct session token lookup).
-    let row: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT s.id, s.user_id, COALESCE(s.org_id, '') \
-         FROM sessions s \
-         WHERE s.instance_id = ? AND s.token_hash = ? AND s.revoked_at IS NULL",
-    )
-    .bind(scoped.instance_id())
-    .bind(&token_hash)
-    .fetch_optional(scoped.pool())
-    .await?;
-
-    if let Some((session_id, user_id, org_id)) = row {
+    if let Some(session) = state
+        .transient
+        .find_session_by_token(DEFAULT_INSTANCE_ID, raw_token)
+        .await?
+    {
         return Ok(Some(Identity {
-            user_id,
-            session_id,
+            user_id: session.user_id,
+            session_id: session.id,
             token_type: "session".to_string(),
-            org_id,
+            org_id: session.org_id,
         }));
     }
 

@@ -65,7 +65,7 @@
             <div v-if="inspecting === item.id" class="col-span-4 mt-3 bg-muted/20 border rounded-md p-4 animate-in fade-in slide-in-from-top-2 duration-200">
               <div class="flex items-center justify-between mb-2">
                 <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Raw Payload</span>
-                <RouterLink :to="`/console/events?fingerprint=${item.id}`" class="text-xs text-primary hover:underline flex items-center gap-1">
+                <RouterLink :to="`/events?fingerprint=${item.id}`" class="text-xs text-primary hover:underline flex items-center gap-1">
                   View Events <ExternalLink class="w-3 h-3" />
                 </RouterLink>
               </div>

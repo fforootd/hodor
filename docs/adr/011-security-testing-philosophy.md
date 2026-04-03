@@ -28,26 +28,26 @@ Tests are organized in three tiers:
 
 ```
 ┌─────────────────────────┐
-│     Fuzz (go native)    │  Attack-pattern fuzzing, no 5xx invariant
+│   Fuzz / property       │  Attack-pattern fuzzing, no 5xx invariant
 ├─────────────────────────┤
-│   Integration (httptest │  Full API pipeline: HTTP → middleware → DB
-│   + SQLite)             │  Token resolution, AuthZ matrix, IDOR
+│ Integration (Axum +     │  Full API pipeline: HTTP → middleware → DB
+│ SQLite)                 │  Token resolution, AuthZ matrix, IDOR
 ├─────────────────────────┤
-│   Unit (pure Go)        │  Hash functions, cookie sign/verify,
+│  Unit (crate-level)     │  Hash functions, cookie sign/verify,
 │                         │  token generation, password verification
 └─────────────────────────┘
 ```
 
-**Unit tests** are fast, pure functions with no I/O. They validate cryptographic primitives:
+**Unit tests** are fast, crate-local functions with no I/O. They validate cryptographic primitives:
 - `token_test.go` — token format, prefix dispatch, hash determinism, uniqueness
 - `cookie_test.go` — HMAC sign/verify round-trip, tamper detection, key rotation
 - `password_test.go` — argon2id hashing, unicode support, credential replacement
 
-**Integration tests** exercise the full request pipeline via `httptest.Server` + SQLite:
+**Integration tests** exercise the full request pipeline via an Axum test server or router harness + SQLite:
 - `authn_integration_test.go` — session lifecycle, Bearer tokens, error uniformity, header injection
 - `authz_integration_test.go` — authorization matrix, privilege escalation, IDOR prevention
 
-**Fuzz tests** use Go's native fuzzing with attack-pattern seed corpora:
+**Fuzz tests** use Rust-native fuzz/property tooling with attack-pattern seed corpora:
 - `fuzz_test.go` (api) — JSON body fuzzing, token resolution, cookie auth, header injection
 - `fuzz_test.go` (session) — cookie verify/sign with arbitrary inputs
 - `fuzz_test.go` (auth) — extractHash with crafted JSON payloads
@@ -61,28 +61,27 @@ Tests are organized in three tiers:
 | Fuzz | `Fuzz{Target}` | `FuzzCookieVerify` |
 | Matrix | `TestAuthorizationMatrix` | Table-driven with `(role × endpoint × status)` |
 
-### testutil Pattern
+### Test Harness Pattern
 
-The `internal/testutil.TestServer` harness provides:
+The test harness should provide:
 
-1. **One server per test** — each test gets a fresh SQLite DB + httptest.Server
+1. **One server per test** — each test gets a fresh SQLite DB + HTTP server/router instance
 2. **WAL checkpoint on cleanup** — `PRAGMA wal_checkpoint(TRUNCATE)` prevents `t.TempDir()` failures from dangling WAL/SHM files
-3. **Bearer-first auth** — all `*WithCookie` helpers use `Authorization: Bearer` internally (not HTTP cookies) since direct-insert tokens can't be HMAC-signed
-4. **Direct DB helpers** — `CreateIdentity`, `CreateSession`, `CreatePAT`, `LoginAdmin` for test setup without HTTP round-trips
+3. **Bearer-first auth** — helper methods use `Authorization: Bearer` internally (not unsigned direct-insert cookies)
+4. **Direct DB helpers** — setup helpers create identities, sessions, and PATs without unnecessary HTTP round-trips
 5. **Timestamp format** — always use `2006-01-02 15:04:05` (not RFC3339) for SQLite `datetime('now')` compatibility
 
 ### Authorization Matrix
 
 Following the OWASP Authorization Testing Automation approach, `TestAuthorizationMatrix` is a **table-driven test** with rows of `(method, path, body, unauth_code, user_code, admin_code)`:
 
-```go
-cases := []testCase{
-    {"POST", "/v1/schemas", body, 401, 403, 201},
-    {"POST", "/v1/entities", body, 401, 403, 201},
-    {"GET", "/v1/sessions", nil, 401, 403, 200},
-    {"GET", "/v1/account/profile", nil, 401, 200, 200},
-    // ...
-}
+```rust
+let cases = vec![
+    ("POST", "/v1/schemas", 401, 403, 201),
+    ("POST", "/v1/entities", 401, 403, 201),
+    ("GET", "/v1/sessions", 401, 403, 200),
+    ("GET", "/v1/account/profile", 401, 200, 200),
+];
 ```
 
 **Invariant:** Unauthenticated requests always get `401`. Non-admin users always get `403` for admin endpoints. Admin requests must not be blocked by auth (`≠ 401/403`).
@@ -91,7 +90,7 @@ cases := []testCase{
 
 | Parameter | Value |
 |-----------|-------|
-| **Framework** | Go native (`testing.F`) |
+| **Framework** | Rust-native fuzz/property tooling |
 | **CI budget** | 10s per target (configurable) |
 | **Invariant** | No 5xx status codes on any input |
 | **Seed corpus** | SQLi payloads, path traversal, null bytes, oversized inputs, unicode |
@@ -130,12 +129,11 @@ Every self-service endpoint (`/v1/account/*`) is tested with cross-user access a
 
 ### CI Integration
 
-In `.github/workflows/ci.yml`:
+In CI workflows:
 
-- **Test timeout:** 240s (increased from 120s to accommodate expanded test suite)
-- **Race detection:** enabled on all tests (`-race`)
-- **Fuzz budget:** 10s × 11 targets = ~110s of fuzzing per CI run
-- **Fuzz targets:** login (2), API (5), session (3), auth (1)
+- **Rust lint/test jobs** run on backend changes
+- **Web static/unit and Playwright suites** run on browser-facing changes
+- **Fuzz/property jobs** should run with bounded budgets in dedicated or release-candidate workflows
 
 ### When to Add Tests
 

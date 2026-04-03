@@ -2,12 +2,12 @@ pub mod assets;
 pub mod health;
 
 use axum::Router;
-use zitadel_config::Config;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
+use zitadel_config::Config;
 
 /// Shared server state accessible from handlers.
 pub struct AppState {
@@ -17,7 +17,12 @@ pub struct AppState {
 }
 
 /// Build the full axum Router with all routes registered.
-pub fn build_router(state: Arc<AppState>, api_state: zitadel_api::ApiState, oidc_state: zitadel_oidc::OidcState, login_state: zitadel_login::LoginState) -> Router {
+pub fn build_router(
+    state: Arc<AppState>,
+    api_state: zitadel_api::ApiState,
+    oidc_state: zitadel_oidc::OidcState,
+    login_state: zitadel_login::LoginState,
+) -> Router {
     Router::new()
         // Health probes
         .merge(health::routes(state.clone()))
@@ -68,6 +73,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let cookie_config = zitadel_auth::cookie::CookieConfig::new(
         config.server.cookie_secrets.clone(),
         &config.server.external_domain,
+        config.server.force_insecure_cookies,
     );
 
     // Build password hasher.
@@ -78,11 +84,30 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     };
 
     // OIDC provider.
-    let issuer = format!("http://{}:{}", config.server.external_domain, config.server.port);
-    let oidc_state = zitadel_oidc::OidcState::new(db.clone(), issuer);
+    let issuer = format!(
+        "http://{}:{}",
+        config.server.external_domain, config.server.port
+    );
+    let oidc_state = zitadel_oidc::OidcState::new(db.clone(), issuer.clone());
+
+    let stateful = Arc::new(zitadel_storage::DefaultStatefulStorage::new(
+        zitadel_storage::SqlStateDb::new(db.clone()),
+        zitadel_storage::SqlEdgeReadDb::new(db.clone()),
+    ));
+    let transient = Arc::new(zitadel_storage::DefaultTransientStorage::new(
+        zitadel_storage::SqlTransientCompatKv::new(db.clone()),
+        zitadel_storage::NoopEdgeSink,
+    ));
+    let analytics = Arc::new(zitadel_storage::DefaultAnalyticsStorage::new(
+        zitadel_storage::NoopAnalyticsSink,
+        zitadel_storage::SqlAnalyticsQueryBackend::new(db.clone()),
+    ));
 
     let api_state = zitadel_api::ApiState {
         db: db.clone(),
+        stateful: stateful.clone(),
+        transient: transient.clone(),
+        analytics,
         passwords: Arc::new(passwords),
         cookie_config: Arc::new(cookie_config),
         is_dev: config.is_dev(),
@@ -90,8 +115,15 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
     let login_state = zitadel_login::LoginState {
         db: db.clone(),
+        stateful,
+        transient,
         passwords: api_state.passwords.clone(),
         cookie_config: api_state.cookie_config.clone(),
+        public_origin: Arc::new(issuer.clone()),
+        rp: Arc::new(zitadel_oidc::rp::RpService::new(
+            zitadel_oidc::rp::ReqwestHttpClient::new(),
+            zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
+        )),
     };
 
     let state = Arc::new(AppState {

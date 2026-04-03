@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 zitadel-config = { workspace = true }
 zitadel-db = { workspace = true }
+zitadel-storage = { workspace = true }
 zitadel-api = { workspace = true }
 zitadel-auth = { workspace = true }
 zitadel-oidc = { workspace = true }

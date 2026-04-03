@@ -1,27 +1,24 @@
 # Bootstrap and Recovery
 
-This guide covers the explicit self-hosted operator workflows for:
+This guide covers the current operator flow in the Rust prototype:
 
-- bootstrapping the first admin on a brand-new Zitadel instance
-- regaining local break-glass access when normal admin access is broken
+- bootstrapping a fresh instance through `zitadel migrate --bootstrap`
+- understanding the current recovery limitations in the Rust binary
 
-These commands are recommended for self-hosted operations. The legacy interactive `zitadel start` bootstrap path still works for local DX, but it is not the preferred operator workflow.
+The older `zitadel bootstrap admin` and `zitadel recover admin` commands described in [ADR-025](../adr/025-explicit-bootstrap-and-local-recovery.md) are not implemented in the current Rust CLI yet.
 
 ## Bootstrap Checklist
 
 1. Point Zitadel at the target database with `ZITADEL_DATABASE_URL`, a config file, or both.
-2. Run `zitadel bootstrap admin`.
-3. Provide the password via `--password-stdin` when possible.
-4. Start the server with `zitadel start`.
-5. Sign in through `/console`.
+2. Run `zitadel migrate --bootstrap`.
+3. Start the server with `zitadel start`.
+4. If you need deterministic local credentials, apply a seed file or use `fixtures/zitadel.dev.toml`.
 
 Example with SQLite:
 
 ```bash
-printf '%s\n' 'super-secret-password' | \
-  go run ./cmd/zitadel bootstrap admin --password-stdin
-
-go run ./cmd/zitadel start
+cargo run -p zitadel -- migrate -c fixtures/zitadel.dev.toml --bootstrap
+cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml
 ```
 
 Example with Postgres:
@@ -29,82 +26,56 @@ Example with Postgres:
 ```bash
 export ZITADEL_DATABASE_URL='postgres://localhost:5432/zitadel?sslmode=disable'
 
-printf '%s\n' 'super-secret-password' | \
-  go run ./cmd/zitadel bootstrap admin \
-    --username admin \
-    --email admin@example.com \
-    --password-stdin
+cargo run -p zitadel -- migrate --bootstrap
+cargo run -p zitadel -- start
 ```
 
-What `bootstrap admin` does:
+What `migrate --bootstrap` does today:
 
 - loads config and resolves local storage paths
 - runs pending schema migrations
-- seeds built-in schemas, the default login flow, and the console client
-- refuses to run if users already exist
-- creates the first admin and grants instance-owner FGA access
+- ensures the default org and `admin` user record exist
+- is safe to run repeatedly
 
-## Recovery Checklist
+What it does **not** do today:
 
-1. Make sure the database schema is already migrated.
-2. Run `zitadel recover admin`.
-3. Target an existing admin with `--user-id` or `--identifier`.
-4. Use `--create-if-missing` only when you intentionally want a new break-glass admin.
-5. Prefer `--password-stdin` over `--password`.
+- prompt for or set an admin password
+- expose a dedicated break-glass recovery flow
+- replace seed packs for deterministic local credentials
 
-Reset an existing admin by identifier:
+## Deterministic Local Access
 
-```bash
-printf '%s\n' 'new-secret-password' | \
-  go run ./cmd/zitadel recover admin \
-    --identifier admin \
-    --password-stdin
-```
-
-Create a new break-glass admin only when the target does not exist:
+For local development, the supported path to a known working admin is a seed pack:
 
 ```bash
-printf '%s\n' 'new-secret-password' | \
-  go run ./cmd/zitadel recover admin \
-    --identifier breakglass \
-    --email breakglass@example.com \
-    --create-if-missing \
-    --password-stdin
+make dev
+# or
+make dev-embed
+# or
+cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml
 ```
 
-What `recover admin` does:
+That path applies the frontend seed pack, which creates:
 
-- performs a schema version check and fails if the database is behind the binary
-- resets the password and reactivates the target user when it exists
-- ensures instance-owner FGA access is present
-- creates a new admin only when `--create-if-missing` is explicitly set
+- `admin / admin123`
+- the deterministic development PAT
+- additional demo identities for login and console testing
 
-## Password Handling
+## Recovery Status
 
-Prefer `--password-stdin` for automation:
+The current Rust CLI does not expose `zitadel recover admin` yet.
 
-```bash
-printf '%s\n' 'super-secret-password' | \
-  go run ./cmd/zitadel bootstrap admin --password-stdin
-```
+For now:
 
-The commands also support:
-
-- `--password` for direct invocation
-- hidden terminal prompting when stdin is interactive
-
-When stdin is non-interactive and no password source is provided, the explicit commands fail instead of generating a random password.
+- `zitadel migrate --bootstrap` is the only supported explicit bootstrap primitive
+- seed files are the supported path to deterministic local credentials
+- true break-glass password recovery on an existing deployment still requires out-of-band database intervention until ADR-025 is implemented
 
 ## Relationship To `zitadel start`
 
-`zitadel start` still supports the older interactive bootstrap path on an empty local instance. That remains useful for quick local experiments and DX.
+`zitadel start` still auto-migrates and auto-bootstraps on an empty DB, which keeps the local-first workflow working, but it does not replace a future dedicated recovery command.
 
-For self-hosted operations, prefer:
+For self-hosted operations today, prefer:
 
-1. `zitadel bootstrap admin`
-2. `zitadel start`
-
-For local break-glass access, prefer:
-
-1. `zitadel recover admin`
+1. `zitadel migrate --bootstrap`
 2. `zitadel start`

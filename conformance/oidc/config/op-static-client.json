@@ -1,0 +1,129 @@
+{
+  "alias": "zitadel-oidc-op",
+  "description": "Zitadel OIDC OP static-client certification profile",
+  "server": {
+    "discoveryUrl": "http://zitadel:8080/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "oidc-conformance-client-1",
+    "client_secret": "oidc-conformance-secret-1"
+  },
+  "client2": {
+    "client_id": "oidc-conformance-client-2",
+    "client_secret": "oidc-conformance-secret-2"
+  },
+  "client_secret_post": {
+    "client_id": "oidc-conformance-client-1",
+    "client_secret": "oidc-conformance-secret-1"
+  },
+  "browser": [
+    {
+      "match": "http://zitadel:8080/authorize*",
+      "tasks": [
+        {
+          "task": "Reuse existing session",
+          "optional": true,
+          "match": "http://zitadel:8080/login*",
+          "commands": [
+            [
+              "wait",
+              "xpath",
+              "//*",
+              5,
+              "Use your existing session?",
+              "update-image-placeholder-optional"
+            ],
+            [
+              "click",
+              "xpath",
+              "//button[contains(., 'Continue with this session')]"
+            ]
+          ]
+        },
+        {
+          "task": "Login",
+          "optional": true,
+          "match": "http://zitadel:8080/login*",
+          "commands": [
+            [
+              "wait",
+              "xpath",
+              "//*",
+              10,
+              "Email or username",
+              "update-image-placeholder-optional"
+            ],
+            [
+              "text",
+              "name",
+              "identifier",
+              "oidc-user@example.com",
+              "optional"
+            ],
+            [
+              "click",
+              "css",
+              "button[type='submit']"
+            ],
+            [
+              "wait",
+              "xpath",
+              "//*",
+              10,
+              "Enter your password",
+              "update-image-placeholder-optional"
+            ],
+            [
+              "text",
+              "name",
+              "password",
+              "password123"
+            ],
+            [
+              "click",
+              "css",
+              "button[type='submit']"
+            ]
+          ]
+        },
+        {
+          "task": "Verify Complete",
+          "match": "https://*/test/*/callback*",
+          "commands": [
+            [
+              "wait",
+              "id",
+              "submission_complete",
+              10
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "override": {
+    "oidcc-ensure-registered-redirect-uri": {
+      "browser": [
+        {
+          "match": "http://zitadel:8080/authorize*",
+          "tasks": [
+            {
+              "task": "Expect redirect uri mismatch error page",
+              "match": "http://zitadel:8080/authorize*",
+              "commands": [
+                [
+                  "wait",
+                  "xpath",
+                  "//*",
+                  10,
+                  "redirect_uri is not registered",
+                  "update-image-placeholder-optional"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

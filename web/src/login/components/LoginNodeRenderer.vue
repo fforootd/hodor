@@ -156,7 +156,8 @@
 
         <Button
           v-else-if="node.type === 'submit'"
-          type="submit"
+          :type="node.action === 'back' ? 'button' : 'submit'"
+          :variant="node.action === 'back' ? 'outline' : 'default'"
           class="w-full"
           :disabled="
             preview ||

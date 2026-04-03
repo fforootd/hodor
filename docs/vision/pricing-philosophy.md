@@ -17,7 +17,7 @@ Everything needed to run a production identity platform:
 - Login UI + Console UI (embedded)
 - SQLite + Postgres
 - CLI + MCP server
-- Go + TS SDKs (with OTel traces)
+- Rust + TS SDKs (with OTel traces)
 - SCIM API, rate limiting, CAPTCHA
 
 **Price:** $0 forever.

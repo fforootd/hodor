@@ -11,7 +11,7 @@ use rust_embed::Embed;
 /// Embedded frontend assets from web/dist.
 /// In dev mode (no web/dist), this will be empty and Vite serves assets instead.
 ///
-/// The folder must exist at compile time. `make ensure-webdist-rs` creates a
+/// The folder must exist at compile time. `make ensure-webdist` creates a
 /// placeholder if web/dist hasn't been built yet.
 #[derive(Embed)]
 #[folder = "../../web/dist/"]
@@ -62,7 +62,9 @@ fn serve_spa_index(path: &str) -> Response {
             .unwrap(),
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .body(Body::from("frontend not embedded (use Vite dev server on :5173)"))
+            .body(Body::from(
+                "frontend not embedded (use Vite dev server on :5173)",
+            ))
             .unwrap(),
     }
 }
@@ -81,10 +83,7 @@ async fn serve_asset(request: Request) -> impl IntoResponse {
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, mime)
-                .header(
-                    header::CACHE_CONTROL,
-                    "public, max-age=31536000, immutable",
-                )
+                .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
                 .body(Body::from(content.data.to_vec()))
                 .unwrap()
         }

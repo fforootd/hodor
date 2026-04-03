@@ -18,22 +18,17 @@ Events are persisted in the same SQL transaction as the entity write. Each async
 
 ## Notify Channel (Not a Data Channel)
 
-An in-memory Go channel signals consumers that new events exist — it does NOT carry the events themselves:
+A lightweight in-process notifier signals consumers that new events exist — it does NOT carry the events themselves:
 
-```go
-type EventBus struct {
-    // Non-blocking signal that new events exist.
-    notify chan struct{}
-    
-    // Each consumer has a cursor persisted in DB.
-    consumers map[string]*Consumer
+```rust
+struct EventBus {
+    // Wake consumers after COMMIT without putting event payloads on the signal path.
+    notify: Arc<tokio::sync::Notify>,
 }
 
-// After COMMIT, signal consumers:
-func (b *EventBus) Signal() {
-    select {
-    case b.notify <- struct{}{}: // wake up consumers
-    default: // channel full, consumers already awake — skip
+impl EventBus {
+    fn signal(&self) {
+        self.notify.notify_waiters();
     }
 }
 ```
@@ -51,7 +46,7 @@ graph LR
     R --> D["Deliver (SMTP/HTTP)"]
 ```
 
-- Configurable worker pool (1-16 goroutines)
+- Configurable worker pool (1-16 async tasks)
 - Per-endpoint circuit breaker (5 failures → open → 60s cooldown → half-open retry)
 - Retry with exponential backoff (immediate → 10s → 60s → mark FAILED)
 - SMTP connection pool (1-5 concurrent)
@@ -112,7 +107,7 @@ graph TD
 | **Redis streams** | Fast, persistent | New dependency, operational overhead |
 | **Kafka / NATS** | Enterprise-grade, partitioned | Massive new dependency, defeats single-binary goal |
 
-The events table + notify channel gives us crash-safe delivery with sub-millisecond latency. No new dependencies. The single-binary promise stays intact.
+The events table + in-process notifier gives us crash-safe delivery with sub-millisecond latency. No new dependencies. The single-binary promise stays intact.
 
 ## Event Schema
 

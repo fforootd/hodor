@@ -7,10 +7,10 @@
 ### 1. Zero-Config First Run
 
 ```bash
-zitadel start
+cargo run -p zitadel -- start
 # → SQLite at ./data/zitadel.db (auto-created)
 # → Schema auto-migrated
-# → Admin bootstrapped
+# → Default org/admin record bootstrapped
 # → Running on http://localhost:8080
 # → Admin console at http://localhost:8080/console
 # → OIDC ready at http://localhost:8080/.well-known/openid-configuration
@@ -22,8 +22,10 @@ No YAML files. No Docker Compose. No database setup. One command, working in 60 
 - SQLite is the default database — no Postgres required for dev/homelab/edge
 - Sensible defaults for everything (session TTL, token lifetime, rate limits)
 - Database auto-migrates on startup (configurable: `check` or `skip` for production)
-- Bootstrap creates default org, admin user, and default schema
+- Bootstrap creates the default org and admin user record
 - Development TLS auto-provisions if needed
+
+For deterministic local credentials such as `admin / admin123`, use a seed file like `fixtures/zitadel.dev.toml` or the `make dev` workflow.
 
 **Root instance gets `*`:**
 The root instance (`inst_root`) is the operator's own instance. Its owners bypass FGA checks entirely — they have implicit wildcard access to all resources across all instances. This means:
@@ -36,22 +38,22 @@ The root instance (`inst_root`) is the operator's own instance. Its owners bypas
 
 | `database.migrate` | Behavior |
 |---|---|
-| `"auto"` (default) | Run `goose up` before serving — consistent for all dialects |
+| `"auto"` (default) | Run the built-in migration runner before serving |
 | `"check"` | Version check only, fail if behind — opt-in for production PG |
 | `"skip"` | No check — fastest cold-start for autoscaler pods |
 
 For production Postgres: run `zitadel migrate` as a K8s Job, then `zitadel start` with `migrate=check`.
 
-### 2. Pure Go Single Binary
+### 2. Single Rust Binary
 
-One binary, ~30MB, cross-compiles to any platform. No runtime dependencies at Level 0 (local/SQLite).
+One Rust binary, cross-compiles to common platforms, and keeps Level 0 local startup SQLite-first with no required external services.
 
 | Principle | Implementation |
 |---|---|
-| No CGO | `modernc.org/sqlite` (pure Go SQLite) |
-| No external processes (Level 0) | OpenFGA embedded, KV in-memory, queue via go channel |
-| No build toolchain | No protobuf compile, no webpack |
-| Embedded assets | UI, migrations, translations via `go:embed` |
+| SQLite-first | `sqlx` talks to SQLite by default, Postgres when configured |
+| No external processes (Level 0) | local defaults and in-process services keep startup simple |
+| Embedded assets | `rust-embed` serves `web/dist` from the binary |
+| Self-contained CLI/config | `clap` + `figment` keep startup, config, and subcommands in one binary |
 
 > **Scaling beyond a single process:** As deployments grow (Level 1-3), the same binary connects to external infrastructure — Postgres, Redis, dedicated queues — without code changes. The four storage primitives (OLTP, KV, Queue, OLAP) are interface-driven; deployment configuration selects implementations. See [Storage Architecture](storage-architecture.md) for the full progression.
 >
@@ -112,22 +114,21 @@ SQLite is the default test database — no Docker, no setup:
 | Performance benchmarks | File-based SQLite (WAL) | sustained load |
 | Cross-DB validation | Postgres (testcontainers) | ~s |
 
-```go
+```rust
 // One-liner test database — dies with the test
-db := testutil.NewTestDB(t)
+let db = zitadel_db::Db::open("").await?;
 ```
 
 ## Library Leverage
 
-Use battle-tested Go libraries instead of building from scratch:
+Use battle-tested Rust crates instead of building from scratch:
 
-| Library | What it gives us |
+| Crate | What it gives us |
 |---|---|
-| `zitadel/oidc` | Production-grade OIDC provider |
-| `openfga/openfga` | Zanzibar-grade authorization (embedded) |
-| `go-webauthn/webauthn` | Passkey/FIDO2 authentication |
-| `crewjam/saml` (fork) | SAML SP/IdP |
-| `expr-lang/expr` | Policy engine expressions |
-| `pquerna/otp` | TOTP/HOTP |
-| `a-h/templ` | Type-safe Go templates |
-| `modernc.org/sqlite` | Pure Go SQLite (no CGO) |
+| `axum` | HTTP routing and middleware |
+| `sqlx` | SQLite/Postgres access with one async query layer |
+| `clap` | CLI parsing for `start`, `migrate`, and `seed` workflows |
+| `serde` + `figment` | config loading and serialization |
+| `rust-embed` | embedded frontend assets from `web/dist` |
+| `jsonwebtoken` | JWT signing and verification |
+| `argon2` | password hashing |
