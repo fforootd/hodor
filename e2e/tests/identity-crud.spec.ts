@@ -1,14 +1,10 @@
 import { test, expect } from '@playwright/test'
 
+import { loginAsAdmin } from '../support/browser'
+
 test.describe('Identity CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    // Login as admin first.
-    await page.goto('/login')
-    await page.fill('input[name="identifier"], input[type="text"]', 'admin')
-    await page.click('button[type="submit"]')
-    await page.fill('input[name="password"], input[type="password"]', 'admin123')
-    await page.click('button[type="submit"]')
-    await page.waitForURL(/\/console/, { timeout: 10000 })
+    await loginAsAdmin(page)
   })
 
   test('identity list page loads @full', async ({ page }) => {

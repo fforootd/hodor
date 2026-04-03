@@ -1,0 +1,249 @@
+name: Reusable CI
+
+on:
+  workflow_call:
+    inputs:
+      run_docs:
+        required: false
+        type: boolean
+        default: true
+      run_e2e:
+        required: false
+        type: boolean
+        default: true
+      run_rust:
+        required: false
+        type: boolean
+        default: true
+      run_web:
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust-static:
+    name: Rust Static
+    if: inputs.run_rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Ensure embedded web placeholder exists
+        run: make ensure-webdist
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  rust-test:
+    name: Rust Test
+    if: inputs.run_rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Ensure embedded web placeholder exists
+        run: make ensure-webdist
+
+      - name: Run cargo nextest
+        run: cargo nextest run --workspace
+
+  docs-check:
+    name: Docs Check
+    if: inputs.run_docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Run stale-command checks
+        run: make docs-check
+
+  docs-links:
+    name: Docs Links
+    if: inputs.run_docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Validate local Markdown links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress README.md docs/**/*.md
+
+  prepare-webdist:
+    name: Prepare Webdist
+    if: inputs.run_e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Build embedded web assets
+        run: |
+          npm ci --prefer-offline
+          make web
+          tar -czf webdist.tgz web/dist
+
+      - name: Upload embedded web assets
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: webdist
+          path: webdist.tgz
+          retention-days: 1
+
+  web-static:
+    name: Web Static
+    if: inputs.run_web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Lint web
+        run: npm run lint -w web
+
+      - name: Typecheck web
+        run: npm run typecheck -w web
+
+  web-unit:
+    name: Web Unit
+    if: inputs.run_web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Run Vitest
+        run: npm test -w web
+
+  e2e-smoke:
+    name: E2E Smoke
+    if: inputs.run_e2e
+    needs: prepare-webdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Restore embedded web assets
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: webdist
+          path: .
+
+      - name: Extract embedded web assets
+        run: tar -xzf webdist.tgz
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4.2.4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build zitadel binary
+        run: cargo build -p zitadel
+
+      - name: Run Playwright smoke tests
+        run: npm run test:smoke -w e2e -- --reporter=line
+
+  e2e-full:
+    name: E2E Full
+    if: inputs.run_e2e
+    needs: prepare-webdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Restore embedded web assets
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: webdist
+          path: .
+
+      - name: Extract embedded web assets
+        run: tar -xzf webdist.tgz
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4.2.4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build zitadel binary
+        run: cargo build -p zitadel
+
+      - name: Run full Playwright suite
+        run: npm test -w e2e -- --reporter=line

@@ -35,19 +35,18 @@ The current binary uses the main SQL database as the source of truth for users, 
 
 Evidence in code:
 
-- `internal/api/session_create.go`
-- `internal/api/token.go`
-- `internal/auth/password.go`
-- `internal/oidcop/storage_auth_request.go`
-- `internal/oidcop/storage_tokens.go`
-- `internal/crypto/store.go`
+- `crates/zitadel-api`
+- `crates/zitadel-authn`
+- `crates/zitadel-oidc`
+- `crates/zitadel-crypto`
+- `crates/zitadel-db`
 
 Automated coverage exists for the core SQL layer:
 
-- `internal/database/database_test.go`
-- `internal/database/schema_test.go`
-- `internal/database/postgres_test.go`
-- `internal/api/postgres_integration_test.go`
+- `crates/zitadel-db/src/lib.rs`
+- `crates/zitadel-db/src/migrate.rs`
+- `crates/zitadel-db/src/bootstrap.rs`
+- `crates/zitadel-server/tests/router_contract.rs`
 
 ### 2. Multi-tenant SQL scoping works
 
@@ -55,13 +54,10 @@ The current storage model is shared infrastructure partitioned by `instance_id`.
 
 Evidence in code:
 
-- `internal/database/scoped.go`
-- `internal/api/isolation_test.go`
-- `internal/auth/password_test.go`
-- `internal/loginflow/resolver_test.go`
-- `internal/risk/risk_storage_test.go`
-- `internal/tenantaudit/tenant_sql_audit_test.go`
-- `internal/tenantaudit/storage_contract_audit_test.go`
+- `crates/zitadel-db/src/scoped.rs`
+- `crates/zitadel-authn/src/session.rs`
+- `crates/zitadel-login/src/lib.rs`
+- `crates/zitadel-server/tests/router_contract.rs`
 
 This part is implemented, tested, and enforced much more strongly than the edge-storage story.
 
@@ -71,17 +67,15 @@ Structured request and runtime logs do not write straight to the database. They 
 
 Implementation:
 
-- `internal/logging/cache.go`
-- `internal/logging/cache_sink.go`
-- `internal/logging/drainer.go`
-- `internal/api/middleware.go`
+- `crates/zitadel-observability/src/lib.rs`
+- `crates/zitadel-observability/src/middleware.rs`
+- `crates/zitadel-storage/src/analytics.rs`
 
 Automated coverage:
 
-- `internal/logging/cache_test.go`
-- `internal/logging/cache_sink_test.go`
-- `internal/logging/drainer_test.go`
-- `internal/logging/logging_test.go`
+- `crates/zitadel-observability/src/lib.rs`
+- `crates/zitadel-observability/src/middleware.rs`
+- `crates/zitadel-storage/src/analytics.rs`
 
 This is the strongest example of the tiered storage model actually existing in code today.
 
@@ -91,14 +85,13 @@ The logging layer has fan-out, redaction, and circuit-breaker behavior for non-c
 
 Implementation:
 
-- `internal/logging/handler.go`
-- `internal/logging/logging.go`
-- `internal/logging/sinks.go`
+- `crates/zitadel-observability/src/lib.rs`
+- `crates/zitadel-observability/src/middleware.rs`
 
 Automated coverage:
 
-- `internal/logging/logging_test.go`
-- `internal/logging/fuzz_test.go`
+- `crates/zitadel-observability/src/lib.rs`
+- `crates/zitadel-storage/src/analytics.rs`
 
 Important caveat:
 
@@ -106,7 +99,7 @@ Important caveat:
 - the `otel` sink is currently a **POC stub** that writes OTEL-shaped JSON to stdout
 - it is **not** a real OTLP exporter yet
 
-See `internal/logging/sinks.go` for the explicit TODO.
+See `crates/zitadel-observability/src/lib.rs` for the current TODOs and sink behavior.
 
 ## What Is Not Implemented End-to-End
 
@@ -116,11 +109,11 @@ The target architecture says transient auth data should be written to edge-local
 
 Current hot-path SQL writes:
 
-- sessions: `internal/api/session_create.go`
-- auth requests: `internal/oidcop/storage_auth_request.go`
-- OIDC access and refresh tokens: `internal/oidcop/storage_tokens.go`
-- PATs: `internal/api/pat.go`
-- magic-link tokens: `internal/login/login.go`
+- sessions: `crates/zitadel-storage/src/transient/mod.rs`
+- auth requests: `crates/zitadel-storage/src/transient/auth_request.rs`
+- OIDC access and refresh tokens: `crates/zitadel-oidc`
+- PATs: `crates/zitadel-api/src/pats.rs`
+- login/session issuance: `crates/zitadel-login/src/steps.rs`
 
 These all write directly to SQL tables such as:
 
@@ -144,16 +137,14 @@ That queue does not currently exist in code for auth storage:
 What *does* exist today:
 
 - the `events` table acts as the durable queue for async consumers described in [Event Pipeline](../architecture/event-pipeline.md)
-- `internal/eventbus` is an in-memory wake-up signal for those consumers
-- `internal/notify` has its own notification request queue table
+- the Rust server uses in-process async wake-up signals for those consumers
+- notifications still use SQL-backed persistence and async delivery rather than a dedicated edge queue
 
 That is real async processing, but it is **not** the same thing as the edge transient-write queue described in [Storage Architecture](storage-architecture.md).
 
 ### 3. EdgeReadDB is only partial
 
-There is a concrete split read/write experiment for Turso in:
-
-- `internal/database/tursosync.go`
+There is no checked-in, fully-wired Turso split read/write path in the current Rust workspace.
 
 This gives:
 
@@ -163,7 +154,7 @@ This gives:
 
 But as of this repo state:
 
-- there are **no automated tests** for `tursosync.go`
+- there is **no automated coverage** for a Turso split-path because the current Rust implementation has not landed one
 - it is not the default server path
 - the higher-level auth/session/token stores are not abstracted against a generic edge-read interface
 
@@ -173,11 +164,11 @@ So this is best described as **partial groundwork**, not a verified storage tier
 
 The analytics package has a backend interface, but only one real implementation:
 
-- `internal/analytics/engine.go` → `OLTPBackend`
+- `crates/zitadel-storage/src/analytics.rs` → `SqlAnalyticsQueryBackend`
 
 The server always wires:
 
-- `analytics.NewOLTPBackend(db.SQL(), db.Dialect())`
+- `zitadel_storage::SqlAnalyticsQueryBackend::new(db.clone())`
 
 There is currently no real:
 
@@ -193,9 +184,9 @@ Request and runtime logs use the cache-and-drain path, but some signal events st
 
 Examples:
 
-- `internal/api/session_create.go` writes `signal.risk_evaluated` directly
-- `internal/login/flow_handlers_risk.go` writes `signal.risk_evaluated` directly
-- `internal/api/otel_ingest.go` writes `signal.session_trace` directly
+- request and runtime logs are buffered through the observability cache/drainer path
+- auth/session/login flows still append transactional events directly in the OLTP path
+- the repo does not yet provide end-to-end proof that every future signal source will use the same buffered path
 
 So "Tier 2" is not one uniform pipeline today.
 
@@ -216,7 +207,7 @@ So "Tier 2" is not one uniform pipeline today.
 
 ### Implemented with weak or missing direct coverage
 
-- Turso split read/write replica path in `internal/database/tursosync.go`
+- any future Turso split read/write replica path
 - analytics query API and backend behavior
 - end-to-end proof that every documented Tier 2 event source uses the same buffered path
 

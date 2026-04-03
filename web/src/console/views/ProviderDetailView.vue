@@ -188,7 +188,9 @@
     </Button>
   </div>
 
-  <div v-else class="flex h-48 items-center justify-center text-muted-foreground">Loading…</div>
+  <div v-else class="flex h-48 items-center justify-center text-muted-foreground">
+    {{ loadError || 'Loading…' }}
+  </div>
 </template>
 
 <script setup lang="ts">

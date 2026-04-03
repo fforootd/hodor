@@ -5,10 +5,10 @@
     <div class="split-form-side">
       <!-- Brand logo top-left -->
       <div class="split-brand">
-        <a href="#" class="split-brand-link">
+        <div class="split-brand-link">
           <img v-if="logo" :src="logo" :alt="branding?.org_name || 'Logo'" class="split-logo" />
           <span v-else class="split-org-name">{{ branding?.org_name || 'Zitadel' }}</span>
-        </a>
+        </div>
       </div>
       <!-- Form content -->
       <div class="split-form-content">

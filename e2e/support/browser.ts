@@ -75,6 +75,31 @@ export async function completePasswordLogin(
   await page.locator('button[type="submit"]').click()
 }
 
+export async function loginAsAdmin(page: Page) {
+  await page.goto('/login')
+  await completePasswordLogin(page, 'admin', 'admin123')
+  await page.waitForURL(/\/console/, { timeout: 15_000 })
+}
+
+export async function completeMockOidcLogin(page: Page, password: string, email?: string) {
+  const emailInput = page.locator('input[name="email"]').first()
+  try {
+    await expect(emailInput).toBeVisible({
+      timeout: 15_000,
+    })
+  } catch (error) {
+    const bodyText = await page.locator('body').innerText().catch(() => '')
+    throw new Error(
+      `Mock OIDC login UI did not appear. Current URL: ${page.url()}. Body: ${bodyText.slice(0, 400)}`,
+    )
+  }
+  if (email) {
+    await emailInput.fill(email)
+  }
+  await page.locator('input[name="password"]').fill(password)
+  await page.getByRole('button', { name: /Sign in/i }).click()
+}
+
 export async function detectInternalOidcEntryState(page: Page, callbackUrlPrefix: string) {
   const loginInput = page
     .locator(

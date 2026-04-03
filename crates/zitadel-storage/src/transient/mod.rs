@@ -97,6 +97,7 @@ pub trait EdgeKv: Clone + Send + Sync + 'static {
         org_id: &str,
         user_agent: &str,
         ip_address: &str,
+        fingerprint: &str,
     ) -> anyhow::Result<CreatedSession>;
 
     async fn find_session_by_token(
@@ -139,6 +140,13 @@ pub trait EdgeKv: Clone + Send + Sync + 'static {
         instance_id: &str,
         flow_id: &str,
         user_id: &str,
+        data: &Value,
+    ) -> anyhow::Result<bool>;
+
+    async fn update_login_flow_data(
+        &self,
+        instance_id: &str,
+        flow_id: &str,
         data: &Value,
     ) -> anyhow::Result<bool>;
 
@@ -213,9 +221,18 @@ impl EdgeKv for SqlTransientCompatKv {
         org_id: &str,
         user_agent: &str,
         ip_address: &str,
+        fingerprint: &str,
     ) -> anyhow::Result<CreatedSession> {
-        sessions::create_session_impl(self, instance_id, user_id, org_id, user_agent, ip_address)
-            .await
+        sessions::create_session_impl(
+            self,
+            instance_id,
+            user_id,
+            org_id,
+            user_agent,
+            ip_address,
+            fingerprint,
+        )
+        .await
     }
 
     async fn find_session_by_token(
@@ -276,6 +293,15 @@ impl EdgeKv for SqlTransientCompatKv {
     ) -> anyhow::Result<bool> {
         login_flow::advance_login_flow_to_password_impl(self, instance_id, flow_id, user_id, data)
             .await
+    }
+
+    async fn update_login_flow_data(
+        &self,
+        instance_id: &str,
+        flow_id: &str,
+        data: &Value,
+    ) -> anyhow::Result<bool> {
+        login_flow::update_login_flow_data_impl(self, instance_id, flow_id, data).await
     }
 
     async fn complete_login_flow(&self, instance_id: &str, flow_id: &str) -> anyhow::Result<bool> {
@@ -358,10 +384,18 @@ where
         org_id: &str,
         user_agent: &str,
         ip_address: &str,
+        fingerprint: &str,
     ) -> anyhow::Result<CreatedSession> {
         let session = self
             .kv
-            .create_session(instance_id, user_id, org_id, user_agent, ip_address)
+            .create_session(
+                instance_id,
+                user_id,
+                org_id,
+                user_agent,
+                ip_address,
+                fingerprint,
+            )
             .await?;
         if let Err(error) = self
             .sink
@@ -507,6 +541,17 @@ where
             }
         }
         Ok(changed)
+    }
+
+    pub async fn update_login_flow_data(
+        &self,
+        instance_id: &str,
+        flow_id: &str,
+        data: &Value,
+    ) -> anyhow::Result<bool> {
+        self.kv
+            .update_login_flow_data(instance_id, flow_id, data)
+            .await
     }
 
     pub async fn complete_login_flow(
@@ -666,6 +711,7 @@ mod tests {
                 "org-1",
                 "ua",
                 "127.0.0.1",
+                "",
             )
             .await
             .unwrap();
@@ -717,6 +763,7 @@ mod tests {
                 "org-1",
                 "ua",
                 "127.0.0.1",
+                "",
             )
             .await
             .unwrap();

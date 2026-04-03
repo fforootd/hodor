@@ -7,7 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zitadel_db::DEFAULT_INSTANCE_ID;
-use zitadel_storage::NewLoginFlowState;
+use zitadel_storage::{LoginFlowRuntimeState, NewLoginFlowState};
 
 use crate::LoginState;
 use crate::redirect::{build_auth_error_redirect, build_auth_redirect};
@@ -53,7 +53,7 @@ impl LoginStep {
 // Request / response types
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 pub(crate) struct FlowStepResponse {
     pub flow_id: String,
     pub step: String,
@@ -62,6 +62,24 @@ pub(crate) struct FlowStepResponse {
     pub redirect_uri: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branding: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captcha_required: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captcha_verified: Option<bool>,
+}
+
+impl FlowStepResponse {
+    fn new(flow_id: String, step: String, nodes: Vec<UINode>) -> Self {
+        Self {
+            flow_id,
+            step,
+            nodes,
+            redirect_uri: None,
+            branding: Some(default_branding()),
+            captcha_required: None,
+            captcha_verified: None,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -152,6 +170,7 @@ pub(crate) async fn flow_create(
                                 }],
                                 redirect_uri: Some(redirect),
                                 branding: Some(default_branding()),
+                                ..Default::default()
                             }),
                         )
                             .into_response();
@@ -193,6 +212,7 @@ pub(crate) async fn flow_create(
                                 }],
                                 redirect_uri: Some(redirect),
                                 branding: Some(default_branding()),
+                                ..Default::default()
                             }),
                         )
                             .into_response();
@@ -255,6 +275,7 @@ pub(crate) async fn flow_create(
             nodes: initial_nodes,
             redirect_uri: None,
             branding: Some(default_branding()),
+            ..Default::default()
         }),
     )
         .into_response()
@@ -307,6 +328,7 @@ pub(crate) async fn flow_get(
         nodes,
         redirect_uri: None,
         branding: Some(default_branding()),
+        ..Default::default()
     })
     .into_response()
 }
@@ -375,16 +397,20 @@ pub(crate) async fn flow_submit(
                         .into_response();
                 }
             }
-            Json(FlowStepResponse {
-                flow_id: flow_id.clone(),
-                step: LoginStep::Identifier.as_str().into(),
-                nodes: identifier_step_nodes(),
-                redirect_uri: None,
-                branding: Some(default_branding()),
-            })
+            Json(FlowStepResponse::new(
+                flow_id.clone(),
+                LoginStep::Identifier.as_str().into(),
+                identifier_step_nodes(),
+            ))
             .into_response()
         }
         "use_session" => handle_use_session(&state, &flow_id, &flow.data, &headers).await,
+        "fingerprint_submit" => {
+            handle_fingerprint_submit(&state, &flow_id, &flow, &req).await
+        }
+        "captcha_submit" => {
+            handle_captcha_submit(&state, &flow_id, &flow, &req).await
+        }
         _ => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": format!("unknown action: {}", req.action)})),
@@ -412,6 +438,7 @@ pub(crate) async fn handle_identifier_step(
             },
             redirect_uri: None,
             branding: Some(default_branding()),
+            ..Default::default()
         })
         .into_response();
     }
@@ -462,6 +489,7 @@ pub(crate) async fn handle_identifier_step(
         nodes: password_step_nodes(&req.identifier),
         redirect_uri: None,
         branding: Some(default_branding()),
+        ..Default::default()
     })
     .into_response()
 }
@@ -508,6 +536,7 @@ pub(crate) async fn handle_password_step(
                 },
                 redirect_uri: None,
                 branding: Some(default_branding()),
+            ..Default::default()
             })
             .into_response();
         }
@@ -548,6 +577,7 @@ pub(crate) async fn handle_password_step(
                 },
                 redirect_uri: None,
                 branding: Some(default_branding()),
+            ..Default::default()
             })
             .into_response();
         }
@@ -589,9 +619,14 @@ pub(crate) async fn handle_password_step(
         }
     };
 
+    let fingerprint = data
+        .get("fingerprint")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
     let created_session = match state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "")
+        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "", fingerprint)
         .await
     {
         Ok(session) => session,
@@ -669,6 +704,7 @@ pub(crate) async fn handle_password_step(
         }],
         redirect_uri: Some(redirect_uri),
         branding: Some(default_branding()),
+        ..Default::default()
     })
     .into_response();
 
@@ -679,6 +715,112 @@ pub(crate) async fn handle_password_step(
     }
 
     response
+}
+
+/// Handle "fingerprint_submit" action: store the device fingerprint in flow data.
+async fn handle_fingerprint_submit(
+    state: &LoginState,
+    flow_id: &str,
+    flow: &LoginFlowRuntimeState,
+    req: &FlowSubmitRequest,
+) -> Response {
+    let visitor_id = req
+        ._extra
+        .get("visitor_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if visitor_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "visitor_id is required"})),
+        )
+            .into_response();
+    }
+
+    let mut data = flow.data.clone();
+    data["fingerprint"] = serde_json::Value::String(visitor_id.to_string());
+
+    if let Err(e) = state
+        .transient
+        .update_login_flow_data(DEFAULT_INSTANCE_ID, flow_id, &data)
+        .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("update flow data: {e}")})),
+        )
+            .into_response();
+    }
+
+    // Return the current step unchanged — fingerprint collection is invisible to the user.
+    let nodes = match flow.step.as_str() {
+        "password" => {
+            let identifier = data.get("identifier").and_then(|v| v.as_str()).unwrap_or_default();
+            password_step_nodes(identifier)
+        }
+        _ => identifier_step_nodes(),
+    };
+    Json(FlowStepResponse::new(
+        flow_id.to_string(),
+        flow.step.clone(),
+        nodes,
+    ))
+    .into_response()
+}
+
+/// Handle "captcha_submit" action: verify captcha and mark flow as verified.
+async fn handle_captcha_submit(
+    state: &LoginState,
+    flow_id: &str,
+    flow: &LoginFlowRuntimeState,
+    req: &FlowSubmitRequest,
+) -> Response {
+    // Accept altcha_payload (PoW) or captcha_token (third-party widget).
+    let has_altcha = req._extra.get("altcha_payload").is_some();
+    let has_token = req
+        ._extra
+        .get("captcha_token")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty());
+
+    if !has_altcha && !has_token {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "altcha_payload or captcha_token is required"})),
+        )
+            .into_response();
+    }
+
+    // POC: trust the client-submitted proof. Production should verify:
+    // - Altcha: validate HMAC signature + PoW hash against server-generated challenge
+    // - Third-party: call provider verification API (hCaptcha/reCAPTCHA/Turnstile)
+
+    let mut data = flow.data.clone();
+    data["captcha_verified"] = serde_json::Value::Bool(true);
+
+    if let Err(e) = state
+        .transient
+        .update_login_flow_data(DEFAULT_INSTANCE_ID, flow_id, &data)
+        .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("update flow data: {e}")})),
+        )
+            .into_response();
+    }
+
+    let nodes = match flow.step.as_str() {
+        "password" => {
+            let identifier = data.get("identifier").and_then(|v| v.as_str()).unwrap_or_default();
+            password_step_nodes(identifier)
+        }
+        _ => identifier_step_nodes(),
+    };
+    let mut resp = FlowStepResponse::new(flow_id.to_string(), flow.step.clone(), nodes);
+    resp.captcha_verified = Some(true);
+    Json(resp).into_response()
 }
 
 /// Handle "use_session" action: reuse the existing trusted session to complete OIDC.
@@ -717,6 +859,7 @@ pub(crate) async fn handle_use_session(
             },
             redirect_uri: None,
             branding: Some(default_branding()),
+            ..Default::default()
         })
         .into_response();
     }
@@ -731,6 +874,7 @@ pub(crate) async fn handle_use_session(
             }],
             redirect_uri: Some("/console".into()),
             branding: Some(default_branding()),
+            ..Default::default()
         })
         .into_response();
     }
@@ -766,6 +910,7 @@ pub(crate) async fn handle_use_session(
         }],
         redirect_uri: Some(redirect),
         branding: Some(default_branding()),
+        ..Default::default()
     })
     .into_response()
 }

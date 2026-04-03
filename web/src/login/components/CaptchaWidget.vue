@@ -17,9 +17,15 @@
       </svg>
       <div
         v-else
+        role="checkbox"
+        aria-checked="false"
+        :aria-label="'Verify you are human'"
+        :tabindex="preview ? -1 : 0"
         class="size-4 rounded border-2 border-muted-foreground/30"
         :class="preview ? 'cursor-default' : 'cursor-pointer'"
         @click="!preview && emit('solve-altcha')"
+        @keydown.enter.prevent="!preview && emit('solve-altcha')"
+        @keydown.space.prevent="!preview && emit('solve-altcha')"
       />
       <span class="text-muted-foreground text-xs">
         {{ captchaSolving ? 'Verifying...' : verified ? 'Verified' : 'I am human' }}
@@ -107,6 +113,7 @@
   const container = ref<HTMLElement | null>(null)
   const widgetError = ref('')
   let widgetId: string | number | null = null
+  let disposed = false
 
   const provider = computed(() => props.node.attributes?.provider || 'altcha')
   const siteKey = computed(() => props.node.attributes?.['site-key'] || '')
@@ -175,6 +182,7 @@
     widgetError.value = ''
 
     if (
+      disposed ||
       props.preview ||
       props.verified ||
       provider.value === 'altcha' ||
@@ -211,7 +219,7 @@
         await loadScript('https://www.google.com/recaptcha/api.js?render=explicit', 'grecaptcha')
         const grecaptcha = window.grecaptcha
         grecaptcha.ready(() => {
-          if (!container.value || props.verified) return
+          if (disposed || !container.value || props.verified) return
           widgetId = grecaptcha.render(container.value, {
             sitekey: siteKey.value,
             theme: widgetTheme(),
@@ -269,6 +277,7 @@
   })
 
   onBeforeUnmount(() => {
+    disposed = true
     clearWidget()
   })
 </script>

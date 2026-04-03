@@ -23,3 +23,6 @@ password-hash = "0.5"
 base64 = "0.22"
 hex = "0.4"
 bcrypt = "0.16"
+
+[dev-dependencies]
+proptest = "1"

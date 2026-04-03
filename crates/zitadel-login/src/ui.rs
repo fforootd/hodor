@@ -25,6 +25,8 @@ pub(crate) enum UINode {
     Hidden { name: String, value: String },
     #[serde(rename = "avatar")]
     Avatar { initial: String, text: String },
+    #[serde(rename = "fingerprint_collect")]
+    FingerprintCollect,
 }
 
 pub(crate) fn identifier_step_nodes() -> Vec<UINode> {
@@ -46,6 +48,7 @@ pub(crate) fn identifier_step_nodes() -> Vec<UINode> {
             label: "Continue".into(),
             action: "identifier".into(),
         },
+        UINode::FingerprintCollect,
     ]
 }
 

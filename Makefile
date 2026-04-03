@@ -1,8 +1,9 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check docs-check generate openapi-export config-schema client-js
+.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js
 
 SEED ?= frontend
+JS_WORKSPACE_MANIFESTS := package.json package-lock.json web/package.json e2e/package.json packages/client-js/package.json
 DEV_CONFIG := fixtures/zitadel.dev.toml
 DEV_SEED_DIR := fixtures/seeds
 DEV_SEED_FILE := $(DEV_SEED_DIR)/$(SEED).yaml
@@ -33,7 +34,7 @@ help:
 		'  dev-seed      Validate and apply a named seed pack' \
 		'  dev-status    Print local dev paths, credentials, and seed pack' \
 		'  build         Build the release zitadel binary' \
-		'  test          Run the Rust workspace test suite' \
+		'  test          Run the Rust workspace test suite (prefers cargo nextest)' \
 		'  test-web      Run web Vitest tests' \
 		'  e2e-smoke     Run Playwright smoke tests' \
 		'  test-e2e      Run the full Playwright suite' \
@@ -52,14 +53,14 @@ help:
 		'  config-validate Validate a config file and print resolved values'
 
 # Install all workspace dependencies.
-install: package.json
+install: $(JS_WORKSPACE_MANIFESTS)
 	npm ci --prefer-offline
 
-node_modules: package.json
+node_modules: $(JS_WORKSPACE_MANIFESTS)
 	npm ci --prefer-offline
 
 # Build Vue apps (login, console, account).
-web/dist: node_modules $(shell find web/src -type f 2>/dev/null)
+web/dist: node_modules web/package.json web/vite.config.ts web/vitest.config.ts $(shell find web/src -type f 2>/dev/null)
 	npm run build
 
 web: web/dist
@@ -151,9 +152,17 @@ dev-status:
 build: ensure-webdist
 	cargo build --release
 
+# Run Rust tests with nextest when available, falling back to cargo test.
+run-rust-tests:
+	@if cargo nextest --version >/dev/null 2>&1; then \
+		cargo nextest run --workspace; \
+	else \
+		cargo test --workspace; \
+	fi
+
 # Run Rust tests.
 test:
-	cargo test --workspace
+	@$(MAKE) run-rust-tests
 
 # Run web component tests (Vitest).
 test-web: node_modules
@@ -232,8 +241,8 @@ rust-check: ensure-webdist
 	@echo "═══ cargo clippy ═══"
 	cargo clippy --workspace -- -D warnings
 	@echo ""
-	@echo "═══ cargo test ═══"
-	cargo test --workspace
+	@echo "═══ Rust tests ═══"
+	@$(MAKE) run-rust-tests
 
 docs-check:
 	@echo "═══ stale doc command checks ═══"

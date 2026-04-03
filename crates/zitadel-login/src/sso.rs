@@ -300,7 +300,7 @@ async fn complete_federated_login(
 
     let created = state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user_id, &org_id, "", "")
+        .create_session(DEFAULT_INSTANCE_ID, &user_id, &org_id, "", "", "")
         .await?;
 
     let metadata = serde_json::json!({

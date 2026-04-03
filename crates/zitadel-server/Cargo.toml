@@ -23,3 +23,6 @@ mime_guess = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+zitadel-testkit = { workspace = true }

@@ -137,3 +137,205 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
 pub fn identity_from_request(req: &Request<Body>) -> Option<&Identity> {
     req.extensions().get::<Identity>()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::Arc;
+
+    use axum::{Router, body::to_bytes, http::Request};
+    use tower::util::ServiceExt;
+    use uuid::Uuid;
+    use zitadel_authn::{
+        cookie::{CookieConfig, sign},
+        password::{Swapper, encode_credential_json},
+        session::hash_token,
+    };
+    use zitadel_config::{Config, password::PasswordHasherConfig};
+    use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
+    use zitadel_storage::{
+        DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTransientStorage,
+        NoopAnalyticsSink, NoopEdgeSink, SqlAnalyticsQueryBackend, SqlEdgeReadDb, SqlStateDb,
+        SqlTransientCompatKv,
+    };
+
+    async fn test_state() -> ApiState {
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+
+        let mut config = Config::default();
+        config.server.public_origin = "http://localhost:18080".into();
+        config.server.force_insecure_cookies = true;
+        config.password_hasher = PasswordHasherConfig::dev_defaults();
+
+        let cookie_config = Arc::new(CookieConfig::new_with_max_age(
+            vec!["test-secret".into()],
+            &config.server.external_domain,
+            config.server.force_insecure_cookies,
+            config.session.max_age_secs as i64,
+        ));
+
+        let stateful = Arc::new(DefaultStatefulStorage::new(
+            SqlStateDb::new(db.clone()),
+            SqlEdgeReadDb::new(db.clone()),
+        ));
+        let transient = Arc::new(DefaultTransientStorage::new(
+            SqlTransientCompatKv::new(db.clone()),
+            NoopEdgeSink,
+        ));
+        let analytics = Arc::new(DefaultAnalyticsStorage::new(
+            NoopAnalyticsSink,
+            SqlAnalyticsQueryBackend::new(db.clone()),
+        ));
+        let oidc = zitadel_oidc::OidcState::new_with_config(
+            db.clone(),
+            config.server.public_origin.clone(),
+            "/login".into(),
+            &config.oidc,
+        );
+
+        ApiState {
+            db,
+            stateful,
+            transient,
+            analytics,
+            oidc,
+            passwords: Arc::new(Swapper::from_config(&config.password_hasher)),
+            cookie_config,
+            is_dev: true,
+        }
+    }
+
+    async fn create_user(state: &ApiState, identifier: &str, password: &str) -> (String, String) {
+        let scoped = state.db.scoped_default();
+        let org_id: (String,) =
+            sqlx::query_as("SELECT id FROM orgs WHERE instance_id = $1 LIMIT 1")
+                .bind(scoped.instance_id())
+                .fetch_one(scoped.pool())
+                .await
+                .unwrap();
+        let user_id = Uuid::new_v4().to_string();
+        let password_hash = state.passwords.hash(password).unwrap();
+        let credential_json = encode_credential_json(&password_hash);
+        let sql = format!(
+            "INSERT INTO credentials (id, instance_id, user_id, type, data) VALUES ($1, $2, $3, 'password', {})",
+            scoped.json_bind(4),
+        );
+
+        sqlx::query(
+            "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state) \
+             VALUES ($1, $2, $3, $4, $5, 'human', 'active')",
+        )
+        .bind(&user_id)
+        .bind(scoped.instance_id())
+        .bind(&org_id.0)
+        .bind(identifier)
+        .bind(identifier)
+        .execute(scoped.pool())
+        .await
+        .unwrap();
+
+        sqlx::query(&sql)
+            .bind(format!("cred-{user_id}"))
+            .bind(scoped.instance_id())
+            .bind(&user_id)
+            .bind(&credential_json)
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        (user_id, org_id.0)
+    }
+
+    async fn create_pat(state: &ApiState, user_id: &str) -> String {
+        let scoped = state.db.scoped_default();
+        let pat_id = Uuid::new_v4().to_string();
+        let token = format!("zit_pat_{}", zitadel_crypto::random_hex(24));
+        let token_hash = hash_token(&token);
+        let sql = format!(
+            "INSERT INTO tokens (id, instance_id, type, token_hash, user_id, name, scopes) VALUES ($1, $2, 'pat', $3, $4, $5, {})",
+            scoped.json_bind(6),
+        );
+
+        sqlx::query(&sql)
+            .bind(&pat_id)
+            .bind(scoped.instance_id())
+            .bind(&token_hash)
+            .bind(user_id)
+            .bind("middleware-test")
+            .bind("[\"admin\"]")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        token
+    }
+
+    #[tokio::test]
+    async fn protected_routes_keep_the_uniform_401_shape_without_credentials() {
+        let state = test_state().await;
+        let app: Router = crate::routes(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/auth/whoami")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"error": "authentication required", "code": 401})
+        );
+    }
+
+    #[tokio::test]
+    async fn authorization_header_takes_precedence_over_cookie_auth() {
+        let state = test_state().await;
+        let (user_id, org_id) = create_user(&state, "middleware@example.com", "password123").await;
+        let session = state
+            .transient
+            .create_session(
+                DEFAULT_INSTANCE_ID,
+                &user_id,
+                &org_id,
+                "zitadel-api-test",
+                "127.0.0.1",
+                "",
+            )
+            .await
+            .unwrap();
+        let pat = create_pat(&state, &user_id).await;
+        let cookie = format!(
+            "{}={}",
+            state.cookie_config.cookie_name(),
+            sign(&session.token, &state.cookie_config.secrets[0])
+        );
+
+        let app: Router = crate::routes(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/auth/whoami")
+                    .header(header::AUTHORIZATION, format!("Bearer {pat}"))
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["token_type"], "pat");
+    }
+}

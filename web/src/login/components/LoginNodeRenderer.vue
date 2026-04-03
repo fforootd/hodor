@@ -1,11 +1,11 @@
 <template>
-  <Alert v-if="submitError" variant="destructive" class="mb-4">
+  <Alert v-if="submitError" variant="destructive" class="mb-4" role="alert">
     <AlertCircle class="size-4" />
     <AlertDescription>{{ submitError }}</AlertDescription>
   </Alert>
 
   <template v-if="flowStep?.errors?.length">
-    <Alert v-for="(err, i) in flowStep.errors" :key="'ge-' + i" variant="destructive" class="mb-4">
+    <Alert v-for="(err, i) in flowStep.errors" :key="'ge-' + i" variant="destructive" class="mb-4" role="alert">
       <AlertCircle class="size-4" />
       <AlertDescription>{{ err.message }}</AlertDescription>
     </Alert>
@@ -54,7 +54,7 @@
           <AlertDescription>{{ node.text }}</AlertDescription>
         </Alert>
 
-        <Alert v-else-if="node.type === 'error'" variant="destructive" class="text-sm">
+        <Alert v-else-if="node.type === 'error'" variant="destructive" class="text-sm" role="alert">
           <AlertCircle class="size-4" />
           <AlertDescription>{{ node.text }}</AlertDescription>
         </Alert>
@@ -80,6 +80,8 @@
             :minlength="node.min_length || undefined"
             :maxlength="node.max_length || undefined"
             :pattern="node.pattern || undefined"
+            :aria-invalid="(node.errors?.length ?? 0) > 0 ? true : undefined"
+            :aria-describedby="(node.errors?.length ?? 0) > 0 ? node.name + '-error' : undefined"
             @update:model-value="(value) => updateFormField(node.name!, value)"
           />
           <template v-if="node.input_type === 'password' && isRegistrationStep">
@@ -101,11 +103,12 @@
                 formData[node.name!] !== confirmPasswords[node.name!]
               "
               class="text-xs text-destructive"
+              role="alert"
             >
               Passwords do not match
             </p>
           </template>
-          <p v-for="(fe, j) in node.errors || []" :key="j" class="text-xs text-destructive">
+          <p v-for="(fe, j) in node.errors || []" :key="j" :id="j === 0 ? node.name + '-error' : undefined" class="text-xs text-destructive" role="alert">
             {{ fe }}
           </p>
         </div>
@@ -176,7 +179,7 @@
           <Separator />
           <span
             class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground"
-            >or</span
+            >{{ node.label || 'or' }}</span
           >
         </div>
 
@@ -415,11 +418,32 @@
     })
   }
 
+  function escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
   function renderConsentLabel(label: string): string {
-    return label.replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" target="_blank" class="underline underline-offset-4 hover:text-foreground">$1</a>',
-    )
+    // Extract markdown links, escape everything else, then re-insert safe anchors.
+    const parts: string[] = []
+    let last = 0
+    const re = /\[([^\]]+)\]\(([^)]+)\)/g
+    let match: RegExpExecArray | null
+    while ((match = re.exec(label)) !== null) {
+      parts.push(escapeHtml(label.slice(last, match.index)))
+      const text = escapeHtml(match[1])
+      const href = encodeURI(match[2])
+      parts.push(
+        `<a href="${href}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground">${text}</a>`,
+      )
+      last = match.index + match[0].length
+    }
+    parts.push(escapeHtml(label.slice(last)))
+    return parts.join('')
   }
 
   const protectedCaptchaActions = new Set([

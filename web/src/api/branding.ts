@@ -106,6 +106,11 @@ export interface FlowCompleteResponse {
   redirect_uri: string
 }
 
+/** SSO or external redirect — the server sends redirect_url instead of redirect_uri. */
+export interface FlowRedirectResponse {
+  redirect_url: string
+}
+
 export const brandingApi = {
   get: (domain?: string) => api.get<Branding>(`/v1/branding${domain ? `?domain=${domain}` : ''}`),
 }
@@ -146,7 +151,7 @@ export const flowApi = {
   },
 
   submit: (baseUrl = '', flowId: string, action: string, data?: Record<string, string>) =>
-    requestJSON<FlowStep | FlowCompleteResponse>(
+    requestJSON<FlowStep | FlowCompleteResponse | FlowRedirectResponse>(
       `/v1/login/flows/${flowId}/submit`,
       {
         method: 'POST',

@@ -39,6 +39,7 @@ pub(crate) async fn create_session_impl(
     org_id: &str,
     user_agent: &str,
     ip_address: &str,
+    fingerprint: &str,
 ) -> anyhow::Result<CreatedSession> {
     let scoped = kv.scoped(instance_id);
     let session_id = Uuid::new_v4().to_string();
@@ -50,8 +51,8 @@ pub(crate) async fn create_session_impl(
         Dialect::Sqlite => "datetime(CURRENT_TIMESTAMP, '+24 hours')",
     };
     let sql = format!(
-        "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, created_at, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {})",
+        "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, fingerprint, created_at, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, {}, {})",
         scoped.timestamp_now(),
         expires_expr,
     );
@@ -64,6 +65,7 @@ pub(crate) async fn create_session_impl(
         .bind(&hashed_token)
         .bind(user_agent)
         .bind(ip_address)
+        .bind(fingerprint)
         .execute(scoped.pool())
         .await?;
 

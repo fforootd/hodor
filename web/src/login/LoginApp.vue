@@ -85,6 +85,7 @@
     type FlowStep,
     type FlowBranding,
     type FlowCompleteResponse,
+    type FlowRedirectResponse,
   } from '@/api/branding'
   import {
     initTelemetry,
@@ -257,6 +258,22 @@
     { immediate: true },
   )
 
+  watch(
+    () => flowStep.value?.step,
+    (newStep, oldStep) => {
+      if (!newStep || newStep === oldStep) return
+      // Wait for the out-in Transition to complete (0.2s leave + 0.2s enter + buffer).
+      setTimeout(() => {
+        const form = document.querySelector('form')
+        if (!form) return
+        const target =
+          form.querySelector<HTMLElement>('input:not([type="hidden"]):not([disabled])') ||
+          form.querySelector<HTMLElement>('h1')
+        target?.focus({ preventScroll: false })
+      }, 450)
+    },
+  )
+
   function resetFormState() {
     flowStep.value = null
     submitError.value = ''
@@ -418,17 +435,21 @@
         payload,
       )
 
-      if ('redirect_url' in resp && (resp as any).redirect_url) {
-        emit('login-redirect', { redirect_url: (resp as any).redirect_url })
-        window.location.href = (resp as any).redirect_url
+      if ('redirect_url' in resp) {
+        const redirectUrl = (resp as FlowRedirectResponse).redirect_url
+        if (redirectUrl) {
+          emit('login-redirect', { redirect_url: redirectUrl })
+          window.location.href = redirectUrl
+          return
+        }
+      }
+
+      const flowOrComplete = resp as FlowStep | FlowCompleteResponse
+      if (handleCompleteResponse(flowOrComplete)) {
         return
       }
 
-      if (handleCompleteResponse(resp)) {
-        return
-      }
-
-      const step = resp as FlowStep
+      const step = flowOrComplete as FlowStep
       applyFlowStepState(step)
 
       if (step.step !== previousStep) {

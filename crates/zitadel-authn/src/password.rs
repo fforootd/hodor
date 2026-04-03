@@ -240,6 +240,7 @@ pub fn decode_credential_json(json: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn dev_swapper() -> Swapper {
         Swapper::dev()
@@ -311,5 +312,23 @@ mod tests {
         assert_eq!(json, r#"{"hash":"$argon2id$v=19$m=4096,t=1,p=1$abc$def"}"#);
         let decoded = decode_credential_json(&json).unwrap();
         assert_eq!(decoded, hash);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(8))]
+
+        #[test]
+        fn plain_passwords_rehash_to_the_current_hasher(password in "[A-Za-z0-9_-]{1,24}") {
+            let sw = dev_swapper();
+            let encoded = format!("$plain${password}");
+
+            let rehashed = match sw.verify(&encoded, &password).unwrap() {
+                VerifyResult::NeedUpdate(new_hash) => new_hash,
+                VerifyResult::Ok => panic!("plain hashes should trigger a rehash"),
+            };
+
+            prop_assert!(rehashed.starts_with("$argon2id$"));
+            prop_assert!(matches!(sw.verify(&rehashed, &password).unwrap(), VerifyResult::Ok));
+        }
     }
 }

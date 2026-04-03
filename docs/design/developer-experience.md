@@ -143,6 +143,10 @@ SQLite is the default test database — no Docker, no setup:
 let db = zitadel_db::Db::open("").await?;
 ```
 
+The default fast path is `cargo nextest run --workspace` when `cargo-nextest` is installed; local `make test` and CI fall back to `cargo test --workspace` only when nextest is unavailable.
+
+For full-router integration coverage, prefer the shared `crates/zitadel-testkit` helpers over ad hoc per-crate harnesses.
+
 ## Library Leverage
 
 Use battle-tested Rust crates instead of building from scratch:

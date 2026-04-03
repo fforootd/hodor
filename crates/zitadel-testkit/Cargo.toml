@@ -1,0 +1,22 @@
+[package]
+name = "zitadel-testkit"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+zitadel-api = { workspace = true }
+zitadel-authn = { workspace = true }
+zitadel-config = { workspace = true }
+zitadel-crypto = { workspace = true }
+zitadel-db = { workspace = true }
+zitadel-login = { workspace = true }
+zitadel-oidc = { workspace = true }
+zitadel-storage = { workspace = true }

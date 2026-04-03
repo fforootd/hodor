@@ -2,14 +2,21 @@
 
 ## Quick Start
 
+The frontend (Vue/Vite) and backend (Rust) are independent and can run separately.
+
 ```bash
 # Full-stack with hot reload (recommended):
 npm ci && make dev
-# → Vite on http://localhost:5173 (HMR) + Rust on http://localhost:8080
-# → Open http://localhost:5173 for the UI
+# → Rust API on http://localhost:8080
+# → Vite HMR on http://localhost:5173 (proxies API calls to :8080)
 
-# Backend-only (no frontend needed):
-cargo build && ./target/debug/zitadel start -c fixtures/zitadel.dev.toml
+# Backend only (Rust API, no frontend):
+cargo build -p zitadel && ./target/debug/zitadel start -c fixtures/zitadel.dev.toml
+# → http://localhost:8080
+
+# Frontend only (requires backend already running at :8080):
+make dev-web
+# → http://localhost:5173
 ```
 
 **Dev credentials:** admin / admin123

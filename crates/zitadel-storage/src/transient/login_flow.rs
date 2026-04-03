@@ -89,6 +89,26 @@ pub(crate) async fn advance_login_flow_to_password_impl(
     Ok(result.rows_affected() > 0)
 }
 
+pub(crate) async fn update_login_flow_data_impl(
+    kv: &SqlTransientCompatKv,
+    instance_id: &str,
+    flow_id: &str,
+    data: &Value,
+) -> anyhow::Result<bool> {
+    let scoped = kv.scoped(instance_id);
+    let sql = format!(
+        "UPDATE auth_states SET data = {} WHERE instance_id = $1 AND id = $2 AND type = 'login_flow'",
+        scoped.json_bind(3),
+    );
+    let result = sqlx::query(&sql)
+        .bind(scoped.instance_id())
+        .bind(flow_id)
+        .bind(serde_json::to_string(data).unwrap_or_else(|_| "{}".into()))
+        .execute(scoped.pool())
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub(crate) async fn complete_login_flow_impl(
     kv: &SqlTransientCompatKv,
     instance_id: &str,

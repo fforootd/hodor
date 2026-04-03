@@ -123,7 +123,7 @@ pub(crate) async fn login(
     };
     let created_session = match state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "")
+        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "", "")
         .await
     {
         Ok(r) => r,

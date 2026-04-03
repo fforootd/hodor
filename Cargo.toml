@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/zitadel",
+    "crates/zitadel-testkit",
     "crates/zitadel-observability",
     "crates/zitadel-server",
     "crates/zitadel-api",
@@ -76,6 +77,7 @@ keyring = "3"
 
 # Workspace crate references
 zitadel-config = { path = "crates/zitadel-config" }
+zitadel-testkit = { path = "crates/zitadel-testkit" }
 zitadel-observability = { path = "crates/zitadel-observability" }
 zitadel-server = { path = "crates/zitadel-server" }
 zitadel-api = { path = "crates/zitadel-api" }

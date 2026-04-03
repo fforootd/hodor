@@ -5,6 +5,8 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BASE_URL="${BASE_URL:-http://127.0.0.1:18080}"
 MOCK_URL="${MOCK_OIDC_URL:-http://127.0.0.1:19998}"
 
+"$ROOT_DIR/e2e/scripts/preflight.sh"
+
 wait_for_url() {
   local target="$1"
   local label="$2"

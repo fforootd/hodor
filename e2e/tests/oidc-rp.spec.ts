@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import {
   browserJSON,
+  completeMockOidcLogin,
   detectInternalOidcEntryState,
   escapeRegex,
   waitForCallback,
@@ -26,25 +27,6 @@ const providerIds = {
 } as const
 
 const callbackHarness = new CallbackHarness(opCallbackOrigin, 9877)
-
-async function completeMockOIDCLogin(page: Page, email?: string) {
-  const emailInput = page.locator('input[name="email"]').first()
-  try {
-    await expect(emailInput).toBeVisible({
-      timeout: 15_000,
-    })
-  } catch (error) {
-    const bodyText = await page.locator('body').innerText().catch(() => '')
-    throw new Error(
-      `Mock OIDC login UI did not appear. Current URL: ${page.url()}. Body: ${bodyText.slice(0, 400)}`,
-    )
-  }
-  if (email) {
-    await emailInput.fill(email)
-  }
-  await page.locator('input[name="password"]').fill(mockOIDCPassword)
-  await page.getByRole('button', { name: /Sign in/i }).click()
-}
 
 async function startRPLogin(page: Page, providerID: string) {
   await page.goto(`${appBaseURL}/v1/auth/sso/${providerID}/start`)
@@ -104,7 +86,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('RP happy path lands on the login exit state and creates an SSO session @smoke', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.happy)
-      await completeMockOIDCLogin(page)
+      await completeMockOidcLogin(page, mockOIDCPassword)
 
       await expectExitState(page)
       await expectAuthenticatedApiSession(page)
@@ -114,7 +96,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('create_or_link reuses the existing local user when the upstream email is verified @full', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.existingUser)
-      await completeMockOIDCLogin(page, 'e2e-user@example.com')
+      await completeMockOidcLogin(page, mockOIDCPassword, 'e2e-user@example.com')
 
       await expectExitState(page)
       await expectAuthenticatedApiSession(page)
@@ -124,7 +106,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('link_only rejects users without an existing linked identity @full', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.linkOnly)
-      await completeMockOIDCLogin(page, 'unlinked-rp-user@example.com')
+      await completeMockOidcLogin(page, mockOIDCPassword, 'unlinked-rp-user@example.com')
 
       await expectLoginError(page, 'sso_link_failed')
       await expectUnauthenticatedApiSession(page)
@@ -134,7 +116,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('userinfo fallback works when the upstream token response omits the ID token @full', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.userinfoOnly)
-      await completeMockOIDCLogin(page, 'userinfo-rp-user@example.com')
+      await completeMockOidcLogin(page, mockOIDCPassword, 'userinfo-rp-user@example.com')
 
       await expectExitState(page)
       await expectAuthenticatedApiSession(page)
@@ -144,7 +126,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('nonce mismatch returns to login with sso_nonce @full', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.nonceMismatch)
-      await completeMockOIDCLogin(page, 'nonce-rp-user@example.com')
+      await completeMockOidcLogin(page, mockOIDCPassword, 'nonce-rp-user@example.com')
 
       await expectLoginError(page, 'sso_nonce')
       await expectUnauthenticatedApiSession(page)
@@ -154,7 +136,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('token exchange failure returns to login with sso_token @full', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.tokenFailure)
-      await completeMockOIDCLogin(page, 'token-failure-rp-user@example.com')
+      await completeMockOidcLogin(page, mockOIDCPassword, 'token-failure-rp-user@example.com')
 
       await expectLoginError(page, 'sso_token')
       await expectUnauthenticatedApiSession(page)
@@ -164,7 +146,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('upstream access_denied returns to login with sso_failed @full', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.accessDenied)
-      await completeMockOIDCLogin(page)
+      await completeMockOidcLogin(page, mockOIDCPassword)
 
       await expectLoginError(page, 'sso_failed')
       await expectUnauthenticatedApiSession(page)
@@ -174,7 +156,7 @@ test.describe.serial('OIDC RP end-to-end', () => {
   test('an SSO-created session is reusable when Zitadel acts as an OP later in the same browser context @smoke', async () => {
     await withIsolatedPage(async (page) => {
       await startRPLogin(page, providerIds.happy)
-      await completeMockOIDCLogin(page)
+      await completeMockOidcLogin(page, mockOIDCPassword)
       await expectExitState(page)
 
       callbackHarness.reset()

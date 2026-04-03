@@ -115,6 +115,14 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    fn tamper_signed_value(value: &str) -> String {
+        let mut chars: Vec<char> = value.chars().collect();
+        let index = chars.len() / 2;
+        chars[index] = if chars[index] == 'A' { 'B' } else { 'A' };
+        chars.into_iter().collect()
+    }
 
     #[test]
     fn sign_verify_roundtrip() {
@@ -166,5 +174,27 @@ mod tests {
         let cfg = CookieConfig::new(vec!["my-secret".into()], "auth.example.com", true);
         assert!(!cfg.secure);
         assert_eq!(cfg.cookie_name(), DEV_COOKIE_NAME);
+    }
+
+    proptest! {
+        #[test]
+        fn sign_verify_roundtrip_for_arbitrary_tokens(
+            token in "[A-Za-z0-9_-]{1,64}",
+            secret in "[A-Za-z0-9_-]{1,64}",
+        ) {
+            let signed = sign(&token, &secret);
+            prop_assert_eq!(verify(&signed, &[secret]), Some(token));
+        }
+
+        #[test]
+        fn tampered_cookie_values_are_rejected(
+            token in "[A-Za-z0-9_-]{1,64}",
+            secret in "[A-Za-z0-9_-]{1,64}",
+        ) {
+            let signed = sign(&token, &secret);
+            let tampered = tamper_signed_value(&signed);
+            prop_assert_ne!(&tampered, &signed);
+            prop_assert_eq!(verify(&tampered, &[secret]), None);
+        }
     }
 }

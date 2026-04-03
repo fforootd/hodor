@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "preflight": "node ./scripts/preflight.cjs",
     "test": "playwright test",
     "test:op": "playwright test tests/oidc-op.spec.ts",
     "test:rp": "playwright test tests/oidc-rp.spec.ts",
