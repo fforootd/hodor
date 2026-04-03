@@ -567,28 +567,25 @@ pub fn resolve_client_auth(
     form_client_id: &str,
     form_client_secret: &str,
 ) -> Result<Option<ClientAuthentication>, ProtocolError> {
-    if let Some(header) = authorization_header {
-        if let Some(value) = header.strip_prefix("Basic ") {
-            let decoded = base64::engine::general_purpose::STANDARD
-                .decode(value)
-                .map_err(|_| {
-                    ProtocolError::invalid_client("invalid basic authorization encoding")
-                })?;
-            let decoded = String::from_utf8(decoded).map_err(|_| {
-                ProtocolError::invalid_client("invalid basic authorization payload")
-            })?;
-            let mut parts = decoded.splitn(2, ':');
-            let client_id = parts.next().unwrap_or_default().to_string();
-            let client_secret = parts.next().unwrap_or_default().to_string();
-            if client_id.is_empty() {
-                return Err(ProtocolError::invalid_client("client_id required"));
-            }
-            return Ok(Some(ClientAuthentication {
-                client_id,
-                client_secret,
-                method: ClientAuthMethod::ClientSecretBasic,
-            }));
+    if let Some(header) = authorization_header
+        && let Some(value) = header.strip_prefix("Basic ")
+    {
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .map_err(|_| ProtocolError::invalid_client("invalid basic authorization encoding"))?;
+        let decoded = String::from_utf8(decoded)
+            .map_err(|_| ProtocolError::invalid_client("invalid basic authorization payload"))?;
+        let mut parts = decoded.splitn(2, ':');
+        let client_id = parts.next().unwrap_or_default().to_string();
+        let client_secret = parts.next().unwrap_or_default().to_string();
+        if client_id.is_empty() {
+            return Err(ProtocolError::invalid_client("client_id required"));
         }
+        return Ok(Some(ClientAuthentication {
+            client_id,
+            client_secret,
+            method: ClientAuthMethod::ClientSecretBasic,
+        }));
     }
 
     if form_client_id.is_empty() && form_client_secret.is_empty() {

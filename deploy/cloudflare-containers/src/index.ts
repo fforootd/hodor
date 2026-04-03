@@ -35,7 +35,7 @@ interface Env {
   ZITADEL_ADMIN_PASSWORD?: string;
   ZITADEL_ADMIN_PAT?: string;
   ZITADEL_COOKIE_SECRETS?: string;
-  ZITADEL_DATABASE_URL?: string;
+  ZITADEL_STORAGE_STATEFUL_URL?: string;
   ZITADEL_DATABASE_AUTH_TOKEN?: string;
   ZITADEL_ADMIN_EMAIL?: string;
   ZITADEL_EXTERNAL_DOMAIN?: string;
@@ -44,8 +44,8 @@ interface Env {
   ZITADEL_TRUSTED_PROXIES?: string;
   ZITADEL_LOG_LEVEL?: string;
   ZITADEL_BASE_PATH?: string;
-  ZITADEL_DATABASE_MIGRATE?: string;
-  ZITADEL_DATABASE_BOOTSTRAP?: string;
+  ZITADEL_STORAGE_STATEFUL_MIGRATE?: string;
+  ZITADEL_STORAGE_STATEFUL_BOOTSTRAP?: string;
   ZITADEL_ENCRYPTION_ACTIVE_KEY_ID?: string;
   ZITADEL_ENCRYPTION_KEYS?: string;
 }
@@ -441,17 +441,17 @@ export class ZitadelContainer extends Container {
       // Encode the D1 database ID in the URL path so the Worker's fetch handler
       // can extract it from the container's outbound request to d1.local.
       const dbId = config.d1_database_id || "";
-      vars.ZITADEL_DATABASE_URL = `d1://d1.local/${dbId}`;
+      vars.ZITADEL_STORAGE_STATEFUL_URL = `d1://d1.local/${dbId}`;
     } else {
       // BYODB: Turso, Postgres, or other direct URL.
-      vars.ZITADEL_DATABASE_URL = config.database_url || "";
+      vars.ZITADEL_STORAGE_STATEFUL_URL = config.database_url || "";
       if (config.database_token) {
         vars.ZITADEL_DATABASE_AUTH_TOKEN = config.database_token;
       }
     }
 
-    if (config.migrate) vars.ZITADEL_DATABASE_MIGRATE = config.migrate;
-    if (config.bootstrap) vars.ZITADEL_DATABASE_BOOTSTRAP = config.bootstrap;
+    if (config.migrate) vars.ZITADEL_STORAGE_STATEFUL_MIGRATE = config.migrate;
+    if (config.bootstrap) vars.ZITADEL_STORAGE_STATEFUL_BOOTSTRAP = config.bootstrap;
     if (config.encryption_keys) vars.ZITADEL_ENCRYPTION_KEYS = config.encryption_keys;
     if (config.encryption_key_id) vars.ZITADEL_ENCRYPTION_ACTIVE_KEY_ID = config.encryption_key_id;
 

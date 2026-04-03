@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+zitadel-config = { workspace = true }
 zitadel-db = { workspace = true }
 zitadel-crypto = { workspace = true }
 serde = { workspace = true }
@@ -12,6 +13,4 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
-
-[dev-dependencies]
 tokio = { workspace = true }

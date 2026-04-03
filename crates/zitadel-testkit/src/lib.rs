@@ -27,10 +27,7 @@ use zitadel_oidc::{
     op::{ClientAuthMethod, ClientAuthentication, TokenExchangeRequest},
     rp::{InMemoryIssuerMetadataCache, ReqwestHttpClient, RpService},
 };
-use zitadel_storage::{
-    DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTransientStorage, NoopAnalyticsSink,
-    NoopEdgeSink, SqlAnalyticsQueryBackend, SqlEdgeReadDb, SqlStateDb, SqlTransientCompatKv,
-};
+use zitadel_storage::StorageRuntime;
 
 #[derive(Clone)]
 pub struct TestDb {
@@ -55,12 +52,13 @@ impl TestDb {
 
     pub async fn default_org_id(&self) -> anyhow::Result<String> {
         let scoped = self.scoped_default();
-        let row: (String,) =
-            sqlx::query_as("SELECT id FROM orgs WHERE instance_id = $1 ORDER BY created_at ASC LIMIT 1")
-                .bind(scoped.instance_id())
-                .fetch_one(scoped.pool())
-                .await
-                .context("load default org")?;
+        let row: (String,) = sqlx::query_as(
+            "SELECT id FROM orgs WHERE instance_id = $1 ORDER BY created_at ASC LIMIT 1",
+        )
+        .bind(scoped.instance_id())
+        .fetch_one(scoped.pool())
+        .await
+        .context("load default org")?;
         Ok(row.0)
     }
 }
@@ -155,30 +153,19 @@ impl TestContext {
         ));
 
         let passwords = Arc::new(Swapper::from_config(&config.password_hasher));
-        let stateful = Arc::new(DefaultStatefulStorage::new(
-            SqlStateDb::new(db.db.clone()),
-            SqlEdgeReadDb::new(db.db.clone()),
-        ));
-        let transient = Arc::new(DefaultTransientStorage::new(
-            SqlTransientCompatKv::new(db.db.clone()),
-            NoopEdgeSink,
-        ));
-        let analytics = Arc::new(DefaultAnalyticsStorage::new(
-            NoopAnalyticsSink,
-            SqlAnalyticsQueryBackend::new(db.db.clone()),
-        ));
         let oidc_state = OidcState::new_with_config(
             db.db.clone(),
             config.server.public_origin.clone(),
             "/login".into(),
             &config.oidc,
         );
+        let storage = StorageRuntime::from_config(&config.storage, db.db.clone()).await?;
 
         let api_state = ApiState {
             db: db.db.clone(),
-            stateful: stateful.clone(),
-            transient: transient.clone(),
-            analytics,
+            stateful: storage.stateful.clone(),
+            transient: storage.transient.clone(),
+            analytics: storage.analytics.clone(),
             oidc: oidc_state.clone(),
             passwords: passwords.clone(),
             cookie_config: cookie_config.clone(),
@@ -187,8 +174,8 @@ impl TestContext {
 
         let login_state = LoginState {
             db: db.db.clone(),
-            stateful,
-            transient,
+            stateful: storage.stateful.clone(),
+            transient: storage.transient.clone(),
             passwords,
             cookie_config: cookie_config.clone(),
             public_origin: Arc::new(config.server.public_origin.clone()),
@@ -307,11 +294,7 @@ impl TestContext {
         })
     }
 
-    pub async fn create_pat(
-        &self,
-        user: &UserFixture,
-        name: &str,
-    ) -> anyhow::Result<PatFixture> {
+    pub async fn create_pat(&self, user: &UserFixture, name: &str) -> anyhow::Result<PatFixture> {
         let scoped = self.db.scoped_default();
         let pat_id = Uuid::new_v4().to_string();
         let token = format!("zit_pat_{}", zitadel_crypto::random_hex(24));
@@ -343,10 +326,10 @@ impl TestContext {
         let client_id = format!("client-{}", &app_id[..8]);
         let client_secret = format!("secret-{}", &Uuid::new_v4().simple());
         let redirect_uri = "http://127.0.0.1:9876/callback".to_string();
-        let grant_types_json = serde_json::to_string(grant_types)
-            .context("serialize oidc grant types")?;
-        let response_types_json = serde_json::to_string(&["code"])
-            .context("serialize oidc response types")?;
+        let grant_types_json =
+            serde_json::to_string(grant_types).context("serialize oidc grant types")?;
+        let response_types_json =
+            serde_json::to_string(&["code"]).context("serialize oidc response types")?;
         let redirect_uris_json = serde_json::to_string(&vec![redirect_uri.clone()])
             .context("serialize oidc redirect uris")?;
         let sql = format!(

@@ -440,10 +440,10 @@ impl RemoteContext {
         let Some(session) = self.session.as_ref() else {
             bail!("not authenticated; run `zitadel auth login` or `zitadel auth token set`");
         };
-        if session.storage == "keyring" {
-            if let Ok(token) = keyring_get(&self.profile_name) {
-                return Ok(token);
-            }
+        if session.storage == "keyring"
+            && let Ok(token) = keyring_get(&self.profile_name)
+        {
+            return Ok(token);
         }
         session.access_token.clone().ok_or_else(|| {
             anyhow!(

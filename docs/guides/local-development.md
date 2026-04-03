@@ -60,7 +60,7 @@ Local development is standardized around repo-root `./data`:
 - database: `data/zitadel.db`
 - analytics cache: `data/zitadel-cache.db`
 
-`make dev-reset` removes those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and refuses to run when `ZITADEL_DATABASE_URL` is not SQLite.
+`make dev-reset` removes those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and refuses to run when `ZITADEL_STORAGE_STATEFUL_URL` is not SQLite.
 
 ## Credentials And Mock OIDC
 
@@ -77,7 +77,7 @@ Mock OIDC is enabled in [fixtures/zitadel.dev.toml](../../fixtures/zitadel.dev.t
 The zero-config path is still valid:
 
 ```bash
-cargo run -p zitadel -- start
+cargo run -p zitadel -- server start
 ```
 
 That keeps the original DX promise: SQLite-first startup with no Docker or external services required. The server auto-migrates and ensures the default org/admin record exists. Deterministic local credentials such as `admin / admin123` still come from seed packs such as `fixtures/zitadel.dev.toml`.

@@ -4,9 +4,7 @@
 //! Entity types: User, Instance, Org, Group, Project, App, Session, Settings.
 //! Instance owner gets wildcard access (root bypass).
 
-use cedar_policy::{
-    Authorizer, Context, Decision, Entities, EntityUid, PolicySet, Request, Schema,
-};
+use cedar_policy::{Authorizer, Context, Decision, Entities, EntityUid, PolicySet, Request};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -62,6 +60,12 @@ pub struct AuthzService {
 pub struct AuthzDecision {
     pub allowed: bool,
     pub reason: String,
+}
+
+impl Default for AuthzService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuthzService {

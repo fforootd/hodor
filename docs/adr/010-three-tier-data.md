@@ -3,12 +3,18 @@
 **Status**: Accepted  
 **Date**: 2026-03-28  
 **Builds on**: ADR-005 (Unified Data Model), ADR-006 (Entity Naming)  
-**Related**: [Event Pipeline](../architecture/event-pipeline.md), [Glossary](../GLOSSARY.md)  
+**Related**: [Event Pipeline](../architecture/event-pipeline.md), [Glossary](../GLOSSARY.md), [Storage Architecture](../design/storage-architecture.md)  
 **Supersedes**: Embedded DuckDB, Parquet lake_writer (both removed), original two-tier ADR
 
 ## Context
 
 Zitadel is an identity platform that serves three distinct domains. Each has different data requirements, query patterns, latency constraints, and failure modes. This ADR defines the three-tier architecture that governs how data flows across these domains.
+
+The later `storage.*` role model overlays this ADR rather than replacing it:
+
+- `storage.stateful`, `storage.read`, `storage.kv`, and `storage.sink` shape transactional and transient runtime paths
+- `storage.analytics` aligns analytical storage with the same config namespace
+- the observability SQLite buffer remains the durable analytics ingest path in the current POC
 
 ## The Three Tiers
 
@@ -159,11 +165,11 @@ Every event has a `category` column derived from its `event_type` prefix. See [G
 The analytics backend defaults to the same OLTP database. For larger deployments, customers configure a dedicated database:
 
 ```toml
-[analytics]
-backend = "oltp"                        # default: same DB
-# backend = "postgres"                  # dedicated analytics Postgres
+[storage.analytics]
+backend = "same_stateful"              # default: same DB
+# backend = "postgres"                 # dedicated analytics Postgres (future)
 # url = "postgres://analytics:5432/z"
-# backend = "clickhouse"                # ClickHouse
+# backend = "clickhouse"               # ClickHouse (future)
 # url = "clickhouse://localhost:9000"
 ```
 
@@ -179,7 +185,7 @@ Action → Events table → visible in Console → queryable → traceable
 
 ## Consequences
 
-- **Single Rust binary** — no separate OLAP service at Level 0. Storage primitives are interface-driven; see [Storage Architecture](../design/storage-architecture.md) for deployment-level implementation choices.
+- **Single Rust binary** — no separate OLAP service at Level 0. The `storage.*` runtime roles stay stable while deployments swap implementations underneath them.
 - **Three clear tiers** — OLTP (critical), OLAP (durable), Fire-and-forget (disposable)
 - **Local cache = zero external deps** — SQLite provides durability without Redis/Kafka
 - **Configurable reliability** — operators choose buffered, sampled, or off per stream

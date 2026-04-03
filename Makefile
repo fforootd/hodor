@@ -108,10 +108,10 @@ dev-web: node_modules
 
 # Wipe DB and restart fresh.
 dev-reset:
-	@db_url="$${ZITADEL_DATABASE_URL:-sqlite://$(CURDIR)/$(DEV_DB_FILE)}"; \
+	@db_url="$${ZITADEL_STORAGE_STATEFUL_URL:-sqlite://$(CURDIR)/$(DEV_DB_FILE)}"; \
 	case "$$db_url" in \
 		sqlite://*) ;; \
-		*) echo "refusing to delete local SQLite files for non-SQLite ZITADEL_DATABASE_URL=$$db_url"; exit 1 ;; \
+		*) echo "refusing to delete local SQLite files for non-SQLite ZITADEL_STORAGE_STATEFUL_URL=$$db_url"; exit 1 ;; \
 	esac
 	@echo "→ stopping local dev services on :8080 and :5173 (if running)"
 	@for port in 8080 5173; do \
@@ -136,7 +136,7 @@ dev-seed:
 	@./target/debug/zitadel seed apply -c $(DEV_CONFIG) --file "$(DEV_SEED_FILE)"
 
 dev-status:
-	@db_url="$${ZITADEL_DATABASE_URL:-sqlite://$(CURDIR)/$(DEV_DB_FILE)}"; \
+	@db_url="$${ZITADEL_STORAGE_STATEFUL_URL:-sqlite://$(CURDIR)/$(DEV_DB_FILE)}"; \
 	seed_file="$${ZITADEL_SEED_FILE:-$(CURDIR)/$(DEV_SEED_FILE)}"; \
 	echo "Dev config:     $(CURDIR)/$(DEV_CONFIG)"; \
 	echo "Server:         http://localhost:8080"; \

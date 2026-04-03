@@ -15,11 +15,11 @@ pub struct ResolvedPatIdentity {
     pub org_id: String,
 }
 
-pub trait StateDb: Clone + Send + Sync + 'static {
+pub trait StatefulStore: Clone + Send + Sync + 'static {
     fn db(&self) -> &Db;
 }
 
-pub trait EdgeReadDb: Clone + Send + Sync + 'static {
+pub trait ReadStore: Clone + Send + Sync + 'static {
     async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
@@ -40,34 +40,34 @@ pub trait EdgeReadDb: Clone + Send + Sync + 'static {
 }
 
 #[derive(Clone)]
-pub struct SqlStateDb {
+pub struct SqlStatefulStore {
     db: Db,
 }
 
-impl SqlStateDb {
+impl SqlStatefulStore {
     pub fn new(db: Db) -> Self {
         Self { db }
     }
 }
 
-impl StateDb for SqlStateDb {
+impl StatefulStore for SqlStatefulStore {
     fn db(&self) -> &Db {
         &self.db
     }
 }
 
 #[derive(Clone)]
-pub struct SqlEdgeReadDb {
+pub struct SqlReadStore {
     db: Db,
 }
 
-impl SqlEdgeReadDb {
+impl SqlReadStore {
     pub fn new(db: Db) -> Self {
         Self { db }
     }
 }
 
-impl EdgeReadDb for SqlEdgeReadDb {
+impl ReadStore for SqlReadStore {
     async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
@@ -143,34 +143,31 @@ impl EdgeReadDb for SqlEdgeReadDb {
 
 #[derive(Clone)]
 pub struct StatefulStorage<S, R> {
-    state_db: S,
-    edge_read: R,
+    stateful: S,
+    read: R,
 }
 
 impl<S, R> StatefulStorage<S, R> {
-    pub fn new(state_db: S, edge_read: R) -> Self {
-        Self {
-            state_db,
-            edge_read,
-        }
+    pub fn new(stateful: S, read: R) -> Self {
+        Self { stateful, read }
     }
 
-    pub fn state_db(&self) -> &S {
-        &self.state_db
+    pub fn stateful(&self) -> &S {
+        &self.stateful
     }
 
-    pub fn edge_read(&self) -> &R {
-        &self.edge_read
+    pub fn read(&self) -> &R {
+        &self.read
     }
 }
 
 impl<S, R> StatefulStorage<S, R>
 where
-    S: StateDb,
-    R: EdgeReadDb,
+    S: StatefulStore,
+    R: ReadStore,
 {
     pub fn db(&self) -> &Db {
-        self.state_db.db()
+        self.stateful.db()
     }
 
     pub async fn find_active_user_by_identifier(
@@ -178,7 +175,7 @@ where
         instance_id: &str,
         identifier: &str,
     ) -> anyhow::Result<Option<UserIdentity>> {
-        self.edge_read
+        self.read
             .find_active_user_by_identifier(instance_id, identifier)
             .await
     }
@@ -188,9 +185,7 @@ where
         instance_id: &str,
         user_id: &str,
     ) -> anyhow::Result<Option<String>> {
-        self.edge_read
-            .load_password_hash(instance_id, user_id)
-            .await
+        self.read.load_password_hash(instance_id, user_id).await
     }
 
     pub async fn resolve_pat_token(
@@ -198,13 +193,11 @@ where
         instance_id: &str,
         raw_token: &str,
     ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
-        self.edge_read
-            .resolve_pat_token(instance_id, raw_token)
-            .await
+        self.read.resolve_pat_token(instance_id, raw_token).await
     }
 }
 
-pub type DefaultStatefulStorage = StatefulStorage<SqlStateDb, SqlEdgeReadDb>;
+pub type DefaultStatefulStorage = StatefulStorage<SqlStatefulStore, SqlReadStore>;
 
 #[cfg(test)]
 mod tests {
@@ -267,8 +260,8 @@ mod tests {
             .unwrap();
 
         let storage = DefaultStatefulStorage::new(
-            SqlStateDb::new(db.clone()),
-            SqlEdgeReadDb::new(db.clone()),
+            SqlStatefulStore::new(db.clone()),
+            SqlReadStore::new(db.clone()),
         );
 
         let user = storage

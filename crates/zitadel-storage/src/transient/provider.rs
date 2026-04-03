@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
-use super::{ProviderAuthState, SqlTransientCompatKv};
+use super::{ProviderAuthState, SqlKvStore};
 
 pub(crate) async fn create_provider_auth_state_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     state: &ProviderAuthState,
 ) -> anyhow::Result<()> {
@@ -28,14 +28,23 @@ pub(crate) async fn create_provider_auth_state_impl(
 }
 
 pub(crate) async fn consume_provider_auth_state_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     state: &str,
 ) -> anyhow::Result<Option<ProviderAuthState>> {
     let scoped = kv.scoped(instance_id);
     let mut tx = scoped.pool().begin().await?;
-    let row: Option<(String, String, String, String, String, String, String, String)> =
-        sqlx::query_as(
+    type ProviderAuthRow = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+    );
+    let row: Option<ProviderAuthRow> = sqlx::query_as(
             "SELECT provider_id, state, nonce, pkce_verifier, flow_id, redirect_uri, expected_issuer, callback_uri \
              FROM oidc_rp_auth_states WHERE instance_id = $1 AND state = $2",
         )

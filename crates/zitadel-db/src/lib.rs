@@ -82,7 +82,7 @@ impl Db {
     /// Open with explicit pool settings from config.
     pub async fn open_with_config(
         conn_str: &str,
-        config: &zitadel_config::DatabaseConfig,
+        config: &zitadel_config::StatefulStorageConfig,
     ) -> anyhow::Result<Self> {
         let (dialect, url) = parse_connection_string(conn_str)?;
 
@@ -149,12 +149,12 @@ fn parse_connection_string(conn_str: &str) -> anyhow::Result<(Dialect, String)> 
         let path = conn_str.strip_prefix("sqlite://").unwrap_or("").to_string();
 
         // Ensure parent directory exists for file-based SQLite.
-        if !path.is_empty() && path != ":memory:" {
-            if let Some(parent) = std::path::Path::new(&path).parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)?;
-                }
-            }
+        if !path.is_empty()
+            && path != ":memory:"
+            && let Some(parent) = std::path::Path::new(&path).parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
 
         let url = if path.is_empty() || path == ":memory:" {

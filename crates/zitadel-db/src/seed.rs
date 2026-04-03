@@ -122,7 +122,7 @@ fn token_hash(token: &str) -> String {
 }
 
 impl SeedProvider {
-    fn into_payload(&self) -> ProviderPayload {
+    fn to_payload(&self) -> ProviderPayload {
         let display_name = if self.display_name.is_empty() {
             self.name.clone()
         } else {
@@ -205,7 +205,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
     let org_id: String = match sqlx::query_as::<_, (String,)>(
         "SELECT id FROM orgs WHERE instance_id = 'default' LIMIT 1",
     )
-    .fetch_optional(&*pool)
+    .fetch_optional(pool)
     .await?
     {
         Some(row) => row.0,
@@ -215,7 +215,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 "INSERT INTO orgs (id, instance_id, name, state) VALUES ($1, 'default', 'Default', 'active')",
             )
             .bind(&id)
-            .execute(&*pool)
+            .execute(pool)
             .await?;
             id
         }
@@ -233,7 +233,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
             "SELECT id FROM users WHERE instance_id = 'default' AND identifier = $1",
         )
         .bind(&user.identifier)
-        .fetch_optional(&*pool)
+        .fetch_optional(pool)
         .await?;
 
         let user_id = if let Some(row) = existing {
@@ -243,7 +243,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 )
                 .bind(display_name)
                 .bind(&row.0)
-                .execute(&*pool)
+                .execute(pool)
                 .await?;
             }
             row.0
@@ -257,7 +257,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
             .bind(&org_id)
             .bind(&user.identifier)
             .bind(display_name)
-            .execute(&*pool)
+            .execute(pool)
             .await?;
             id
         };
@@ -272,7 +272,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 "SELECT id FROM credentials WHERE instance_id = 'default' AND user_id = $1 AND type = 'password'",
             )
             .bind(&user_id)
-            .fetch_optional(&*pool)
+            .fetch_optional(pool)
             .await?;
 
             if let Some(cred) = existing_cred {
@@ -283,7 +283,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 sqlx::query(&sql)
                     .bind(&cred.0)
                     .bind(&cred_json)
-                    .execute(&*pool)
+                    .execute(pool)
                     .await?;
             } else {
                 let cred_id = Uuid::new_v4().to_string();
@@ -295,7 +295,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                     .bind(&cred_id)
                     .bind(&user_id)
                     .bind(&cred_json)
-                    .execute(&*pool)
+                    .execute(pool)
                     .await?;
             }
         }
@@ -309,7 +309,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 "SELECT id FROM tokens WHERE instance_id = 'default' AND token_hash = $1",
             )
             .bind(&token_hash)
-            .fetch_optional(&*pool)
+            .fetch_optional(pool)
             .await?;
 
             if existing_pat.is_none() {
@@ -325,7 +325,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                     .bind(&user_id)
                     .bind(&pat.name)
                     .bind(&scopes)
-                    .execute(&*pool)
+                    .execute(pool)
                     .await?;
             }
         }
@@ -338,7 +338,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         let existing: Option<(String,)> =
             sqlx::query_as("SELECT id FROM apps WHERE instance_id = 'default' AND client_id = $1")
                 .bind(&app.client_id)
-                .fetch_optional(&*pool)
+                .fetch_optional(pool)
                 .await?;
 
         let redirect_uris = serde_json::to_string(&app.redirect_uris)?;
@@ -360,7 +360,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                     .bind(&redirect_uris)
                     .bind(&grant_types)
                     .bind(&response_types)
-                    .execute(&*pool)
+                    .execute(pool)
                     .await?;
             }
         } else {
@@ -382,7 +382,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 .bind(&redirect_uris)
                 .bind(&grant_types)
                 .bind(&response_types)
-                .execute(&*pool)
+                .execute(pool)
                 .await?;
         }
 
@@ -391,7 +391,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
 
     // Seed providers (external OIDC/SSO providers).
     for provider in &seed.providers {
-        let payload = provider.into_payload();
+        let payload = provider.to_payload();
 
         if get_provider(&scoped, &provider.id).await?.is_some() {
             update_provider(&scoped, &provider.id, &payload).await?;
@@ -409,10 +409,10 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
     // Seed observability data (events + fingerprints) if tables are empty.
     let event_count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM events WHERE instance_id = 'default'")
-            .fetch_one(&*pool)
+            .fetch_one(pool)
             .await?;
     if event_count.0 == 0 {
-        seed_observability(&pool, &org_id, &seed).await?;
+        seed_observability(pool, &org_id, &seed).await?;
     }
 
     tracing::info!(

@@ -1,247 +1,190 @@
 # Storage Implementation Status
 
-**Date**: 2026-04-01
-**Scope**: current repository state, not the target architecture
-**Related**: [Storage Architecture](storage-architecture.md), [ADR-010](../adr/010-three-tier-data.md), [Event Pipeline](../architecture/event-pipeline.md)
+**Date**: 2026-04-02  
+**Scope**: current repository state, not future Redis/analytics expansion  
+**Related**: [Storage Architecture](storage-architecture.md), [ADR-010](../adr/010-three-tier-data.md), [ADR-017](../adr/017-caching-tiers.md)
 
 ## Verdict
 
-The current POC has a working and well-tested **shared SQL storage layer** with multi-tenant scoping via `instance_id`.
+The storage reset is now real in the codebase:
 
-It also has a working and tested **durable analytics buffer** for structured request and runtime logs:
+- `storage.*` is the canonical server config namespace
+- `storage.stateful` is the only required block
+- `StorageRuntime::from_config` derives the remaining roles automatically
+- SQLite and Postgres both run through the same role-based runtime
 
-- logger
-- local SQLite cache
-- background drainer
-- `events` table
-
-What it does **not** have yet is the full **edge-first four-primitive storage architecture** described in [Storage Architecture](storage-architecture.md). In particular:
-
-- transient auth data is still written directly to SQL on the request path
-- there is no real `EdgeKV` implementation for sessions/tokens/auth state
-- there is no separate `EdgeSink` or queue for transient auth writes
-- the only analytics query backend today is the OLTP database itself
-
-So the short answer is:
-
-- **Tiered three-tier data flow**: partially real, partially tested, partially documented
-- **Edge-first four-primitive storage**: mostly target architecture, not current implementation
+The current POC is no longer “just shared SQL pretending to be future architecture.” It now has a working Level 0/Level 1 storage runtime with real role separation.
 
 ## What Works Today
 
-### 1. Shared OLTP storage works
+### 1. Canonical `storage.*` config is live
 
-The current binary uses the main SQL database as the source of truth for users, sessions, tokens, auth states, events, settings, secrets, and related resources.
+Implemented:
 
-Evidence in code:
+- `crates/zitadel-config/src/storage.rs`
+- `crates/zitadel-config/src/lib.rs`
+- `zitadel.reference.toml`
 
-- `crates/zitadel-api`
-- `crates/zitadel-authn`
-- `crates/zitadel-oidc`
-- `crates/zitadel-crypto`
-- `crates/zitadel-db`
+Behavior:
 
-Automated coverage exists for the core SQL layer:
+- `storage.stateful` replaces `database`
+- old `[database]` config fails fast with a migration error
+- old `ZITADEL_DATABASE_*` env vars fail fast with migration guidance
+- `ZITADEL_STORAGE__...` nested env vars and `ZITADEL_STORAGE_STATEFUL_*` flat env vars work
 
-- `crates/zitadel-db/src/lib.rs`
-- `crates/zitadel-db/src/migrate.rs`
-- `crates/zitadel-db/src/bootstrap.rs`
-- `crates/zitadel-server/tests/router_contract.rs`
+### 2. Runtime role derivation is live
 
-### 2. Multi-tenant SQL scoping works
+Implemented:
 
-The current storage model is shared infrastructure partitioned by `instance_id`. This is the real multi-tenant boundary in the current POC.
+- `crates/zitadel-storage/src/runtime.rs`
+- `crates/zitadel-server/src/lib.rs`
+- `crates/zitadel-testkit/src/lib.rs`
 
-Evidence in code:
+Current defaults:
 
-- `crates/zitadel-db/src/scoped.rs`
-- `crates/zitadel-authn/src/session.rs`
+| `storage.stateful.url` | Derived `read` | Derived `kv` | Derived `sink` | Derived `process_cache` | Derived `analytics` |
+|---|---|---|---|---|---|
+| SQLite | `same_connection` | `memory` | `channel` | `memory` | same stateful |
+| Postgres | `same_primary` | `postgres_unlogged` | `postgres` | `memory` | same stateful |
+
+### 3. `KvStore` is real for auth transient state
+
+Implemented:
+
+- `MemoryKvStore`
+- `SqlKvStore`
+- `TransientStorage<KvStore, Sink>`
+
+Covered data families:
+
+- sessions
+- login flow runtime state
+- provider auth state
+- auth request completion state
+
+Coverage exists in:
+
+- `crates/zitadel-storage/src/transient/mod.rs`
 - `crates/zitadel-login/src/lib.rs`
 - `crates/zitadel-server/tests/router_contract.rs`
 
-This part is implemented, tested, and enforced much more strongly than the edge-storage story.
+### 4. `Sink` is real for transient promotion
 
-### 3. Tier 2 durable analytics buffering works for request and runtime logs
+Implemented:
 
-Structured request and runtime logs do not write straight to the database. They go through the local SQLite cache and drain asynchronously.
+- `ChannelSink`
+- `SqlSink`
+- typed `TransientRecord` payloads
+- background ingest into the main stateful tables
 
-Implementation:
+Important detail:
 
-- `crates/zitadel-observability/src/lib.rs`
-- `crates/zitadel-observability/src/middleware.rs`
-- `crates/zitadel-storage/src/analytics.rs`
+- the sink is no longer a no-op in the default runtime
+- SQLite local mode now uses `memory KV + channel sink`
+- Postgres default mode uses `postgres KV + postgres inbox sink`
 
-Automated coverage:
+Coverage exists in:
 
-- `crates/zitadel-observability/src/lib.rs`
-- `crates/zitadel-observability/src/middleware.rs`
-- `crates/zitadel-storage/src/analytics.rs`
+- `crates/zitadel-storage/src/transient/mod.rs`
+- `crates/zitadel-login/src/lib.rs`
 
-This is the strongest example of the tiered storage model actually existing in code today.
+### 5. Stateful/read role naming is live
 
-### 4. Tier 3 fire-and-forget fan-out exists
+Implemented:
 
-The logging layer has fan-out, redaction, and circuit-breaker behavior for non-critical sinks.
+- `StatefulStore`
+- `ReadStore`
+- `SqlStatefulStore`
+- `SqlReadStore`
 
-Implementation:
+The higher-level server wiring and testkit now depend on these names instead of the older `StateDb`/`EdgeReadDb` naming.
 
-- `crates/zitadel-observability/src/lib.rs`
-- `crates/zitadel-observability/src/middleware.rs`
+### 6. Analytics remains stable and unchanged
 
-Automated coverage:
+Still true today:
 
-- `crates/zitadel-observability/src/lib.rs`
-- `crates/zitadel-storage/src/analytics.rs`
+- observability buffering uses the local SQLite analytics cache
+- analytics queries use the SQL backend
+- `storage.analytics` exists in config/schema/docs, but advanced analytics backends are not implemented yet
 
-Important caveat:
+This is intentional. The analytics workstream remains separate from the storage role reset.
 
-- `stdout` is real
-- the `otel` sink is currently a **POC stub** that writes OTEL-shaped JSON to stdout
-- it is **not** a real OTLP exporter yet
+## What Is Still Missing
 
-See `crates/zitadel-observability/src/lib.rs` for the current TODOs and sink behavior.
+### 1. Redis / Valkey backends
 
-## What Is Not Implemented End-to-End
+The docs and config now reserve `backend = "redis"` for both Redis and Valkey-compatible servers, but the runtime does not implement those backends yet.
 
-### 1. There is no real EdgeKV for auth transient data
+Current behavior:
 
-The target architecture says transient auth data should be written to edge-local KV and only later ingested centrally. That is not what the current binary does.
+- `storage.kv.backend = "redis"` fails clearly at startup
+- `storage.sink.backend = "redis"` fails clearly at startup
 
-Current hot-path SQL writes:
+This is deliberate. The config surface is defined, but the runtime stays honest.
 
-- sessions: `crates/zitadel-storage/src/transient/mod.rs`
-- auth requests: `crates/zitadel-storage/src/transient/auth_request.rs`
-- OIDC access and refresh tokens: `crates/zitadel-oidc`
-- PATs: `crates/zitadel-api/src/pats.rs`
-- login/session issuance: `crates/zitadel-login/src/steps.rs`
+### 2. Dedicated process-cache backends
 
-These all write directly to SQL tables such as:
+`ProcessCache` is defined as a role, but only `memory` is implemented in this pass.
 
-- `sessions`
-- `tokens`
-- `auth_states`
+Not implemented yet:
 
-That means the current system is still a **shared SQL system with tenant scoping**, not an edge-KV system.
+- SQLite-backed process cache
+- cache invalidation policies beyond in-process behavior
+- promoting settings/domain/query caches into the new role
 
-### 2. There is no separate EdgeSink / queue for transient auth writes
+### 3. Dedicated analytics backends
 
-The target storage architecture describes a queue that ships transient auth writes from edge to central.
+`storage.analytics` is reserved, but only “same stateful database” behavior exists today.
 
-That queue does not currently exist in code for auth storage:
-
-- no `event_inbox`
-- no Redis stream implementation
-- no SQS / Kafka implementation
-- no transient-ingestion worker that moves sessions/tokens/auth states from a queue into OLTP
-
-What *does* exist today:
-
-- the `events` table acts as the durable queue for async consumers described in [Event Pipeline](../architecture/event-pipeline.md)
-- the Rust server uses in-process async wake-up signals for those consumers
-- notifications still use SQL-backed persistence and async delivery rather than a dedicated edge queue
-
-That is real async processing, but it is **not** the same thing as the edge transient-write queue described in [Storage Architecture](storage-architecture.md).
-
-### 3. EdgeReadDB is only partial
-
-There is no checked-in, fully-wired Turso split read/write path in the current Rust workspace.
-
-This gives:
-
-- local partial-sync read replica
-- remote write path
-- pull-after-write behavior
-
-But as of this repo state:
-
-- there is **no automated coverage** for a Turso split-path because the current Rust implementation has not landed one
-- it is not the default server path
-- the higher-level auth/session/token stores are not abstracted against a generic edge-read interface
-
-So this is best described as **partial groundwork**, not a verified storage tier.
-
-### 4. Dedicated OLAP backends are not implemented
-
-The analytics package has a backend interface, but only one real implementation:
-
-- `crates/zitadel-storage/src/analytics.rs` → `SqlAnalyticsQueryBackend`
-
-The server always wires:
-
-- `zitadel_storage::SqlAnalyticsQueryBackend::new(db.clone())`
-
-There is currently no real:
+Not implemented yet:
 
 - dedicated Postgres analytics backend
 - ClickHouse backend
-- alternate analytics storage implementation
+- alternate analytics query runtime
 
-There are also no dedicated tests for `/v1/analytics/query`, `/v1/analytics/tables`, or `/v1/analytics/schema`.
+### 4. Full distributed validation for Postgres + sink
 
-### 5. Tier 2 behavior is mixed for signal data
+The code supports the derived Postgres topology and the role model is in place, but the strongest automated coverage today is still SQLite-first plus targeted runtime derivation tests.
 
-Request and runtime logs use the cache-and-drain path, but some signal events still write directly to `events` inside SQL transactions.
+Future work should deepen:
 
-Examples:
+- multi-instance Postgres session visibility
+- replica read semantics
+- Redis/Valkey split-topology behavior
 
-- request and runtime logs are buffered through the observability cache/drainer path
-- auth/session/login flows still append transactional events directly in the OLTP path
-- the repo does not yet provide end-to-end proof that every future signal source will use the same buffered path
+## Test Coverage Snapshot
 
-So "Tier 2" is not one uniform pipeline today.
+### Directly covered now
 
-## Test Coverage Summary
+- storage config loading and schema generation
+- SQLite derived role defaults
+- Postgres derived role defaults
+- legacy `[database]` rejection
+- transient record emission
+- sink failure not breaking the auth hot path
+- consume-once provider auth state
+- channel sink persisting memory-backed sessions into SQLite
+- login flow/session behavior through the shared runtime
 
-### Implemented and tested
+### Still worth expanding
 
-- SQL database open and migration paths for SQLite and Postgres
-- tenant scoping via `instance_id`
-- password storage isolation
-- login flow isolation
-- OIDC auth-request and token lifecycle
-- token resolution and session lifecycle
-- local analytics cache
-- cache sink routing and sampling
-- analytics drainer behavior and circuit-breaker behavior
-- logging fan-out and redaction
-
-### Implemented with weak or missing direct coverage
-
-- any future Turso split read/write replica path
-- analytics query API and backend behavior
-- end-to-end proof that every documented Tier 2 event source uses the same buffered path
-
-## Documentation Status
-
-### Accurate enough for current implementation
-
-- [ADR-010](../adr/010-three-tier-data.md): accurately describes the current request/log cache-and-drain pipeline at a high level
-- [Event Pipeline](../architecture/event-pipeline.md): accurately describes the current events-table async consumer model
-
-### Target architecture, not current implementation
-
-- [Storage Architecture](storage-architecture.md): this is the **target** edge-first storage model, not the current storage implementation
-
-### Current contradictions to be aware of
-
-1. `storage-architecture.md` says the central database is never in the auth hot path for transient writes.
-   Current code still writes sessions, tokens, PATs, magic links, and auth states directly to SQL.
-
-2. `event-pipeline.md` says the events table is the queue.
-   `storage-architecture.md` describes a separate edge-to-central queue for transient auth writes.
-
-3. `developer-experience.md` and `README.md` describe Level 0 as if KV + queue are already the live auth storage path.
-   In reality, the only strongly-realized tiered storage path today is the logging cache/drainer path.
+- Postgres sink replay/restart behavior
+- replica-read overrides
+- Redis/Valkey once implemented
+- `storage.analytics` override failure modes
 
 ## Practical Conclusion
 
 If the question is:
 
-- "Does the current POC storage layer work?"  
-  **Yes**. The shared SQL storage layer works, multi-tenant scoping is tested, and the analytics cache/drain path works.
+- “Is `storage.*` now the real config model?”  
+  **Yes.**
 
-- "Is the full tiered edge-first storage architecture implemented and verified?"  
-  **No**. That architecture is still mostly a design target.
+- “Does the runtime really derive `read`, `kv`, `sink`, `process_cache`, and `analytics` from `storage.stateful`?”  
+  **Yes.**
 
-- "Is it documented?"  
-  **Yes, but inconsistently**. The repository has extensive storage documentation, but it currently mixes target architecture and present reality. This document is the reality check.
+- “Is Redis/Valkey already implemented?”  
+  **No. The role surface is defined, but those backends still fail clearly.**
+
+- “Is the POC still SQLite-first with zero external dependencies?”  
+  **Yes. SQLite local mode now runs through the real role-based runtime instead of a special-case path.**

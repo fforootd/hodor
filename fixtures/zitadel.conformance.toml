@@ -8,7 +8,7 @@ public_origin = "https://nginx:8446"
 force_insecure_cookies = false
 cookie_secrets = ["zitadel-oidc-conformance-cookie-secret-do-not-use-in-production"]
 
-[database]
+[storage.stateful]
 url = "sqlite:///data/zitadel-conformance.db"
 
 [observability]

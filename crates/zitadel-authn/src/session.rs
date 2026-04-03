@@ -2,6 +2,18 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zitadel_db::scoped::ScopedDb;
 
+type SessionRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
 /// Session record matching the sessions table schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
@@ -100,17 +112,7 @@ impl SessionStore {
              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
         );
 
-        let row: Option<(
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-        )> = sqlx::query_as(&sql)
+        let row: Option<SessionRow> = sqlx::query_as(&sql)
             .bind(scoped.instance_id())
             .bind(&token_hash)
             .fetch_optional(scoped.pool())
@@ -158,17 +160,7 @@ impl SessionStore {
              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) \
              ORDER BY created_at DESC LIMIT 50"
         );
-        let rows: Vec<(
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-        )> = sqlx::query_as(&sql)
+        let rows: Vec<SessionRow> = sqlx::query_as(&sql)
             .bind(scoped.instance_id())
             .bind(user_id)
             .fetch_all(scoped.pool())

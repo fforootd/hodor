@@ -95,7 +95,7 @@ kamal details
 **Kamal** manages three containers on the VM:
 - **zitadel** — the main service, deployed via kamal-proxy for zero-downtime updates
 - **caddy** — accessory, handles TLS termination and domain→instance routing
-- **redis** — accessory, EdgeKV for sessions and tokens
+- **redis** — accessory, shared KV backend for sessions and tokens
 
 **Caddy** is configured with one site block per customer domain (generated from `domains.json`). Each block:
 1. Uses `on_demand` TLS — cert provisioned lazily on first request

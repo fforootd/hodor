@@ -58,7 +58,7 @@ ZITADEL_API_BASE=http://localhost:8081 make dev-web
 make dev-reset
 ```
 
-This deletes local SQLite files under `./data/`, refuses to run against non-SQLite `ZITADEL_DATABASE_URL` values, and then boots the default frontend seed pack again.
+This deletes local SQLite files under `./data/`, refuses to run against non-SQLite `ZITADEL_STORAGE_STATEFUL_URL` values, and then boots the default frontend seed pack again.
 
 ### Reseed data
 
@@ -82,7 +82,7 @@ cargo run -p zitadel -- seed validate --file fixtures/seeds/frontend.yaml
 The zero-config path still works:
 
 ```bash
-cargo run -p zitadel -- start
+cargo run -p zitadel -- server start
 ```
 
 That uses SQLite at `./data/zitadel.db` with no required config file. For deterministic local credentials such as `admin / admin123`, prefer `make dev` or run with `fixtures/zitadel.dev.toml`, which applies the frontend seed pack on startup.
@@ -105,7 +105,7 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 - **Schema-driven resources** — JSON Schema with annotations (`x-claim-mapping`, `x-user-editable`, `x-sensitive`, `x-hidden`)
 - **SSO Federation** — Protocol-agnostic providers (OIDC, SAML, SCIM) with `expr`-based claim mapping
 - **Embedded OpenFGA** — Zanzibar-style authorization in-process
-- **Four-primitive storage** — target architecture is OLTP, KV, Queue, OLAP. The current POC already has the shared SQL layer and analytics cache/drain path; see [Storage Architecture](docs/design/storage-architecture.md) and [Storage Implementation Status](docs/design/storage-implementation-status.md).
+- **Role-based storage runtime** — `storage.stateful` is canonical, with derived `read`, `kv`, `sink`, `process_cache`, and `analytics` roles. The current POC already wires SQLite and Postgres defaults through that runtime; see [Storage Architecture](docs/design/storage-architecture.md) and [Storage Implementation Status](docs/design/storage-implementation-status.md).
 - **Event-sourced audit** — every mutation emitted as an event with field-level redaction
 - **Import & Seed** — `POST /v1/import` for migrations, `--seed` YAML files for CI/dev
 
@@ -132,7 +132,7 @@ Three-layer precedence: `CLI flags > env vars > TOML config > defaults`
 
 | Setting | Env Var | Flag | Default |
 |---|---|---|---|
-| Database URL | `ZITADEL_DATABASE_URL` | — | `sqlite://./data/zitadel.db` |
+| Stateful storage URL | `ZITADEL_STORAGE_STATEFUL_URL` | — | `sqlite://./data/zitadel.db` |
 | Server port | `ZITADEL_PORT` | — | `8080` |
 | Mock OIDC | `ZITADEL_MOCK_OIDC` | `--mock-oidc` | `false` |
 | Seed file | `ZITADEL_SEED_FILE` | `--seed` | — |

@@ -9,7 +9,7 @@ port = 8080
 external_domain = "localhost"
 cookie_secrets = ["zitadel-dev-cookie-secret-do-not-use-in-production"]
 
-[database]
+[storage.stateful]
 url = "sqlite://../data/zitadel.db"
 
 [observability]

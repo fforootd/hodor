@@ -9,10 +9,10 @@
 
 ADR-021 adopted shared-database row-level discrimination (`instance_id` on every table) for multi-tenancy. This works for self-hosted single-binary deployments where a single database is simpler to operate.
 
-For Zitadel Cloud on Cloudflare, we want stronger isolation guarantees: each customer gets their own container process, own database, own encryption keys, own cookie secrets. The goal is to keep the Go binary completely single-tenant while letting the Cloudflare Worker layer handle multi-tenancy, routing, and configuration.
+For Zitadel Cloud on Cloudflare, we want stronger isolation guarantees: each customer gets their own container process, own database, own encryption keys, own cookie secrets. The goal is to keep the Rust runtime completely single-tenant while letting the Cloudflare Worker layer handle multi-tenancy, routing, and configuration.
 
 Cloudflare's infrastructure provides the building blocks:
-- **Containers** run per-tenant Go binaries with per-instance env vars
+- **Containers** run per-tenant Rust binaries with per-instance env vars
 - **Durable Objects** provide strongly consistent per-instance config storage
 - **D1** provides managed SQLite databases provisionable via REST API
 - **outboundByHost** lets the Worker intercept container HTTP calls and bridge them to D1
@@ -27,7 +27,7 @@ Each customer instance gets:
 - Its own container process (scale-to-zero when idle)
 - Its own encryption keys, cookie secrets, admin credentials
 
-The Go binary sees `ZITADEL_DATABASE_URL=d1://d1.local` and connects via the existing d1driver. The Worker's `outboundByHost` intercepts these HTTP calls and bridges them to the correct D1 database using the REST API.
+The runtime sees `ZITADEL_STORAGE_STATEFUL_URL=d1://d1.local` and connects via the existing d1driver. The Worker's `outboundByHost` intercepts these HTTP calls and bridges them to the correct D1 database using the REST API.
 
 ### Architecture
 
@@ -40,7 +40,7 @@ Request (acme.zitadel.cloud)
      - loads config from DO SQLite
      - sets container envVars
      - outboundByHost bridges d1.local -> D1 REST API
-  -> Container (Go binary)
+  -> Container (Rust binary)
      - reads env vars, connects to d1://d1.local
      - d1driver sends HTTP to d1.local
      - outboundByHost intercepts and queries tenant's D1
@@ -61,13 +61,13 @@ Request (acme.zitadel.cloud)
 
 For D1 tenants, the container URL is `d1://d1.local` and the outboundByHost bridge routes queries to the tenant's D1 database ID via Cloudflare's REST API.
 
-For BYODB tenants, the container gets `ZITADEL_DATABASE_URL=libsql://...` or `postgres://...` directly. The outbound bridge is never hit.
+For BYODB tenants, the container gets `ZITADEL_STORAGE_STATEFUL_URL=libsql://...` or `postgres://...` directly. The outbound bridge is never hit.
 
 Migration from D1 to BYODB: D1 export API produces a SQL dump, customer imports into their database, config is updated to point to the new URL.
 
 ### Three database connections per instance
 
-The Go binary opens three connections at startup. All use the same D1 database (via the bridge), except the analytics cache:
+The Rust binary opens three connections at startup. All use the same D1 database (via the bridge), except the analytics cache:
 
 | Connection | Target | Purpose |
 |-----------|--------|---------|
@@ -147,7 +147,7 @@ Response translation: unwrap `result[0]`, extract column names from first result
 - Per-tenant scale-to-zero (idle tenants cost nothing)
 - BYODB unlocks enterprise data residency without any Go code changes
 - D1 free tier (5M reads/day, 100K writes/day) covers small tenants at zero cost
-- The Go binary is unchanged — same code runs locally on SQLite, self-hosted on Postgres, or in cloud on D1
+- The Rust binary is unchanged — same code runs locally on SQLite, self-hosted on Postgres, or in cloud on D1
 
 ### Negative
 

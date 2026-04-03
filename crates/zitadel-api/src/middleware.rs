@@ -58,12 +58,11 @@ pub async fn auth_gate(
 
 fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
     // 1. Authorization: Bearer <token>
-    if let Some(auth) = req.headers().get(header::AUTHORIZATION) {
-        if let Ok(val) = auth.to_str() {
-            if let Some(token) = val.strip_prefix("Bearer ") {
-                return Some(token.to_string());
-            }
-        }
+    if let Some(auth) = req.headers().get(header::AUTHORIZATION)
+        && let Ok(val) = auth.to_str()
+        && let Some(token) = val.strip_prefix("Bearer ")
+    {
+        return Some(token.to_string());
     }
 
     // 2. Session cookie (HMAC-verified).
@@ -71,12 +70,11 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
     for name in state.cookie_config.all_cookie_names() {
         for part in cookie_header.split(';') {
             let part = part.trim();
-            if let Some(value) = part.strip_prefix(name).and_then(|s| s.strip_prefix('=')) {
-                if let Some(token) =
+            if let Some(value) = part.strip_prefix(name).and_then(|s| s.strip_prefix('='))
+                && let Some(token) =
                     zitadel_authn::cookie::verify(value, &state.cookie_config.secrets)
-                {
-                    return Some(token);
-                }
+            {
+                return Some(token);
             }
         }
     }
@@ -154,11 +152,7 @@ mod tests {
     };
     use zitadel_config::{Config, password::PasswordHasherConfig};
     use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
-    use zitadel_storage::{
-        DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTransientStorage,
-        NoopAnalyticsSink, NoopEdgeSink, SqlAnalyticsQueryBackend, SqlEdgeReadDb, SqlStateDb,
-        SqlTransientCompatKv,
-    };
+    use zitadel_storage::StorageRuntime;
 
     async fn test_state() -> ApiState {
         let db = Db::open("").await.unwrap();
@@ -176,19 +170,9 @@ mod tests {
             config.server.force_insecure_cookies,
             config.session.max_age_secs as i64,
         ));
-
-        let stateful = Arc::new(DefaultStatefulStorage::new(
-            SqlStateDb::new(db.clone()),
-            SqlEdgeReadDb::new(db.clone()),
-        ));
-        let transient = Arc::new(DefaultTransientStorage::new(
-            SqlTransientCompatKv::new(db.clone()),
-            NoopEdgeSink,
-        ));
-        let analytics = Arc::new(DefaultAnalyticsStorage::new(
-            NoopAnalyticsSink,
-            SqlAnalyticsQueryBackend::new(db.clone()),
-        ));
+        let storage = StorageRuntime::from_config(&config.storage, db.clone())
+            .await
+            .unwrap();
         let oidc = zitadel_oidc::OidcState::new_with_config(
             db.clone(),
             config.server.public_origin.clone(),
@@ -198,9 +182,9 @@ mod tests {
 
         ApiState {
             db,
-            stateful,
-            transient,
-            analytics,
+            stateful: storage.stateful.clone(),
+            transient: storage.transient.clone(),
+            analytics: storage.analytics.clone(),
             oidc,
             passwords: Arc::new(Swapper::from_config(&config.password_hasher)),
             cookie_config,

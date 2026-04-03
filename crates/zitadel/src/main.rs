@@ -581,17 +581,18 @@ fn run_start(args: StartArgs) -> anyhow::Result<()> {
         cfg.dev.seed_file = seed_path.to_string_lossy().into_owned();
     }
     if args.skip_migrate {
-        cfg.database.migrate = "skip".into();
+        cfg.storage.stateful.migrate = "skip".into();
     }
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+            .await?;
         let _observability =
             zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
         tracing::info!(
             port = cfg.server.port,
-            db = %cfg.database.url,
+            db = %cfg.storage.stateful.url,
             "starting zitadel server"
         );
         zitadel_server::run_with_db(cfg, db).await
@@ -604,7 +605,8 @@ fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
     resolve_paths(&mut cfg, args.config.as_deref());
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+            .await?;
         let _observability =
             zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
 
@@ -644,7 +646,8 @@ fn run_seed_apply(config: Option<PathBuf>, file: PathBuf) -> anyhow::Result<()> 
         std::env::current_dir()?.join(file)
     };
     rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+            .await?;
         let _observability =
             zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
         zitadel_db::seed::apply(&db, &file).await?;
@@ -681,7 +684,8 @@ fn run_openapi_export(args: OpenapiExportArgs) -> anyhow::Result<()> {
     resolve_paths(&mut cfg, args.config.as_deref());
     let rt = tokio::runtime::Runtime::new()?;
     let document = rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+            .await?;
         let document = zitadel_api::openapi::document(&db, &public_origin(&cfg)).await?;
         db.close().await;
         anyhow::Ok(document)
@@ -859,28 +863,18 @@ fn public_origin(cfg: &zitadel_config::Config) -> String {
     format!("http://{}:{}", cfg.server.external_domain, cfg.server.port)
 }
 
-/// Resolve relative paths (database URL, seed file, cache path) relative to the config file directory.
+/// Resolve relative paths (storage URLs, seed file, cache path) relative to the config file directory.
 fn resolve_paths(cfg: &mut zitadel_config::Config, config_path: Option<&Path>) {
     let base_dir = config_path
         .and_then(|p| std::fs::canonicalize(p).ok())
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    if let Some(path) = cfg.database.url.strip_prefix("sqlite://") {
-        if !path.is_empty() && path != ":memory:" {
-            let p = Path::new(path);
-            let joined = if p.is_absolute() {
-                p.to_path_buf()
-            } else {
-                base_dir.join(path)
-            };
-            let resolved = normalize_path(&joined);
-            if let Some(parent) = resolved.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            cfg.database.url = format!("sqlite://{}", resolved.display());
-        }
-    }
+    resolve_sqlite_url(&mut cfg.storage.stateful.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.read.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.kv.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.sink.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.analytics.url, &base_dir);
 
     if !cfg.dev.seed_file.is_empty() && !Path::new(&cfg.dev.seed_file).is_absolute() {
         let cwd_path = std::env::current_dir()
@@ -899,6 +893,25 @@ fn resolve_paths(cfg: &mut zitadel_config::Config, config_path: Option<&Path>) {
     {
         let resolved = base_dir.join(&cfg.observability.cache_path);
         cfg.observability.cache_path = resolved.to_string_lossy().into_owned();
+    }
+}
+
+fn resolve_sqlite_url(url: &mut String, base_dir: &Path) {
+    if let Some(path) = url.strip_prefix("sqlite://")
+        && !path.is_empty()
+        && path != ":memory:"
+    {
+        let p = Path::new(path);
+        let joined = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            base_dir.join(path)
+        };
+        let resolved = normalize_path(&joined);
+        if let Some(parent) = resolved.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        *url = format!("sqlite://{}", resolved.display());
     }
 }
 

@@ -112,10 +112,9 @@ fn extract_request_context(req: &Request<Body>) -> (String, Option<String>) {
         .headers()
         .get("traceparent")
         .and_then(|v| v.to_str().ok())
+        && let Some((trace_id, span_id)) = parse_traceparent(traceparent)
     {
-        if let Some((trace_id, span_id)) = parse_traceparent(traceparent) {
-            return (trace_id, Some(span_id));
-        }
+        return (trace_id, Some(span_id));
     }
     (Uuid::now_v7().simple().to_string(), None)
 }

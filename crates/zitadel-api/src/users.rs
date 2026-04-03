@@ -9,6 +9,30 @@ use uuid::Uuid;
 
 use crate::{ApiState, response};
 
+type UserListRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+);
+type UserDetailRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+);
+
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/users", get(list_users).post(create_user))
@@ -140,20 +164,7 @@ async fn list_users(State(state): State<ApiState>, Query(params): Query<ListPara
          FROM users WHERE instance_id = $1 AND id > $2 ORDER BY id LIMIT $3",
     );
 
-    let rows: Result<
-        Vec<(
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-        )>,
-        _,
-    > = sqlx::query_as(&sql)
+    let rows: Result<Vec<UserListRow>, _> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .bind(&cursor)
         .bind(limit + 1) // Fetch one extra for next_cursor
@@ -299,18 +310,7 @@ async fn load_user(
         "SELECT id, org_id, identifier, display_name, user_type, state, schema_id, COALESCE({metadata}, '{{}}'), {created_at}, {updated_at} \
          FROM users WHERE instance_id = $1 AND id = $2"
     );
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-    )> = sqlx::query_as(&sql)
+    let row: Option<UserDetailRow> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .bind(id)
         .fetch_optional(scoped.pool())

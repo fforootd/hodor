@@ -3,21 +3,21 @@ use uuid::Uuid;
 use zitadel_crypto::token_hash;
 use zitadel_db::Dialect;
 
-use super::{CreatedSession, SessionRecord, SqlTransientCompatKv};
+use super::{CreatedSession, SessionRecord, SqlKvStore};
 
-pub(crate) fn map_session_row(
-    row: (
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    ),
-) -> SessionRecord {
+type SessionRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+);
+
+pub(crate) fn map_session_row(row: SessionRow) -> SessionRecord {
     SessionRecord {
         id: row.0,
         user_id: row.1,
@@ -33,7 +33,7 @@ pub(crate) fn map_session_row(
 }
 
 pub(crate) async fn create_session_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     user_id: &str,
     org_id: &str,
@@ -73,7 +73,7 @@ pub(crate) async fn create_session_impl(
 }
 
 pub(crate) async fn find_session_by_token_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     raw_token: &str,
 ) -> anyhow::Result<Option<SessionRecord>> {
@@ -87,17 +87,7 @@ pub(crate) async fn find_session_by_token_impl(
          WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
     );
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(&sql)
+    let row: Option<SessionRow> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .bind(token_hash(raw_token))
         .fetch_optional(scoped.pool())
@@ -107,7 +97,7 @@ pub(crate) async fn find_session_by_token_impl(
 }
 
 pub(crate) async fn list_sessions_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
 ) -> anyhow::Result<Vec<SessionRecord>> {
     let scoped = kv.scoped(instance_id);
@@ -118,17 +108,7 @@ pub(crate) async fn list_sessions_impl(
         "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
          FROM sessions WHERE instance_id = $1 ORDER BY created_at DESC LIMIT 50"
     );
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(&sql)
+    let rows: Vec<SessionRow> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .fetch_all(scoped.pool())
         .await?;
@@ -137,7 +117,7 @@ pub(crate) async fn list_sessions_impl(
 }
 
 pub(crate) async fn get_session_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     session_id: &str,
 ) -> anyhow::Result<Option<SessionRecord>> {
@@ -149,17 +129,7 @@ pub(crate) async fn get_session_impl(
         "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
          FROM sessions WHERE instance_id = $1 AND id = $2"
     );
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(&sql)
+    let row: Option<SessionRow> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .bind(session_id)
         .fetch_optional(scoped.pool())
@@ -169,7 +139,7 @@ pub(crate) async fn get_session_impl(
 }
 
 pub(crate) async fn revoke_session_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     session_id: &str,
 ) -> anyhow::Result<bool> {

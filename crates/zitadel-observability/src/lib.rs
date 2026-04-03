@@ -301,15 +301,15 @@ where
         if route.stdout {
             write_stdout(self.state.format, &record);
         }
-        if route.analytics {
-            if let Some(tx) = &self.state.analytics_tx {
-                let _ = tx.send(record.clone());
-            }
+        if route.analytics
+            && let Some(tx) = &self.state.analytics_tx
+        {
+            let _ = tx.send(record.clone());
         }
-        if route.otel {
-            if let Some(tx) = &self.state.otel_tx {
-                let _ = tx.send(record);
-            }
+        if route.otel
+            && let Some(tx) = &self.state.otel_tx
+        {
+            let _ = tx.send(record);
         }
     }
 }
@@ -529,10 +529,10 @@ fn redact_value(redaction: &Redaction, key: Option<&str>, value: &mut Value) {
             }
         }
         Value::String(string) => {
-            if let Some(key) = key {
-                if is_ip_key(key) {
-                    *string = redact_ip(redaction, &Value::String(string.clone()));
-                }
+            if let Some(key) = key
+                && is_ip_key(key)
+            {
+                *string = redact_ip(redaction, &Value::String(string.clone()));
             }
         }
         _ => {}
@@ -746,10 +746,10 @@ async fn start_analytics_pipeline(
 }
 
 fn ensure_parent_dir(path: &str) -> anyhow::Result<()> {
-    if let Some(parent) = Path::new(path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = Path::new(path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
     }
     Ok(())
 }
@@ -1108,21 +1108,21 @@ fn emit_otel(logger: &SdkLogger, record: &StructuredRecord) {
         .and_then(value_as_string)
         .and_then(|span_id| SpanId::from_hex(&span_id).ok())
     {
-        if let Some(request_id) = &record.request_id {
-            if let Ok(trace_id) = TraceId::from_hex(request_id) {
-                otel_record.set_trace_context(trace_id, parent_span_id, Some(TraceFlags::SAMPLED));
-            }
+        if let Some(request_id) = &record.request_id
+            && let Ok(trace_id) = TraceId::from_hex(request_id)
+        {
+            otel_record.set_trace_context(trace_id, parent_span_id, Some(TraceFlags::SAMPLED));
         }
-    } else if let Some(request_id) = &record.request_id {
-        if let Ok(trace_id) = TraceId::from_hex(request_id) {
-            let mut hasher = DefaultHasher::new();
-            record.id.hash(&mut hasher);
-            otel_record.set_trace_context(
-                trace_id,
-                SpanId::from(hasher.finish()),
-                Some(TraceFlags::SAMPLED),
-            );
-        }
+    } else if let Some(request_id) = &record.request_id
+        && let Ok(trace_id) = TraceId::from_hex(request_id)
+    {
+        let mut hasher = DefaultHasher::new();
+        record.id.hash(&mut hasher);
+        otel_record.set_trace_context(
+            trace_id,
+            SpanId::from(hasher.finish()),
+            Some(TraceFlags::SAMPLED),
+        );
     }
     otel_record.add_attribute("payload", AnyValue::from(record.payload.to_string()));
     otel_record.add_attribute("metadata", AnyValue::from(record.metadata.to_string()));

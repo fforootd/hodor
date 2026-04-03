@@ -68,7 +68,6 @@ impl Default for StreamRoutingConfig {
                 sinks: vec!["stdout".into(), "otel".into(), "analytics".into()],
                 mode: "sampled".into(),
                 sample_rate: 0.01,
-                ..Default::default()
             },
             jobs: StreamConfig {
                 sinks: vec!["stdout".into(), "analytics".into()],

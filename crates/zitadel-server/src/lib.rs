@@ -46,16 +46,18 @@ pub fn build_router(
 /// Start the HTTP server and block until shutdown signal.
 pub async fn run(config: Config) -> anyhow::Result<()> {
     // Open database.
-    let db = zitadel_db::Db::open_with_config(&config.database.url, &config.database).await?;
+    let db =
+        zitadel_db::Db::open_with_config(&config.storage.stateful.url, &config.storage.stateful)
+            .await?;
     run_with_db(config, db).await
 }
 
 pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<()> {
     let port = config.server.port;
-    tracing::info!(dialect = %db.dialect(), url = %config.database.url, "database connected");
+    tracing::info!(dialect = %db.dialect(), url = %config.storage.stateful.url, "database connected");
 
     // Run migrations based on mode.
-    match config.database.resolve_migrate_mode() {
+    match config.storage.stateful.resolve_migrate_mode() {
         "auto" => zitadel_db::migrate::migrate(&db).await?,
         "check" => zitadel_db::migrate::check_version(&db).await?,
         "skip" => tracing::info!("migration skipped"),
@@ -63,7 +65,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     }
 
     // Bootstrap (create default org + admin if empty).
-    if config.database.resolve_bootstrap_mode() == "auto" {
+    if config.storage.stateful.resolve_bootstrap_mode() == "auto" {
         zitadel_db::bootstrap::bootstrap(&db).await?;
     }
 
@@ -132,25 +134,13 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         login_path,
         &config.oidc,
     );
-
-    let stateful = Arc::new(zitadel_storage::DefaultStatefulStorage::new(
-        zitadel_storage::SqlStateDb::new(db.clone()),
-        zitadel_storage::SqlEdgeReadDb::new(db.clone()),
-    ));
-    let transient = Arc::new(zitadel_storage::DefaultTransientStorage::new(
-        zitadel_storage::SqlTransientCompatKv::new(db.clone()),
-        zitadel_storage::NoopEdgeSink,
-    ));
-    let analytics = Arc::new(zitadel_storage::DefaultAnalyticsStorage::new(
-        zitadel_storage::NoopAnalyticsSink,
-        zitadel_storage::SqlAnalyticsQueryBackend::new(db.clone()),
-    ));
+    let storage = zitadel_storage::StorageRuntime::from_config(&config.storage, db.clone()).await?;
 
     let api_state = zitadel_api::ApiState {
         db: db.clone(),
-        stateful: stateful.clone(),
-        transient: transient.clone(),
-        analytics,
+        stateful: storage.stateful.clone(),
+        transient: storage.transient.clone(),
+        analytics: storage.analytics.clone(),
         oidc: oidc_state.clone(),
         passwords: Arc::new(passwords),
         cookie_config: Arc::new(cookie_config),
@@ -159,8 +149,8 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     let login_state = zitadel_login::LoginState {
         db: db.clone(),
-        stateful,
-        transient,
+        stateful: storage.stateful.clone(),
+        transient: storage.transient.clone(),
         passwords: api_state.passwords.clone(),
         cookie_config: api_state.cookie_config.clone(),
         public_origin: Arc::new(issuer.clone()),

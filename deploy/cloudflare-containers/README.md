@@ -1,6 +1,6 @@
 # Deploy Zitadel to Cloudflare Workers + Containers + Turso
 
-This example runs the real Zitadel Go binary in a single Cloudflare Container and stores data in a remote Turso database over `libsql://`.
+This example runs the real Zitadel Rust binary in a single Cloudflare Container and stores data in a remote Turso database over `libsql://`.
 
 It is intentionally opinionated:
 
@@ -27,8 +27,8 @@ Key details:
 - The Worker serves hashed frontend bundles from Workers Assets.
 - The Worker proxies HTML shells, API traffic, OIDC traffic, and dynamic login assets to one named `ZitadelContainer`.
 - The container starts with runtime env vars derived from Worker secrets and the first incoming request host.
-- Zitadel connects directly to Turso using `ZITADEL_DATABASE_URL=libsql://...`.
-- The Go binary uses the standard `database/sql` path, so the Cloudflare side stays thin.
+- Zitadel connects directly to Turso using `ZITADEL_STORAGE_STATEFUL_URL=libsql://...`.
+- The Rust runtime keeps the Cloudflare side thin by treating the stateful store as a normal runtime URL.
 
 ## Why This Version Exists
 
@@ -59,7 +59,7 @@ npx wrangler login
 Set the required Worker secrets:
 
 ```bash
-npx wrangler secret put ZITADEL_DATABASE_URL
+npx wrangler secret put ZITADEL_STORAGE_STATEFUL_URL
 npx wrangler secret put ZITADEL_DATABASE_AUTH_TOKEN
 npx wrangler secret put ZITADEL_ADMIN_PASSWORD
 npx wrangler secret put ZITADEL_ADMIN_PAT
@@ -68,7 +68,7 @@ npx wrangler secret put ZITADEL_COOKIE_SECRETS
 
 Recommended values:
 
-- `ZITADEL_DATABASE_URL`: `libsql://<db>.turso.io`
+- `ZITADEL_STORAGE_STATEFUL_URL`: `libsql://<db>.turso.io`
 - `ZITADEL_DATABASE_AUTH_TOKEN`: output of `turso db tokens create <db-name>`
 
 Deploy:
@@ -123,7 +123,7 @@ This example keeps the Worker configuration surface intentionally small.
 
 Required secrets:
 
-- `ZITADEL_DATABASE_URL`: remote libSQL/Turso database URL, for example `libsql://test-ffozitadel.aws-us-west-2.turso.io`
+- `ZITADEL_STORAGE_STATEFUL_URL`: remote libSQL/Turso database URL, for example `libsql://test-ffozitadel.aws-us-west-2.turso.io`
 - `ZITADEL_DATABASE_AUTH_TOKEN`: Turso database auth token
 - `ZITADEL_ADMIN_PASSWORD`: bootstrap admin password used by the seed file
 - `ZITADEL_ADMIN_PAT`: bootstrap PAT for API access
@@ -137,8 +137,8 @@ Optional vars or secrets:
 - `ZITADEL_EXTERNAL_DOMAIN`: overrides the request host for issuer/public URLs
 - `ZITADEL_TLS_MODE`: override inferred TLS mode (`external` for HTTPS, `off` for local HTTP)
 - `ZITADEL_BASE_PATH`: optional path prefix
-- `ZITADEL_DATABASE_MIGRATE`: e.g. `skip` for very fast cold starts after schema is ready
-- `ZITADEL_DATABASE_BOOTSTRAP`: e.g. `skip` after first bootstrap
+- `ZITADEL_STORAGE_STATEFUL_MIGRATE`: e.g. `skip` for very fast cold starts after schema is ready
+- `ZITADEL_STORAGE_STATEFUL_BOOTSTRAP`: e.g. `skip` after first bootstrap
 - `ZITADEL_ENCRYPTION_ACTIVE_KEY_ID` and `ZITADEL_ENCRYPTION_KEYS`: recommended if you do not want secrets stored in plaintext mode
 
 ## Database Notes

@@ -1,6 +1,6 @@
 # System Architecture
 
-Zitadel is a single Rust binary that bundles authentication, authorization, user and application management, and observability. At Level 0 (local/SQLite), everything runs in one process with zero external dependencies. As deployments scale, the same binary connects to external storage primitives (Postgres, Redis, queues) without code changes. See [Storage Architecture](../design/storage-architecture.md) for deployment profiles.
+Zitadel is a single Rust binary that bundles authentication, authorization, user and application management, and observability. At Level 0 (local/SQLite), everything runs in one process with zero external dependencies. As deployments scale, the same binary keeps the same storage roles and swaps implementations underneath them. See [Storage Architecture](../design/storage-architecture.md) for the canonical `storage.*` model.
 
 ## High-Level Architecture
 
@@ -65,11 +65,12 @@ graph TB
         end
     end
 
-    subgraph Storage["Storage (Four Primitives)"]
-        OLTP_S["OLTP<br/>(SQLite or Postgres)"]
-        KV_S["EdgeKV<br/>(in-memory, Redis, platform-native)"]
-        Queue_S["EdgeSink / Queue<br/>(tokio notify, PG table, SQS/Kafka)"]
-        OLAP_S["OLAP<br/>(same DB or dedicated)"]
+    subgraph Storage["Storage Roles"]
+        Stateful_S["Stateful<br/>(SQLite or Postgres)"]
+        Read_S["Read<br/>(same connection, primary, replica)"]
+        KV_S["KV<br/>(memory, Postgres transient, Redis/Valkey)"]
+        Sink_S["Sink<br/>(channel, PG inbox, Redis stream)"]
+        Analytics_S["Analytics<br/>(same DB or dedicated)"]
     end
 
     subgraph Export["Export (OTEL)"]
@@ -113,7 +114,7 @@ graph TB
     IdentityAPI --> EventWriter
     MgmtAPI --> EventWriter
 
-    EventWriter --> OLTP_S
+    EventWriter --> Stateful_S
 
     EventWriter --> NotifyEngine
     NotifyEngine --> SMTP_C
@@ -217,14 +218,14 @@ graph LR
 
 ## Deployment Topologies
 
-The system is composed of four storage primitives — OLTP, KV, Queue, OLAP — with different implementations at each level. See [Storage Architecture](../design/storage-architecture.md) for full details.
+The system uses one role-based storage runtime with different derived defaults at each level. Most operators only configure `storage.stateful`; the runtime derives `read`, `kv`, `sink`, `process_cache`, and `analytics`. See [Storage Architecture](../design/storage-architecture.md) for full details.
 
-| Level | OLTP | KV | Queue | OLAP |
-|---|---|---|---|---|
-| **0 — Local** | SQLite | in-memory | go channel | same SQLite |
-| **1 — Scale Out** | Postgres | in-memory or Redis | PG unlogged table | same Postgres |
-| **2 — Dedicated KV** | Postgres | Redis / platform-native | PG table / Redis stream | same PG or dedicated |
-| **3 — Multi-Region** | Postgres primary | per-region Redis | per-region SQS/Kafka | ClickHouse / dedicated |
+| Level | `stateful` | `read` | `kv` | `sink` | `analytics` |
+|---|---|---|---|---|---|
+| **0 — Local** | SQLite | same connection | memory | channel | same SQLite |
+| **1 — Shared Postgres** | Postgres | same primary | Postgres transient tables | Postgres inbox | same Postgres |
+| **2 — Split Hot Path** | Postgres | same primary or replica | Redis / Valkey | Postgres or Redis stream | same Postgres or dedicated |
+| **3 — Multi-Region** | Postgres primary | per-region replicas | per-region Redis / Valkey | regional queue / stream | dedicated analytics |
 
 ## Provider / Flow / Session Boundaries
 

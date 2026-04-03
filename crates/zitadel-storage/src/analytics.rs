@@ -214,26 +214,24 @@ fn extract_value(row: &sqlx::any::AnyRow, idx: usize) -> Value {
     }
 
     let type_name = row.columns()[idx].type_info().name().to_uppercase();
-    if type_name.contains("INT") {
-        if let Ok(value) = row.try_get::<i64, _>(idx) {
-            return Value::Number(value.into());
-        }
+    if type_name.contains("INT")
+        && let Ok(value) = row.try_get::<i64, _>(idx)
+    {
+        return Value::Number(value.into());
     }
-    if type_name.contains("REAL")
+    if (type_name.contains("REAL")
         || type_name.contains("FLOAT")
         || type_name.contains("DOUBLE")
-        || type_name.contains("NUMERIC")
+        || type_name.contains("NUMERIC"))
+        && let Ok(value) = row.try_get::<f64, _>(idx)
+        && let Some(number) = serde_json::Number::from_f64(value)
     {
-        if let Ok(value) = row.try_get::<f64, _>(idx) {
-            if let Some(number) = serde_json::Number::from_f64(value) {
-                return Value::Number(number);
-            }
-        }
+        return Value::Number(number);
     }
-    if type_name.contains("BOOL") {
-        if let Ok(value) = row.try_get::<bool, _>(idx) {
-            return Value::Bool(value);
-        }
+    if type_name.contains("BOOL")
+        && let Ok(value) = row.try_get::<bool, _>(idx)
+    {
+        return Value::Bool(value);
     }
     if let Ok(value) = row.try_get::<String, _>(idx) {
         return Value::String(value);

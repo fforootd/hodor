@@ -17,7 +17,7 @@ Numbered decisions with rationale. See [ADR Index](../000-index.md) for the full
 
 | Document | What it covers |
 |---|---|
-| [Developer Experience](../design/developer-experience.md) | Zero-config, Rust-first single binary (Level 0), scaling path via storage primitives, config cascade, testing philosophy |
+| [Developer Experience](../design/developer-experience.md) | Zero-config, Rust-first single binary (Level 0), scaling path via storage roles, config cascade, testing philosophy |
 | [Design Decisions](../design/design-decisions.md) | Resolved decisions: OpenFGA, passkeys, SCIM scope, whitelabeling |
 | [Design Patterns](../design/design-patterns.md) | Unified identity, i18n rules, notification channels, schema registry |
 | [Storage Implementation Status](../design/storage-implementation-status.md) | Current-state reality check for storage: what is real, tested, partial, or still target architecture |

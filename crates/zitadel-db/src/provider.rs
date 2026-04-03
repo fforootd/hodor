@@ -180,25 +180,25 @@ fn parse_json_field<T: serde::de::DeserializeOwned>(label: &str, raw: &str) -> a
     serde_json::from_str(raw).map_err(|error| anyhow::anyhow!("parse provider {label}: {error}"))
 }
 
-fn row_to_provider(
-    row: (
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-        String,
-    ),
-) -> anyhow::Result<ProviderRecord> {
+type ProviderRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+);
+
+fn row_to_provider(row: ProviderRow) -> anyhow::Result<ProviderRecord> {
     Ok(ProviderRecord {
         id: row.0,
         org_id: row.1,
@@ -236,23 +236,7 @@ pub async fn list_providers(scoped: &ScopedDb) -> anyhow::Result<Vec<ProviderRec
          FROM providers WHERE instance_id = $1 ORDER BY display_order, display_name"
     );
 
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-        String,
-    )> = sqlx::query_as(&sql)
+    let rows: Vec<ProviderRow> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .fetch_all(scoped.pool())
         .await?;
@@ -276,23 +260,7 @@ pub async fn get_provider(scoped: &ScopedDb, id: &str) -> anyhow::Result<Option<
          FROM providers WHERE instance_id = $1 AND id = $2"
     );
 
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-        String,
-    )> = sqlx::query_as(&sql)
+    let row: Option<ProviderRow> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .bind(id)
         .fetch_optional(scoped.pool())

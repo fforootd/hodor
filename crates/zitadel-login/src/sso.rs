@@ -576,10 +576,7 @@ mod tests {
     use super::*;
     use crate::DefaultRpService;
     use zitadel_authn::{cookie::CookieConfig, password::Swapper};
-    use zitadel_storage::{
-        DefaultStatefulStorage, DefaultTransientStorage, NoopEdgeSink, SqlEdgeReadDb, SqlStateDb,
-        SqlTransientCompatKv,
-    };
+    use zitadel_storage::StorageRuntime;
 
     async fn test_state() -> LoginState {
         let db = zitadel_db::Db::open("").await.unwrap();
@@ -592,17 +589,15 @@ mod tests {
             .execute(scoped.pool())
             .await
             .unwrap();
+        let storage =
+            StorageRuntime::from_config(&zitadel_config::Config::default().storage, db.clone())
+                .await
+                .unwrap();
 
         LoginState {
             db: db.clone(),
-            stateful: Arc::new(DefaultStatefulStorage::new(
-                SqlStateDb::new(db.clone()),
-                SqlEdgeReadDb::new(db.clone()),
-            )),
-            transient: Arc::new(DefaultTransientStorage::new(
-                SqlTransientCompatKv::new(db.clone()),
-                NoopEdgeSink,
-            )),
+            stateful: storage.stateful.clone(),
+            transient: storage.transient.clone(),
             passwords: Arc::new(Swapper::dev()),
             cookie_config: Arc::new(CookieConfig::new(
                 vec!["test-secret".into()],

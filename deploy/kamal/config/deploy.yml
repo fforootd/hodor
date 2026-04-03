@@ -36,7 +36,7 @@ env:
     ZITADEL_TLS_MODE: "external"
     ZITADEL_SEED_FILE: "/etc/zitadel/seed.yaml"
   secret:
-    - ZITADEL_DATABASE_URL
+    - ZITADEL_STORAGE_STATEFUL_URL
     - ZITADEL_COOKIE_SECRETS
     - ZITADEL_ADMIN_PASSWORD
     - ZITADEL_ADMIN_PAT

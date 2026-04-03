@@ -6,7 +6,7 @@ port = 18080
 external_domain = "127.0.0.1"
 cookie_secrets = ["zitadel-e2e-cookie-secret-do-not-use-in-production"]
 
-[database]
+[storage.stateful]
 url = "sqlite://../data/zitadel-e2e.db"
 
 [observability]

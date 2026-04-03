@@ -90,7 +90,7 @@
   // ── Database Wiring ──────────────────────────────────────────────────────
   //
   // Default: D1 via outboundByHost bridge (database ID from DO config).
-  // BYODB: Turso/Postgres URL passed as ZITADEL_DATABASE_URL env var.
+  // BYODB: Turso/Postgres URL passed as ZITADEL_STORAGE_STATEFUL_URL env var.
   //
   // Required Worker secrets for D1 bridge:
   //   CLOUDFLARE_ACCOUNT_ID — Cloudflare account ID

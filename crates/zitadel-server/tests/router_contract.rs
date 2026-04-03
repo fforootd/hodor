@@ -1,9 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{
-        Arc,
-        atomic::AtomicBool,
-    },
+    sync::{Arc, atomic::AtomicBool},
 };
 
 use axum::{Router, http::HeaderMap};
@@ -43,10 +40,7 @@ async fn public_surfaces_bypass_auth_and_readyz_reflects_state() -> anyhow::Resu
     assert_eq!(ready.text(), "ready");
 
     let discovery = app
-        .get(
-            "/.well-known/openid-configuration",
-            AuthActor::Anonymous,
-        )
+        .get("/.well-known/openid-configuration", AuthActor::Anonymous)
         .await?;
     assert_eq!(discovery.status, axum::http::StatusCode::OK);
     let discovery_json = discovery.json_value();
@@ -91,7 +85,11 @@ async fn protected_routes_follow_the_current_actor_contract() -> anyhow::Result<
         "/v1/fga/model",
     ] {
         let unauth = app.get(path, AuthActor::Anonymous).await?;
-        assert_eq!(unauth.status, axum::http::StatusCode::UNAUTHORIZED, "{path}");
+        assert_eq!(
+            unauth.status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
         assert_eq!(
             unauth.json_value(),
             json!({"error": "authentication required", "code": 401}),
@@ -137,9 +135,7 @@ async fn auth_resolution_accepts_session_pat_cookie_and_oidc_tokens() -> anyhow:
     let pat = app.ctx.create_pat(&user, "auth-user-pat").await?;
     let oidc_token = app.ctx.mint_oidc_access_token_for_user(&user).await?;
 
-    let bearer_session = app
-        .get("/v1/auth/whoami", session.bearer_actor())
-        .await?;
+    let bearer_session = app.get("/v1/auth/whoami", session.bearer_actor()).await?;
     assert_eq!(bearer_session.status, axum::http::StatusCode::OK);
     assert_eq!(bearer_session.json_value()["token_type"], "session");
 
@@ -181,7 +177,10 @@ async fn auth_resolution_accepts_session_pat_cookie_and_oidc_tokens() -> anyhow:
     let mut extra_headers = HeaderMap::new();
     extra_headers.insert(
         axum::http::header::COOKIE,
-        app.ctx.cookie_header_for_token(&session.token).parse().unwrap(),
+        app.ctx
+            .cookie_header_for_token(&session.token)
+            .parse()
+            .unwrap(),
     );
     let precedence = app
         .request(
@@ -200,9 +199,7 @@ async fn auth_resolution_accepts_session_pat_cookie_and_oidc_tokens() -> anyhow:
         .transient
         .revoke_session(DEFAULT_INSTANCE_ID, &session.session_id)
         .await?;
-    let revoked = app
-        .get("/v1/auth/whoami", session.bearer_actor())
-        .await?;
+    let revoked = app.get("/v1/auth/whoami", session.bearer_actor()).await?;
     assert_eq!(revoked.status, axum::http::StatusCode::UNAUTHORIZED);
     assert_eq!(
         revoked.json_value(),
@@ -400,7 +397,10 @@ async fn sso_callback_errors_redirect_back_to_login() -> anyhow::Result<()> {
             AuthActor::Anonymous,
         )
         .await?;
-    assert_eq!(callback_error.status, axum::http::StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        callback_error.status,
+        axum::http::StatusCode::TEMPORARY_REDIRECT
+    );
     let location = callback_error
         .headers
         .get(axum::http::header::LOCATION)

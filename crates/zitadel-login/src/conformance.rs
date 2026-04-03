@@ -336,6 +336,7 @@ fn render_login_page(
     )
 }
 
+#[allow(dead_code)]
 fn render_session_reuse_page(
     auth_request_id: &str,
     identifier: &str,

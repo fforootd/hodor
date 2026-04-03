@@ -1,9 +1,9 @@
 use serde_json::Value;
 
-use super::{LoginFlowRuntimeState, NewLoginFlowState, SqlTransientCompatKv};
+use super::{LoginFlowRuntimeState, NewLoginFlowState, SqlKvStore};
 
 pub(crate) async fn create_login_flow_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     input: &NewLoginFlowState,
 ) -> anyhow::Result<()> {
@@ -25,7 +25,7 @@ pub(crate) async fn create_login_flow_impl(
 }
 
 pub(crate) async fn load_login_flow_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     flow_id: &str,
 ) -> anyhow::Result<Option<LoginFlowRuntimeState>> {
@@ -50,7 +50,7 @@ pub(crate) async fn load_login_flow_impl(
 }
 
 pub(crate) async fn set_login_flow_step_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     flow_id: &str,
     step: &str,
@@ -68,7 +68,7 @@ pub(crate) async fn set_login_flow_step_impl(
 }
 
 pub(crate) async fn advance_login_flow_to_password_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     flow_id: &str,
     user_id: &str,
@@ -90,7 +90,7 @@ pub(crate) async fn advance_login_flow_to_password_impl(
 }
 
 pub(crate) async fn update_login_flow_data_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     flow_id: &str,
     data: &Value,
@@ -110,7 +110,7 @@ pub(crate) async fn update_login_flow_data_impl(
 }
 
 pub(crate) async fn complete_login_flow_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     flow_id: &str,
 ) -> anyhow::Result<bool> {

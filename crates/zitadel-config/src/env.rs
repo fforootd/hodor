@@ -9,10 +9,10 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
     let mut overrides = Map::new();
 
     // Server
-    if let Ok(v) = env::var("ZITADEL_PORT") {
-        if let Ok(port) = v.parse::<u16>() {
-            merge_path(&mut overrides, &["server", "port"], json!(port));
-        }
+    if let Ok(v) = env::var("ZITADEL_PORT")
+        && let Ok(port) = v.parse::<u16>()
+    {
+        merge_path(&mut overrides, &["server", "port"], json!(port));
     }
     if let Ok(v) = env::var("ZITADEL_EXTERNAL_DOMAIN") {
         merge_path(
@@ -40,12 +40,27 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
         );
     }
 
-    // Database
-    if let Ok(v) = env::var("ZITADEL_DATABASE_URL") {
-        merge_path(&mut overrides, &["database", "url"], Value::String(v));
+    // Storage
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_URL") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "url"],
+            Value::String(v),
+        );
     }
-    if let Ok(v) = env::var("ZITADEL_DATABASE_MIGRATE") {
-        merge_path(&mut overrides, &["database", "migrate"], Value::String(v));
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_MIGRATE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "migrate"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_BOOTSTRAP") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "bootstrap"],
+            Value::String(v),
+        );
     }
 
     // Observability
@@ -70,14 +85,14 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_CACHE_MAX") {
-        if let Ok(value) = v.parse::<u64>() {
-            merge_path(
-                &mut overrides,
-                &["observability", "cache_max"],
-                json!(value),
-            );
-        }
+    if let Ok(v) = env::var("ZITADEL_CACHE_MAX")
+        && let Ok(value) = v.parse::<u64>()
+    {
+        merge_path(
+            &mut overrides,
+            &["observability", "cache_max"],
+            json!(value),
+        );
     }
     if let Ok(v) = env::var("ZITADEL_OTEL_ENDPOINT") {
         merge_path(
@@ -93,14 +108,14 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_ANALYTICS_ENABLED") {
-        if let Some(value) = parse_boolish(&v) {
-            merge_path(
-                &mut overrides,
-                &["observability", "sinks", "analytics", "enabled"],
-                Value::Bool(value),
-            );
-        }
+    if let Ok(v) = env::var("ZITADEL_ANALYTICS_ENABLED")
+        && let Some(value) = parse_boolish(&v)
+    {
+        merge_path(
+            &mut overrides,
+            &["observability", "sinks", "analytics", "enabled"],
+            Value::Bool(value),
+        );
     }
     if let Ok(v) = env::var("ZITADEL_ANALYTICS_DRAIN_INTERVAL") {
         merge_path(
@@ -109,14 +124,14 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_ANALYTICS_DRAIN_BATCH") {
-        if let Ok(value) = v.parse::<u32>() {
-            merge_path(
-                &mut overrides,
-                &["observability", "sinks", "analytics", "drain_batch"],
-                json!(value),
-            );
-        }
+    if let Ok(v) = env::var("ZITADEL_ANALYTICS_DRAIN_BATCH")
+        && let Ok(value) = v.parse::<u32>()
+    {
+        merge_path(
+            &mut overrides,
+            &["observability", "sinks", "analytics", "drain_batch"],
+            json!(value),
+        );
     }
     if let Ok(v) = env::var("ZITADEL_REDACTION_KEYS") {
         let keys = v
@@ -161,10 +176,10 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
     );
 
     // Dev
-    if let Ok(v) = env::var("ZITADEL_MOCK_OIDC") {
-        if let Some(value) = parse_boolish(&v) {
-            merge_path(&mut overrides, &["dev", "mock_oidc"], Value::Bool(value));
-        }
+    if let Ok(v) = env::var("ZITADEL_MOCK_OIDC")
+        && let Some(value) = parse_boolish(&v)
+    {
+        merge_path(&mut overrides, &["dev", "mock_oidc"], Value::Bool(value));
     }
     if let Ok(v) = env::var("ZITADEL_SEED_FILE") {
         merge_path(&mut overrides, &["dev", "seed_file"], Value::String(v));
@@ -183,41 +198,41 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_PASSWORD_HASHER_MEMORY_COST_KB") {
-        if let Ok(value) = v.parse::<u32>() {
-            merge_path(
-                &mut overrides,
-                &["password_hasher", "memory_cost_kb"],
-                json!(value),
-            );
-        }
+    if let Ok(v) = env::var("ZITADEL_PASSWORD_HASHER_MEMORY_COST_KB")
+        && let Ok(value) = v.parse::<u32>()
+    {
+        merge_path(
+            &mut overrides,
+            &["password_hasher", "memory_cost_kb"],
+            json!(value),
+        );
     }
 
     // OIDC
-    if let Ok(v) = env::var("ZITADEL_OIDC_ACCESS_TOKEN_LIFETIME_SECS") {
-        if let Ok(value) = v.parse::<u64>() {
-            merge_path(
-                &mut overrides,
-                &["oidc", "access_token_lifetime_secs"],
-                json!(value),
-            );
-        }
+    if let Ok(v) = env::var("ZITADEL_OIDC_ACCESS_TOKEN_LIFETIME_SECS")
+        && let Ok(value) = v.parse::<u64>()
+    {
+        merge_path(
+            &mut overrides,
+            &["oidc", "access_token_lifetime_secs"],
+            json!(value),
+        );
     }
-    if let Ok(v) = env::var("ZITADEL_OIDC_ID_TOKEN_LIFETIME_SECS") {
-        if let Ok(value) = v.parse::<u64>() {
-            merge_path(
-                &mut overrides,
-                &["oidc", "id_token_lifetime_secs"],
-                json!(value),
-            );
-        }
+    if let Ok(v) = env::var("ZITADEL_OIDC_ID_TOKEN_LIFETIME_SECS")
+        && let Ok(value) = v.parse::<u64>()
+    {
+        merge_path(
+            &mut overrides,
+            &["oidc", "id_token_lifetime_secs"],
+            json!(value),
+        );
     }
 
     // Session
-    if let Ok(v) = env::var("ZITADEL_SESSION_MAX_AGE_SECS") {
-        if let Ok(value) = v.parse::<u64>() {
-            merge_path(&mut overrides, &["session", "max_age_secs"], json!(value));
-        }
+    if let Ok(v) = env::var("ZITADEL_SESSION_MAX_AGE_SECS")
+        && let Ok(value) = v.parse::<u64>()
+    {
+        merge_path(&mut overrides, &["session", "max_age_secs"], json!(value));
     }
 
     Serialized::defaults(Value::Object(overrides))
@@ -244,14 +259,14 @@ fn merge_stream_env(overrides: &mut Map<String, Value>, stream_name: &str, prefi
             Value::Array(sinks),
         );
     }
-    if let Ok(v) = env::var(format!("{prefix}_SAMPLE_RATE")) {
-        if let Ok(value) = v.parse::<f64>() {
-            merge_path(
-                overrides,
-                &["observability", "streams", stream_name, "sample_rate"],
-                Value::from(value),
-            );
-        }
+    if let Ok(v) = env::var(format!("{prefix}_SAMPLE_RATE"))
+        && let Ok(value) = v.parse::<f64>()
+    {
+        merge_path(
+            overrides,
+            &["observability", "streams", stream_name, "sample_rate"],
+            Value::from(value),
+        );
     }
 }
 

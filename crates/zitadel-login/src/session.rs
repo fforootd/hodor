@@ -13,11 +13,14 @@ pub(crate) async fn extract_session_user(
         let part = part.trim();
         if let Some(value) = part.strip_prefix(&format!("{cookie_name}=")) {
             let token = zitadel_authn::cookie::verify(value, &state.cookie_config.secrets)?;
-            let scoped = state.db.scoped_default();
-            let session_store = zitadel_authn::session::SessionStore::new(state.db.clone());
-            let session = session_store.find_by_token(&scoped, &token).await.ok()??;
+            let session = state
+                .transient
+                .find_session_by_token(zitadel_db::DEFAULT_INSTANCE_ID, &token)
+                .await
+                .ok()??;
 
             // Load user details.
+            let scoped = state.db.scoped_default();
             let user: Option<(String, String)> = sqlx::query_as(
                 "SELECT identifier, display_name FROM users WHERE instance_id = $1 AND id = $2",
             )

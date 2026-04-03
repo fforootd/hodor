@@ -59,6 +59,7 @@ mod tests {
     use super::*;
     use axum::http::StatusCode;
     use steps::{FlowSubmitRequest, handle_identifier_step, handle_password_step};
+    use tokio::time::{Duration, sleep};
     use uuid::Uuid;
     use zitadel_authn::{
         cookie::CookieConfig,
@@ -70,18 +71,17 @@ mod tests {
     async fn test_state() -> LoginState {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        let stateful = Arc::new(zitadel_storage::DefaultStatefulStorage::new(
-            zitadel_storage::SqlStateDb::new(db.clone()),
-            zitadel_storage::SqlEdgeReadDb::new(db.clone()),
-        ));
-        let transient = Arc::new(zitadel_storage::DefaultTransientStorage::new(
-            zitadel_storage::SqlTransientCompatKv::new(db.clone()),
-            zitadel_storage::NoopEdgeSink,
-        ));
+        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        let mut config = zitadel_config::Config::default();
+        config.server.public_origin = "http://localhost:8080".into();
+        config.server.force_insecure_cookies = false;
+        let storage = zitadel_storage::StorageRuntime::from_config(&config.storage, db.clone())
+            .await
+            .unwrap();
         LoginState {
             db,
-            stateful,
-            transient,
+            stateful: storage.stateful.clone(),
+            transient: storage.transient.clone(),
             passwords: Arc::new(Swapper::dev()),
             cookie_config: Arc::new(CookieConfig::new(
                 vec!["test-secret".into()],
@@ -162,6 +162,38 @@ mod tests {
         flow_id
     }
 
+    async fn wait_for_session_count(state: &LoginState, user_id: &str, expected: i64) {
+        let scoped = state.db.scoped_default();
+        for _ in 0..40 {
+            let count: (i64,) = sqlx::query_as(
+                "SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2",
+            )
+            .bind(scoped.instance_id())
+            .bind(user_id)
+            .fetch_one(scoped.pool())
+            .await
+            .unwrap();
+
+            if count.0 == expected {
+                return;
+            }
+
+            sleep(Duration::from_millis(25)).await;
+        }
+
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2")
+                .bind(scoped.instance_id())
+                .bind(user_id)
+                .fetch_one(scoped.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            count.0, expected,
+            "session count did not converge to the expected persisted value"
+        );
+    }
+
     // ─── Happy Path ───────────────────────────────────────
 
     #[tokio::test]
@@ -233,19 +265,8 @@ mod tests {
             handle_password_step(&state, &flow_id, &pwd_req, &flow.data, &flow.redirect_uri).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
-        // Session should exist.
-        let scoped = state.db.scoped_default();
-        let count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2")
-                .bind(scoped.instance_id())
-                .bind("u1")
-                .fetch_one(scoped.pool())
-                .await
-                .unwrap();
-        assert_eq!(
-            count.0, 1,
-            "session should be created after correct password"
-        );
+        // Session should exist in the stateful store once the local sink flushes.
+        wait_for_session_count(&state, "u1", 1).await;
 
         // Flow should be complete.
         let completed = state

@@ -106,17 +106,14 @@ permissions_policy = "camera=(), microphone=(), geolocation=(), payment=()"
 cross_origin_opener = "same-origin"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DATABASE — Primary data store and startup lifecycle
+# STORAGE — Stateful store and derived storage roles
 # ═══════════════════════════════════════════════════════════════════════════════
-[database]
+[storage.stateful]
+# Previously `[database]`. Search for "database" in older docs and examples if
+# you are migrating an older local config.
+#
 # SQLite (default, good for dev/single-node/edge/homelab). Prefix with "sqlite://".
 # PostgreSQL (scale-out): "postgres://user:pass@host:5432/zitadel?sslmode=require"
-# libSQL / Turso (remote SQLite): "libsql://my-db.turso.io"
-#   Preferred auth: set ZITADEL_DATABASE_AUTH_TOKEN or TURSO_AUTH_TOKEN in env.
-#   URL query authToken is also supported but less safe for logs and config files.
-# Cloudflare D1 (edge, via HTTP proxy): "d1://d1.local"
-#   D1 requires deploying on Cloudflare Workers + Containers with the
-#   outboundByHost proxy pattern. See deploy/cloudflare-containers/README.md.
 url = "sqlite://./data/zitadel.db"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +122,7 @@ url = "sqlite://./data/zitadel.db"
 # "auto"  — run migrations before serving (default for all dialects)
 # "check" — verify schema version only, fail if behind (opt-in for production PG)
 # "skip"  — no version check, no migration (fastest cold-start for autoscaling)
-# Env: ZITADEL_DATABASE_MIGRATE
+# Env: ZITADEL_STORAGE__STATEFUL__MIGRATE
 # migrate = "auto"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,7 +130,7 @@ url = "sqlite://./data/zitadel.db"
 # ─────────────────────────────────────────────────────────────────────────────
 # "auto"  — create admin if no entities exist (default)
 # "skip"  — never bootstrap (production: admin created via 'zitadel migrate --bootstrap')
-# Env: ZITADEL_DATABASE_BOOTSTRAP
+# Env: ZITADEL_STORAGE__STATEFUL__BOOTSTRAP
 # bootstrap = "auto"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,6 +154,40 @@ url = "sqlite://./data/zitadel.db"
 #   Cloud SQL:    "postgres://user:pass@x.x.x.x:5432/zitadel?sslmode=verify-ca&sslrootcert=/etc/ssl/server-ca.pem"
 #   Supabase:     "postgres://postgres.xxx:pass@pooler.supabase.com:6543/postgres?sslmode=verify-full"
 #   Self-hosted:  "postgres://user:pass@pg-primary:5432/zitadel?sslmode=disable"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Advanced Storage Role Overrides — optional
+# ─────────────────────────────────────────────────────────────────────────────
+# Most users only set `[storage.stateful]`.
+# The runtime derives the read, KV, sink, and process-cache roles automatically:
+#   - SQLite:  read=same_connection, kv=memory, sink=channel, process_cache=memory
+#   - Postgres: read=same_primary, kv=postgres_unlogged, sink=postgres, process_cache=memory
+
+[storage.read]
+# backend = "postgres_replica"
+# url = "postgres://readonly@pg-replica:5432/zitadel"
+
+[storage.kv]
+# backend = "memory"              # default for SQLite
+# backend = "postgres_unlogged"   # default for Postgres
+# backend = "redis"               # Redis or Valkey-compatible server (not yet implemented)
+# url = "redis://localhost:6379"
+
+[storage.sink]
+# backend = "channel"             # default for SQLite
+# backend = "postgres"            # default for Postgres
+# backend = "redis"               # Redis or Valkey-compatible server (not yet implemented)
+# url = "redis://localhost:6379"
+buffer_size = 4096
+batch_size = 128
+flush_interval = "100ms"
+
+[storage.process_cache]
+backend = "memory"
+
+[storage.analytics]
+# Reserved for future dedicated analytics storage.
+# backend = "same_stateful"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OBSERVABILITY — Logging and telemetry

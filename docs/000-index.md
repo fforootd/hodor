@@ -25,7 +25,7 @@
 | 014 | Performance Testing Strategy — vCPU Scaling | Proposed | 2026-03-28 |
 | [015](adr/015-actions-catalog.md) | Actions, Templates & Catalog | Proposed | 2026-03-28 |
 | [016](adr/016-uniqueness-constraints.md) | Schema-Driven Uniqueness & Identifier Resolution | Proposed | 2026-03-28 |
-| [017](adr/017-caching-tiers.md) | Tiered Caching Architecture | Proposed | 2026-03-28 |
+| [017](adr/017-caching-tiers.md) | Process Cache Semantics | Proposed | 2026-03-28 |
 | [018](adr/018-startup-lifecycle.md) | Startup Lifecycle & Schema Migration | Proposed | 2026-03-28 |
 | [019](adr/019-server-driven-login-wc.md) | Server-Driven Login UI + Web Components | Accepted | 2026-03-28 |
 | [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Marketplace Modules | Accepted | 2026-03-29 |
@@ -54,7 +54,7 @@
 | [Developer Experience](design/developer-experience.md) | Zero-config, Rust-first single binary, config cascade, testing philosophy |
 | [Design Decisions](design/design-decisions.md) | Resolved architecture and product decisions with rationale |
 | [Design Patterns](design/design-patterns.md) | Unified identity, i18n, notifications, schemas, UI architecture |
-| [Storage Architecture](design/storage-architecture.md) | Four storage primitives (OLTP, KV, Queue, OLAP) across four deployment profiles (Level 0-3: local, scale-out, dedicated KV, multi-region). Canonical reference for data architecture. |
+| [Storage Architecture](design/storage-architecture.md) | Canonical storage role model (`storage.stateful`, `read`, `kv`, `sink`, `process_cache`, `analytics`) with derived SQLite/Postgres defaults and advanced split-topology overrides. |
 | [Storage Implementation Status](design/storage-implementation-status.md) | Reality check for the current POC: what storage tiers are actually implemented, tested, and still only documented as target architecture. |
 
 ## Guides

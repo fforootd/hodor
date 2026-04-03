@@ -72,24 +72,13 @@ impl Default for AppAccessEntry {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct AppAccessConfig {
     pub console: AppAccessEntry,
     pub admin: AppAccessEntry,
     pub api: AppAccessEntry,
     pub login: AppAccessEntry,
-}
-
-impl Default for AppAccessConfig {
-    fn default() -> Self {
-        Self {
-            console: AppAccessEntry::default(),
-            admin: AppAccessEntry::default(),
-            api: AppAccessEntry::default(),
-            login: AppAccessEntry::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

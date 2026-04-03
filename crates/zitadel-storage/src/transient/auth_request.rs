@@ -1,7 +1,7 @@
-use super::{AuthRequestRedirect, SqlTransientCompatKv};
+use super::{AuthRequestRedirect, SqlKvStore};
 
 pub(crate) async fn load_auth_request_redirect_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     auth_request_id: &str,
 ) -> anyhow::Result<Option<AuthRequestRedirect>> {
@@ -28,7 +28,7 @@ pub(crate) async fn load_auth_request_redirect_impl(
 }
 
 pub(crate) async fn complete_auth_request_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     auth_request_id: &str,
     user_id: &str,
@@ -57,7 +57,7 @@ pub(crate) async fn complete_auth_request_impl(
 }
 
 pub(crate) async fn load_auth_request_prompts_impl(
-    kv: &SqlTransientCompatKv,
+    kv: &SqlKvStore,
     instance_id: &str,
     auth_request_id: &str,
 ) -> anyhow::Result<Vec<String>> {

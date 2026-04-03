@@ -44,7 +44,8 @@ The following terms define the structure and scope of the identity intelligence 
 | **Category** | The top-level classification of an event. Stored as an indexed column, derived from the `event_type` prefix. Values: `entity`, `auth`, `session`, `token`, `request`, `log`, `signal`, `threat`, `system`. | — |
 | **Traces** | Correlated causal chains of events relying on `trace_id` and `span_id`. Provides end-to-end visibility from client SDK interactions to platform actions. | Activity / APM |
 | **Sessions** | Live authenticated state management. Bridges identities and historical events by providing a point of active security enforcement/revocation. Session metadata also carries auth provenance such as `auth_method`, `provider_id`, `provider_kind`, and `login_flow_id`. | Sessions / Grants |
-| **Cache** | A per-process SQLite database (`./data/zitadel-cache.db`) used as a durable buffer for analytics writes, settings cache, and rate limiter state. Disposable — can be deleted or run on tmpfs. Not a source of truth. | Local WAL / Sidecar cache |
+| **Process Cache** | Local read acceleration for stable data such as schemas, settings, and provider metadata. In the current POC this role is memory-only and never a source of truth. | Local in-memory cache |
+| **Analytics Cache** | A per-process SQLite database (`./data/zitadel-cache.db`) used as the durable buffer for observability drains. Disposable — can be deleted or run on tmpfs. Not a source of truth. | Local WAL / Sidecar cache |
 
 ### Event Categories
 

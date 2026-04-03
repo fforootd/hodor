@@ -190,33 +190,32 @@ pub(crate) async fn flow_create(
         } else {
             // No existing session.
             if prompts.contains(&"none".to_string()) {
-                if !req.auth_request_id.is_empty() {
-                    if let Ok(Some(auth_req)) = state
+                if !req.auth_request_id.is_empty()
+                    && let Ok(Some(auth_req)) = state
                         .transient
                         .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
                         .await
-                    {
-                        let redirect = build_auth_error_redirect(
-                            &auth_req.redirect_uri,
-                            &auth_req.state,
-                            "login_required",
-                            "prompt=none requires an existing session",
-                        );
-                        return (
-                            StatusCode::CREATED,
-                            Json(FlowStepResponse {
-                                flow_id,
-                                step: LoginStep::Complete.as_str().into(),
-                                nodes: vec![UINode::Heading {
-                                    text: "Redirecting...".into(),
-                                }],
-                                redirect_uri: Some(redirect),
-                                branding: Some(default_branding()),
-                                ..Default::default()
-                            }),
-                        )
-                            .into_response();
-                    }
+                {
+                    let redirect = build_auth_error_redirect(
+                        &auth_req.redirect_uri,
+                        &auth_req.state,
+                        "login_required",
+                        "prompt=none requires an existing session",
+                    );
+                    return (
+                        StatusCode::CREATED,
+                        Json(FlowStepResponse {
+                            flow_id,
+                            step: LoginStep::Complete.as_str().into(),
+                            nodes: vec![UINode::Heading {
+                                text: "Redirecting...".into(),
+                            }],
+                            redirect_uri: Some(redirect),
+                            branding: Some(default_branding()),
+                            ..Default::default()
+                        }),
+                    )
+                        .into_response();
                 }
 
                 // prompt=none but no session: error.
@@ -405,12 +404,8 @@ pub(crate) async fn flow_submit(
             .into_response()
         }
         "use_session" => handle_use_session(&state, &flow_id, &flow.data, &headers).await,
-        "fingerprint_submit" => {
-            handle_fingerprint_submit(&state, &flow_id, &flow, &req).await
-        }
-        "captcha_submit" => {
-            handle_captcha_submit(&state, &flow_id, &flow, &req).await
-        }
+        "fingerprint_submit" => handle_fingerprint_submit(&state, &flow_id, &flow, &req).await,
+        "captcha_submit" => handle_captcha_submit(&state, &flow_id, &flow, &req).await,
         _ => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": format!("unknown action: {}", req.action)})),
@@ -536,7 +531,7 @@ pub(crate) async fn handle_password_step(
                 },
                 redirect_uri: None,
                 branding: Some(default_branding()),
-            ..Default::default()
+                ..Default::default()
             })
             .into_response();
         }
@@ -577,7 +572,7 @@ pub(crate) async fn handle_password_step(
                 },
                 redirect_uri: None,
                 branding: Some(default_branding()),
-            ..Default::default()
+                ..Default::default()
             })
             .into_response();
         }
@@ -626,7 +621,14 @@ pub(crate) async fn handle_password_step(
 
     let created_session = match state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "", fingerprint)
+        .create_session(
+            DEFAULT_INSTANCE_ID,
+            &user.user_id,
+            &user.org_id,
+            "",
+            "",
+            fingerprint,
+        )
         .await
     {
         Ok(session) => session,
@@ -756,7 +758,10 @@ async fn handle_fingerprint_submit(
     // Return the current step unchanged — fingerprint collection is invisible to the user.
     let nodes = match flow.step.as_str() {
         "password" => {
-            let identifier = data.get("identifier").and_then(|v| v.as_str()).unwrap_or_default();
+            let identifier = data
+                .get("identifier")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
             password_step_nodes(identifier)
         }
         _ => identifier_step_nodes(),
@@ -813,7 +818,10 @@ async fn handle_captcha_submit(
 
     let nodes = match flow.step.as_str() {
         "password" => {
-            let identifier = data.get("identifier").and_then(|v| v.as_str()).unwrap_or_default();
+            let identifier = data
+                .get("identifier")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
             password_step_nodes(identifier)
         }
         _ => identifier_step_nodes(),

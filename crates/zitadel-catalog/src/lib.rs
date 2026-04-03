@@ -137,15 +137,15 @@ impl Catalog {
             .templates
             .iter()
             .filter(|t| {
-                if let Some(tf) = type_filter {
-                    if t.entry_type != tf {
-                        return false;
-                    }
+                if let Some(tf) = type_filter
+                    && t.entry_type != tf
+                {
+                    return false;
                 }
-                if let Some(tag) = tag_filter {
-                    if !t.tags.iter().any(|t| t == tag) {
-                        return false;
-                    }
+                if let Some(tag) = tag_filter
+                    && !t.tags.iter().any(|t| t == tag)
+                {
+                    return false;
                 }
                 true
             })

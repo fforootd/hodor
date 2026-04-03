@@ -1,5 +1,4 @@
 mod crypto;
-mod database;
 mod env;
 mod generators;
 mod observability;
@@ -7,12 +6,13 @@ pub mod oidc;
 pub mod password;
 mod server;
 pub mod session;
+mod storage;
 
 pub use crypto::*;
-pub use database::*;
 pub use generators::*;
 pub use observability::*;
 pub use server::*;
+pub use storage::*;
 
 use figment::{
     Figment,
@@ -27,13 +27,13 @@ use crate::env::flat_env_overrides;
 /// Runtime configuration for the Zitadel server.
 /// Covers infrastructure-level settings only.
 /// Domain-specific configuration (policies, whitelabeling) lives in seed YAML.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Config {
     pub server: ServerConfig,
     pub tls: TlsConfig,
     pub encryption: EncryptionConfig,
-    pub database: DatabaseConfig,
+    pub storage: StorageConfig,
     pub observability: ObservabilityConfig,
     pub workers: WorkersConfig,
     pub rate_limit: RateLimitConfig,
@@ -46,38 +46,19 @@ pub struct Config {
     pub generators: GeneratorsConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            tls: TlsConfig::default(),
-            encryption: EncryptionConfig::default(),
-            database: DatabaseConfig::default(),
-            observability: ObservabilityConfig::default(),
-            workers: WorkersConfig::default(),
-            rate_limit: RateLimitConfig::default(),
-            catalog: CatalogConfig::default(),
-            dev: DevConfig::default(),
-            password_hasher: PasswordHasherConfig::default(),
-            secret_hasher: SecretHasherConfig::default(),
-            oidc: OidcConfig::default(),
-            session: SessionConfig::default(),
-            generators: GeneratorsConfig::default(),
-        }
-    }
-}
-
 impl Config {
     /// Load config from an optional TOML file path, with env var overlays.
     /// If path is None, only defaults + env vars are used.
     ///
     /// Environment variables use ZITADEL_ prefix with __ for nesting:
     ///   ZITADEL_SERVER__PORT=9090
-    ///   ZITADEL_DATABASE__URL=postgres://...
+    ///   ZITADEL_STORAGE__STATEFUL__URL=postgres://...
     ///
     /// Flat env vars from the Go version are also supported:
-    ///   ZITADEL_PORT, ZITADEL_DATABASE_URL, etc.
+    ///   ZITADEL_PORT, ZITADEL_STORAGE_STATEFUL_URL, etc.
+    #[allow(clippy::result_large_err)]
     pub fn load(path: Option<&Path>) -> Result<Self, figment::Error> {
+        validate_no_legacy_database_config(path).map_err(figment::Error::from)?;
         let mut figment = Figment::from(Serialized::defaults(Config::default()));
 
         if let Some(p) = path {
@@ -109,6 +90,36 @@ impl Config {
             || !self.dev.seed_file.is_empty()
             || self.server.external_domain == "localhost"
     }
+}
+
+fn validate_no_legacy_database_config(path: Option<&Path>) -> Result<(), String> {
+    if let Some(path) = path {
+        let raw = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let parsed: toml::Value = raw.parse().map_err(|e: toml::de::Error| e.to_string())?;
+        if parsed.get("database").is_some() {
+            return Err(
+                "legacy [database] config is no longer supported; move it to [storage.stateful]"
+                    .into(),
+            );
+        }
+    }
+
+    for key in [
+        "ZITADEL_DATABASE__URL",
+        "ZITADEL_DATABASE__MIGRATE",
+        "ZITADEL_DATABASE__BOOTSTRAP",
+        "ZITADEL_DATABASE_URL",
+        "ZITADEL_DATABASE_MIGRATE",
+        "ZITADEL_DATABASE_BOOTSTRAP",
+    ] {
+        if std::env::var_os(key).is_some() {
+            return Err(format!(
+                "legacy {key} is no longer supported; use ZITADEL_STORAGE__STATEFUL__URL, ZITADEL_STORAGE__STATEFUL__MIGRATE, or ZITADEL_STORAGE__STATEFUL__BOOTSTRAP"
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 pub fn reference_toml() -> &'static str {
@@ -181,12 +192,12 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(cfg.server.port, 8080);
         assert_eq!(cfg.server.external_domain, "localhost");
-        assert_eq!(cfg.database.url, "sqlite://./data/zitadel.db");
+        assert_eq!(cfg.storage.stateful.url, "sqlite://./data/zitadel.db");
         assert_eq!(cfg.observability.log_level, "info");
         assert_eq!(cfg.observability.streams.request.mode, "sampled");
         assert_eq!(cfg.observability.streams.request.sample_rate, 0.01);
-        assert_eq!(cfg.database.resolve_migrate_mode(), "auto");
-        assert_eq!(cfg.database.resolve_bootstrap_mode(), "auto");
+        assert_eq!(cfg.storage.stateful.resolve_migrate_mode(), "auto");
+        assert_eq!(cfg.storage.stateful.resolve_bootstrap_mode(), "auto");
     }
 
     #[test]
@@ -201,7 +212,7 @@ mod tests {
         let schema = Config::json_schema_string();
         assert!(schema.contains("\"Config\""));
         assert!(schema.contains("\"ServerConfig\""));
-        assert!(schema.contains("\"DatabaseConfig\""));
+        assert!(schema.contains("\"StorageConfig\""));
         assert!(schema.contains("\"PasswordHasherConfig\""));
         assert!(schema.contains("\"OidcConfig\""));
         assert!(schema.contains("\"SessionConfig\""));
@@ -229,7 +240,7 @@ mod tests {
     fn reference_toml_loads() {
         let cfg: Config = toml::from_str(reference_toml()).expect("reference TOML should parse");
         assert_eq!(cfg.server.port, 8080);
-        assert_eq!(cfg.database.url, "sqlite://./data/zitadel.db");
+        assert_eq!(cfg.storage.stateful.url, "sqlite://./data/zitadel.db");
         assert_eq!(cfg.observability.log_level, "info");
         assert_eq!(cfg.observability.cache_path, "./data/zitadel-cache.db");
         assert_eq!(cfg.observability.streams.request.mode, "sampled");

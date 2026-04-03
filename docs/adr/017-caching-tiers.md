@@ -1,185 +1,118 @@
-# ADR-017: Tiered Caching Architecture
+# ADR-017: Process Cache Semantics
 
 **Status**: Proposed  
 **Date**: 2026-03-28  
 **Builds on**: ADR-010 (Three-Tier Data Architecture)  
-**Related**: [Glossary](../GLOSSARY.md), [Event Pipeline](../architecture/event-pipeline.md)
+**Related**: [Storage Architecture](../design/storage-architecture.md), [Glossary](../GLOSSARY.md)
 
 ## Context
 
-Zitadel is a single Go binary (~30MB) that must cache effectively without requiring external infrastructure by default (Level 0). As deployments scale through [deployment profiles](../design/storage-architecture.md#deployment-profiles) (Level 0-3), caching needs vary in scope, durability, and consistency requirements. The L3 shared cache tier described here is now formalized as the **EdgeKV** primitive in the [Storage Architecture](../design/storage-architecture.md).
+The earlier cache ADR mixed together several different concerns:
 
-This ADR defines a four-tier caching architecture where each tier serves a distinct purpose, and operators can opt-in to higher tiers as their scale demands.
+- local read caching
+- shared transient auth state
+- analytics buffering
+- Redis as a generic “escape hatch”
 
-## Four Cache Tiers
+That made the storage story harder to reason about. The storage reset now defines explicit runtime roles:
 
-```
-L1: In-Database      — always available, zero config
-L2: In-Process        — per-instance, zero network overhead
-L3: Shared (opt-in)   — cross-instance coordination
-L4: HTTP / CDN        — client-side, automatic
-```
+- `stateful`
+- `read`
+- `kv`
+- `sink`
+- `process_cache`
+- `analytics`
 
-### L1: In-Database
-
-Available in every deployment. Uses database features to accelerate repeated reads.
-
-| Technique | What | When |
-|---|---|---|
-| **Covering indexes** | Domain→org lookup, event_type+category | Already exists |
-| **Materialized views** | Entity counts per schema_type, login trend aggregates | Refresh on mutation event |
-
-### L2: In-Process (Zero Network)
-
-Every Zitadel instance maintains a local cache — no network calls, no external deps.
-
-#### SQLite Cache (`./data/zitadel-cache.db`)
-
-The existing log buffer expands into a general-purpose local cache:
-
-```sql
--- Existing: log buffer (ring buffer for analytics)
-CREATE TABLE IF NOT EXISTS log_buffer (...);
-
--- New: generic key-value cache with TTL
-CREATE TABLE IF NOT EXISTS kv_cache (
-    key        TEXT PRIMARY KEY,
-    namespace  TEXT NOT NULL DEFAULT '',
-    value      TEXT NOT NULL,
-    ttl_secs   INTEGER NOT NULL DEFAULT 60,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- New: analytics query result cache (LRU, 1000 max)
-CREATE TABLE IF NOT EXISTS query_cache (
-    query_hash TEXT PRIMARY KEY,
-    result     TEXT NOT NULL,
-    row_count  INTEGER NOT NULL,
-    ttl_secs   INTEGER NOT NULL DEFAULT 30,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
-
-**What lives in L2:**
-
-| Data | Store | Eviction | Persistence |
-|---|---|---|---|
-| Log buffer | SQLite `log_buffer` | Ring buffer (50K) | ✅ Persistent |
-| Schema cache | SQLite `kv_cache` | TTL 60s + event | ✅ Persistent |
-| Settings cache | SQLite `kv_cache` | TTL 30s + event | ✅ Persistent |
-| OIDC Discovery | SQLite `kv_cache` | TTL 5min | ✅ Persistent |
-| JWKS | SQLite `kv_cache` | TTL 5min + event | ✅ Persistent |
-| Domain → Org | SQLite `kv_cache` | TTL 5min + event | ✅ Persistent |
-| Query results | SQLite `query_cache` | TTL 30s (flat), LRU 1000 | ✅ Persistent |
-| Rate limiter | Go `sync.Map` | TTL (bucket window), LRU | ❌ Ephemeral |
-| Compiled expr | Go `sync.Map` | LRU (500) | ❌ Ephemeral |
-| FGA batch | Go per-request | Per-request lifecycle | ❌ Ephemeral |
-
-#### Analytics Query Caching
-
-The Explore SQL editor and dashboard use expensive queries (`COUNT(*)`, `GROUP BY`). Query results are cached with a flat 30-second TTL:
-
-1. Hash the normalized SQL → check `query_cache`
-2. If hit and not expired → return cached result
-3. If miss → execute query → store result → return
-
-Query caching is safe because analytics data is append-only and slight staleness is expected.
-
-#### Invalidation
-
-SQLite cache entries are invalidated by domain events via the EventBus:
-- `schema.updated` → invalidate schema cache
-- `settings.updated` → invalidate settings cache
-- `org.domain.*` → invalidate domain→org cache
-- Key rotation events → invalidate JWKS cache
-
-### L3: Shared (Escape Hatch, Opt-In)
-
-Redis/Valkey is positioned as an **escape hatch** — only needed when L1+L2 can't keep up in multi-instance deployments:
-
-| When L3 is needed | Why |
-|---|---|
-| Session tokens across 5+ instances | Each instance caches separately → stale reads on revocation |
-| Rate limiting across instances | In-memory buckets aren't shared → limits reset on different instance |
-| Auth request state across instances | Login started on instance A, callback lands on instance B |
-
-```toml
-[cache]
-backend = "memory"    # default: L1+L2 only (zero-config)
-# backend = "redis"   # adds L3 for specific cross-instance state
-# redis_url = "redis://localhost:6379"
-```
-
-When `backend = "redis"`, **only specific caches** are promoted:
-- Session token → session validation
-- Rate limiter buckets
-- Auth request state
-
-Everything else stays in L2. Redis is not a blanket cache — it's targeted at cross-instance consistency.
-
-### L4: HTTP / CDN (Client-Side)
-
-Automatic caching via HTTP headers:
-
-| Header | What | Value |
-|---|---|---|
-| `ETag` | OIDC Discovery, JWKS, schema definitions | Hash of content |
-| `Cache-Control` | Static UI assets | `max-age=3600, public` |
-| `Cache-Control` | API responses | `no-cache` (revalidate via ETag) |
-
-## Cache Mechanics
-
-### Eviction Policies
-
-| Policy | Description | When to use |
-|---|---|---|
-| **TTL** | Entries expire after a fixed duration | Most caches |
-| **LRU** | Least Recently Used eviction at capacity | In-memory maps, bounded caches |
-| **Ring Buffer** | Oldest dropped when max reached | Log buffer |
-| **Event-Driven** | Invalidated by domain events | Settings, schemas |
-
-### Per-Item Mechanics
-
-| Data | Eviction | Persistence | Consistency | Invalidation |
-|---|---|---|---|---|
-| **Log buffer** | Ring buffer (50K) | ✅ SQLite | Eventual | Background drain |
-| **Schema cache** | TTL 60s + event | ✅ SQLite | Read-your-writes | `schema.updated` |
-| **Settings cache** | TTL 30s + event | ✅ SQLite | Eventual | `settings.updated` |
-| **Query results** | TTL 30s | ✅ SQLite | Eventual | TTL only |
-| **Rate limiter** | TTL (bucket) | ❌ Ephemeral | Strong | GC timer |
-| **Compiled expr** | LRU (500) | ❌ Ephemeral | Strong | `settings.updated` |
-| **Session tokens** | TTL 5min | ❌ or Redis | Eventual | `session.revoked` |
-
-### Generic Interface
-
-All caches implement a common interface for backend swappability:
-
-```go
-type Cache[K comparable, V any] interface {
-    Get(ctx context.Context, key K) (V, bool)
-    Set(ctx context.Context, key K, value V, opts ...CacheOption) error
-    Delete(ctx context.Context, key K) error
-    Clear(ctx context.Context) error
-}
-
-func WithTTL(d time.Duration) CacheOption
-func WithMaxEntries(n int) CacheOption  // LRU
-```
+This ADR now narrows its scope to `ProcessCache` only.
 
 ## Decision
 
-1. **L1+L2 are the default** — zero external deps, single binary promise preserved
-2. **L3 (Redis) is opt-in** — escape hatch for multi-instance consistency
-3. **L4 is automatic** — ETag and Cache-Control added to cacheable endpoints
-4. **Flat 30s TTL for query cache** — simple, revisit after load tests
-5. **PG unlogged tables** — deferred to post-performance-testing
-6. **Cold start / start-without-migrations** — deferred to separate devex workstream
+`ProcessCache` is a local, per-process read-acceleration layer.
+
+It is:
+
+- optional
+- local-only
+- never a source of truth
+- never a distributed correctness mechanism
+
+It is not:
+
+- the transient auth state store
+- the sink buffer
+- the analytics SQLite buffer
+
+## Role Boundaries
+
+| Role | Owns | Does not own |
+|---|---|---|
+| `process_cache` | local read acceleration | distributed session/auth correctness |
+| `kv` | transient auth state, TTL, consume-once behavior | durable retained history |
+| `sink` | buffering, replay, ingestion into durable state | local read acceleration |
+| observability cache | analytics drain buffering | general app cache semantics |
+
+This separation is intentional. It keeps “cache” from becoming a catch-all word for every fast path.
+
+## Default Implementation
+
+The default implementation in this phase is:
+
+- backend: `memory`
+- scope: per process
+- lifecycle: disposable
+
+The role exists in config now:
+
+```toml
+[storage.process_cache]
+backend = "memory"
+```
+
+Only `memory` is implemented in this pass.
+
+## Candidate Uses
+
+`ProcessCache` is appropriate for:
+
+- domain-to-org lookups
+- provider metadata
+- schema and settings reads
+- local query/result caching where stale reads are acceptable
+
+`ProcessCache` is not appropriate for:
+
+- shared sessions across instances
+- auth request callbacks that may land on another instance
+- consume-once security state
+- durable buffering before ingest
+
+Those belong to `kv` or `sink`, not `process_cache`.
+
+## SQLite-Backed Cache
+
+A SQLite-backed local cache remains a valid future optimization, but it is not the default runtime for this pass.
+
+If added later, it should still preserve the same semantics:
+
+- local-only
+- disposable
+- not a correctness dependency
+
+That makes it useful for:
+
+- larger local caches than in-memory LRU alone
+- faster warm starts on one machine
+- bounded query/result caches
+
+But even then it must remain distinct from:
+
+- `storage.kv`
+- `storage.sink`
+- `observability.cache_path`
 
 ## Consequences
 
-- **Zero-config caching** — SQLite cache works on first run, no Redis needed
-- **Graceful scaling** — add Redis when needed, not before
-- **tmpfs compatible** — SQLite cache can be placed on tmpfs for in-memory speed
-- **Disposable cache** — delete `./data/zitadel-cache.db` at any time, no data loss (just refill delay)
-- **Query caching reduces DB load** — dashboard pages served from cache
-- **ETag reduces network** — unchanged OIDC Discovery returns 304
+- the common storage story is clearer
+- Redis/Valkey is positioned under `storage.kv` or `storage.sink`, not as a blanket cache
+- the observability cache can keep its own lifecycle and settings
+- future SQLite-backed local caching can be added without re-blurring the role model

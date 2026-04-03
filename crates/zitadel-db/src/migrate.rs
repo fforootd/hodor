@@ -144,7 +144,7 @@ pub async fn check_version(db: &Db) -> anyhow::Result<()> {
     // Check if version table exists.
     let current: i64 =
         match sqlx::query_as::<_, (i64,)>("SELECT COALESCE(MAX(version), 0) FROM _schema_version")
-            .fetch_one(&*pool)
+            .fetch_one(pool)
             .await
         {
             Ok(row) => row.0,
