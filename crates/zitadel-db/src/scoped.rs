@@ -63,6 +63,14 @@ impl ScopedDb {
         format!("CASE WHEN {expr} THEN 1 ELSE 0 END")
     }
 
+    /// Convert a timestamp expression into unix epoch seconds.
+    pub fn epoch_seconds(&self, expr: &str) -> String {
+        match self.dialect {
+            Dialect::Postgres => format!("CAST(EXTRACT(EPOCH FROM {expr}) AS BIGINT)"),
+            Dialect::Sqlite => format!("CAST(strftime('%s', {expr}) AS INTEGER)"),
+        }
+    }
+
     /// Returns dialect-specific current timestamp expression.
     pub fn timestamp_now(&self) -> &str {
         "CURRENT_TIMESTAMP"

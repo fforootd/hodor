@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js perf-db perf-db-sqlite perf-db-postgres
+.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke conformance oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js perf-db perf-db-sqlite perf-db-postgres
 
 SEED ?= frontend
 JS_WORKSPACE_MANIFESTS := package.json package-lock.json web/package.json e2e/package.json packages/client-js/package.json
@@ -37,10 +37,11 @@ help:
 		'  test          Run the Rust workspace test suite (prefers cargo nextest)' \
 		'  test-web      Run web Vitest tests' \
 		'  e2e-smoke     Run Playwright smoke tests' \
-		'  test-e2e      Run the full Playwright suite' \
-		'  oidc-conformance-op Run the Dockerized OIDC provider conformance lane' \
-		'  oidc-conformance-rp Run the current RP OIDC daily regression lane' \
-		'  oidc-conformance Run OIDC daily coverage (OIDF OP + RP regression by default)' \
+		'  test-e2e      Run the extended Playwright suite' \
+		'  conformance   Alias for oidc-conformance' \
+		'  oidc-conformance-op Run the Compliance OIDC provider lane' \
+		'  oidc-conformance-rp Run the Compliance OIDC RP regression lane' \
+		'  oidc-conformance Run the Compliance OIDC aggregate lane (OP + RP by default)' \
 		'  oidc-conformance-clean Stop and remove local OIDC conformance containers' \
 		'  perf-db-sqlite Run the SQLite database performance harness' \
 		'  perf-db-postgres Run the Postgres database performance harness (PG URL optional)' \
@@ -184,25 +185,43 @@ perf-db-postgres: ensure-webdist
 perf-db: perf-db-sqlite perf-db-postgres
 
 # Run E2E browser tests (Playwright).
-test-e2e: node_modules web
-	cargo build -p zitadel
+test-e2e: node_modules
+	@if [ -z "$${ZITADEL_E2E_BINARY:-}" ]; then \
+		$(MAKE) web; \
+		cargo build -p zitadel; \
+	else \
+		echo "→ using prepared zitadel binary $${ZITADEL_E2E_BINARY}"; \
+	fi
 	npm test -w e2e
 
 # Run Playwright smoke tests.
-e2e-smoke: node_modules web
-	cargo build -p zitadel
+e2e-smoke: node_modules
+	@if [ -z "$${ZITADEL_E2E_BINARY:-}" ]; then \
+		$(MAKE) web; \
+		cargo build -p zitadel; \
+	else \
+		echo "→ using prepared zitadel binary $${ZITADEL_E2E_BINARY}"; \
+	fi
 	npm run test:smoke -w e2e
+
+# Back-compat alias for the top-level conformance entrypoint.
+conformance: oidc-conformance
 
 # Run the Dockerized OIDC provider conformance lane.
 oidc-conformance-op:
 	./conformance/oidc/scripts/run-op.sh
 
-# Run the current RP daily regression lane.
-oidc-conformance-rp: node_modules web
-	cargo build -p zitadel
+# Run the current Compliance OIDC RP regression lane.
+oidc-conformance-rp: node_modules
+	@if [ -z "$${ZITADEL_E2E_BINARY:-}" ]; then \
+		$(MAKE) web; \
+		cargo build -p zitadel; \
+	else \
+		echo "→ using prepared zitadel binary $${ZITADEL_E2E_BINARY}"; \
+	fi
 	./conformance/oidc/scripts/run-rp.sh
 
-# Run OIDC daily coverage. Set OIDC_CONFORMANCE_SURFACE=op|rp|both (default both).
+# Run Compliance OIDC. Set OIDC_CONFORMANCE_SURFACE=op|rp|both (default both).
 oidc-conformance:
 	@surface="$${OIDC_CONFORMANCE_SURFACE:-both}"; \
 	case "$$surface" in \

@@ -145,6 +145,7 @@ pub(crate) async fn login(
                 &req.auth_request_id,
                 &user.user_id,
                 &code,
+                Some(&created_session.created_at),
             )
             .await
         {

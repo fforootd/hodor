@@ -11,7 +11,7 @@ use zitadel_storage::{LoginFlowRuntimeState, NewLoginFlowState};
 
 use crate::LoginState;
 use crate::redirect::{build_auth_error_redirect, build_auth_redirect};
-use crate::session::extract_session_user;
+use crate::session::{extract_session_user, now_epoch_seconds, session_satisfies_max_age};
 use crate::ui::{
     UINode, default_branding, identifier_step_nodes, password_step_nodes, session_reuse_nodes,
 };
@@ -265,78 +265,120 @@ pub(crate) async fn flow_create(
     let trusted_user = extract_session_user(&state, &headers).await;
 
     // Load OIDC prompt from the auth_request if present.
-    let prompts = if !req.auth_request_id.is_empty() {
+    let requirements = if !req.auth_request_id.is_empty() {
         state
             .transient
             .load_auth_request_prompts(DEFAULT_INSTANCE_ID, &req.auth_request_id)
             .await
             .unwrap_or_default()
     } else {
-        vec![]
+        Default::default()
     };
+    let prompts = requirements.prompt;
+    let max_age = requirements.max_age;
+    let now = now_epoch_seconds();
 
     // Determine initial step based on session + prompt.
-    let (initial_step, initial_nodes) =
-        if let Some((ref user_id, ref identifier, ref display_name)) = trusted_user {
-            let allow_reuse = !prompts.contains(&"login".to_string())
-                && !prompts.contains(&"select_account".to_string());
-            let silent = prompts.contains(&"none".to_string());
+    let (initial_step, initial_nodes) = if let Some(ref trusted_user) = trusted_user {
+        let allow_reuse = !prompts.contains(&"login".to_string())
+            && !prompts.contains(&"select_account".to_string());
+        let silent = prompts.contains(&"none".to_string());
+        let session_fresh =
+            session_satisfies_max_age(trusted_user.authenticated_at_epoch, max_age, now);
+        let can_reuse = allow_reuse && session_fresh;
 
-            if silent && allow_reuse {
-                // prompt=none: silently reuse session, complete the OIDC request immediately.
-                if !req.auth_request_id.is_empty() {
-                    let code = Uuid::new_v4().to_string();
-                    let _ = state
-                        .transient
-                        .complete_auth_request(
-                            DEFAULT_INSTANCE_ID,
-                            &req.auth_request_id,
-                            user_id,
-                            &code,
-                        )
-                        .await;
-                    if let Ok(Some(auth_req)) = state
-                        .transient
-                        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
-                        .await
-                    {
-                        let redirect =
-                            build_auth_redirect(&auth_req.redirect_uri, &auth_req.state, &code);
-                        return (
-                            StatusCode::CREATED,
-                            Json(FlowStepResponse {
-                                flow_id,
-                                step: LoginStep::Complete.as_str().into(),
-                                nodes: vec![UINode::Heading {
-                                    text: "Redirecting...".into(),
-                                }],
-                                redirect_uri: Some(redirect),
-                                branding: Some(default_branding()),
-                                ..Default::default()
-                            }),
-                        )
-                            .into_response();
-                    }
+        if silent && can_reuse {
+            // prompt=none: silently reuse session, complete the OIDC request immediately.
+            if !req.auth_request_id.is_empty() {
+                let code = Uuid::new_v4().to_string();
+                let _ = state
+                    .transient
+                    .complete_auth_request(
+                        DEFAULT_INSTANCE_ID,
+                        &req.auth_request_id,
+                        &trusted_user.user_id,
+                        &code,
+                        Some(&trusted_user.authenticated_at),
+                    )
+                    .await;
+                if let Ok(Some(auth_req)) = state
+                    .transient
+                    .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+                    .await
+                {
+                    let redirect =
+                        build_auth_redirect(&auth_req.redirect_uri, &auth_req.state, &code);
+                    return (
+                        StatusCode::CREATED,
+                        Json(FlowStepResponse {
+                            flow_id,
+                            step: LoginStep::Complete.as_str().into(),
+                            nodes: vec![UINode::Heading {
+                                text: "Redirecting...".into(),
+                            }],
+                            redirect_uri: Some(redirect),
+                            branding: Some(default_branding()),
+                            ..Default::default()
+                        }),
+                    )
+                        .into_response();
                 }
-                (LoginStep::Identifier, identifier_step_nodes())
-            } else if allow_reuse {
-                // Session exists, prompt allows reuse: show session_reuse step.
-                (
-                    LoginStep::SessionReuse,
-                    session_reuse_nodes(identifier, display_name),
-                )
-            } else {
-                // prompt=login: force fresh login.
-                (LoginStep::Identifier, identifier_step_nodes())
             }
+            (LoginStep::Identifier, identifier_step_nodes())
+        } else if can_reuse {
+            // Session exists, prompt allows reuse: show session_reuse step.
+            (
+                LoginStep::SessionReuse,
+                session_reuse_nodes(&trusted_user.identifier, &trusted_user.display_name),
+            )
+        } else if silent {
+            if !req.auth_request_id.is_empty() {
+                if let Ok(Some(auth_req)) = state
+                    .transient
+                    .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+                    .await
+                {
+                    let redirect = build_auth_error_redirect(
+                        &auth_req.redirect_uri,
+                        &auth_req.state,
+                        "login_required",
+                        "prompt=none requires a recent session",
+                    );
+                    return (
+                        StatusCode::CREATED,
+                        Json(FlowStepResponse {
+                            flow_id,
+                            step: LoginStep::Complete.as_str().into(),
+                            nodes: vec![UINode::Heading {
+                                text: "Redirecting...".into(),
+                            }],
+                            redirect_uri: Some(redirect),
+                            branding: Some(default_branding()),
+                            ..Default::default()
+                        }),
+                    )
+                        .into_response();
+                }
+            }
+
+            (
+                LoginStep::Identifier,
+                vec![UINode::Error {
+                    message: "A fresh sign-in is required.".into(),
+                }],
+            )
         } else {
-            // No existing session.
-            if prompts.contains(&"none".to_string()) {
-                if !req.auth_request_id.is_empty()
-                    && let Ok(Some(auth_req)) = state
-                        .transient
-                        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
-                        .await
+            // prompt=login or stale session: force fresh login.
+            (LoginStep::Identifier, identifier_step_nodes())
+        }
+    } else {
+        // No existing session.
+        if prompts.contains(&"none".to_string()) {
+            if !req.auth_request_id.is_empty() {
+                if let Ok(Some(auth_req)) = state
+                    .transient
+                    .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+                    .await
                 {
                     let redirect = build_auth_error_redirect(
                         &auth_req.redirect_uri,
@@ -359,19 +401,20 @@ pub(crate) async fn flow_create(
                     )
                         .into_response();
                 }
-
-                // prompt=none but no session: error.
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": "login_required",
-                        "error_description": "prompt=none requires an existing session",
-                    })),
-                )
-                    .into_response();
             }
-            (LoginStep::Identifier, identifier_step_nodes())
-        };
+
+            // prompt=none but no session: error.
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "login_required",
+                    "error_description": "prompt=none requires a recent session",
+                })),
+            )
+                .into_response();
+        }
+        (LoginStep::Identifier, identifier_step_nodes())
+    };
 
     let initial_step_str = initial_step.as_str().to_string();
 
@@ -430,8 +473,8 @@ pub(crate) async fn flow_create(
     if !req.auth_request_id.is_empty() {
         data["auth_request_id"] = serde_json::Value::String(req.auth_request_id.clone());
     }
-    if let Some((ref user_id, _, _)) = trusted_user {
-        data["trusted_user_id"] = serde_json::Value::String(user_id.clone());
+    if let Some(ref trusted_user) = trusted_user {
+        data["trusted_user_id"] = serde_json::Value::String(trusted_user.user_id.clone());
     }
 
     if let Err(e) = state
@@ -906,7 +949,13 @@ pub(crate) async fn handle_password_step(
         let code = Uuid::new_v4().to_string();
         if let Err(e) = state
             .transient
-            .complete_auth_request(DEFAULT_INSTANCE_ID, auth_request_id, &user.user_id, &code)
+            .complete_auth_request(
+                DEFAULT_INSTANCE_ID,
+                auth_request_id,
+                &user.user_id,
+                &code,
+                Some(&created_session.created_at),
+            )
             .await
         {
             return (
@@ -1182,7 +1231,7 @@ pub(crate) async fn handle_use_session(
     let current_user = extract_session_user(state, headers).await;
     let session_valid = current_user
         .as_ref()
-        .map(|(uid, _, _)| uid == trusted_user_id)
+        .map(|session| session.user_id == trusted_user_id)
         .unwrap_or(false);
 
     if trusted_user_id.is_empty() || !session_valid {
@@ -1218,11 +1267,45 @@ pub(crate) async fn handle_use_session(
         .into_response();
     }
 
+    let requirements = state
+        .transient
+        .load_auth_request_prompts(DEFAULT_INSTANCE_ID, auth_request_id)
+        .await
+        .unwrap_or_default();
+    let current_user = current_user.expect("validated current session");
+    if !session_satisfies_max_age(
+        current_user.authenticated_at_epoch,
+        requirements.max_age,
+        now_epoch_seconds(),
+    ) {
+        return Json(FlowStepResponse {
+            flow_id: flow_id.to_string(),
+            step: LoginStep::Identifier.as_str().into(),
+            nodes: {
+                let mut n = vec![UINode::Error {
+                    message: "A fresh sign-in is required.".into(),
+                }];
+                n.extend(identifier_step_nodes());
+                n
+            },
+            redirect_uri: None,
+            branding: Some(default_branding()),
+            ..Default::default()
+        })
+        .into_response();
+    }
+
     // Complete the OIDC auth request with the trusted user.
     let code = Uuid::new_v4().to_string();
     if let Err(e) = state
         .transient
-        .complete_auth_request(DEFAULT_INSTANCE_ID, auth_request_id, trusted_user_id, &code)
+        .complete_auth_request(
+            DEFAULT_INSTANCE_ID,
+            auth_request_id,
+            trusted_user_id,
+            &code,
+            Some(&current_user.authenticated_at),
+        )
         .await
     {
         return (

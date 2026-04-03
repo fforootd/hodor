@@ -1,0 +1,20 @@
+[
+  {
+    "test-name": "oidcc-scope-address",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "comment": "Address scope and claims are not implemented in the current OP profile."
+  },
+  {
+    "test-name": "oidcc-scope-phone",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "comment": "Phone scope and claims are not implemented in the current OP profile."
+  },
+  {
+    "test-name": "oidcc-scope-all",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "comment": "Address and phone claims remain intentionally unsupported in the current OP profile."
+  }
+]

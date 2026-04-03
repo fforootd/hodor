@@ -11,7 +11,7 @@ use zitadel_db::DEFAULT_INSTANCE_ID;
 use crate::{
     LoginState,
     redirect::{build_auth_error_redirect, build_auth_redirect},
-    session::extract_session_user,
+    session::{extract_session_user, now_epoch_seconds, session_satisfies_max_age},
 };
 
 #[derive(Deserialize, Default)]
@@ -53,12 +53,12 @@ pub(crate) async fn login_get(
         );
     }
 
-    let prompts = match state
+    let requirements = match state
         .transient
         .load_auth_request_prompts(DEFAULT_INSTANCE_ID, &query.auth_request_id)
         .await
     {
-        Ok(prompts) => prompts,
+        Ok(requirements) => requirements,
         Err(_) => {
             return html_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -67,13 +67,30 @@ pub(crate) async fn login_get(
         }
     };
 
+    let prompts = requirements.prompt;
     let allow_reuse =
         !prompts.contains(&"login".to_string()) && !prompts.contains(&"select_account".to_string());
     let silent = prompts.contains(&"none".to_string());
 
-    if let Some((user_id, _, _)) = extract_session_user(&state, &headers).await {
-        if allow_reuse {
-            return complete_auth_request_redirect(&state, &query.auth_request_id, &user_id).await;
+    if let Some(session_user) = extract_session_user(&state, &headers).await {
+        let can_reuse = allow_reuse
+            && session_satisfies_max_age(
+                session_user.authenticated_at_epoch,
+                requirements.max_age,
+                now_epoch_seconds(),
+            );
+        if can_reuse {
+            return complete_auth_request_redirect(
+                &state,
+                &query.auth_request_id,
+                &session_user.user_id,
+                Some(&session_user.authenticated_at),
+            )
+            .await;
+        }
+        if silent {
+            return auth_error_redirect_response(&state, &query.auth_request_id, "login_required")
+                .await;
         }
     } else if silent {
         return auth_error_redirect_response(&state, &query.auth_request_id, "login_required")
@@ -103,7 +120,7 @@ pub(crate) async fn login_post(
     }
 
     if form.action == "use_session" {
-        let Some((user_id, _, _)) = extract_session_user(&state, &headers).await else {
+        let Some(session_user) = extract_session_user(&state, &headers).await else {
             return html_response(
                 StatusCode::UNAUTHORIZED,
                 render_login_page(
@@ -113,7 +130,40 @@ pub(crate) async fn login_post(
                 ),
             );
         };
-        return complete_auth_request_redirect(&state, &form.auth_request_id, &user_id).await;
+        let requirements = match state
+            .transient
+            .load_auth_request_prompts(DEFAULT_INSTANCE_ID, &form.auth_request_id)
+            .await
+        {
+            Ok(requirements) => requirements,
+            Err(_) => {
+                return html_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    render_error_page("Failed to load authorization request"),
+                );
+            }
+        };
+        if !session_satisfies_max_age(
+            session_user.authenticated_at_epoch,
+            requirements.max_age,
+            now_epoch_seconds(),
+        ) {
+            return html_response(
+                StatusCode::UNAUTHORIZED,
+                render_login_page(
+                    &form.auth_request_id,
+                    Some(&form.identifier),
+                    Some("A fresh sign-in is required."),
+                ),
+            );
+        }
+        return complete_auth_request_redirect(
+            &state,
+            &form.auth_request_id,
+            &session_user.user_id,
+            Some(&session_user.authenticated_at),
+        )
+        .await;
     }
 
     if form.action == "back" {
@@ -196,11 +246,17 @@ pub(crate) async fn login_post(
         }
     };
 
-    let redirect =
-        match complete_auth_request_location(&state, &form.auth_request_id, &user.user_id).await {
-            Ok(redirect) => redirect,
-            Err(response) => return response,
-        };
+    let redirect = match complete_auth_request_location(
+        &state,
+        &form.auth_request_id,
+        &user.user_id,
+        Some(&created_session.created_at),
+    )
+    .await
+    {
+        Ok(redirect) => redirect,
+        Err(response) => return response,
+    };
 
     redirect_with_session_cookie(&redirect, &state.cookie_config, &created_session.token)
 }
@@ -209,8 +265,9 @@ async fn complete_auth_request_redirect(
     state: &LoginState,
     auth_request_id: &str,
     user_id: &str,
+    auth_time: Option<&str>,
 ) -> Response {
-    match complete_auth_request_location(state, auth_request_id, user_id).await {
+    match complete_auth_request_location(state, auth_request_id, user_id, auth_time).await {
         Ok(redirect) => Redirect::temporary(&redirect).into_response(),
         Err(response) => response,
     }
@@ -220,11 +277,18 @@ async fn complete_auth_request_location(
     state: &LoginState,
     auth_request_id: &str,
     user_id: &str,
+    auth_time: Option<&str>,
 ) -> Result<String, Response> {
     let code = Uuid::new_v4().to_string();
     if let Err(error) = state
         .transient
-        .complete_auth_request(DEFAULT_INSTANCE_ID, auth_request_id, user_id, &code)
+        .complete_auth_request(
+            DEFAULT_INSTANCE_ID,
+            auth_request_id,
+            user_id,
+            &code,
+            auth_time,
+        )
         .await
     {
         return Err(html_response(

@@ -10,6 +10,7 @@ type SessionRow = (
     String,
     String,
     String,
+    i64,
     Option<String>,
     Option<String>,
 );
@@ -25,6 +26,7 @@ pub struct SessionRecord {
     pub ip_address: String,
     pub metadata: serde_json::Value,
     pub created_at: String,
+    pub created_at_epoch: u64,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
 }
@@ -103,10 +105,11 @@ impl SessionStore {
     ) -> anyhow::Result<Option<SessionRecord>> {
         let token_hash = hash_token(token);
         let created_at = scoped.as_text("created_at");
+        let created_at_epoch = scoped.epoch_seconds("created_at");
         let expires_at = scoped.as_text("expires_at");
         let revoked_at = scoped.as_text("revoked_at");
         let sql = format!(
-            "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
+            "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
              FROM sessions \
              WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
@@ -127,8 +130,9 @@ impl SessionStore {
             ip_address: r.5,
             metadata: serde_json::Value::Object(Default::default()),
             created_at: r.6,
-            expires_at: r.7,
-            revoked_at: r.8,
+            created_at_epoch: r.7 as u64,
+            expires_at: r.8,
+            revoked_at: r.9,
         }))
     }
 
@@ -151,10 +155,11 @@ impl SessionStore {
         user_id: &str,
     ) -> anyhow::Result<Vec<SessionRecord>> {
         let created_at = scoped.as_text("created_at");
+        let created_at_epoch = scoped.epoch_seconds("created_at");
         let expires_at = scoped.as_text("expires_at");
         let revoked_at = scoped.as_text("revoked_at");
         let sql = format!(
-            "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
+            "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
              FROM sessions \
              WHERE instance_id = $1 AND user_id = $2 AND revoked_at IS NULL \
              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) \
@@ -177,8 +182,9 @@ impl SessionStore {
                 ip_address: r.5,
                 metadata: serde_json::Value::Object(Default::default()),
                 created_at: r.6,
-                expires_at: r.7,
-                revoked_at: r.8,
+                created_at_epoch: r.7 as u64,
+                expires_at: r.8,
+                revoked_at: r.9,
             })
             .collect())
     }

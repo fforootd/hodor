@@ -80,8 +80,8 @@ impl AuthRequestStore for ZitadelOpStore {
         let scoped = self.scoped(instance_id);
         let auth_request_id = Uuid::new_v4().to_string();
         let sql = format!(
-            "INSERT INTO oidc_auth_requests (id, instance_id, client_id, redirect_uri, scope, state, nonce, response_type, code_challenge, code_challenge_method, prompt, login_hint) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, {}, $12)",
+            "INSERT INTO oidc_auth_requests (id, instance_id, client_id, redirect_uri, scope, state, nonce, response_type, code_challenge, code_challenge_method, prompt, login_hint, max_age) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, {}, $12, $13)",
             scoped.json_bind(11),
         );
         sqlx::query(&sql)
@@ -97,6 +97,7 @@ impl AuthRequestStore for ZitadelOpStore {
             .bind(&request.code_challenge_method)
             .bind(serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_string()))
             .bind(&request.login_hint)
+            .bind(request.max_age.map(|value| value as i64))
             .execute(scoped.pool())
             .await?;
 
@@ -110,17 +111,27 @@ impl AuthRequestStore for ZitadelOpStore {
     ) -> anyhow::Result<Option<ConsumedAuthRequest>> {
         let scoped = self.scoped(instance_id);
         let mut tx = scoped.pool().begin().await?;
-        let row: Option<(String, String, String, String, String, String, String)> = sqlx::query_as(
-            "SELECT id, user_id, client_id, redirect_uri, scope, nonce, code_challenge \
-             FROM oidc_auth_requests WHERE instance_id = $1 AND code = $2 AND done = 1",
-        )
-        .bind(scoped.instance_id())
-        .bind(code)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let auth_time = scoped.epoch_seconds("auth_time");
+        let row: Option<(String, String, String, String, String, String, String, Option<i64>)> =
+            sqlx::query_as(&format!(
+                "SELECT id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, {auth_time} \
+                 FROM oidc_auth_requests WHERE instance_id = $1 AND code = $2 AND done = 1"
+            ))
+            .bind(scoped.instance_id())
+            .bind(code)
+            .fetch_optional(&mut *tx)
+            .await?;
 
-        let Some((auth_request_id, user_id, client_id, redirect_uri, scope, nonce, code_challenge)) =
-            row
+        let Some((
+            auth_request_id,
+            user_id,
+            client_id,
+            redirect_uri,
+            scope,
+            nonce,
+            code_challenge,
+            auth_time,
+        )) = row
         else {
             tx.rollback().await?;
             return Ok(None);
@@ -141,6 +152,7 @@ impl AuthRequestStore for ZitadelOpStore {
             scope,
             nonce,
             code_challenge,
+            auth_time: auth_time.and_then(|value| u64::try_from(value).ok()),
         }))
     }
 }
@@ -281,8 +293,8 @@ mod tests {
         let scoped = db.scoped_default();
 
         sqlx::query(
-            "INSERT INTO oidc_auth_requests (id, instance_id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, code, done) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1)",
+            "INSERT INTO oidc_auth_requests (id, instance_id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, code, done, auth_time) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, CURRENT_TIMESTAMP)",
         )
         .bind("auth-1")
         .bind(scoped.instance_id())
@@ -309,5 +321,38 @@ mod tests {
 
         assert!(first.is_some());
         assert!(second.is_none());
+    }
+
+    #[tokio::test]
+    async fn consume_auth_code_returns_stored_auth_time() {
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let scoped = db.scoped_default();
+
+        sqlx::query(
+            "INSERT INTO oidc_auth_requests (id, instance_id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, code, done, auth_time) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, CURRENT_TIMESTAMP)",
+        )
+        .bind("auth-1")
+        .bind(scoped.instance_id())
+        .bind("user-1")
+        .bind("client-1")
+        .bind("https://app.example/callback")
+        .bind("openid")
+        .bind("nonce-1")
+        .bind("challenge-1")
+        .bind("code-1")
+        .execute(scoped.pool())
+        .await
+        .unwrap();
+
+        let store = ZitadelOpStore::new(db);
+        let auth = store
+            .consume_auth_code(zitadel_db::DEFAULT_INSTANCE_ID, "code-1")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(auth.auth_time.is_some());
     }
 }

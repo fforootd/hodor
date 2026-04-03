@@ -13,6 +13,7 @@ type SessionRow = (
     String,
     String,
     String,
+    i64,
     Option<String>,
     Option<String>,
 );
@@ -27,8 +28,9 @@ pub(crate) fn map_session_row(row: SessionRow) -> SessionRecord {
         ip_address: row.5,
         metadata: Value::Object(Default::default()),
         created_at: row.6,
-        expires_at: row.7,
-        revoked_at: row.8,
+        created_at_epoch: row.7 as u64,
+        expires_at: row.8,
+        revoked_at: row.9,
     }
 }
 
@@ -69,7 +71,23 @@ pub(crate) async fn create_session_impl(
         .execute(scoped.pool())
         .await?;
 
-    Ok(CreatedSession { session_id, token })
+    let created_at = scoped.as_text("created_at");
+    let created_at_epoch = scoped.epoch_seconds("created_at");
+    let sql = format!(
+        "SELECT {created_at}, {created_at_epoch} FROM sessions WHERE instance_id = $1 AND id = $2"
+    );
+    let (created_at, created_at_epoch): (String, i64) = sqlx::query_as(&sql)
+        .bind(scoped.instance_id())
+        .bind(&session_id)
+        .fetch_one(scoped.pool())
+        .await?;
+
+    Ok(CreatedSession {
+        session_id,
+        token,
+        created_at,
+        created_at_epoch: created_at_epoch as u64,
+    })
 }
 
 pub(crate) async fn find_session_by_token_impl(
@@ -79,10 +97,11 @@ pub(crate) async fn find_session_by_token_impl(
 ) -> anyhow::Result<Option<SessionRecord>> {
     let scoped = kv.scoped(instance_id);
     let created_at = scoped.as_text("created_at");
+    let created_at_epoch = scoped.epoch_seconds("created_at");
     let expires_at = scoped.as_text("expires_at");
     let revoked_at = scoped.as_text("revoked_at");
     let sql = format!(
-        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
+        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
          FROM sessions \
          WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
@@ -102,10 +121,11 @@ pub(crate) async fn list_sessions_impl(
 ) -> anyhow::Result<Vec<SessionRecord>> {
     let scoped = kv.scoped(instance_id);
     let created_at = scoped.as_text("created_at");
+    let created_at_epoch = scoped.epoch_seconds("created_at");
     let expires_at = scoped.as_text("expires_at");
     let revoked_at = scoped.as_text("revoked_at");
     let sql = format!(
-        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
+        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
          FROM sessions WHERE instance_id = $1 ORDER BY created_at DESC LIMIT 50"
     );
     let rows: Vec<SessionRow> = sqlx::query_as(&sql)
@@ -123,10 +143,11 @@ pub(crate) async fn get_session_impl(
 ) -> anyhow::Result<Option<SessionRecord>> {
     let scoped = kv.scoped(instance_id);
     let created_at = scoped.as_text("created_at");
+    let created_at_epoch = scoped.epoch_seconds("created_at");
     let expires_at = scoped.as_text("expires_at");
     let revoked_at = scoped.as_text("revoked_at");
     let sql = format!(
-        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {expires_at}, {revoked_at} \
+        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
          FROM sessions WHERE instance_id = $1 AND id = $2"
     );
     let row: Option<SessionRow> = sqlx::query_as(&sql)

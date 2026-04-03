@@ -8,12 +8,15 @@ SUITE_COMPOSE="${SUITE_DIR}/docker-compose-localtest.yml"
 ZITADEL_COMPOSE="${ROOT_DIR}/conformance/oidc/docker-compose.zitadel.yml"
 PLAN_FILE="${ROOT_DIR}/conformance/oidc/plans/op.txt"
 CONFIG_FILE="${ROOT_DIR}/conformance/oidc/config/op-static-client.json"
+EXPECTED_PROBLEMS_FILE="${OIDC_CONFORMANCE_EXPECTED_PROBLEMS_FILE:-$ROOT_DIR/conformance/oidc/config/op-expected-problems.json}"
+EXPECTED_SKIPS_FILE="${OIDC_CONFORMANCE_EXPECTED_SKIPS_FILE:-$ROOT_DIR/conformance/oidc/config/op-expected-skips.json}"
 SUITE_NGINX_TEMPLATE="${ROOT_DIR}/conformance/oidc/suite-nginx.conf"
 PROJECT_NAME="${OIDC_CONFORMANCE_PROJECT:-oidc-conformance}"
 MAVEN_CACHE="${OIDC_CONFORMANCE_MAVEN_CACHE:-$CACHE_DIR/m2}"
 ARTIFACT_ROOT="${OIDC_CONFORMANCE_ARTIFACTS_DIR:-$ROOT_DIR/artifacts/oidc-conformance}"
 ARTIFACT_DIR="${ARTIFACT_ROOT}/op"
 KEEP_STACK="${OIDC_CONFORMANCE_KEEP_STACK:-0}"
+ZITADEL_IMAGE="${OIDC_CONFORMANCE_ZITADEL_IMAGE:-}"
 
 mkdir -p "$MAVEN_CACHE" "$ARTIFACT_DIR"
 cp "$SUITE_NGINX_TEMPLATE" "$SUITE_DIR/nginx/nginx.conf"
@@ -28,6 +31,16 @@ esac
 
 CONTAINER_ARTIFACT_DIR="/work/repo/${ARTIFACT_DIR#$ROOT_DIR/}"
 CONTAINER_CONFIG_FILE="/work/repo/${CONFIG_FILE#$ROOT_DIR/}"
+CONTAINER_EXPECTED_PROBLEMS_FILE=""
+CONTAINER_EXPECTED_SKIPS_FILE=""
+
+if [[ -n "$EXPECTED_PROBLEMS_FILE" && -f "$EXPECTED_PROBLEMS_FILE" ]]; then
+  CONTAINER_EXPECTED_PROBLEMS_FILE="/work/repo/${EXPECTED_PROBLEMS_FILE#$ROOT_DIR/}"
+fi
+
+if [[ -n "$EXPECTED_SKIPS_FILE" && -f "$EXPECTED_SKIPS_FILE" ]]; then
+  CONTAINER_EXPECTED_SKIPS_FILE="/work/repo/${EXPECTED_SKIPS_FILE#$ROOT_DIR/}"
+fi
 
 wait_for_url() {
   local target="$1"
@@ -57,6 +70,8 @@ save_logs() {
     echo "project=${PROJECT_NAME}"
     echo "plan_file=${PLAN_FILE#$ROOT_DIR/}"
     echo "config_file=${CONFIG_FILE#$ROOT_DIR/}"
+    echo "run_log=op/run.log"
+    echo "zitadel_image=${ZITADEL_IMAGE:-build}"
   } >"$ARTIFACT_DIR/metadata.txt"
 
   docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" logs --no-color \
@@ -84,7 +99,15 @@ trap cleanup EXIT INT TERM
 
 docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" build nginx >/dev/null
 docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d mongodb oidcc-provider server
-docker compose -p "$PROJECT_NAME" -f "$ZITADEL_COMPOSE" up -d --build zitadel
+if [[ -n "$ZITADEL_IMAGE" ]]; then
+  if ! docker image inspect "$ZITADEL_IMAGE" >/dev/null 2>&1; then
+    echo "[oidc-conformance] missing prepared zitadel image: $ZITADEL_IMAGE" >&2
+    exit 1
+  fi
+  docker compose -p "$PROJECT_NAME" -f "$ZITADEL_COMPOSE" up -d zitadel
+else
+  docker compose -p "$PROJECT_NAME" -f "$ZITADEL_COMPOSE" up -d --build zitadel
+fi
 docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d nginx
 
 wait_for_url "http://127.0.0.1:18081/healthz" "zitadel"
@@ -97,6 +120,12 @@ if [[ "${#plan_lines[@]}" -eq 0 ]]; then
 fi
 
 args=(scripts/run-test-plan.py --no-parallel --export-dir "$CONTAINER_ARTIFACT_DIR")
+if [[ -n "$CONTAINER_EXPECTED_PROBLEMS_FILE" ]]; then
+  args+=(--expected-failures-file "$CONTAINER_EXPECTED_PROBLEMS_FILE")
+fi
+if [[ -n "$CONTAINER_EXPECTED_SKIPS_FILE" ]]; then
+  args+=(--expected-skips-file "$CONTAINER_EXPECTED_SKIPS_FILE")
+fi
 for plan in "${plan_lines[@]}"; do
   args+=("$plan" "$CONTAINER_CONFIG_FILE")
 done
@@ -105,4 +134,4 @@ docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" run --rm \
   --entrypoint python3 \
   --volume "$ROOT_DIR:/work/repo" \
   test \
-  "${args[@]}"
+  "${args[@]}" 2>&1 | tee "$ARTIFACT_DIR/run.log"

@@ -7,26 +7,42 @@ on:
         required: false
         type: boolean
         default: true
-      run_e2e:
+      run_fast_rust:
         required: false
         type: boolean
         default: true
-      run_rust:
+      run_fast_web:
         required: false
         type: boolean
         default: true
-      run_web:
+      run_extended_e2e:
         required: false
         type: boolean
         default: true
+      run_browser_artifacts:
+        required: false
+        type: boolean
+        default: true
+      artifact_prefix:
+        required: false
+        type: string
+        default: ci
 
 permissions:
   contents: read
 
 jobs:
-  rust-static:
-    name: Rust Static
-    if: inputs.run_rust
+  noop:
+    name: Noop
+    if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_extended_e2e && !inputs.run_browser_artifacts }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: No lanes selected
+        run: echo "No reusable CI lanes selected."
+
+  fast-rust-static:
+    name: Fast Rust Static
+    if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -44,9 +60,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 
-  rust-test:
-    name: Rust Test
-    if: inputs.run_rust
+  fast-rust-tests:
+    name: Fast Rust Tests
+    if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -65,8 +81,8 @@ jobs:
       - name: Run cargo nextest
         run: cargo nextest run --workspace
 
-  docs-check:
-    name: Docs Check
+  fast-docs-check:
+    name: Fast Docs Check
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
@@ -75,8 +91,8 @@ jobs:
       - name: Run stale-command checks
         run: make docs-check
 
-  docs-links:
-    name: Docs Links
+  fast-docs-links:
+    name: Fast Docs Links
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
@@ -89,7 +105,7 @@ jobs:
 
   prepare-webdist:
     name: Prepare Webdist
-    if: inputs.run_e2e
+    if: inputs.run_browser_artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -109,13 +125,49 @@ jobs:
       - name: Upload embedded web assets
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: webdist
+          name: ${{ inputs.artifact_prefix }}-webdist
           path: webdist.tgz
           retention-days: 1
 
-  web-static:
-    name: Web Static
-    if: inputs.run_web
+  prepare-rust-binary:
+    name: Prepare Rust Binary
+    if: inputs.run_browser_artifacts
+    needs: prepare-webdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Restore embedded web assets
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: ${{ inputs.artifact_prefix }}-webdist
+          path: .
+
+      - name: Extract embedded web assets
+        run: tar -xzf webdist.tgz
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build zitadel binary
+        run: cargo build -p zitadel
+
+      - name: Package zitadel binary
+        run: |
+          mkdir -p artifacts/prepare-rust-binary
+          tar -czf artifacts/prepare-rust-binary/zitadel-debug.tgz -C target/debug zitadel
+
+      - name: Upload zitadel binary artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ inputs.artifact_prefix }}-zitadel-binary
+          path: artifacts/prepare-rust-binary/zitadel-debug.tgz
+          retention-days: 1
+
+  fast-web-static:
+    name: Fast Web Static
+    if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -135,9 +187,9 @@ jobs:
       - name: Typecheck web
         run: npm run typecheck -w web
 
-  web-unit:
-    name: Web Unit
-    if: inputs.run_web
+  fast-web-unit:
+    name: Fast Web Unit
+    if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -154,26 +206,26 @@ jobs:
       - name: Run Vitest
         run: npm test -w web
 
-  e2e-smoke:
-    name: E2E Smoke
-    if: inputs.run_e2e
-    needs: prepare-webdist
+  extended-e2e:
+    name: Extended E2E
+    if: inputs.run_extended_e2e && inputs.run_browser_artifacts
+    needs: prepare-rust-binary
     runs-on: ubuntu-latest
+    env:
+      ZITADEL_E2E_BINARY: ${{ runner.temp }}/zitadel-bin/zitadel
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Restore embedded web assets
+      - name: Restore zitadel binary
         uses: actions/download-artifact@v4.3.0
         with:
-          name: webdist
+          name: ${{ inputs.artifact_prefix }}-zitadel-binary
           path: .
 
-      - name: Extract embedded web assets
-        run: tar -xzf webdist.tgz
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Extract zitadel binary
+        run: |
+          mkdir -p "$RUNNER_TEMP/zitadel-bin"
+          tar -xzf zitadel-debug.tgz -C "$RUNNER_TEMP/zitadel-bin"
 
       - uses: actions/setup-node@v6.3.0
         with:
@@ -194,56 +246,17 @@ jobs:
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-
-      - name: Build zitadel binary
-        run: cargo build -p zitadel
-
-      - name: Run Playwright smoke tests
-        run: npm run test:smoke -w e2e -- --reporter=line
-
-  e2e-full:
-    name: E2E Full
-    if: inputs.run_e2e
-    needs: prepare-webdist
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Restore embedded web assets
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: webdist
-          path: .
-
-      - name: Extract embedded web assets
-        run: tar -xzf webdist.tgz
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Build zitadel binary
-        run: cargo build -p zitadel
 
       - name: Run full Playwright suite
-        run: npm test -w e2e -- --reporter=line
+        run: npm test -w e2e -- --reporter=github,line,html
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ inputs.artifact_prefix }}-e2e-report
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: warn
+          retention-days: 7

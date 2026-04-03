@@ -19,4 +19,5 @@ pub use transient::{
     DefaultTransientStorage, KvStore, LoginFlowRuntimeState, MemoryKvStore, NewLoginFlowState,
     NoopSink, PersistedSessionRecord, ProviderAuthState, SessionRecord, Sink, SqlKvStore, SqlSink,
     TransientRecord, TransientStorage,
+    AuthRequestRequirements,
 };

@@ -901,13 +901,15 @@ fn paths() -> Value {
             "get": operation("oidc", "getOpenIdConfiguration", "OIDC discovery document", json_response("OpenIdConfiguration"))
         },
         "/authorize": {
-            "get": operation("oidc", "authorize", "OIDC authorization endpoint", empty_response(302, "Redirect to login or callback"))
+            "get": operation("oidc", "authorize", "OIDC authorization endpoint", empty_response(302, "Redirect to login or callback")),
+            "post": operation("oidc", "authorizePost", "OIDC authorization endpoint (form POST)", empty_response(302, "Redirect to login or callback"))
         },
         "/oauth/token": {
             "post": operation("oidc", "exchangeToken", "OIDC token endpoint", json_response("TokenResponse"))
         },
         "/userinfo": {
-            "get": operation("oidc", "userinfo", "OIDC userinfo endpoint", generic_object_response("User claims"))
+            "get": operation("oidc", "userinfo", "OIDC userinfo endpoint", generic_object_response("User claims")),
+            "post": operation("oidc", "userinfoPost", "OIDC userinfo endpoint (form POST or bearer header)", generic_object_response("User claims"))
         },
         "/keys": {
             "get": operation("oidc", "jwks", "OIDC JWKS endpoint", json_response("JsonWebKeySet"))

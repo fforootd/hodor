@@ -10,9 +10,12 @@ concurrency:
 
 jobs:
   ci:
+    name: Fast And Extended CI
     uses: ./.github/workflows/reusable-ci.yml
     with:
       run_docs: true
-      run_e2e: true
-      run_rust: true
-      run_web: true
+      run_fast_rust: true
+      run_fast_web: true
+      run_extended_e2e: true
+      run_browser_artifacts: true
+      artifact_prefix: main

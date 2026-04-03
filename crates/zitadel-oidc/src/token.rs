@@ -6,7 +6,7 @@ use crate::{
 use axum::{
     Form, Json, Router,
     extract::State,
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
@@ -46,7 +46,7 @@ async fn token_endpoint(
         .and_then(|value| value.to_str().ok());
     let client_auth = match resolve_client_auth(authorization, &req.client_id, &req.client_secret) {
         Ok(auth) => auth,
-        Err(error) => return protocol_error_response(error),
+        Err(error) => return add_token_cache_headers(protocol_error_response(error)),
     };
 
     match state
@@ -61,9 +61,19 @@ async fn token_endpoint(
         })
         .await
     {
-        Ok(token) => Json(token).into_response(),
-        Err(error) => protocol_error_response(error),
+        Ok(token) => add_token_cache_headers(Json(token).into_response()),
+        Err(error) => add_token_cache_headers(protocol_error_response(error)),
     }
+}
+
+fn add_token_cache_headers(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+        .headers_mut()
+        .insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    response
 }
 
 #[derive(Deserialize)]
@@ -77,4 +87,23 @@ async fn revoke_endpoint(
 ) -> Response {
     let _ = req.token;
     StatusCode::OK.into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_responses_include_cache_headers() {
+        let response = add_token_cache_headers(StatusCode::OK.into_response());
+
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert_eq!(
+            response.headers().get(header::PRAGMA),
+            Some(&HeaderValue::from_static("no-cache"))
+        );
+    }
 }

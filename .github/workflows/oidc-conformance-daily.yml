@@ -1,4 +1,4 @@
-name: OIDC Daily Coverage
+name: Compliance OIDC Daily
 
 on:
   schedule:
@@ -22,33 +22,118 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  OIDC_CONFORMANCE_SURFACE: ${{ github.event_name == 'workflow_dispatch' && inputs.surface || 'both' }}
+
 jobs:
-  oidc-daily:
-    name: OIDC Daily Coverage
+  prepare-compliance-browser-artifacts:
+    name: Prepare Compliance Browser Artifacts
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      run_docs: false
+      run_fast_rust: false
+      run_fast_web: false
+      run_extended_e2e: false
+      run_browser_artifacts: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+      artifact_prefix: compliance-oidc
+
+  prepare-conformance-image:
+    name: Prepare Conformance Image
     runs-on: ubuntu-latest
-    env:
-      OIDC_CONFORMANCE_SURFACE: ${{ github.event_name == 'workflow_dispatch' && inputs.surface || 'both' }}
-      OIDC_CONFORMANCE_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/oidc-conformance
+    outputs:
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v6.0.2
 
+      - id: image_meta
+        name: Set image metadata
+        run: echo "image_tag=zitadel-oidc-conformance:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+
+      - name: Build conformance image
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          tags: ${{ steps.image_meta.outputs.image_tag }}
+          outputs: type=docker,dest=${{ runner.temp }}/zitadel-oidc-conformance.tar
+          cache-from: type=gha,scope=compliance-oidc-image
+          cache-to: type=gha,mode=max,scope=compliance-oidc-image
+
+      - name: Compress conformance image
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        run: gzip -1 "$RUNNER_TEMP/zitadel-oidc-conformance.tar"
+
+      - name: Upload conformance image artifact
+        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: compliance-oidc-image
+          path: ${{ runner.temp }}/zitadel-oidc-conformance.tar.gz
+          retention-days: 1
+
+  compliance-oidc:
+    name: Compliance OIDC
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-compliance-browser-artifacts
+      - prepare-conformance-image
+    env:
+      OIDC_CONFORMANCE_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/oidc-conformance
+      OIDC_CONFORMANCE_SUMMARY_MD: ${{ github.workspace }}/artifacts/oidc-conformance/summary.md
+      OIDC_CONFORMANCE_SUMMARY_JSON: ${{ github.workspace }}/artifacts/oidc-conformance/summary.json
+      ZITADEL_E2E_BINARY: ${{ runner.temp }}/zitadel-bin/zitadel
+      OIDC_CONFORMANCE_ZITADEL_IMAGE: ${{ needs.prepare-conformance-image.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Check prepared compliance artifacts
+        id: preflight
+        continue-on-error: true
+        run: |
+          test "${{ needs.prepare-compliance-browser-artifacts.result }}" = "success"
+          test "${{ needs.prepare-conformance-image.result }}" = "success"
+
+      - name: Restore prepared zitadel binary
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: compliance-oidc-zitadel-binary
+          path: .
+
+      - name: Extract prepared zitadel binary
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/zitadel-bin"
+          tar -xzf zitadel-debug.tgz -C "$RUNNER_TEMP/zitadel-bin"
+
+      - name: Restore prepared conformance image
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: compliance-oidc-image
+          path: ${{ runner.temp }}/compliance-image
+
+      - name: Load prepared conformance image
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        run: gunzip -c "$RUNNER_TEMP/compliance-image/zitadel-oidc-conformance.tar.gz" | docker load
+
       - uses: actions/setup-node@v6.3.0
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
         run: npm ci --prefer-offline
 
-      - uses: dtolnay/rust-toolchain@stable
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-
-      - uses: Swatinem/rust-cache@v2
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-
       - name: Cache Playwright browsers
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
         uses: actions/cache@v4.2.4
         with:
           path: ~/.cache/ms-playwright
@@ -57,20 +142,59 @@ jobs:
             playwright-${{ runner.os }}-
 
       - name: Install Chromium
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'op' }}
+        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
         run: npx playwright install --with-deps chromium
 
-      - name: Run daily OIDC coverage
+      - name: Run Compliance OIDC
+        id: run_conformance
+        if: steps.preflight.outcome == 'success'
+        continue-on-error: true
         run: make oidc-conformance
 
-      - name: Upload OIDC daily coverage artifacts
+      - name: Resolve compliance run status
         if: always()
+        id: run_status
+        run: |
+          status="${{ steps.run_conformance.outcome }}"
+          if [[ "${{ steps.preflight.outcome }}" != "success" ]]; then
+            status="failure"
+          fi
+          echo "value=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize Compliance OIDC
+        if: always()
+        id: summarize
+        run: |
+          python3 conformance/oidc/scripts/summarize-results.py \
+            --artifact-root "$OIDC_CONFORMANCE_ARTIFACTS_DIR" \
+            --surface "$OIDC_CONFORMANCE_SURFACE" \
+            --run-status "${{ steps.run_status.outputs.value }}" \
+            --markdown-out "$OIDC_CONFORMANCE_SUMMARY_MD" \
+            --json-out "$OIDC_CONFORMANCE_SUMMARY_JSON" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload Compliance OIDC artifacts
+        if: always()
+        id: upload_artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: oidc-daily-coverage-${{ env.OIDC_CONFORMANCE_SURFACE }}
+          name: compliance-oidc-${{ env.OIDC_CONFORMANCE_SURFACE }}
           path: |
             artifacts/oidc-conformance
-            e2e/playwright-report
-            e2e/test-results
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Publish Compliance OIDC summary
+        if: always()
+        env:
+          ARTIFACT_URL: ${{ steps.upload_artifact.outputs.artifact-url }}
+        run: |
+          cp "$OIDC_CONFORMANCE_SUMMARY_MD" "$RUNNER_TEMP/oidc-daily-summary.md"
+          if [[ -n "$ARTIFACT_URL" ]]; then
+            printf '\n- Artifact: [download](%s)\n' "$ARTIFACT_URL" >> "$RUNNER_TEMP/oidc-daily-summary.md"
+          fi
+          cat "$RUNNER_TEMP/oidc-daily-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if Compliance OIDC failed
+        if: always() && (steps.preflight.outcome != 'success' || steps.run_conformance.outcome != 'success')
+        run: exit 1

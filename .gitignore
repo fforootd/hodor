@@ -47,6 +47,10 @@ bench-results/
 # Rust
 /target/
 
+# Python
+__pycache__/
+*.pyc
+
 # OIDC conformance
 /.cache/oidc-conformance/
 /artifacts/oidc-conformance/

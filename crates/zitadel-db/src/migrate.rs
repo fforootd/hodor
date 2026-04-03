@@ -19,6 +19,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "00004_oidc_rp_provider",
         include_str!("../../../migrations/sqlite/00003_oidc_rp_provider.sql"),
     ),
+    (
+        "00004_oidc_auth_request_max_age",
+        include_str!("../../../migrations/sqlite/00004_oidc_auth_request_max_age.sql"),
+    ),
 ];
 
 const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
@@ -37,6 +41,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
     (
         "00004_oidc_rp_provider",
         include_str!("../../../migrations/postgres/00003_oidc_rp_provider.sql"),
+    ),
+    (
+        "00004_oidc_auth_request_max_age",
+        include_str!("../../../migrations/postgres/00004_oidc_auth_request_max_age.sql"),
     ),
 ];
 

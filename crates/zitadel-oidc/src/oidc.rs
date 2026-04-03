@@ -74,6 +74,7 @@ pub struct NewAuthRequest {
     pub code_challenge_method: String,
     pub prompt: Vec<String>,
     pub login_hint: String,
+    pub max_age: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +86,7 @@ pub struct ConsumedAuthRequest {
     pub scope: String,
     pub nonce: String,
     pub code_challenge: String,
+    pub auth_time: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,6 +245,8 @@ pub struct IdTokenClaims {
     pub aud: String,
     pub exp: u64,
     pub iat: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_time: Option<u64>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub nonce: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -253,6 +257,17 @@ pub struct IdTokenClaims {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
+    pub iss: String,
+    pub sub: String,
+    pub aud: String,
+    pub exp: u64,
+    pub iat: u64,
+    pub scope: String,
+    pub client_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshTokenClaims {
     pub iss: String,
     pub sub: String,
     pub aud: String,

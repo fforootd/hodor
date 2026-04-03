@@ -1,0 +1,128 @@
+[
+  {
+    "test-name": "oidcc-server",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainName",
+    "expected-result": "warning",
+    "comment": "Current OP issues profile and identity claims beyond the minimum requested set."
+  },
+  {
+    "test-name": "oidcc-server",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "",
+    "condition": "EnsureIdTokenDoesNotContainNonRequestedClaims",
+    "expected-result": "warning",
+    "comment": "Current OP issues non-requested claims in the ID token."
+  },
+  {
+    "test-name": "oidcc-scope-profile",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "",
+    "condition": "VerifyScopesReturnedInUserInfoClaims",
+    "expected-result": "warning",
+    "comment": "Current userinfo scope-to-claims behavior is not yet certification-clean."
+  },
+  {
+    "test-name": "oidcc-scope-email",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainName",
+    "expected-result": "warning",
+    "comment": "Current OP includes name-related claims more broadly than required."
+  },
+  {
+    "test-name": "oidcc-scope-email",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+    "expected-result": "warning",
+    "comment": "Current OP returns email-related claims in the ID token for email-only scope."
+  },
+  {
+    "test-name": "oidcc-scope-email",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "",
+    "condition": "EnsureUserInfoDoesNotContainName",
+    "expected-result": "warning",
+    "comment": "Current userinfo response includes name claims for email-only scope."
+  },
+  {
+    "test-name": "oidcc-ensure-other-scope-order-succeeds",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainName",
+    "expected-result": "warning",
+    "comment": "Current OP includes name-related claims more broadly than required."
+  },
+  {
+    "test-name": "oidcc-ensure-other-scope-order-succeeds",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+    "expected-result": "warning",
+    "comment": "Current OP returns email-related claims in the ID token for reordered scopes."
+  },
+  {
+    "test-name": "oidcc-ensure-other-scope-order-succeeds",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "",
+    "condition": "EnsureUserInfoDoesNotContainName",
+    "expected-result": "warning",
+    "comment": "Current userinfo response includes name claims for reordered scopes."
+  },
+  {
+    "test-name": "oidcc-ensure-request-with-acr-values-succeeds",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "ValidateIdTokenACRClaimAgainstAcrValuesRequest",
+    "expected-result": "warning",
+    "comment": "Current OP does not yet return an ACR claim aligned to acr_values."
+  },
+  {
+    "test-name": "oidcc-codereuse-30seconds",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "*",
+    "condition": "EnsureHttpStatusCodeIs4xx",
+    "expected-result": "warning",
+    "comment": "Current OP does not revoke the previously issued access token after code reuse."
+  },
+  {
+    "test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "CheckDiscEndpointRequestParameterSupported",
+    "expected-result": "warning",
+    "comment": "Current discovery document does not advertise request parameter support."
+  },
+  {
+    "test-name": "oidcc-claims-essential",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "",
+    "condition": "EnsureIdTokenDoesNotContainName",
+    "expected-result": "warning",
+    "comment": "Current OP still includes name claims beyond the explicitly requested essential claims."
+  },
+  {
+    "test-name": "oidcc-ensure-request-object-with-redirect-uri",
+    "variant": "*",
+    "configuration-filename": "*/conformance/oidc/config/op-static-client.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "CheckDiscEndpointRequestParameterSupported",
+    "expected-result": "warning",
+    "comment": "Current discovery document does not advertise request parameter support."
+  }
+]

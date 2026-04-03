@@ -25,6 +25,7 @@ pub struct SessionRecord {
     pub ip_address: String,
     pub metadata: Value,
     pub created_at: String,
+    pub created_at_epoch: u64,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
 }
@@ -46,6 +47,8 @@ pub struct PersistedSessionRecord {
 pub struct CreatedSession {
     pub session_id: String,
     pub token: String,
+    pub created_at: String,
+    pub created_at_epoch: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +71,12 @@ pub struct LoginFlowRuntimeState {
 pub struct AuthRequestRedirect {
     pub redirect_uri: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuthRequestRequirements {
+    pub prompt: Vec<String>,
+    pub max_age: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -199,13 +208,14 @@ pub trait KvStore: Clone + Send + Sync + 'static {
         auth_request_id: &str,
         user_id: &str,
         code: &str,
+        auth_time: Option<&str>,
     ) -> anyhow::Result<()>;
 
     async fn load_auth_request_prompts(
         &self,
         instance_id: &str,
         auth_request_id: &str,
-    ) -> anyhow::Result<Vec<String>>;
+    ) -> anyhow::Result<AuthRequestRequirements>;
 
     async fn create_provider_auth_state(
         &self,
@@ -357,17 +367,25 @@ impl KvStore for SqlKvStore {
         auth_request_id: &str,
         user_id: &str,
         code: &str,
+        auth_time: Option<&str>,
     ) -> anyhow::Result<()> {
-        auth_request::complete_auth_request_impl(self, instance_id, auth_request_id, user_id, code)
-            .await
+        auth_request::complete_auth_request_impl(
+            self,
+            instance_id,
+            auth_request_id,
+            user_id,
+            code,
+            auth_time,
+        )
+        .await
     }
 
     async fn load_auth_request_prompts(
         &self,
         instance_id: &str,
         auth_request_id: &str,
-    ) -> anyhow::Result<Vec<String>> {
-        auth_request::load_auth_request_prompts_impl(self, instance_id, auth_request_id).await
+    ) -> anyhow::Result<AuthRequestRequirements> {
+        auth_request::load_auth_request_requirements_impl(self, instance_id, auth_request_id).await
     }
 
     async fn create_provider_auth_state(
@@ -440,7 +458,8 @@ impl KvStore for MemoryKvStore {
     ) -> anyhow::Result<CreatedSession> {
         let session_id = Uuid::new_v4().to_string();
         let token = Uuid::new_v4().to_string();
-        let (created_at, expires_at) = session_timestamps(&self.db, instance_id).await?;
+        let (created_at, created_at_epoch, expires_at) =
+            session_timestamps(&self.db, instance_id).await?;
         let record = SessionRecord {
             id: session_id.clone(),
             user_id: user_id.to_string(),
@@ -454,9 +473,12 @@ impl KvStore for MemoryKvStore {
             ip_address: ip_address.to_string(),
             metadata: Value::Object(Default::default()),
             created_at,
+            created_at_epoch,
             expires_at,
             revoked_at: None,
         };
+        let created_at = record.created_at.clone();
+        let created_at_epoch = record.created_at_epoch;
 
         self.state
             .write()
@@ -466,7 +488,12 @@ impl KvStore for MemoryKvStore {
             .or_default()
             .insert(session_id.clone(), MemorySessionEntry { record });
 
-        Ok(CreatedSession { session_id, token })
+        Ok(CreatedSession {
+            session_id,
+            token,
+            created_at,
+            created_at_epoch,
+        })
     }
 
     async fn find_session_by_token(
@@ -708,9 +735,10 @@ impl KvStore for MemoryKvStore {
         auth_request_id: &str,
         user_id: &str,
         code: &str,
+        auth_time: Option<&str>,
     ) -> anyhow::Result<()> {
         self.sql()
-            .complete_auth_request(instance_id, auth_request_id, user_id, code)
+            .complete_auth_request(instance_id, auth_request_id, user_id, code, auth_time)
             .await
     }
 
@@ -718,7 +746,7 @@ impl KvStore for MemoryKvStore {
         &self,
         instance_id: &str,
         auth_request_id: &str,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<AuthRequestRequirements> {
         self.sql()
             .load_auth_request_prompts(instance_id, auth_request_id)
             .await
@@ -1022,9 +1050,10 @@ where
         auth_request_id: &str,
         user_id: &str,
         code: &str,
+        auth_time: Option<&str>,
     ) -> anyhow::Result<()> {
         self.kv
-            .complete_auth_request(instance_id, auth_request_id, user_id, code)
+            .complete_auth_request(instance_id, auth_request_id, user_id, code, auth_time)
             .await?;
         if let Err(error) = self
             .sink
@@ -1050,7 +1079,7 @@ where
         &self,
         instance_id: &str,
         auth_request_id: &str,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<AuthRequestRequirements> {
         self.kv
             .load_auth_request_prompts(instance_id, auth_request_id)
             .await
@@ -1262,16 +1291,17 @@ impl KvStore for DefaultKvStore {
         auth_request_id: &str,
         user_id: &str,
         code: &str,
+        auth_time: Option<&str>,
     ) -> anyhow::Result<()> {
         match self {
             Self::Memory(store) => {
                 store
-                    .complete_auth_request(instance_id, auth_request_id, user_id, code)
+                    .complete_auth_request(instance_id, auth_request_id, user_id, code, auth_time)
                     .await
             }
             Self::Sql(store) => {
                 store
-                    .complete_auth_request(instance_id, auth_request_id, user_id, code)
+                    .complete_auth_request(instance_id, auth_request_id, user_id, code, auth_time)
                     .await
             }
         }
@@ -1281,7 +1311,7 @@ impl KvStore for DefaultKvStore {
         &self,
         instance_id: &str,
         auth_request_id: &str,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<AuthRequestRequirements> {
         match self {
             Self::Memory(store) => {
                 store
@@ -1440,16 +1470,18 @@ async fn apply_channel_batch(db: &Db, pending: &mut Vec<TransientRecord>) -> any
 async fn session_timestamps(
     db: &Db,
     instance_id: &str,
-) -> anyhow::Result<(String, Option<String>)> {
+) -> anyhow::Result<(String, u64, Option<String>)> {
     let scoped = db.scoped(instance_id.to_string());
     let sql = match db.dialect() {
         zitadel_db::Dialect::Postgres => {
-            "SELECT CURRENT_TIMESTAMP::text, (CURRENT_TIMESTAMP + INTERVAL '24 hours')::text"
+            "SELECT CURRENT_TIMESTAMP::text, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::bigint, (CURRENT_TIMESTAMP + INTERVAL '24 hours')::text"
         }
-        zitadel_db::Dialect::Sqlite => "SELECT datetime('now'), datetime('now', '+24 hours')",
+        zitadel_db::Dialect::Sqlite => {
+            "SELECT datetime('now'), CAST(strftime('%s', 'now') AS INTEGER), datetime('now', '+24 hours')"
+        }
     };
-    let row: (String, String) = sqlx::query_as(sql).fetch_one(scoped.pool()).await?;
-    Ok((row.0, Some(row.1)))
+    let row: (String, i64, String) = sqlx::query_as(sql).fetch_one(scoped.pool()).await?;
+    Ok((row.0, row.1 as u64, Some(row.2)))
 }
 
 async fn current_timestamp(db: &Db, instance_id: &str) -> anyhow::Result<String> {

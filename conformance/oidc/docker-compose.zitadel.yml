@@ -1,5 +1,6 @@
 services:
   zitadel:
+    image: ${OIDC_CONFORMANCE_ZITADEL_IMAGE:-zitadel-oidc-conformance:local}
     build:
       context: ../..
       dockerfile: Dockerfile

@@ -148,6 +148,40 @@ The default fast path is `cargo nextest run --workspace` when `cargo-nextest` is
 
 For full-router integration coverage, prefer the shared `crates/zitadel-testkit` helpers over ad hoc per-crate harnesses.
 
+## CI Tiers
+
+CI uses one taxonomy everywhere: `tier + domain`.
+
+| Tier | Purpose | Current lanes |
+|---|---|---|
+| Fast | Cheap correctness and static feedback for PRs | Fast Rust, Fast Web, Fast Docs |
+| Extended | Broader behavioral coverage for relevant PRs | Extended E2E |
+| Compliance | Protocol and certification-style coverage | Compliance OIDC |
+
+The default policy is tiered PR execution:
+- Fast lanes run on relevant PR changes.
+- Extended lanes run when browser-facing behavior might have changed.
+- Compliance lanes run on directly related protocol changes and on scheduled/manual workflows.
+
+## CI Build Reuse
+
+Correctness-critical downstream jobs should consume prepared outputs, not rebuild them ad hoc.
+
+Current prepared outputs:
+- `Prepare Webdist`
+- `Prepare Rust Binary`
+- `Prepare Conformance Image`
+
+Use artifacts for exact prepared outputs that downstream jobs must consume, such as `web/dist`, a prepared Zitadel binary, and compliance reports.
+
+Use caches for rebuildable accelerators:
+- Rust dependencies and target reuse via `Swatinem/rust-cache`
+- npm package download reuse via `actions/setup-node` cache
+- Playwright browser downloads via `actions/cache`
+- Docker layers for compliance images via Buildx GitHub cache
+
+This keeps CI faster without making cache hits a correctness requirement.
+
 ## Library Leverage
 
 Use battle-tested Rust crates instead of building from scratch:
