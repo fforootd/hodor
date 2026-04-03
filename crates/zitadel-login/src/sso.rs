@@ -13,7 +13,9 @@ use zitadel_db::{
     DEFAULT_INSTANCE_ID,
     provider::{self, ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
 };
-use zitadel_oidc::rp::{RpAuthState, RpCallbackRequest, RpProviderSpec, RpStartRequest, StateStore};
+use zitadel_oidc::rp::{
+    RpAuthState, RpCallbackRequest, RpProviderSpec, RpStartRequest, StateStore,
+};
 use zitadel_storage::ProviderAuthState;
 
 use crate::LoginState;
@@ -48,7 +50,11 @@ impl StateStore for TransientRpStateStore {
             .await
     }
 
-    async fn take_state(&self, instance_id: &str, state: &str) -> anyhow::Result<Option<RpAuthState>> {
+    async fn take_state(
+        &self,
+        instance_id: &str,
+        state: &str,
+    ) -> anyhow::Result<Option<RpAuthState>> {
         Ok(self
             .transient
             .consume_provider_auth_state(instance_id, state)
@@ -108,7 +114,9 @@ async fn sso_start(
     if provider.payload.protocol != "oidc" {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "provider protocol is not supported by this endpoint"})),
+            Json(
+                serde_json::json!({"error": "provider protocol is not supported by this endpoint"}),
+            ),
         )
             .into_response();
     }
@@ -273,7 +281,11 @@ async fn complete_federated_login(
         .as_ref()
         .map(zitadel_schema::claim_defaults)
         .unwrap_or_default();
-    let profile = zitadel_expr::map_claims(&defaults, &provider.payload.mapping.claims, &identity.claims);
+    let profile = zitadel_expr::map_claims(
+        &defaults,
+        &provider.payload.mapping.claims,
+        &identity.claims,
+    );
     let user_id = find_or_create_identity(&scoped, provider, identity, &profile).await?;
 
     let org_id = sqlx::query_as::<_, (String,)>(
@@ -312,12 +324,16 @@ async fn complete_federated_login(
         .execute(scoped.pool())
         .await?;
 
-    let signed = zitadel_auth::cookie::sign(&created.token, &state.cookie_config.secrets[0]);
+    let signed = zitadel_authn::cookie::sign(&created.token, &state.cookie_config.secrets[0]);
     let cookie_name = state.cookie_config.cookie_name();
-    let secure_flag = if state.cookie_config.secure { "; Secure" } else { "" };
+    let secure_flag = if state.cookie_config.secure {
+        "; Secure"
+    } else {
+        ""
+    };
     let cookie_value = format!(
         "{cookie_name}={signed}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}{secure_flag}",
-        zitadel_auth::cookie::MAX_AGE,
+        state.cookie_config.max_age,
     );
 
     let redirect_url = "/login?sso=complete";
@@ -397,7 +413,8 @@ async fn find_or_create_identity(
         return Ok(user_id);
     }
 
-    if let Some(existing_user_id) = match_existing_user(scoped, provider, identity, profile).await? {
+    if let Some(existing_user_id) = match_existing_user(scoped, provider, identity, profile).await?
+    {
         create_linked_identity(scoped, &existing_user_id, provider, identity).await?;
         return Ok(existing_user_id);
     }
@@ -416,8 +433,8 @@ async fn find_or_create_identity(
                 identity.email.clone()
             }
         });
-    let display_name = profile_string(profile, "display_name")
-        .unwrap_or_else(|| identifier.clone());
+    let display_name =
+        profile_string(profile, "display_name").unwrap_or_else(|| identifier.clone());
     let org_id = get_default_org(scoped).await?;
     let user_id = Uuid::new_v4().to_string();
 
@@ -533,10 +550,7 @@ async fn get_default_org(scoped: &zitadel_db::scoped::ScopedDb) -> anyhow::Resul
         .ok_or_else(|| anyhow::anyhow!("no org found"))
 }
 
-fn profile_string(
-    profile: &HashMap<String, serde_json::Value>,
-    key: &str,
-) -> Option<String> {
+fn profile_string(profile: &HashMap<String, serde_json::Value>, key: &str) -> Option<String> {
     profile
         .get(key)
         .and_then(serde_json::Value::as_str)
@@ -561,8 +575,11 @@ fn urlencoding_encode(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::DefaultRpService;
-    use zitadel_auth::{cookie::CookieConfig, password::Passwords};
-    use zitadel_storage::{DefaultStatefulStorage, DefaultTransientStorage, NoopEdgeSink, SqlEdgeReadDb, SqlStateDb, SqlTransientCompatKv};
+    use zitadel_authn::{cookie::CookieConfig, password::Swapper};
+    use zitadel_storage::{
+        DefaultStatefulStorage, DefaultTransientStorage, NoopEdgeSink, SqlEdgeReadDb, SqlStateDb,
+        SqlTransientCompatKv,
+    };
 
     async fn test_state() -> LoginState {
         let db = zitadel_db::Db::open("").await.unwrap();
@@ -586,13 +603,14 @@ mod tests {
                 SqlTransientCompatKv::new(db.clone()),
                 NoopEdgeSink,
             )),
-            passwords: Arc::new(Passwords::new_dev()),
+            passwords: Arc::new(Swapper::dev()),
             cookie_config: Arc::new(CookieConfig::new(
                 vec!["test-secret".into()],
                 "localhost",
                 false,
             )),
             public_origin: Arc::new("http://localhost:8080".into()),
+            conformance_login_html: false,
             rp: Arc::new(DefaultRpService::new(
                 zitadel_oidc::rp::ReqwestHttpClient::new(),
                 zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
@@ -634,10 +652,18 @@ mod tests {
     async fn link_only_rejects_unknown_user() {
         let state = test_state().await;
         let scoped = state.db.scoped_default();
-        provider::insert_provider(&scoped, "provider-1", "org-1", &provider_payload(ProviderLinkingMode::LinkOnly))
+        provider::insert_provider(
+            &scoped,
+            "provider-1",
+            "org-1",
+            &provider_payload(ProviderLinkingMode::LinkOnly),
+        )
+        .await
+        .unwrap();
+        let provider = provider::get_provider(&scoped, "provider-1")
             .await
+            .unwrap()
             .unwrap();
-        let provider = provider::get_provider(&scoped, "provider-1").await.unwrap().unwrap();
         let identity = zitadel_oidc::rp::VerifiedExternalIdentity {
             issuer: "https://issuer.example".into(),
             subject: "ext-1".into(),

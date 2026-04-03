@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "zitadel", about = "Zitadel identity platform", version)]
@@ -53,6 +52,16 @@ enum Commands {
 
     /// Export OpenAPI 3.1 spec to stdout.
     OpenapiExport,
+
+    /// Print the JSON Schema for the TOML configuration file.
+    ConfigSchema,
+
+    /// Validate a config file and print the resolved configuration.
+    ConfigValidate {
+        /// Path to TOML config file.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -102,16 +111,18 @@ fn main() -> anyhow::Result<()> {
                 cfg.database.migrate = "skip".into();
             }
 
-            init_tracing(&cfg.observability.log_level, &cfg.observability.log_format);
-
-            tracing::info!(
-                port = cfg.server.port,
-                db = %cfg.database.url,
-                "starting zitadel server"
-            );
-
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(zitadel_server::run(cfg))?;
+            rt.block_on(async move {
+                let db = zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+                let _observability =
+                    zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
+                tracing::info!(
+                    port = cfg.server.port,
+                    db = %cfg.database.url,
+                    "starting zitadel server"
+                );
+                zitadel_server::run_with_db(cfg, db).await
+            })?;
         }
 
         Commands::Migrate {
@@ -121,47 +132,50 @@ fn main() -> anyhow::Result<()> {
         } => {
             let mut cfg = load_config(config.as_deref())?;
             resolve_paths(&mut cfg, config.as_deref());
-            init_tracing(&cfg.observability.log_level, &cfg.observability.log_format);
             let rt = tokio::runtime::Runtime::new()?;
-            let db = rt.block_on(zitadel_db::Db::open_with_config(
-                &cfg.database.url,
-                &cfg.database,
-            ))?;
+            rt.block_on(async move {
+                let db = zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+                let _observability =
+                    zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
 
-            if status {
-                rt.block_on(zitadel_db::migrate::check_version(&db))?;
-                tracing::info!("schema is up to date");
-            } else {
-                rt.block_on(zitadel_db::migrate::migrate(&db))?;
-                if bootstrap {
-                    let changed = rt.block_on(zitadel_db::bootstrap::bootstrap(&db))?;
-                    tracing::info!(bootstrapped = changed, "migration command completed");
+                if status {
+                    zitadel_db::migrate::check_version(&db).await?;
+                    tracing::info!("schema is up to date");
                 } else {
-                    tracing::info!("migration command completed");
+                    zitadel_db::migrate::migrate(&db).await?;
+                    if bootstrap {
+                        let changed = zitadel_db::bootstrap::bootstrap(&db).await?;
+                        tracing::info!(bootstrapped = changed, "migration command completed");
+                    } else {
+                        tracing::info!("migration command completed");
+                    }
                 }
-            }
-
-            rt.block_on(db.close());
+                db.close().await;
+                anyhow::Ok(())
+            })?;
         }
 
         Commands::Seed { action } => match action {
             SeedAction::Apply { config, file } => {
                 let mut cfg = load_config(config.as_deref())?;
                 resolve_paths(&mut cfg, config.as_deref());
-                init_tracing(&cfg.observability.log_level, &cfg.observability.log_format);
                 let rt = tokio::runtime::Runtime::new()?;
-                let db = rt.block_on(zitadel_db::Db::open_with_config(
-                    &cfg.database.url,
-                    &cfg.database,
-                ))?;
                 let file = if file.is_absolute() {
                     file
                 } else {
                     std::env::current_dir()?.join(file)
                 };
-                rt.block_on(zitadel_db::seed::apply(&db, &file))?;
-                rt.block_on(db.close());
-                tracing::info!(file = %file.display(), "seed applied");
+                rt.block_on(async move {
+                    let db =
+                        zitadel_db::Db::open_with_config(&cfg.database.url, &cfg.database).await?;
+                    let _observability =
+                        zitadel_observability::install(&cfg.observability, Some(db.clone()))
+                            .await?;
+                    zitadel_db::seed::apply(&db, &file).await?;
+                    db.close().await;
+                    tracing::info!(file = %file.display(), "seed applied");
+                    anyhow::Ok(())
+                })?;
             }
             SeedAction::Validate { file } => {
                 let file = if file.is_absolute() {
@@ -169,13 +183,39 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     std::env::current_dir()?.join(file)
                 };
-                let seed = zitadel_db::seed::validate(&file)?;
-                tracing::info!(file = %file.display(), users = seed.users.len(), "seed valid");
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(async move {
+                    let cfg = zitadel_config::Config::default();
+                    let _observability =
+                        zitadel_observability::install(&cfg.observability, None).await?;
+                    let seed = zitadel_db::seed::validate(&file)?;
+                    tracing::info!(file = %file.display(), users = seed.users.len(), "seed valid");
+                    anyhow::Ok(())
+                })?;
             }
         },
 
         Commands::OpenapiExport => {
             eprintln!("OpenAPI export not yet implemented");
+        }
+
+        Commands::ConfigSchema => {
+            println!("{}", zitadel_config::Config::json_schema_string());
+        }
+
+        Commands::ConfigValidate { config } => {
+            let mut cfg = load_config(config.as_deref())?;
+            resolve_paths(&mut cfg, config.as_deref());
+            let json = serde_json::to_string_pretty(&cfg)?;
+            println!("{json}");
+            eprintln!("Config is valid.");
+            eprintln!("  Database:        {}", cfg.database.url);
+            eprintln!("  Server:          {}:{}", cfg.server.external_domain, cfg.server.port);
+            eprintln!("  Encryption:      {}", if cfg.encryption.keys.is_empty() { "plaintext (no keys)" } else { "active" });
+            eprintln!("  Password hasher: {:?}", cfg.password_hasher.algorithm);
+            eprintln!("  OIDC signing:    {:?}", cfg.oidc.signing_algorithm);
+            eprintln!("  Session max age: {}s", cfg.session.max_age_secs);
+            eprintln!("  Dev mode:        {}", cfg.is_dev());
         }
     }
 
@@ -249,17 +289,4 @@ fn normalize_path(path: &std::path::Path) -> PathBuf {
         }
     }
     components.iter().collect()
-}
-
-fn init_tracing(level: &str, format: &str) {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
-
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false);
-
-    match format {
-        "json" => subscriber.json().init(),
-        _ => subscriber.init(),
-    }
 }

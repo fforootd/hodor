@@ -38,6 +38,7 @@
 | [025](adr/025-explicit-bootstrap-and-local-recovery.md) | Explicit Bootstrap and Local Break-Glass Recovery | Proposed | 2026-03-31 |
 | [026](adr/026-cloud-container-per-tenant.md) | Cloud Deployment — Container-per-Tenant with D1 | Proposed | 2026-03-31 |
 | [027](adr/027-fips-compliance.md) | FIPS Compliance — Opt-in Compile Target | Proposed | 2026-04-02 |
+| [028](adr/028-secrets-hashers-key-lifecycle.md) | Configurable Secrets, Hashers & Key Lifecycle | Proposed | 2026-04-02 |
 
 ## Architecture
 
@@ -63,6 +64,7 @@
 | [Local Development](guides/local-development.md) | Canonical `make dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
 | [Bootstrap and Recovery](guides/bootstrap-recovery.md) | Current Rust bootstrap flow and recovery limitations |
 | [OIDC Daily Coverage](guides/oidc-conformance.md) | Daily OIDC provider conformance and RP regression targets via top-level `make` commands |
+| [Secrets & Crypto](guides/secrets-and-crypto.md) | Password hashing, encryption keys, token config, secret generators, FIPS |
 | [Zitadel Login Web Component](guides/zitadel-login-wc.md) | Embed and customize the server-driven login web component |
 
 ## Vision
@@ -110,4 +112,4 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 028
+- **Next ADR number**: 029

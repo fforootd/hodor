@@ -12,7 +12,7 @@ make oidc-conformance-clean
 ## What Each Target Does
 
 - `make oidc-conformance-op`
-  Runs the official OpenID Foundation conformance suite against Zitadel as an OpenID Provider.
+  Runs the official OpenID Foundation conformance suite against Zitadel as an OpenID Provider. The current repo target is the Core Basic static-client profile.
 - `make oidc-conformance-rp`
   Runs the current RP-focused daily regression lane using the repository's Playwright OIDC RP suite.
 - `make oidc-conformance`
@@ -20,7 +20,7 @@ make oidc-conformance-clean
 - `make oidc-conformance-clean`
   Stops and removes the local Dockerized conformance stack.
 
-The OP lane is the official protocol conformance lane. The RP lane is currently the best reproducible daily regression path for the Zitadel RP/broker flow. A dedicated OIDF RP harness can be added later without changing the top-level Make entrypoints.
+The OP lane is the official protocol conformance lane. The current daily profile is intentionally narrower than full certification: it runs the Core Basic static-client plan through an HTTPS reverse proxy plus a plain HTML conformance login surface. The RP lane is currently the best reproducible daily regression path for the Zitadel RP/broker flow. A dedicated OIDF RP harness and broader OP profiles can be added later without changing the top-level Make entrypoints.
 
 ## Requirements
 

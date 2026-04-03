@@ -101,10 +101,7 @@ async fn create(State(s): State<ApiState>, Json(req): Json<LoginFlowRequest>) ->
     }
 }
 
-async fn list(
-    State(s): State<ApiState>,
-    Query(p): Query<response::PaginationParams>,
-) -> Response {
+async fn list(State(s): State<ApiState>, Query(p): Query<response::PaginationParams>) -> Response {
     let scoped = s.db.scoped_default();
     let cursor = p.cursor.unwrap_or_default();
     let is_default = scoped.bool_as_int("is_default");

@@ -92,20 +92,48 @@ pub struct TokenExchangeRequest {
     pub refresh_token: String,
 }
 
+/// Token lifetime configuration, sourced from `OidcConfig`.
+#[derive(Debug, Clone)]
+pub struct TokenLifetimes {
+    pub access_token_secs: u64,
+    pub id_token_secs: u64,
+}
+
+impl Default for TokenLifetimes {
+    fn default() -> Self {
+        Self {
+            access_token_secs: 12 * 3600,
+            id_token_secs: 12 * 3600,
+        }
+    }
+}
+
+impl From<&zitadel_config::oidc::OidcConfig> for TokenLifetimes {
+    fn from(cfg: &zitadel_config::oidc::OidcConfig) -> Self {
+        Self {
+            access_token_secs: cfg.access_token_lifetime_secs,
+            id_token_secs: cfg.id_token_lifetime_secs,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Provider<C, A, K, U> {
     instance_id: String,
     issuer: String,
+    login_path: String,
     clients: C,
     auth_requests: A,
     keys: K,
     claims: U,
+    lifetimes: TokenLifetimes,
 }
 
 impl<C, A, K, U> Provider<C, A, K, U> {
     pub fn new(
         instance_id: String,
         issuer: String,
+        login_path: String,
         clients: C,
         auth_requests: A,
         keys: K,
@@ -114,11 +142,18 @@ impl<C, A, K, U> Provider<C, A, K, U> {
         Self {
             instance_id,
             issuer,
+            login_path,
             clients,
             auth_requests,
             keys,
             claims,
+            lifetimes: TokenLifetimes::default(),
         }
+    }
+
+    pub fn with_lifetimes(mut self, lifetimes: TokenLifetimes) -> Self {
+        self.lifetimes = lifetimes;
+        self
     }
 
     pub fn issuer(&self) -> &str {
@@ -148,6 +183,7 @@ impl<C, A, K, U> Provider<C, A, K, U> {
             token_endpoint_auth_methods_supported: vec![
                 "client_secret_post".into(),
                 "client_secret_basic".into(),
+                "none".into(),
             ],
             code_challenge_methods_supported: vec!["S256".into()],
             claims_supported: vec![
@@ -253,7 +289,7 @@ where
             })?;
 
         Ok(AuthorizeRedirect {
-            location: format!("/login?auth_request_id={auth_request_id}"),
+            location: format!("{}?auth_request_id={auth_request_id}", self.login_path),
         })
     }
 
@@ -273,7 +309,10 @@ where
         }
     }
 
-    pub async fn userinfo(&self, access_token: &str) -> Result<UserInfoResponse, ProtocolError> {
+    pub async fn validate_access_token(
+        &self,
+        access_token: &str,
+    ) -> Result<AccessTokenClaims, ProtocolError> {
         if access_token.is_empty() {
             return Err(ProtocolError::invalid_request("Bearer token required"));
         }
@@ -290,13 +329,17 @@ where
         validation.validate_aud = false;
         validation.set_issuer(&[&self.issuer]);
 
-        let token =
-            jsonwebtoken::decode::<AccessTokenClaims>(access_token, &key.decoding, &validation)
-                .map_err(|_| ProtocolError::invalid_grant("invalid access token"))?;
+        jsonwebtoken::decode::<AccessTokenClaims>(access_token, &key.decoding, &validation)
+            .map(|token| token.claims)
+            .map_err(|_| ProtocolError::invalid_grant("invalid access token"))
+    }
+
+    pub async fn userinfo(&self, access_token: &str) -> Result<UserInfoResponse, ProtocolError> {
+        let token = self.validate_access_token(access_token).await?;
 
         let claims = self
             .claims
-            .load_user_claims(&self.instance_id, &token.claims.sub)
+            .load_user_claims(&self.instance_id, &token.sub)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load user claims: {error}")))?;
 
@@ -317,18 +360,37 @@ where
         let auth = request
             .client_auth
             .as_ref()
-            .ok_or_else(|| ProtocolError::invalid_client("client authentication required"))?;
+            .ok_or_else(|| ProtocolError::invalid_client("client_id required"))?;
 
-        let authenticated = self
+        let client = self
             .clients
-            .authenticate_client_secret(&self.instance_id, &auth.client_id, &auth.client_secret)
+            .find_client(&self.instance_id, &auth.client_id)
             .await
-            .map_err(|error| {
-                ProtocolError::server_error(format!("authenticate client: {error}"))
-            })?;
+            .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
+        let client = client.ok_or_else(|| ProtocolError::invalid_client("unknown client_id"))?;
+
+        let authenticated = if client.client_secret.is_empty() {
+            auth.client_secret.is_empty()
+        } else {
+            self.clients
+                .authenticate_client_secret(&self.instance_id, &auth.client_id, &auth.client_secret)
+                .await
+                .map_err(|error| {
+                    ProtocolError::server_error(format!("authenticate client: {error}"))
+                })?
+        };
 
         if !authenticated {
             return Err(ProtocolError::invalid_client("invalid client credentials"));
+        }
+        if !client
+            .grant_types
+            .iter()
+            .any(|grant| grant == "authorization_code")
+        {
+            return Err(ProtocolError::unauthorized_client(
+                "client is not allowed to use authorization_code",
+            ));
         }
 
         let granted = self
@@ -347,6 +409,15 @@ where
         }
         if !request.redirect_uri.is_empty() && request.redirect_uri != granted.redirect_uri {
             return Err(ProtocolError::invalid_grant("redirect_uri mismatch"));
+        }
+        if !client
+            .redirect_uris
+            .iter()
+            .any(|uri| uri == &granted.redirect_uri)
+        {
+            return Err(ProtocolError::invalid_grant(
+                "redirect_uri is not registered",
+            ));
         }
         if !granted.code_challenge.is_empty() {
             if request.code_verifier.is_empty() {
@@ -382,7 +453,7 @@ where
                 iss: self.issuer.clone(),
                 sub: user.subject.clone(),
                 aud: auth.client_id.clone(),
-                exp: now + 3600,
+                exp: now + self.lifetimes.id_token_secs,
                 iat: now,
                 nonce: granted.nonce.clone(),
                 name: user.name.clone(),
@@ -398,7 +469,7 @@ where
                 iss: self.issuer.clone(),
                 sub: user.subject,
                 aud: auth.client_id.clone(),
-                exp: now + 3600,
+                exp: now + self.lifetimes.access_token_secs,
                 iat: now,
                 scope: granted.scope.clone(),
                 client_id: auth.client_id.clone(),
@@ -410,7 +481,7 @@ where
         Ok(TokenResponse {
             access_token,
             token_type: "Bearer".to_string(),
-            expires_in: 3600,
+            expires_in: self.lifetimes.access_token_secs,
             id_token: Some(id_token),
             refresh_token: None,
             scope: granted.scope,
@@ -471,7 +542,7 @@ where
                 iss: self.issuer.clone(),
                 sub: auth.client_id.clone(),
                 aud: auth.client_id.clone(),
-                exp: now + 3600,
+                exp: now + self.lifetimes.access_token_secs,
                 iat: now,
                 scope: "openid".to_string(),
                 client_id: auth.client_id.clone(),
@@ -483,7 +554,7 @@ where
         Ok(TokenResponse {
             access_token,
             token_type: "Bearer".to_string(),
-            expires_in: 3600,
+            expires_in: self.lifetimes.access_token_secs,
             id_token: None,
             refresh_token: None,
             scope: "openid".to_string(),
@@ -631,6 +702,7 @@ mod tests {
         Provider::new(
             "default".to_string(),
             "http://issuer.example".to_string(),
+            "/login".to_string(),
             FakeClientStore {
                 client: Some(ClientMetadata {
                     client_id: "client".to_string(),

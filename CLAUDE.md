@@ -27,16 +27,12 @@ crates/
   zitadel-db/                     DB layer (SQLite + Postgres via sqlx)
   zitadel-oidc/                   OIDC provider (discovery, token, authorize)
   zitadel-login/                  Login flow, password auth, branding
-  zitadel-auth/                   Password hashing (argon2id), session cookies
+  zitadel-authn/                  Password hashing (argon2id), session cookies
   zitadel-crypto/                 AES-256-GCM envelope encryption
   zitadel-config/                 TOML config loading with env var overrides
-  zitadel-cedar/                  Cedar authorization model (POC)
-  zitadel-catalog/                Template catalog (stub)
-  zitadel-events/                 Event system (stub)
-  zitadel-notify/                 Notification service (stub)
+  zitadel-authz/                  Cedar authorization model (POC)
+  zitadel-catalog/                Template catalog
   zitadel-schema/                 JSON Schema validation (stub)
-  zitadel-risk/                   Risk assessment (stub)
-  zitadel-ratelimit/              Rate limiting (stub)
 migrations/
   sqlite/                         SQLite migration files (00001_initial.sql, ...)
   postgres/                       Postgres migration files

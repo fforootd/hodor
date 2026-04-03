@@ -14,5 +14,4 @@ serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 sha2 = { workspace = true }
-hex = "0.4"
 zitadel-config = { workspace = true }

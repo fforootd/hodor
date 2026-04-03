@@ -10,8 +10,10 @@ path = "src/main.rs"
 [dependencies]
 zitadel-config = { workspace = true }
 zitadel-db = { workspace = true }
+zitadel-observability = { workspace = true }
 zitadel-server = { workspace = true }
 clap = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

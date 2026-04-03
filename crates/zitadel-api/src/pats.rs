@@ -36,7 +36,7 @@ async fn create_pat(State(s): State<ApiState>, Json(req): Json<CreatePatRequest>
     let scoped = s.db.scoped_default();
     let id = Uuid::new_v4().to_string();
     let token = format!("zit_pat_{}", zitadel_crypto::random_hex(24));
-    let token_hash = zitadel_auth::session::hash_token(&token);
+    let token_hash = zitadel_authn::session::hash_token(&token);
     let scopes = serde_json::to_string(&req.scopes).unwrap_or_else(|_| "[]".to_string());
     let sql = format!(
         "INSERT INTO tokens (id, instance_id, type, token_hash, user_id, name, scopes) VALUES ($1, $2, 'pat', $3, $4, $5, {})",

@@ -8,6 +8,7 @@ SUITE_COMPOSE="${SUITE_DIR}/docker-compose-localtest.yml"
 ZITADEL_COMPOSE="${ROOT_DIR}/conformance/oidc/docker-compose.zitadel.yml"
 PLAN_FILE="${ROOT_DIR}/conformance/oidc/plans/op.txt"
 CONFIG_FILE="${ROOT_DIR}/conformance/oidc/config/op-static-client.json"
+SUITE_NGINX_TEMPLATE="${ROOT_DIR}/conformance/oidc/suite-nginx.conf"
 PROJECT_NAME="${OIDC_CONFORMANCE_PROJECT:-oidc-conformance}"
 MAVEN_CACHE="${OIDC_CONFORMANCE_MAVEN_CACHE:-$CACHE_DIR/m2}"
 ARTIFACT_ROOT="${OIDC_CONFORMANCE_ARTIFACTS_DIR:-$ROOT_DIR/artifacts/oidc-conformance}"
@@ -15,6 +16,7 @@ ARTIFACT_DIR="${ARTIFACT_ROOT}/op"
 KEEP_STACK="${OIDC_CONFORMANCE_KEEP_STACK:-0}"
 
 mkdir -p "$MAVEN_CACHE" "$ARTIFACT_DIR"
+cp "$SUITE_NGINX_TEMPLATE" "$SUITE_DIR/nginx/nginx.conf"
 
 case "$ARTIFACT_DIR" in
   "$ROOT_DIR"/*) ;;
@@ -80,6 +82,7 @@ trap cleanup EXIT INT TERM
   MAVEN_CACHE="$MAVEN_CACHE" docker compose -f builder-compose.yml run --rm builder
 )
 
+docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" build nginx >/dev/null
 docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d mongodb oidcc-provider server nginx
 docker compose -p "$PROJECT_NAME" -f "$ZITADEL_COMPOSE" up -d --build zitadel
 

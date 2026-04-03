@@ -18,3 +18,42 @@ cache_path = "../data/zitadel-cache.db"
 [dev]
 mock_oidc = true
 seed_file = "./seeds/frontend.yaml"
+
+# ─── Secrets & Crypto (defaults shown, uncomment to override) ───
+#
+# [encryption]
+# active_key_id = "key-2024"
+# [[encryption.keys]]
+# id = "key-2024"
+# secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # 64 hex chars = 32 bytes
+#
+# [password_hasher]
+# algorithm = "argon2id"    # argon2id | bcrypt
+# memory_cost_kb = 65536    # argon2: 64 MB
+# time_cost = 3             # argon2: iterations
+# parallelism = 4           # argon2: threads
+# bcrypt_cost = 14          # bcrypt: cost factor
+#
+# [secret_hasher]
+# algorithm = "bcrypt"
+# bcrypt_cost = 4
+#
+# [oidc]
+# signing_algorithm = "RS256"
+# key_size = 2048
+# access_token_lifetime_secs = 43200    # 12h
+# id_token_lifetime_secs = 43200        # 12h
+# refresh_token_idle_secs = 2592000     # 720h
+# refresh_token_max_secs = 7776000      # 2160h
+#
+# [session]
+# max_age_secs = 86400    # 24h
+#
+# [generators.client_secret]
+# length = 64
+# charset = "alphanumeric"
+#
+# [generators.otp_sms]
+# length = 8
+# expiry_secs = 300
+# charset = "digits"

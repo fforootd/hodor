@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod analytics;
 pub mod apps;
+pub mod auth;
 pub mod catalog;
 pub mod console;
 pub mod events;
@@ -22,8 +23,9 @@ pub mod users;
 
 use axum::Router;
 use std::sync::Arc;
-use zitadel_auth::cookie::CookieConfig;
+use zitadel_authn::cookie::CookieConfig;
 use zitadel_db::Db;
+use zitadel_oidc::OidcState;
 use zitadel_storage::{DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTransientStorage};
 
 /// Shared API state.
@@ -33,7 +35,8 @@ pub struct ApiState {
     pub stateful: Arc<DefaultStatefulStorage>,
     pub transient: Arc<DefaultTransientStorage>,
     pub analytics: Arc<DefaultAnalyticsStorage>,
-    pub passwords: Arc<zitadel_auth::password::Passwords>,
+    pub oidc: OidcState,
+    pub passwords: Arc<zitadel_authn::password::Swapper>,
     pub cookie_config: Arc<CookieConfig>,
     pub is_dev: bool,
 }
@@ -77,6 +80,8 @@ pub fn routes(state: ApiState) -> Router {
         .merge(actions::routes())
         // Telemetry (fingerprints)
         .merge(telemetry::routes())
+        // Auth/session info
+        .merge(auth::routes())
         // Catalog / marketplace
         .merge(catalog::routes())
         // Auth middleware — validates Bearer token or session cookie.

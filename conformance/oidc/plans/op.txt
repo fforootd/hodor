@@ -2,4 +2,3 @@
 # Keep this list intentionally small and stable for daily CI.
 
 oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]
-oidcc-config-certification-test-plan

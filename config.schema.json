@@ -1,0 +1,1272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Config",
+  "description": "Runtime configuration for the Zitadel server. Covers infrastructure-level settings only. Domain-specific configuration (policies, whitelabeling) lives in seed YAML.",
+  "type": "object",
+  "properties": {
+    "catalog": {
+      "default": {
+        "local_path": "",
+        "refresh_interval": "",
+        "url": ""
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/CatalogConfig"
+        }
+      ]
+    },
+    "database": {
+      "default": {
+        "bootstrap": "",
+        "conn_max_lifetime": "1h",
+        "max_idle_conns": 5,
+        "max_open_conns": 25,
+        "migrate": "",
+        "url": "sqlite://./data/zitadel.db"
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/DatabaseConfig"
+        }
+      ]
+    },
+    "dev": {
+      "default": {
+        "conformance_login_html": false,
+        "mock_oidc": false,
+        "mock_oidc_port": 0,
+        "seed_file": ""
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/DevConfig"
+        }
+      ]
+    },
+    "encryption": {
+      "default": {
+        "active_key_id": "",
+        "keys": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/EncryptionConfig"
+        }
+      ]
+    },
+    "generators": {
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/GeneratorsConfig"
+        }
+      ]
+    },
+    "observability": {
+      "default": {
+        "cache_max": 50000,
+        "cache_path": "./data/zitadel-cache.db",
+        "log_format": "text",
+        "log_level": "info",
+        "redaction": {
+          "ip_mode": "keep",
+          "keys": [
+            "password",
+            "secret",
+            "token",
+            "client_secret",
+            "private_key"
+          ],
+          "mask": "***REDACTED***"
+        },
+        "sinks": {
+          "analytics": {
+            "drain_batch": 500,
+            "drain_interval": "5s",
+            "enabled": true
+          },
+          "otel": {
+            "endpoint": "",
+            "protocol": "http"
+          }
+        },
+        "streams": {
+          "event_handler": {
+            "mode": "buffered",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout",
+              "analytics"
+            ]
+          },
+          "event_pusher": {
+            "mode": "off",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout"
+            ]
+          },
+          "jobs": {
+            "mode": "buffered",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout",
+              "analytics"
+            ]
+          },
+          "queue": null,
+          "request": {
+            "mode": "sampled",
+            "sample_rate": 0.01,
+            "sinks": [
+              "stdout",
+              "otel",
+              "analytics"
+            ]
+          },
+          "runtime": {
+            "mode": "buffered",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout",
+              "analytics"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ObservabilityConfig"
+        }
+      ]
+    },
+    "oidc": {
+      "default": {
+        "access_token_lifetime_secs": 43200,
+        "id_token_lifetime_secs": 43200,
+        "key_size": 2048,
+        "private_key_lifetime_secs": 21600,
+        "public_key_lifetime_secs": 108000,
+        "refresh_token_idle_secs": 2592000,
+        "refresh_token_max_secs": 7776000,
+        "signing_algorithm": "RS256"
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/OidcConfig"
+        }
+      ]
+    },
+    "password_hasher": {
+      "default": {
+        "algorithm": "argon2id",
+        "bcrypt_cost": 14,
+        "memory_cost_kb": 65536,
+        "parallelism": 4,
+        "time_cost": 3
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/PasswordHasherConfig"
+        }
+      ]
+    },
+    "rate_limit": {
+      "default": {
+        "backend": "memory",
+        "batch_write": false,
+        "gc_interval": 60,
+        "redis_url": ""
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/RateLimitConfig"
+        }
+      ]
+    },
+    "secret_hasher": {
+      "default": {
+        "algorithm": "bcrypt",
+        "bcrypt_cost": 4
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/SecretHasherConfig"
+        }
+      ]
+    },
+    "server": {
+      "default": {
+        "app_access": {
+          "admin": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "api": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "console": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "login": {
+            "enabled": true,
+            "ip_allow": []
+          }
+        },
+        "base_path": "",
+        "cookie_secrets": [],
+        "external_domain": "localhost",
+        "force_insecure_cookies": false,
+        "management_secret": "",
+        "multi_tenant": false,
+        "path_overrides": {
+          "api": "",
+          "assets": "",
+          "console": "",
+          "login": "",
+          "oidc": "",
+          "saml": ""
+        },
+        "port": 8080,
+        "proxy_header_mode": "",
+        "public_origin": "",
+        "real_ip_header": "",
+        "security_headers": {
+          "cross_origin_opener": "same-origin",
+          "csp_enabled": true,
+          "csp_policy": "",
+          "csp_report_uri": "",
+          "hsts_enabled": true,
+          "hsts_max_age": 63072000,
+          "hsts_preload": false,
+          "hsts_subdomains": true,
+          "permissions_policy": "camera=(), microphone=(), geolocation=(), payment=()",
+          "referrer_policy": "strict-origin-when-cross-origin",
+          "x_content_type_options": true,
+          "x_frame_options": "DENY"
+        },
+        "tls_cert": "",
+        "tls_key": "",
+        "trusted_proxies": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ServerConfig"
+        }
+      ]
+    },
+    "session": {
+      "default": {
+        "max_age_secs": 86400
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/SessionConfig"
+        }
+      ]
+    },
+    "tls": {
+      "default": {
+        "ca_dir": "",
+        "email": "",
+        "http_port": 80,
+        "https_port": 443,
+        "mode": ""
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/TlsConfig"
+        }
+      ]
+    },
+    "workers": {
+      "default": {
+        "event_workers": 1,
+        "lake_batch_size": 1000,
+        "lake_batch_window_secs": 5,
+        "notification_workers": 1
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/WorkersConfig"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "AnalyticsSinkConfig": {
+      "type": "object",
+      "properties": {
+        "drain_batch": {
+          "default": 500,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "drain_interval": {
+          "default": "5s",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
+    "AppAccessConfig": {
+      "type": "object",
+      "properties": {
+        "admin": {
+          "default": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppAccessEntry"
+            }
+          ]
+        },
+        "api": {
+          "default": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppAccessEntry"
+            }
+          ]
+        },
+        "console": {
+          "default": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppAccessEntry"
+            }
+          ]
+        },
+        "login": {
+          "default": {
+            "enabled": true,
+            "ip_allow": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppAccessEntry"
+            }
+          ]
+        }
+      }
+    },
+    "AppAccessEntry": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "ip_allow": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CatalogConfig": {
+      "type": "object",
+      "properties": {
+        "local_path": {
+          "default": "",
+          "type": "string"
+        },
+        "refresh_interval": {
+          "default": "",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "DatabaseConfig": {
+      "type": "object",
+      "properties": {
+        "bootstrap": {
+          "default": "",
+          "type": "string"
+        },
+        "conn_max_lifetime": {
+          "default": "1h",
+          "type": "string"
+        },
+        "max_idle_conns": {
+          "default": 5,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_open_conns": {
+          "default": 25,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "migrate": {
+          "default": "",
+          "type": "string"
+        },
+        "url": {
+          "default": "sqlite://./data/zitadel.db",
+          "type": "string"
+        }
+      }
+    },
+    "DevConfig": {
+      "type": "object",
+      "properties": {
+        "conformance_login_html": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mock_oidc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mock_oidc_port": {
+          "default": 0,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "seed_file": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "EncryptionConfig": {
+      "type": "object",
+      "properties": {
+        "active_key_id": {
+          "default": "",
+          "type": "string"
+        },
+        "keys": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EncryptionKey"
+          }
+        }
+      }
+    },
+    "EncryptionKey": {
+      "type": "object",
+      "required": [
+        "id",
+        "secret"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        }
+      }
+    },
+    "GeneratorProfileOverride": {
+      "description": "Per-purpose secret generator profile override in TOML.\n\nOnly fields explicitly set override the compiled-in defaults. This mirrors the profile shape from `zitadel-crypto::generator::GeneratorProfile` but lives in the config crate to avoid a circular dependency.",
+      "type": "object",
+      "properties": {
+        "charset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "custom_chars": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dash_interval": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "expiry_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "GeneratorsConfig": {
+      "description": "Generator configuration section in TOML.\n\nKeys are purpose names (e.g., `client_secret`, `otp_sms`). Values are partial overrides of the compiled-in defaults.",
+      "type": "object"
+    },
+    "HashAlgorithm": {
+      "description": "Password hashing algorithm selection.",
+      "type": "string",
+      "enum": [
+        "argon2id",
+        "bcrypt"
+      ]
+    },
+    "ObservabilityConfig": {
+      "type": "object",
+      "properties": {
+        "cache_max": {
+          "default": 50000,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "cache_path": {
+          "default": "./data/zitadel-cache.db",
+          "type": "string"
+        },
+        "log_format": {
+          "default": "text",
+          "type": "string"
+        },
+        "log_level": {
+          "default": "info",
+          "type": "string"
+        },
+        "redaction": {
+          "default": {
+            "ip_mode": "keep",
+            "keys": [
+              "password",
+              "secret",
+              "token",
+              "client_secret",
+              "private_key"
+            ],
+            "mask": "***REDACTED***"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedactionConfig"
+            }
+          ]
+        },
+        "sinks": {
+          "default": {
+            "analytics": {
+              "drain_batch": 500,
+              "drain_interval": "5s",
+              "enabled": true
+            },
+            "otel": {
+              "endpoint": "",
+              "protocol": "http"
+            }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/SinksConfig"
+            }
+          ]
+        },
+        "streams": {
+          "default": {
+            "event_handler": {
+              "mode": "buffered",
+              "sample_rate": 0.0,
+              "sinks": [
+                "stdout",
+                "analytics"
+              ]
+            },
+            "event_pusher": {
+              "mode": "off",
+              "sample_rate": 0.0,
+              "sinks": [
+                "stdout"
+              ]
+            },
+            "jobs": {
+              "mode": "buffered",
+              "sample_rate": 0.0,
+              "sinks": [
+                "stdout",
+                "analytics"
+              ]
+            },
+            "queue": null,
+            "request": {
+              "mode": "sampled",
+              "sample_rate": 0.01,
+              "sinks": [
+                "stdout",
+                "otel",
+                "analytics"
+              ]
+            },
+            "runtime": {
+              "mode": "buffered",
+              "sample_rate": 0.0,
+              "sinks": [
+                "stdout",
+                "analytics"
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamRoutingConfig"
+            }
+          ]
+        }
+      }
+    },
+    "OidcConfig": {
+      "description": "OIDC provider configuration: signing keys, key lifecycle, and token lifetimes.",
+      "type": "object",
+      "properties": {
+        "access_token_lifetime_secs": {
+          "description": "Access token lifetime (seconds). Default: 43200 (12h).",
+          "default": 43200,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "id_token_lifetime_secs": {
+          "description": "ID token lifetime (seconds). Default: 43200 (12h).",
+          "default": 43200,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "key_size": {
+          "description": "RSA key size in bits (ignored for EC). Default: 2048.",
+          "default": 2048,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "private_key_lifetime_secs": {
+          "description": "How long a private signing key is used before rotation (seconds). Default: 6h.",
+          "default": 21600,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "public_key_lifetime_secs": {
+          "description": "How long a public key remains available for verification after rotation (seconds). Default: 30h.",
+          "default": 108000,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "refresh_token_idle_secs": {
+          "description": "Refresh token idle expiration (seconds). Default: 2592000 (720h).",
+          "default": 2592000,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "refresh_token_max_secs": {
+          "description": "Refresh token absolute max lifetime (seconds). Default: 7776000 (2160h).",
+          "default": 7776000,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "signing_algorithm": {
+          "description": "JWT signing algorithm (default: RS256).",
+          "default": "RS256",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SigningAlgorithm"
+            }
+          ]
+        }
+      }
+    },
+    "OtelSinkConfig": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "default": "",
+          "type": "string"
+        },
+        "protocol": {
+          "default": "http",
+          "type": "string"
+        }
+      }
+    },
+    "PasswordHasherConfig": {
+      "description": "Configuration for the primary password hasher.\n\nThese are system-level (TOML) settings, not per-org policy. Password *policy* (min length, complexity) lives in the settings table.",
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "default": "argon2id",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HashAlgorithm"
+            }
+          ]
+        },
+        "bcrypt_cost": {
+          "description": "Bcrypt: cost factor (default: 14).",
+          "default": 14,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "memory_cost_kb": {
+          "description": "Argon2id: memory cost in KiB (default: 65536 = 64 MB).",
+          "default": 65536,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "parallelism": {
+          "description": "Argon2id: degree of parallelism (default: 4).",
+          "default": 4,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "time_cost": {
+          "description": "Argon2id: number of iterations (default: 3).",
+          "default": 3,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "PathOverrideConfig": {
+      "type": "object",
+      "properties": {
+        "api": {
+          "default": "",
+          "type": "string"
+        },
+        "assets": {
+          "default": "",
+          "type": "string"
+        },
+        "console": {
+          "default": "",
+          "type": "string"
+        },
+        "login": {
+          "default": "",
+          "type": "string"
+        },
+        "oidc": {
+          "default": "",
+          "type": "string"
+        },
+        "saml": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "RateLimitConfig": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "default": "memory",
+          "type": "string"
+        },
+        "batch_write": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gc_interval": {
+          "default": 60,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "redis_url": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "RedactionConfig": {
+      "type": "object",
+      "properties": {
+        "ip_mode": {
+          "default": "keep",
+          "type": "string"
+        },
+        "keys": {
+          "default": [
+            "password",
+            "secret",
+            "token",
+            "client_secret",
+            "private_key"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mask": {
+          "default": "***REDACTED***",
+          "type": "string"
+        }
+      }
+    },
+    "SecretHasherConfig": {
+      "description": "Configuration for API / machine secret hashing (lower cost than user passwords).",
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "default": "bcrypt",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HashAlgorithm"
+            }
+          ]
+        },
+        "bcrypt_cost": {
+          "default": 4,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "SecurityHeadersConfig": {
+      "type": "object",
+      "properties": {
+        "cross_origin_opener": {
+          "default": "same-origin",
+          "type": "string"
+        },
+        "csp_enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "csp_policy": {
+          "default": "",
+          "type": "string"
+        },
+        "csp_report_uri": {
+          "default": "",
+          "type": "string"
+        },
+        "hsts_enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "hsts_max_age": {
+          "default": 63072000,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "hsts_preload": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hsts_subdomains": {
+          "default": true,
+          "type": "boolean"
+        },
+        "permissions_policy": {
+          "default": "camera=(), microphone=(), geolocation=(), payment=()",
+          "type": "string"
+        },
+        "referrer_policy": {
+          "default": "strict-origin-when-cross-origin",
+          "type": "string"
+        },
+        "x_content_type_options": {
+          "default": true,
+          "type": "boolean"
+        },
+        "x_frame_options": {
+          "default": "DENY",
+          "type": "string"
+        }
+      }
+    },
+    "ServerConfig": {
+      "type": "object",
+      "properties": {
+        "app_access": {
+          "default": {
+            "admin": {
+              "enabled": true,
+              "ip_allow": []
+            },
+            "api": {
+              "enabled": true,
+              "ip_allow": []
+            },
+            "console": {
+              "enabled": true,
+              "ip_allow": []
+            },
+            "login": {
+              "enabled": true,
+              "ip_allow": []
+            }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AppAccessConfig"
+            }
+          ]
+        },
+        "base_path": {
+          "default": "",
+          "type": "string"
+        },
+        "cookie_secrets": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "external_domain": {
+          "default": "localhost",
+          "type": "string"
+        },
+        "force_insecure_cookies": {
+          "default": false,
+          "type": "boolean"
+        },
+        "management_secret": {
+          "default": "",
+          "type": "string"
+        },
+        "multi_tenant": {
+          "default": false,
+          "type": "boolean"
+        },
+        "path_overrides": {
+          "default": {
+            "api": "",
+            "assets": "",
+            "console": "",
+            "login": "",
+            "oidc": "",
+            "saml": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/PathOverrideConfig"
+            }
+          ]
+        },
+        "port": {
+          "default": 8080,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "proxy_header_mode": {
+          "default": "",
+          "type": "string"
+        },
+        "public_origin": {
+          "default": "",
+          "type": "string"
+        },
+        "real_ip_header": {
+          "default": "",
+          "type": "string"
+        },
+        "security_headers": {
+          "default": {
+            "cross_origin_opener": "same-origin",
+            "csp_enabled": true,
+            "csp_policy": "",
+            "csp_report_uri": "",
+            "hsts_enabled": true,
+            "hsts_max_age": 63072000,
+            "hsts_preload": false,
+            "hsts_subdomains": true,
+            "permissions_policy": "camera=(), microphone=(), geolocation=(), payment=()",
+            "referrer_policy": "strict-origin-when-cross-origin",
+            "x_content_type_options": true,
+            "x_frame_options": "DENY"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityHeadersConfig"
+            }
+          ]
+        },
+        "tls_cert": {
+          "default": "",
+          "type": "string"
+        },
+        "tls_key": {
+          "default": "",
+          "type": "string"
+        },
+        "trusted_proxies": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SessionConfig": {
+      "description": "Session configuration.",
+      "type": "object",
+      "properties": {
+        "max_age_secs": {
+          "description": "Maximum session age in seconds. Default: 86400 (24h).",
+          "default": 86400,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "SigningAlgorithm": {
+      "description": "OIDC signing algorithm.",
+      "type": "string",
+      "enum": [
+        "RS256",
+        "ES256",
+        "ES384"
+      ]
+    },
+    "SinksConfig": {
+      "type": "object",
+      "properties": {
+        "analytics": {
+          "default": {
+            "drain_batch": 500,
+            "drain_interval": "5s",
+            "enabled": true
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnalyticsSinkConfig"
+            }
+          ]
+        },
+        "otel": {
+          "default": {
+            "endpoint": "",
+            "protocol": "http"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/OtelSinkConfig"
+            }
+          ]
+        }
+      }
+    },
+    "StreamConfig": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "default": "buffered",
+          "type": "string"
+        },
+        "sample_rate": {
+          "default": 0.0,
+          "type": "number",
+          "format": "double"
+        },
+        "sinks": {
+          "default": [
+            "stdout"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "StreamRoutingConfig": {
+      "type": "object",
+      "properties": {
+        "event_handler": {
+          "default": {
+            "mode": "buffered",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout",
+              "analytics"
+            ]
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamConfig"
+            }
+          ]
+        },
+        "event_pusher": {
+          "default": {
+            "mode": "off",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout"
+            ]
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamConfig"
+            }
+          ]
+        },
+        "jobs": {
+          "default": {
+            "mode": "buffered",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout",
+              "analytics"
+            ]
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamConfig"
+            }
+          ]
+        },
+        "queue": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StreamConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request": {
+          "default": {
+            "mode": "sampled",
+            "sample_rate": 0.01,
+            "sinks": [
+              "stdout",
+              "otel",
+              "analytics"
+            ]
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamConfig"
+            }
+          ]
+        },
+        "runtime": {
+          "default": {
+            "mode": "buffered",
+            "sample_rate": 0.0,
+            "sinks": [
+              "stdout",
+              "analytics"
+            ]
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamConfig"
+            }
+          ]
+        }
+      }
+    },
+    "TlsConfig": {
+      "type": "object",
+      "properties": {
+        "ca_dir": {
+          "default": "",
+          "type": "string"
+        },
+        "email": {
+          "default": "",
+          "type": "string"
+        },
+        "http_port": {
+          "default": 80,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "https_port": {
+          "default": 443,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "mode": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "WorkersConfig": {
+      "type": "object",
+      "properties": {
+        "event_workers": {
+          "default": 1,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "lake_batch_size": {
+          "default": 1000,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "lake_batch_window_secs": {
+          "default": 5,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "notification_workers": {
+          "default": 1,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

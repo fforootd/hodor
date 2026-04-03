@@ -14,7 +14,10 @@ pub fn routes() -> Router<ApiState> {
         .route("/analytics/query", post(query))
         .route("/analytics/schema", get(schema))
         .route("/analytics/queries", get(list_queries).post(create_query))
-        .route("/analytics/queries/{id}", axum::routing::delete(delete_query))
+        .route(
+            "/analytics/queries/{id}",
+            axum::routing::delete(delete_query),
+        )
 }
 
 #[derive(Deserialize)]

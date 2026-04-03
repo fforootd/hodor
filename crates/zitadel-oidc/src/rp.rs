@@ -74,7 +74,11 @@ pub struct CachedIssuerMetadata {
 
 pub trait StateStore: Clone + Send + Sync + 'static {
     async fn put_state(&self, instance_id: &str, state: &RpAuthState) -> anyhow::Result<()>;
-    async fn take_state(&self, instance_id: &str, state: &str) -> anyhow::Result<Option<RpAuthState>>;
+    async fn take_state(
+        &self,
+        instance_id: &str,
+        state: &str,
+    ) -> anyhow::Result<Option<RpAuthState>>;
 }
 
 pub trait HttpClient: Clone + Send + Sync + 'static {
@@ -214,7 +218,11 @@ where
 
         let challenge = s256_challenge(&state.pkce_verifier);
         let scopes = if request.provider.scopes.is_empty() {
-            vec!["openid".to_string(), "profile".to_string(), "email".to_string()]
+            vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ]
         } else {
             request.provider.scopes.clone()
         };
@@ -249,7 +257,10 @@ where
         Ok(result)
     }
 
-    pub async fn finish(&self, request: &RpCallbackRequest) -> anyhow::Result<VerifiedExternalIdentity> {
+    pub async fn finish(
+        &self,
+        request: &RpCallbackRequest,
+    ) -> anyhow::Result<VerifiedExternalIdentity> {
         if request.code.is_empty() {
             anyhow::bail!("missing authorization code");
         }
@@ -264,7 +275,12 @@ where
             .issuer_metadata(&request.stored_state.expected_issuer)
             .await?;
         let token_response = self
-            .exchange_code(&metadata, &request.provider, &request.stored_state, &request.code)
+            .exchange_code(
+                &metadata,
+                &request.provider,
+                &request.stored_state,
+                &request.code,
+            )
             .await?;
 
         let mut claims = if let Some(id_token) = token_response.id_token.as_ref() {
@@ -402,7 +418,10 @@ fn should_enrich_from_userinfo(claims: &Value) -> bool {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .is_empty()
-        || claims.get("email_verified").and_then(Value::as_bool).is_none()
+        || claims
+            .get("email_verified")
+            .and_then(Value::as_bool)
+            .is_none()
 }
 
 fn merge_claims(primary: Value, fallback: Value) -> Value {
@@ -560,10 +579,19 @@ mod tests {
 
         let url = Url::parse(&result.authorization_url).unwrap();
         assert_eq!(
-            url.query_pairs().find(|(key, _)| key == "response_type").unwrap().1,
+            url.query_pairs()
+                .find(|(key, _)| key == "response_type")
+                .unwrap()
+                .1,
             "code"
         );
-        assert!(store.take_state("default", &result.state.state).await.unwrap().is_some());
+        assert!(
+            store
+                .take_state("default", &result.state.state)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -739,7 +767,10 @@ mod tests {
         assert_eq!(identity.subject, "user-1");
         assert_eq!(identity.email, "userinfo@example.com");
         assert!(identity.email_verified);
-        assert_eq!(identity.claims.get("name").and_then(Value::as_str), Some("User Info"));
+        assert_eq!(
+            identity.claims.get("name").and_then(Value::as_str),
+            Some("User Info")
+        );
     }
 
     #[tokio::test]

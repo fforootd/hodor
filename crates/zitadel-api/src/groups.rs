@@ -90,10 +90,7 @@ async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response 
     }
 }
 
-async fn list(
-    State(s): State<ApiState>,
-    Query(p): Query<response::PaginationParams>,
-) -> Response {
+async fn list(State(s): State<ApiState>, Query(p): Query<response::PaginationParams>) -> Response {
     let scoped = s.db.scoped_default();
     let cursor = p.cursor.unwrap_or_default();
     let (created_at, updated_at) = scoped.select_timestamps();

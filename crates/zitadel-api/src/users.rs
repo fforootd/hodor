@@ -260,7 +260,7 @@ async fn set_password(
         Err(e) => return response::internal_error(format!("hash password: {e}")),
     };
 
-    let cred_json = zitadel_auth::password::encode_credential_json(&hash);
+    let cred_json = zitadel_authn::password::encode_credential_json(&hash);
     let cred_id = Uuid::new_v4().to_string();
 
     // Delete existing password, insert new.

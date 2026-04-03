@@ -3,8 +3,9 @@
 
 [server]
 port = 8080
-external_domain = "zitadel"
-force_insecure_cookies = true
+external_domain = "nginx"
+public_origin = "https://nginx:8446"
+force_insecure_cookies = false
 cookie_secrets = ["zitadel-oidc-conformance-cookie-secret-do-not-use-in-production"]
 
 [database]
@@ -12,3 +13,6 @@ url = "sqlite:///data/zitadel-conformance.db"
 
 [observability]
 cache_path = "/data/zitadel-conformance-cache.db"
+
+[dev]
+conformance_login_html = true

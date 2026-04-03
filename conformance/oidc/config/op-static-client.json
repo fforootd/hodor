@@ -2,7 +2,7 @@
   "alias": "zitadel-oidc-op",
   "description": "Zitadel OIDC OP static-client certification profile",
   "server": {
-    "discoveryUrl": "http://zitadel:8080/.well-known/openid-configuration"
+    "discoveryUrl": "https://nginx:8446/.well-known/openid-configuration"
   },
   "client": {
     "client_id": "oidc-conformance-client-1",
@@ -18,12 +18,12 @@
   },
   "browser": [
     {
-      "match": "http://zitadel:8080/authorize*",
+      "match": "https://nginx:8446/authorize*",
       "tasks": [
         {
           "task": "Reuse existing session",
           "optional": true,
-          "match": "http://zitadel:8080/login*",
+          "match": "https://nginx:8446/conformance/login*",
           "commands": [
             [
               "wait",
@@ -43,7 +43,7 @@
         {
           "task": "Login",
           "optional": true,
-          "match": "http://zitadel:8080/login*",
+          "match": "https://nginx:8446/conformance/login*",
           "commands": [
             [
               "wait",
@@ -57,21 +57,7 @@
               "text",
               "name",
               "identifier",
-              "oidc-user@example.com",
-              "optional"
-            ],
-            [
-              "click",
-              "css",
-              "button[type='submit']"
-            ],
-            [
-              "wait",
-              "xpath",
-              "//*",
-              10,
-              "Enter your password",
-              "update-image-placeholder-optional"
+              "oidc-user@example.com"
             ],
             [
               "text",
@@ -105,11 +91,11 @@
     "oidcc-ensure-registered-redirect-uri": {
       "browser": [
         {
-          "match": "http://zitadel:8080/authorize*",
+          "match": "https://nginx:8446/authorize*",
           "tasks": [
             {
               "task": "Expect redirect uri mismatch error page",
-              "match": "http://zitadel:8080/authorize*",
+              "match": "https://nginx:8446/authorize*",
               "commands": [
                 [
                   "wait",

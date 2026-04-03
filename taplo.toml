@@ -1,0 +1,10 @@
+# Taplo configuration for TOML language server integration.
+# This gives IDE autocomplete, validation, and hover docs for Zitadel config files.
+# Works with VS Code (Even Better TOML extension) and other editors using taplo.
+
+[[rule]]
+# Apply the config schema to all Zitadel config TOML files.
+include = ["fixtures/*.toml", "zitadel.reference.toml", "zitadel.toml"]
+
+[rule.schema]
+path = "./config.schema.json"

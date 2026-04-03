@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check docs-check generate openapi-export client-js
+.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check docs-check generate openapi-export config-schema client-js
 
 SEED ?= frontend
 DEV_CONFIG := fixtures/zitadel.dev.toml
@@ -44,7 +44,12 @@ help:
 		'  rust-check    Run fmt, clippy, and Rust tests' \
 		'  docs-check    Fail on stale doc commands and local absolute links' \
 		'  quality       Run the main local quality gate' \
-		'  generate      Generate the client SDK'
+		'  config-schema Regenerate config.schema.json from Rust types' \
+		'  generate      Generate the client SDK' \
+		'' \
+		'CLI commands (via cargo run -p zitadel --)' \
+		'  config-schema   Print JSON Schema for config files' \
+		'  config-validate Validate a config file and print resolved values'
 
 # Install all workspace dependencies.
 install: package.json
@@ -196,6 +201,12 @@ lint-web: node_modules
 	npm run lint -w web
 
 # ─── SDK Generation ────────────────────────────────────────
+
+# Regenerate config.schema.json from Rust config types.
+config-schema:
+	@echo "═══ config-schema ═══"
+	SCHEMA_OUT=config.schema.json cargo test -p zitadel-config json_schema_generates --quiet
+	@echo "Written config.schema.json ($$(wc -l < config.schema.json) lines)"
 
 # Export OpenAPI 3.1 spec (TODO: implement in Rust binary).
 openapi-export:

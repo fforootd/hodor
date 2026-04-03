@@ -14,6 +14,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use zitadel_config::oidc::OidcConfig;
 use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
 
 type DefaultProvider = op::Provider<
@@ -29,21 +30,45 @@ pub struct OidcState {
 }
 
 impl OidcState {
-    pub fn new(db: Db, issuer: String) -> Self {
-        Self::new_for_instance(db, issuer, DEFAULT_INSTANCE_ID.to_string())
+    pub fn new(db: Db, issuer: String, login_path: String) -> Self {
+        Self::new_with_config(db, issuer, login_path, &OidcConfig::default())
     }
 
-    pub fn new_for_instance(db: Db, issuer: String, instance_id: String) -> Self {
+    pub fn new_with_config(
+        db: Db,
+        issuer: String,
+        login_path: String,
+        oidc_config: &OidcConfig,
+    ) -> Self {
+        Self::new_for_instance(
+            db,
+            issuer,
+            login_path,
+            DEFAULT_INSTANCE_ID.to_string(),
+            oidc_config,
+        )
+    }
+
+    pub fn new_for_instance(
+        db: Db,
+        issuer: String,
+        login_path: String,
+        instance_id: String,
+        oidc_config: &OidcConfig,
+    ) -> Self {
         let store = adapters::ZitadelOpStore::new(db);
         let keys = adapters::RuntimeKeyStore::new();
+        let lifetimes = op::TokenLifetimes::from(oidc_config);
         let provider = op::Provider::new(
             instance_id,
             issuer,
+            login_path,
             store.clone(),
             store.clone(),
             keys,
             store,
-        );
+        )
+        .with_lifetimes(lifetimes);
 
         Self { provider }
     }

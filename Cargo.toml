@@ -2,22 +2,19 @@
 resolver = "2"
 members = [
     "crates/zitadel",
+    "crates/zitadel-observability",
     "crates/zitadel-server",
     "crates/zitadel-api",
     "crates/zitadel-storage",
     "crates/zitadel-db",
     "crates/zitadel-oidc",
     "crates/zitadel-login",
-    "crates/zitadel-auth",
-    "crates/zitadel-cedar",
+    "crates/zitadel-authn",
+    "crates/zitadel-authz",
     "crates/zitadel-crypto",
     "crates/zitadel-config",
-    "crates/zitadel-events",
-    "crates/zitadel-notify",
     "crates/zitadel-catalog",
     "crates/zitadel-schema",
-    "crates/zitadel-risk",
-    "crates/zitadel-ratelimit",
     "crates/zitadel-expr",
 ]
 
@@ -39,9 +36,11 @@ tower-http = { version = "0.6", features = ["cors", "fs", "trace", "set-header",
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+toml = "0.8"
 
 # Config
 figment = { version = "0.10", features = ["toml", "env"] }
+schemars = "0.8"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -49,6 +48,9 @@ clap = { version = "4", features = ["derive"] }
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["logs", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["logs", "grpc-tonic", "http-proto", "reqwest-client"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "any", "migrate"] }
@@ -68,22 +70,22 @@ anyhow = "1"
 thiserror = "2"
 rust-embed = { version = "8", features = ["compression", "include-exclude"] }
 mime_guess = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+webbrowser = "1"
+keyring = "3"
 
 # Workspace crate references
 zitadel-config = { path = "crates/zitadel-config" }
+zitadel-observability = { path = "crates/zitadel-observability" }
 zitadel-server = { path = "crates/zitadel-server" }
 zitadel-api = { path = "crates/zitadel-api" }
 zitadel-storage = { path = "crates/zitadel-storage" }
 zitadel-db = { path = "crates/zitadel-db" }
 zitadel-oidc = { path = "crates/zitadel-oidc" }
 zitadel-login = { path = "crates/zitadel-login" }
-zitadel-auth = { path = "crates/zitadel-auth" }
-zitadel-cedar = { path = "crates/zitadel-cedar" }
+zitadel-authn = { path = "crates/zitadel-authn" }
+zitadel-authz = { path = "crates/zitadel-authz" }
 zitadel-crypto = { path = "crates/zitadel-crypto" }
-zitadel-events = { path = "crates/zitadel-events" }
-zitadel-notify = { path = "crates/zitadel-notify" }
 zitadel-catalog = { path = "crates/zitadel-catalog" }
 zitadel-schema = { path = "crates/zitadel-schema" }
-zitadel-risk = { path = "crates/zitadel-risk" }
-zitadel-ratelimit = { path = "crates/zitadel-ratelimit" }
 zitadel-expr = { path = "crates/zitadel-expr" }

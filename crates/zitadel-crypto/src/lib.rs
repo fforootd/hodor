@@ -1,3 +1,5 @@
+pub mod generator;
+
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use std::collections::HashMap;
 

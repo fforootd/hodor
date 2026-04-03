@@ -5,6 +5,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use tracing::Span;
 use zitadel_db::DEFAULT_INSTANCE_ID;
 
 use crate::ApiState;
@@ -40,6 +41,10 @@ pub async fn auth_gate(
     // Resolve token against database.
     match resolve_token(&state, &raw_token).await {
         Ok(Some(identity)) => {
+            let span = Span::current();
+            span.record("actor_id", tracing::field::display(&identity.user_id));
+            span.record("session_id", tracing::field::display(&identity.session_id));
+            span.record("org_id", tracing::field::display(&identity.org_id));
             req.extensions_mut().insert(identity);
             next.run(req).await
         }
@@ -68,7 +73,7 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
             let part = part.trim();
             if let Some(value) = part.strip_prefix(name).and_then(|s| s.strip_prefix('=')) {
                 if let Some(token) =
-                    zitadel_auth::cookie::verify(value, &state.cookie_config.secrets)
+                    zitadel_authn::cookie::verify(value, &state.cookie_config.secrets)
                 {
                     return Some(token);
                 }
@@ -105,6 +110,24 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
             token_type: "session".to_string(),
             org_id: session.org_id,
         }));
+    }
+
+    if let Ok(claims) = state.oidc.provider.validate_access_token(raw_token).await {
+        let scoped = state.db.scoped_default();
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT org_id FROM users WHERE instance_id = $1 AND id = $2")
+                .bind(scoped.instance_id())
+                .bind(&claims.sub)
+                .fetch_optional(scoped.pool())
+                .await?;
+        if let Some((org_id,)) = row {
+            return Ok(Some(Identity {
+                user_id: claims.sub,
+                session_id: String::new(),
+                token_type: "oidc".to_string(),
+                org_id,
+            }));
+        }
     }
 
     Ok(None)

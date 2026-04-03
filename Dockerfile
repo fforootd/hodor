@@ -19,7 +19,7 @@ COPY crates/ crates/
 COPY migrations/ migrations/
 # Copy web assets for rust-embed.
 COPY --from=web /app/web/dist/ web/dist/
-RUN cargo build --release --bin zitadel
+RUN cargo build --locked --release --bin zitadel
 
 # Stage 3: Minimal runtime
 FROM debian:bookworm-slim

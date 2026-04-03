@@ -7,6 +7,7 @@ use crate::{
     },
 };
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -114,6 +115,10 @@ fn default_protocol() -> String {
 
 fn default_template() -> String {
     "custom".into()
+}
+
+fn token_hash(token: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(token.as_bytes()))
 }
 
 impl SeedProvider {
@@ -297,13 +302,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
 
         // Create PATs.
         for pat in &user.pats {
-            // Hash the token with SHA-256 (same as zitadel_auth::session::hash_token).
-            let token_hash = {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(pat.token.as_bytes());
-                format!("sha256:{}", hex::encode(hasher.finalize()))
-            };
+            let token_hash = token_hash(&pat.token);
             let scopes = serde_json::to_string(&pat.scopes)?;
 
             let existing_pat: Option<(String,)> = sqlx::query_as(
@@ -453,9 +452,21 @@ async fn seed_observability(
 
     // Generate fingerprints.
     let fingerprints = [
-        ("fp_browser_chrome_win", "browser", r#"{"ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125","screen":"1920x1080","lang":"en-US"}"#),
-        ("fp_browser_firefox_mac", "browser", r#"{"ua":"Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5) Firefox/128","screen":"2560x1600","lang":"en-US"}"#),
-        ("fp_mobile_ios", "mobile", r#"{"ua":"Zitadel-iOS/2.1","device":"iPhone15,2","os":"iOS 18.0"}"#),
+        (
+            "fp_browser_chrome_win",
+            "browser",
+            r#"{"ua":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125","screen":"1920x1080","lang":"en-US"}"#,
+        ),
+        (
+            "fp_browser_firefox_mac",
+            "browser",
+            r#"{"ua":"Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5) Firefox/128","screen":"2560x1600","lang":"en-US"}"#,
+        ),
+        (
+            "fp_mobile_ios",
+            "mobile",
+            r#"{"ua":"Zitadel-iOS/2.1","device":"iPhone15,2","os":"iOS 18.0"}"#,
+        ),
     ];
     for (id, type_, raw) in &fingerprints {
         sqlx::query(
@@ -476,18 +487,32 @@ async fn seed_observability(
         ("session.created", "session", "human", "session", "direct"),
         ("session.refreshed", "session", "human", "session", "direct"),
         ("user.updated", "identity", "human", "user", "direct"),
-        ("user.password.changed", "identity", "human", "user", "direct"),
+        (
+            "user.password.changed",
+            "identity",
+            "human",
+            "user",
+            "direct",
+        ),
         ("org.member.added", "identity", "human", "org", "direct"),
-        ("app.token.exchanged", "auth", "service", "token", "exchanged"),
-        ("user.login.succeeded", "auth", "human", "session", "pat_shared"),
+        (
+            "app.token.exchanged",
+            "auth",
+            "service",
+            "token",
+            "exchanged",
+        ),
+        (
+            "user.login.succeeded",
+            "auth",
+            "human",
+            "session",
+            "pat_shared",
+        ),
     ];
 
     let ips = ["192.168.1.42", "10.0.0.15", "172.16.0.100", "203.0.113.50"];
-    let sdks = [
-        ("zitadel-js", "2.1.0"),
-        ("zitadel-go", "1.4.0"),
-        ("", ""),
-    ];
+    let sdks = [("zitadel-js", "2.1.0"), ("zitadel-go", "1.4.0"), ("", "")];
 
     let mut seq = 1i64;
     // Generate events spread over the last 24 hours.
@@ -548,7 +573,11 @@ async fn seed_observability(
         seq += 1;
     }
 
-    tracing::info!(events = 60, fingerprints = fingerprints.len(), "seeded observability data");
+    tracing::info!(
+        events = 60,
+        fingerprints = fingerprints.len(),
+        "seeded observability data"
+    );
     Ok(())
 }
 

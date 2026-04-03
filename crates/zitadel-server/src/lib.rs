@@ -6,13 +6,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
-use tower_http::trace::TraceLayer;
 use zitadel_config::Config;
 
 /// Shared server state accessible from handlers.
 pub struct AppState {
     pub config: Config,
     pub db: zitadel_db::Db,
+    pub secret_box: Arc<zitadel_crypto::SecretBox>,
     pub ready: AtomicBool,
 }
 
@@ -35,15 +35,20 @@ pub fn build_router(
         // Static frontend assets + SPA fallback
         .merge(assets::routes())
         // Middleware
-        .layer(TraceLayer::new_for_http())
+        .layer(axum::middleware::from_fn(
+            zitadel_observability::request_context_middleware,
+        ))
 }
 
 /// Start the HTTP server and block until shutdown signal.
 pub async fn run(config: Config) -> anyhow::Result<()> {
-    let port = config.server.port;
-
     // Open database.
     let db = zitadel_db::Db::open_with_config(&config.database.url, &config.database).await?;
+    run_with_db(config, db).await
+}
+
+pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<()> {
+    let port = config.server.port;
     tracing::info!(dialect = %db.dialect(), url = %config.database.url, "database connected");
 
     // Run migrations based on mode.
@@ -69,26 +74,57 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         }
     }
 
-    // Build cookie config.
-    let cookie_config = zitadel_auth::cookie::CookieConfig::new(
+    // Build encryption secret box from config (plaintext passthrough if no keys configured).
+    let encryption_keys: std::collections::HashMap<String, String> = config
+        .encryption
+        .keys
+        .iter()
+        .map(|k| (k.id.clone(), k.secret.clone()))
+        .collect();
+    let secret_box = Arc::new(
+        zitadel_crypto::SecretBox::new(&config.encryption.active_key_id, &encryption_keys)
+            .expect("invalid encryption key config"),
+    );
+    if secret_box.plaintext() {
+        tracing::warn!("no encryption keys configured — secrets stored in plaintext (dev mode)");
+    }
+
+    // Build cookie config with session max age from config.
+    let cookie_config = zitadel_authn::cookie::CookieConfig::new_with_max_age(
         config.server.cookie_secrets.clone(),
         &config.server.external_domain,
         config.server.force_insecure_cookies,
+        config.session.max_age_secs as i64,
     );
 
-    // Build password hasher.
-    let passwords = if config.is_dev() {
-        zitadel_auth::password::Passwords::new_dev()
+    // Build password swapper from config (verifies any supported algorithm, re-hashes to preferred).
+    let hasher_config = if config.is_dev() {
+        zitadel_config::password::PasswordHasherConfig::dev_defaults()
     } else {
-        zitadel_auth::password::Passwords::new()
+        config.password_hasher.clone()
     };
+    let passwords = zitadel_authn::password::Swapper::from_config(&hasher_config);
 
     // OIDC provider.
-    let issuer = format!(
-        "http://{}:{}",
-        config.server.external_domain, config.server.port
-    );
-    let oidc_state = zitadel_oidc::OidcState::new(db.clone(), issuer.clone());
+    let issuer = if config.server.public_origin.is_empty() {
+        format!(
+            "http://{}:{}",
+            config.server.external_domain, config.server.port
+        )
+    } else {
+        config
+            .server
+            .public_origin
+            .trim_end_matches('/')
+            .to_string()
+    };
+    let login_path = if config.dev.conformance_login_html {
+        "/conformance/login".to_string()
+    } else {
+        "/login".to_string()
+    };
+    let oidc_state =
+        zitadel_oidc::OidcState::new_with_config(db.clone(), issuer.clone(), login_path, &config.oidc);
 
     let stateful = Arc::new(zitadel_storage::DefaultStatefulStorage::new(
         zitadel_storage::SqlStateDb::new(db.clone()),
@@ -108,6 +144,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         stateful: stateful.clone(),
         transient: transient.clone(),
         analytics,
+        oidc: oidc_state.clone(),
         passwords: Arc::new(passwords),
         cookie_config: Arc::new(cookie_config),
         is_dev: config.is_dev(),
@@ -120,6 +157,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         passwords: api_state.passwords.clone(),
         cookie_config: api_state.cookie_config.clone(),
         public_origin: Arc::new(issuer.clone()),
+        conformance_login_html: config.dev.conformance_login_html,
         rp: Arc::new(zitadel_oidc::rp::RpService::new(
             zitadel_oidc::rp::ReqwestHttpClient::new(),
             zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
@@ -129,6 +167,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         config,
         db,
+        secret_box,
         ready: AtomicBool::new(false),
     });
 
