@@ -1,0 +1,71 @@
+name: Fuzz Daily
+
+on:
+  schedule:
+    - cron: '30 3 * * *'   # 03:30 UTC daily
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Seconds per fuzz target'
+        required: false
+        default: '300'
+
+concurrency:
+  group: fuzz-daily
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_cookie_verify
+          - fuzz_resolve_client_auth
+          - fuzz_token_request_deser
+          - fuzz_authorize_params_deser
+          - fuzz_decode_request_object
+          - fuzz_password_verify
+          - fuzz_secretbox_open
+          - fuzz_generator
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Create web/dist placeholder
+        run: make ensure-webdist
+
+      - name: Restore fuzz corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Run fuzzer
+        run: |
+          DURATION=${{ inputs.duration || '300' }}
+          echo "Running ${{ matrix.target }} for ${DURATION}s"
+          cargo fuzz run ${{ matrix.target }} -- -max_total_time=${DURATION}
+
+      - name: Save fuzz corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30

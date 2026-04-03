@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke conformance oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js perf-db perf-db-sqlite perf-db-postgres
+.PHONY: help install dev dev-web dev-embed dev-reset dev-seed dev-status test test-web test-e2e e2e-smoke conformance oidc-conformance oidc-conformance-op oidc-conformance-rp oidc-conformance-clean typecheck lint-web build clean web ensure-webdist quality check rust-check run-rust-tests docs-check generate openapi-export config-schema client-js perf-db perf-db-sqlite perf-db-postgres fuzz fuzz-quick fuzz-extended
 
 SEED ?= frontend
 JS_WORKSPACE_MANIFESTS := package.json package-lock.json web/package.json e2e/package.json packages/client-js/package.json
@@ -313,6 +313,28 @@ quality: ensure-webdist node_modules
 
 # Alias for quality.
 check: quality
+
+# ─── Fuzz Testing ─────────────────────────────────────────
+
+FUZZ_DURATION ?= 10
+FUZZ_TARGETS := fuzz_cookie_verify fuzz_resolve_client_auth fuzz_token_request_deser \
+                fuzz_authorize_params_deser fuzz_decode_request_object fuzz_password_verify \
+                fuzz_secretbox_open fuzz_generator
+
+# Run all fuzz targets for FUZZ_DURATION seconds each.
+fuzz:
+	@for target in $(FUZZ_TARGETS); do \
+		echo "═══ fuzzing $$target ($(FUZZ_DURATION)s) ═══"; \
+		cargo fuzz run $$target -- -max_total_time=$(FUZZ_DURATION) || exit 1; \
+	done
+
+# Quick fuzz: 10s per target (CI budget from ADR-011).
+fuzz-quick:
+	@$(MAKE) fuzz FUZZ_DURATION=10
+
+# Extended fuzz: 5 minutes per target (daily CI).
+fuzz-extended:
+	@$(MAKE) fuzz FUZZ_DURATION=300
 
 # ─── Clean ─────────────────────────────────────────────────
 

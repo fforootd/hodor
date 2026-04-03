@@ -17,19 +17,20 @@ pub fn routes(state: OidcState) -> Router {
 }
 
 #[derive(Clone, Debug, Default)]
-struct AuthorizeParams {
-    client_id: Option<String>,
-    redirect_uri: Option<String>,
-    response_type: Option<String>,
-    scope: Option<String>,
-    state: Option<String>,
-    nonce: Option<String>,
-    code_challenge: Option<String>,
-    code_challenge_method: Option<String>,
-    prompt: Option<String>,
-    login_hint: Option<String>,
-    request: Option<String>,
-    max_age: Option<String>,
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct AuthorizeParams {
+    pub client_id: Option<String>,
+    pub redirect_uri: Option<String>,
+    pub response_type: Option<String>,
+    pub scope: Option<String>,
+    pub state: Option<String>,
+    pub nonce: Option<String>,
+    pub code_challenge: Option<String>,
+    pub code_challenge_method: Option<String>,
+    pub prompt: Option<String>,
+    pub login_hint: Option<String>,
+    pub request: Option<String>,
+    pub max_age: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -152,7 +153,7 @@ async fn extract_authorize_params(
     Ok(params)
 }
 
-fn parse_authorize_params(input: &str) -> AuthorizeParams {
+pub fn parse_authorize_params(input: &str) -> AuthorizeParams {
     let mut params = AuthorizeParams::default();
     for (key, value) in url::form_urlencoded::parse(input.as_bytes()) {
         apply_param(&mut params, key, value);
@@ -218,7 +219,7 @@ fn merge_authorize_params(target: &mut AuthorizeParams, source: AuthorizeParams)
     }
 }
 
-fn decode_request_object(token: &str) -> Result<AuthorizeParams, crate::oidc::ProtocolError> {
+pub fn decode_request_object(token: &str) -> Result<AuthorizeParams, crate::oidc::ProtocolError> {
     let mut segments = token.splitn(3, '.');
     let header = segments
         .next()

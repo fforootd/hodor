@@ -91,6 +91,7 @@ jobs:
       run_fast_web: ${{ needs.changes.outputs.fast_web == 'true' }}
       run_extended_e2e: ${{ needs.changes.outputs.extended_e2e == 'true' }}
       run_browser_artifacts: ${{ needs.changes.outputs.extended_e2e == 'true' }}
+      run_fuzz: ${{ needs.changes.outputs.fast_rust == 'true' }}
       artifact_prefix: pr
 
   prepare-compliance-browser-artifacts:

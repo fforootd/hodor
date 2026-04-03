@@ -20,6 +20,7 @@ pub fn routes(state: OidcState) -> Router {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TokenRequest {
     pub grant_type: String,
     #[serde(default)]

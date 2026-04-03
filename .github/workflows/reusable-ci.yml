@@ -23,6 +23,10 @@ on:
         required: false
         type: boolean
         default: true
+      run_fuzz:
+        required: false
+        type: boolean
+        default: false
       artifact_prefix:
         required: false
         type: string
@@ -80,6 +84,26 @@ jobs:
 
       - name: Run cargo nextest
         run: cargo nextest run --workspace
+
+  fuzz-quick:
+    name: Fuzz Quick
+    if: inputs.run_fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Ensure embedded web placeholder exists
+        run: make ensure-webdist
+
+      - name: Run fuzz targets (10s each)
+        run: make fuzz-quick
 
   fast-docs-check:
     name: Fast Docs Check

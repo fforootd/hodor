@@ -3,7 +3,11 @@ name = "zitadel-oidc"
 version.workspace = true
 edition.workspace = true
 
+[features]
+arbitrary = ["dep:arbitrary"]
+
 [dependencies]
+arbitrary = { version = "1", features = ["derive"], optional = true }
 zitadel-db = { workspace = true }
 zitadel-config = { workspace = true }
 zitadel-authn = { workspace = true }

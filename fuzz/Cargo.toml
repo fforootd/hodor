@@ -1,0 +1,62 @@
+[package]
+name = "zitadel-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+serde_urlencoded = "0.7"
+base64 = "0.22"
+
+# Workspace crates under test
+zitadel-authn = { path = "../crates/zitadel-authn" }
+zitadel-crypto = { path = "../crates/zitadel-crypto", features = ["arbitrary"] }
+zitadel-oidc = { path = "../crates/zitadel-oidc", features = ["arbitrary"] }
+
+# Prevent this from joining the workspace
+[workspace]
+
+[[bin]]
+name = "fuzz_cookie_verify"
+path = "fuzz_targets/fuzz_cookie_verify.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_resolve_client_auth"
+path = "fuzz_targets/fuzz_resolve_client_auth.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_token_request_deser"
+path = "fuzz_targets/fuzz_token_request_deser.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_authorize_params_deser"
+path = "fuzz_targets/fuzz_authorize_params_deser.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_password_verify"
+path = "fuzz_targets/fuzz_password_verify.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_secretbox_open"
+path = "fuzz_targets/fuzz_secretbox_open.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_decode_request_object"
+path = "fuzz_targets/fuzz_decode_request_object.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_generator"
+path = "fuzz_targets/fuzz_generator.rs"
+doc = false

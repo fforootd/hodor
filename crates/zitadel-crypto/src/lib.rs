@@ -92,6 +92,9 @@ impl SecretBox {
         let cipher =
             Aes256Gcm::new_from_slice(key).map_err(|e| anyhow::anyhow!("create cipher: {e}"))?;
 
+        if nonce.len() != 12 {
+            anyhow::bail!("nonce must be 12 bytes (got {})", nonce.len());
+        }
         let nonce = Nonce::from_slice(nonce);
         cipher
             .decrypt(nonce, ciphertext)

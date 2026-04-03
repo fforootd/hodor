@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Character set options for secret/code generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum CharsetKind {
     /// 0-9
@@ -18,6 +19,7 @@ pub enum CharsetKind {
 
 /// Configuration for a single secret/code generator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GeneratorProfile {
     /// Number of characters to generate.
     pub length: usize,
