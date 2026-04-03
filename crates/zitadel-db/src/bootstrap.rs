@@ -56,12 +56,35 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
         }
     };
 
+    // Ensure a default login flow exists.
+    let has_login_flow = sqlx::query_as::<_, (i64,)>(
+        "SELECT COUNT(*) FROM login_flows WHERE instance_id = $1 AND is_default = TRUE",
+    )
+    .bind(DEFAULT_INSTANCE_ID)
+    .fetch_one(&mut *tx)
+    .await?
+    .0;
+    if has_login_flow == 0 {
+        let flow_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO login_flows (id, instance_id, name, strategy, is_default, enabled, state, priority, auth_methods) \
+             VALUES ($1, $2, 'Default', 'identifier_first', TRUE, TRUE, 'active', 100, \
+             '{\"password\":{\"enabled\":true,\"interactive\":true,\"position\":0},\"passkey\":{\"enabled\":true,\"interactive\":true,\"position\":1},\"sso\":{\"enabled\":true,\"interactive\":true,\"position\":2}}')",
+        )
+        .bind(&flow_id)
+        .bind(DEFAULT_INSTANCE_ID)
+        .execute(&mut *tx)
+        .await?;
+        changed = true;
+        tracing::info!(flow_id, "bootstrapped default login flow");
+    }
+
     tx.commit().await?;
 
     if changed {
-        tracing::info!(org_id, admin_id, "bootstrapped default org and admin user");
+        tracing::info!(org_id, admin_id, "bootstrapped default org, admin user, and login flow");
     } else {
-        tracing::debug!("bootstrap skipped — default org and admin already exist");
+        tracing::debug!("bootstrap skipped — defaults already exist");
     }
 
     Ok(changed)
@@ -96,5 +119,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(admins.0, 1);
+
+        let flows: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM login_flows WHERE instance_id = $1 AND is_default = TRUE",
+        )
+        .bind(DEFAULT_INSTANCE_ID)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(flows.0, 1);
     }
 }

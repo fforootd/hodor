@@ -65,6 +65,8 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
     let metadata = scoped.as_text("metadata");
 
     // Build dynamic WHERE clause with optional filters.
+    // Exclude internal log.* events by default — they're server-side observability
+    // noise and shouldn't appear in the user-facing audit log.
     let mut conditions = vec!["instance_id = $1".to_string(), "id > $2".to_string()];
     let mut bind_idx = 3u32;
     let mut extra_binds: Vec<String> = Vec::new();
@@ -73,6 +75,8 @@ async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) ->
         conditions.push(format!("event_type = ${bind_idx}"));
         extra_binds.push(et.clone());
         bind_idx += 1;
+    } else {
+        conditions.push("event_type NOT LIKE 'log.%'".to_string());
     }
     if let Some(ref sid) = p.session_id {
         conditions.push(format!("session_id = ${bind_idx}"));

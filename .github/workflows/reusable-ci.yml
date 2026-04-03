@@ -55,8 +55,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Ensure embedded web placeholder exists
-        run: make ensure-webdist
+        run: just ensure-webdist
 
       - name: Check formatting
         run: cargo fmt --check
@@ -79,8 +83,12 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Ensure embedded web placeholder exists
-        run: make ensure-webdist
+        run: just ensure-webdist
 
       - name: Run cargo nextest
         run: cargo nextest run --workspace
@@ -99,11 +107,15 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Ensure embedded web placeholder exists
-        run: make ensure-webdist
+        run: just ensure-webdist
 
       - name: Run fuzz targets (10s each)
-        run: make fuzz-quick
+        run: just fuzz-quick
 
   fast-docs-check:
     name: Fast Docs Check
@@ -112,8 +124,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Run stale-command checks
-        run: make docs-check
+        run: just docs-check
 
   fast-docs-links:
     name: Fast Docs Links
@@ -140,10 +156,14 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Build embedded web assets
         run: |
           npm ci --prefer-offline
-          make web
+          just web
           tar -czf webdist.tgz web/dist
 
       - name: Upload embedded web assets

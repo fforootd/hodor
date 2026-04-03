@@ -48,9 +48,9 @@ What it does **not** do today:
 For local development, the supported path to a known working admin is a seed pack:
 
 ```bash
-make dev
+just dev
 # or
-make dev-embed
+just dev-embed
 # or
 cargo run -p zitadel -- server start -c fixtures/zitadel.dev.toml
 ```

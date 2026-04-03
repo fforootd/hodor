@@ -11,7 +11,7 @@ use rust_embed::Embed;
 /// Embedded frontend assets from web/dist.
 /// In dev mode (no web/dist), this will be empty and Vite serves assets instead.
 ///
-/// The folder must exist at compile time. `make ensure-webdist` creates a
+/// The folder must exist at compile time. `just ensure-webdist` creates a
 /// placeholder if web/dist hasn't been built yet.
 #[derive(Embed)]
 #[folder = "../../web/dist/"]

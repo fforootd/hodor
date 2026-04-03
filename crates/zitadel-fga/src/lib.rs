@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 use anyhow::Context;
 use async_recursion::async_recursion;
@@ -7,6 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sqlx::Row;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 use zitadel_db::{Db, Dialect};
 
@@ -455,35 +457,131 @@ pub trait FgaApi {
 pub struct FgaService {
     db: Db,
     max_depth: usize,
+    store_cache: Arc<RwLock<HashMap<String, StoreInfo>>>,
+    active_model_cache: Arc<RwLock<HashMap<(String, String), CachedModel>>>,
+    explicit_model_cache: Arc<RwLock<HashMap<(String, String, String), CachedModel>>>,
 }
 
 impl FgaService {
     pub fn new(db: Db) -> Self {
-        Self { db, max_depth: 32 }
+        Self {
+            db,
+            max_depth: 32,
+            store_cache: Arc::new(RwLock::new(HashMap::new())),
+            active_model_cache: Arc::new(RwLock::new(HashMap::new())),
+            explicit_model_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     fn scoped(&self, instance_id: &str) -> zitadel_db::scoped::ScopedDb {
         self.db.scoped(instance_id.to_string())
     }
 
-    async fn ensure_store_row(&self, instance_id: &str) -> Result<StoreInfo, FgaError> {
+    async fn cached_store(&self, instance_id: &str) -> Option<StoreInfo> {
+        self.store_cache.read().await.get(instance_id).cloned()
+    }
+
+    async fn cache_store(&self, instance_id: &str, store: &StoreInfo) {
+        self.store_cache
+            .write()
+            .await
+            .insert(instance_id.to_string(), store.clone());
+    }
+
+    async fn cached_active_model(&self, instance_id: &str, store_id: &str) -> Option<CachedModel> {
+        self.active_model_cache
+            .read()
+            .await
+            .get(&(instance_id.to_string(), store_id.to_string()))
+            .cloned()
+    }
+
+    async fn cached_explicit_model(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        model_id: &str,
+    ) -> Option<CachedModel> {
+        self.explicit_model_cache
+            .read()
+            .await
+            .get(&(
+                instance_id.to_string(),
+                store_id.to_string(),
+                model_id.to_string(),
+            ))
+            .cloned()
+    }
+
+    async fn cache_model(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        model: &CachedModel,
+        is_active: bool,
+    ) {
+        self.explicit_model_cache.write().await.insert(
+            (
+                instance_id.to_string(),
+                store_id.to_string(),
+                model.model_id.clone(),
+            ),
+            model.clone(),
+        );
+        if is_active {
+            self.active_model_cache.write().await.insert(
+                (instance_id.to_string(), store_id.to_string()),
+                model.clone(),
+            );
+        }
+    }
+
+    async fn invalidate_store_cache(&self, instance_id: &str) {
+        self.store_cache.write().await.remove(instance_id);
+    }
+
+    async fn invalidate_model_caches(&self, instance_id: &str, store_id: &str) {
+        self.active_model_cache
+            .write()
+            .await
+            .remove(&(instance_id.to_string(), store_id.to_string()));
+        self.explicit_model_cache.write().await.retain(
+            |(cached_instance_id, cached_store_id, _), _| {
+                cached_instance_id != instance_id || cached_store_id != store_id
+            },
+        );
+    }
+
+    async fn load_store_row(&self, instance_id: &str) -> Result<Option<StoreInfo>, FgaError> {
+        if let Some(store) = self.cached_store(instance_id).await {
+            return Ok(Some(store));
+        }
+
         let scoped = self.scoped(instance_id);
-        if let Some(row) = sqlx::query_as::<_, (String,)>(
+        let row = sqlx::query_as::<_, (String,)>(
             "SELECT store_id FROM fga_instance_stores WHERE instance_id = $1",
         )
         .bind(scoped.instance_id())
         .fetch_optional(scoped.pool())
         .await
-        .context("load instance store")?
-        {
-            let store = StoreInfo {
-                id: row.0,
-                name: format!("zitadel-{instance_id}"),
-            };
-            self.ensure_default_model(instance_id, &store.id).await?;
+        .context("load instance store")?;
+
+        let store = row.map(|row| StoreInfo {
+            id: row.0,
+            name: format!("zitadel-{instance_id}"),
+        });
+        if let Some(store) = &store {
+            self.cache_store(instance_id, store).await;
+        }
+        Ok(store)
+    }
+
+    async fn ensure_store_row(&self, instance_id: &str) -> Result<StoreInfo, FgaError> {
+        if let Some(store) = self.load_store_row(instance_id).await? {
             return Ok(store);
         }
 
+        let scoped = self.scoped(instance_id);
         let store_id = instance_id.to_string();
         let insert = match scoped.dialect() {
             Dialect::Sqlite => {
@@ -500,12 +598,14 @@ impl FgaService {
             .await
             .context("insert instance store")?;
 
-        self.ensure_default_model(instance_id, &store_id).await?;
-
-        Ok(StoreInfo {
+        let store = StoreInfo {
             id: store_id,
             name: format!("zitadel-{instance_id}"),
-        })
+        };
+        self.cache_store(instance_id, &store).await;
+        self.ensure_default_model(instance_id, &store.id).await?;
+
+        Ok(store)
     }
 
     async fn ensure_default_model(
@@ -513,6 +613,13 @@ impl FgaService {
         instance_id: &str,
         store_id: &str,
     ) -> Result<(), FgaError> {
+        if self
+            .cached_active_model(instance_id, store_id)
+            .await
+            .is_some()
+        {
+            return Ok(());
+        }
         let scoped = self.scoped(instance_id);
         let existing: Option<(String,)> = sqlx::query_as(
             "SELECT model_id FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 LIMIT 1",
@@ -548,24 +655,53 @@ impl FgaService {
         .await
         .context("insert default fga model")?;
 
+        let cached = self
+            .load_model_row_from_db(instance_id, store_id, Some(&model_id))
+            .await?
+            .ok_or_else(|| FgaError::NotFound("authorization model not found".into()))?;
+        self.cache_model(instance_id, store_id, &cached, true).await;
+
         Ok(())
     }
 
-    async fn require_store(&self, instance_id: &str, store_id: &str) -> Result<(), FgaError> {
-        let store = self.ensure_store_row(instance_id).await?;
+    async fn require_store(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+    ) -> Result<StoreInfo, FgaError> {
+        let store = self
+            .load_store_row(instance_id)
+            .await?
+            .ok_or_else(|| FgaError::NotFound(format!("store {store_id} not found")))?;
         if store.id != store_id {
             return Err(FgaError::NotFound(format!("store {store_id} not found")));
         }
-        Ok(())
+        Ok(store)
     }
 
-    async fn load_model_row(
+    fn build_cached_model(
+        &self,
+        model_id: String,
+        raw: String,
+        created_at: String,
+    ) -> Result<CachedModel, FgaError> {
+        let request: AuthorizationModelWriteRequest =
+            serde_json::from_str(&raw).context("parse compiled authorization model")?;
+        let compiled = CompiledModel::from_request(&request)?;
+        Ok(CachedModel {
+            model_id,
+            raw,
+            created_at,
+            compiled: Arc::new(compiled),
+        })
+    }
+
+    async fn load_model_row_from_db(
         &self,
         instance_id: &str,
         store_id: &str,
         model_id: Option<&str>,
-    ) -> Result<(String, String, String), FgaError> {
-        self.require_store(instance_id, store_id).await?;
+    ) -> Result<Option<CachedModel>, FgaError> {
         let scoped = self.scoped(instance_id);
         let row = if let Some(model_id) = model_id {
             sqlx::query_as::<_, (String, String, String)>(
@@ -588,7 +724,53 @@ impl FgaService {
             .context("load active fga model")?
         };
 
-        row.ok_or_else(|| FgaError::NotFound("authorization model not found".into()))
+        let Some((resolved_model_id, raw, created_at)) = row else {
+            return Ok(None);
+        };
+        let cached = self.build_cached_model(resolved_model_id, raw, created_at)?;
+        self.cache_model(instance_id, store_id, &cached, model_id.is_none())
+            .await;
+        Ok(Some(cached))
+    }
+
+    async fn load_model_row(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        model_id: Option<&str>,
+    ) -> Result<CachedModel, FgaError> {
+        let _store = self.require_store(instance_id, store_id).await?;
+        if let Some(model_id) = model_id {
+            if let Some(cached) = self
+                .cached_explicit_model(instance_id, store_id, model_id)
+                .await
+            {
+                return Ok(cached);
+            }
+        } else {
+            if let Some(cached) = self.cached_active_model(instance_id, store_id).await {
+                return Ok(cached);
+            }
+        }
+
+        if let Some(cached) = self
+            .load_model_row_from_db(instance_id, store_id, model_id)
+            .await?
+        {
+            return Ok(cached);
+        }
+
+        if model_id.is_none() {
+            self.ensure_default_model(instance_id, store_id).await?;
+            if let Some(cached) = self
+                .load_model_row_from_db(instance_id, store_id, None)
+                .await?
+            {
+                return Ok(cached);
+            }
+        }
+
+        Err(FgaError::NotFound("authorization model not found".into()))
     }
 
     async fn load_compiled_model(
@@ -596,12 +778,9 @@ impl FgaService {
         instance_id: &str,
         store_id: &str,
         model_id: Option<&str>,
-    ) -> Result<(String, CompiledModel), FgaError> {
-        let (model_id, raw, _) = self.load_model_row(instance_id, store_id, model_id).await?;
-        let request: AuthorizationModelWriteRequest =
-            serde_json::from_str(&raw).context("parse compiled authorization model")?;
-        let compiled = CompiledModel::from_request(&request)?;
-        Ok((model_id, compiled))
+    ) -> Result<(String, Arc<CompiledModel>), FgaError> {
+        let model = self.load_model_row(instance_id, store_id, model_id).await?;
+        Ok((model.model_id, model.compiled))
     }
 
     async fn validate_model_id(
@@ -765,7 +944,11 @@ impl FgaService {
 #[async_trait]
 impl StoreResolver for FgaService {
     async fn initialize_instance(&self, instance_id: &str) -> Result<StoreInfo, FgaError> {
-        self.ensure_store_row(instance_id).await
+        self.invalidate_store_cache(instance_id).await;
+        let store = self.ensure_store_row(instance_id).await?;
+        self.invalidate_model_caches(instance_id, &store.id).await;
+        self.ensure_default_model(instance_id, &store.id).await?;
+        Ok(store)
     }
 
     async fn discover_store(&self, instance_id: &str) -> Result<StoreInfo, FgaError> {
@@ -781,16 +964,15 @@ impl ModelRepository for FgaService {
         store_id: &str,
         model_id: Option<&str>,
     ) -> Result<AuthorizationModelMetadata, FgaError> {
-        let (model_id, raw, created_at) =
-            self.load_model_row(instance_id, store_id, model_id).await?;
+        let model = self.load_model_row(instance_id, store_id, model_id).await?;
         let request: AuthorizationModelWriteRequest =
-            serde_json::from_str(&raw).context("parse authorization model row")?;
+            serde_json::from_str(&model.raw).context("parse authorization model row")?;
         Ok(AuthorizationModelMetadata {
-            authorization_model_id: model_id,
+            authorization_model_id: model.model_id,
             schema_version: request.schema_version,
             type_definitions: request.type_definitions,
             conditions: request.conditions,
-            created_at,
+            created_at: model.created_at,
         })
     }
 
@@ -875,6 +1057,13 @@ impl ModelRepository for FgaService {
         .await
         .context("insert authorization model")?;
         tx.commit().await.context("commit model transaction")?;
+
+        self.invalidate_model_caches(instance_id, store_id).await;
+        let cached = self
+            .load_model_row_from_db(instance_id, store_id, Some(&model_id))
+            .await?
+            .ok_or_else(|| FgaError::NotFound("authorization model not found".into()))?;
+        self.cache_model(instance_id, store_id, &cached, true).await;
 
         Ok(AuthorizationModelWriteResponse {
             authorization_model_id: model_id,
@@ -1132,7 +1321,6 @@ impl Evaluator for FgaService {
         store_id: &str,
         request: CheckRequest,
     ) -> Result<CheckResponse, FgaError> {
-        self.require_store(instance_id, store_id).await?;
         if request.context.is_some() {
             return Err(FgaError::Unsupported(
                 "request context is not supported by the embedded v1 server".into(),
@@ -1147,7 +1335,7 @@ impl Evaluator for FgaService {
             )
             .await?;
         let contextual = parse_contextual(request.contextual_tuples)?;
-        let mut ctx = self.evaluate_internal(instance_id, store_id, &model, &contextual);
+        let mut ctx = self.evaluate_internal(instance_id, store_id, model.as_ref(), &contextual);
         let allowed = ctx
             .check(&tuple.user, &tuple.relation, &tuple.object, 0)
             .await?;
@@ -1160,7 +1348,6 @@ impl Evaluator for FgaService {
         store_id: &str,
         request: BatchCheckRequest,
     ) -> Result<BatchCheckResponse, FgaError> {
-        self.require_store(instance_id, store_id).await?;
         if request.context.is_some() {
             return Err(FgaError::Unsupported(
                 "request context is not supported by the embedded v1 server".into(),
@@ -1174,7 +1361,7 @@ impl Evaluator for FgaService {
             )
             .await?;
         let contextual = parse_contextual(request.contextual_tuples)?;
-        let mut ctx = self.evaluate_internal(instance_id, store_id, &model, &contextual);
+        let mut ctx = self.evaluate_internal(instance_id, store_id, model.as_ref(), &contextual);
         let mut results = Vec::with_capacity(request.checks.len());
         for item in request.checks {
             let tuple = ParsedTupleKey::parse(item.tuple_key)?;
@@ -1195,7 +1382,6 @@ impl Evaluator for FgaService {
         store_id: &str,
         request: ExpandRequest,
     ) -> Result<ExpandResponse, FgaError> {
-        self.require_store(instance_id, store_id).await?;
         let object = ObjectRef::parse(&request.object)?;
         let (_, model) = self
             .load_compiled_model(
@@ -1205,7 +1391,7 @@ impl Evaluator for FgaService {
             )
             .await?;
         let contextual = parse_contextual(request.contextual_tuples)?;
-        let mut ctx = self.evaluate_internal(instance_id, store_id, &model, &contextual);
+        let mut ctx = self.evaluate_internal(instance_id, store_id, model.as_ref(), &contextual);
         let tree = ctx.expand(&object, &request.relation, 0).await?;
         Ok(ExpandResponse { tree })
     }
@@ -1216,7 +1402,6 @@ impl Evaluator for FgaService {
         store_id: &str,
         request: ListObjectsRequest,
     ) -> Result<ListObjectsResponse, FgaError> {
-        self.require_store(instance_id, store_id).await?;
         let user = UserRef::parse(&request.user)?;
         let (_, model) = self
             .load_compiled_model(
@@ -1229,7 +1414,7 @@ impl Evaluator for FgaService {
         let candidates = self
             .candidate_objects(instance_id, store_id, &request.object_type, &contextual)
             .await?;
-        let mut ctx = self.evaluate_internal(instance_id, store_id, &model, &contextual);
+        let mut ctx = self.evaluate_internal(instance_id, store_id, model.as_ref(), &contextual);
         let mut objects = Vec::new();
         for object in candidates {
             if ctx.check(&user, &request.relation, &object, 0).await? {
@@ -1245,7 +1430,6 @@ impl Evaluator for FgaService {
         store_id: &str,
         request: ListUsersRequest,
     ) -> Result<ListUsersResponse, FgaError> {
-        self.require_store(instance_id, store_id).await?;
         let object = ObjectRef::parse(&request.object)?;
         let (_, model) = self
             .load_compiled_model(
@@ -1255,7 +1439,7 @@ impl Evaluator for FgaService {
             )
             .await?;
         let contextual = parse_contextual(request.contextual_tuples)?;
-        let mut ctx = self.evaluate_internal(instance_id, store_id, &model, &contextual);
+        let mut ctx = self.evaluate_internal(instance_id, store_id, model.as_ref(), &contextual);
         let mut users = BTreeSet::new();
         for filter in &request.user_filters {
             for user in self
@@ -1502,6 +1686,14 @@ impl ParsedTupleKey {
 struct StoredTuple {
     user: UserRef,
     raw_user: String,
+}
+
+#[derive(Clone, Debug)]
+struct CachedModel {
+    model_id: String,
+    raw: String,
+    created_at: String,
+    compiled: Arc<CompiledModel>,
 }
 
 #[derive(Clone, Debug)]
@@ -2217,6 +2409,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn repeated_checks_reuse_cached_active_model() {
+        let service = test_service().await;
+        let store = service
+            .initialize_instance(DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap();
+        service
+            .write_tuples(
+                DEFAULT_INSTANCE_ID,
+                &store.id,
+                WriteRequest {
+                    writes: TupleKeySet {
+                        tuple_keys: vec![TupleKey {
+                            user: "user:anne".into(),
+                            relation: "member".into(),
+                            object: "group:engineering".into(),
+                            condition: None,
+                        }],
+                    },
+                    deletes: TupleKeySet { tuple_keys: vec![] },
+                    authorization_model_id: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let request = CheckRequest {
+            tuple_key: TupleKey {
+                user: "user:anne".into(),
+                relation: "member".into(),
+                object: "group:engineering".into(),
+                condition: None,
+            },
+            authorization_model_id: None,
+            contextual_tuples: None,
+            context: None,
+        };
+
+        let first = service
+            .check(DEFAULT_INSTANCE_ID, &store.id, request.clone())
+            .await
+            .unwrap();
+        assert!(first.allowed);
+
+        let active_key = (DEFAULT_INSTANCE_ID.to_string(), store.id.clone());
+        let cached_model_id = service
+            .active_model_cache
+            .read()
+            .await
+            .get(&active_key)
+            .map(|entry| entry.model_id.clone())
+            .expect("active model cache should be populated after the first check");
+
+        let second = service
+            .check(DEFAULT_INSTANCE_ID, &store.id, request)
+            .await
+            .unwrap();
+        assert!(second.allowed);
+        assert_eq!(
+            service.active_model_cache.read().await[&active_key].model_id,
+            cached_model_id
+        );
+    }
+
+    #[tokio::test]
     async fn supports_tuple_to_userset_and_difference() {
         let service = test_service().await;
         let store = service
@@ -2370,5 +2627,116 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("sealed type instance"));
+    }
+
+    #[tokio::test]
+    async fn write_model_replaces_active_model_cache() {
+        let service = test_service().await;
+        let store = service
+            .initialize_instance(DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap();
+        let original = service
+            .read_model(DEFAULT_INSTANCE_ID, &store.id, None)
+            .await
+            .unwrap();
+        let mut model = core_authorization_model();
+        model.type_definitions.push(TypeDefinition {
+            type_name: "document".into(),
+            relations: Map::from_iter([("viewer".into(), json!({ "this": {} }))]),
+            metadata: Some(json!({
+                "relations": {
+                    "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                }
+            })),
+        });
+        let written = service
+            .write_model(DEFAULT_INSTANCE_ID, &store.id, model)
+            .await
+            .unwrap();
+
+        let current = service
+            .read_model(DEFAULT_INSTANCE_ID, &store.id, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            current.authorization_model_id,
+            written.authorization_model_id
+        );
+        assert_ne!(
+            current.authorization_model_id,
+            original.authorization_model_id
+        );
+
+        let active_key = (DEFAULT_INSTANCE_ID.to_string(), store.id.clone());
+        assert_eq!(
+            service.active_model_cache.read().await[&active_key].model_id,
+            written.authorization_model_id
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_model_reads_stay_available_after_active_model_changes() {
+        let service = test_service().await;
+        let store = service
+            .initialize_instance(DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap();
+        let original = service
+            .read_model(DEFAULT_INSTANCE_ID, &store.id, None)
+            .await
+            .unwrap();
+        let mut model = core_authorization_model();
+        model.type_definitions.push(TypeDefinition {
+            type_name: "document".into(),
+            relations: Map::from_iter([("viewer".into(), json!({ "this": {} }))]),
+            metadata: Some(json!({
+                "relations": {
+                    "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                }
+            })),
+        });
+        let written = service
+            .write_model(DEFAULT_INSTANCE_ID, &store.id, model)
+            .await
+            .unwrap();
+
+        let old_model = service
+            .read_model(
+                DEFAULT_INSTANCE_ID,
+                &store.id,
+                Some(&original.authorization_model_id),
+            )
+            .await
+            .unwrap();
+        let new_model = service
+            .read_model(
+                DEFAULT_INSTANCE_ID,
+                &store.id,
+                Some(&written.authorization_model_id),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            old_model.authorization_model_id,
+            original.authorization_model_id
+        );
+        assert_eq!(
+            new_model.authorization_model_id,
+            written.authorization_model_id
+        );
+
+        let explicit_cache = service.explicit_model_cache.read().await;
+        assert!(explicit_cache.contains_key(&(
+            DEFAULT_INSTANCE_ID.to_string(),
+            store.id.clone(),
+            original.authorization_model_id
+        )));
+        assert!(explicit_cache.contains_key(&(
+            DEFAULT_INSTANCE_ID.to_string(),
+            store.id.clone(),
+            written.authorization_model_id
+        )));
     }
 }

@@ -61,9 +61,9 @@
 
 | Document | Summary |
 |---|---|
-| [Local Development](guides/local-development.md) | Canonical `make dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
+| [Local Development](guides/local-development.md) | Canonical `just dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
 | [Bootstrap and Recovery](guides/bootstrap-recovery.md) | Current Rust bootstrap flow and recovery limitations |
-| [OIDC Daily Coverage](guides/oidc-conformance.md) | Daily OIDC provider conformance and RP regression targets via top-level `make` commands |
+| [OIDC Daily Coverage](guides/oidc-conformance.md) | Daily OIDC provider conformance and RP regression targets via top-level `just` commands |
 | [Secrets & Crypto](guides/secrets-and-crypto.md) | Password hashing, encryption keys, token config, secret generators, FIPS |
 | [Zitadel Login Web Component](guides/zitadel-login-wc.md) | Embed and customize the server-driven login web component |
 

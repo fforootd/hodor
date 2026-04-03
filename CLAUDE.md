@@ -6,7 +6,7 @@ The frontend (Vue/Vite) and backend (Rust) are independent and can run separatel
 
 ```bash
 # Full-stack with hot reload (recommended):
-npm ci && make dev
+just dev
 # → Rust API on http://localhost:8080
 # → Vite HMR on http://localhost:5173 (proxies API calls to :8080)
 
@@ -15,7 +15,7 @@ cargo build -p zitadel && ./target/debug/zitadel start -c fixtures/zitadel.dev.t
 # → http://localhost:8080
 
 # Frontend only (requires backend already running at :8080):
-make dev-web
+just dev-web
 # → http://localhost:5173
 ```
 
@@ -56,20 +56,20 @@ docs/
   GLOSSARY.md                     Domain vocabulary
 ```
 
-## Key Make Targets
+## Key Recipes
 
 | Command | Purpose |
 |---------|---------|
-| `make dev` | Vite HMR + Rust server (recommended for development) |
-| `make dev-embed` | Embedded assets + Rust server (production-like) |
-| `make dev-web` | Frontend-only on :5173 (needs backend at :8080) |
-| `make dev-reset` | Wipe DB and restart fresh |
-| `make test` | Rust tests (`cargo test --workspace`) |
-| `make test-web` | Vitest unit tests |
-| `make test-e2e` | Playwright E2E tests |
-| `make quality` | Full CI gate (fmt, clippy, test, typecheck, vitest) |
-| `make build` | Release build (`cargo build --release`) |
-| `make ensure-webdist` | Create placeholder web/dist for compilation |
+| `just dev` | Vite HMR + Rust server (recommended for development) |
+| `just dev-embed` | Embedded assets + Rust server (production-like) |
+| `just dev-web` | Frontend-only on :5173 (needs backend at :8080) |
+| `just dev-reset` | Wipe DB and restart fresh |
+| `just test` | Rust tests (`cargo test --workspace`) |
+| `just test-web` | Vitest unit tests |
+| `just test-e2e` | Playwright E2E tests |
+| `just quality` | Full CI gate (fmt, clippy, test, typecheck, vitest) |
+| `just build` | Release build (`cargo build --release`) |
+| `just ensure-webdist` | Create placeholder web/dist for compilation |
 
 ## Building & Testing
 
@@ -87,7 +87,7 @@ npm test -w web
 npm run typecheck -w web
 
 # Full CI-equivalent gate:
-make quality
+just quality
 ```
 
 ## Conventions

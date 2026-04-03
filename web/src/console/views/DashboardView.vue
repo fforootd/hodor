@@ -93,8 +93,9 @@ onMounted(async () => {
 
     if (counts.status === 'fulfilled') {
       const c = counts.value as Record<string, number>
-      stats.value[0].value = String(c.users ?? Object.values(c).reduce((sum, n) => sum + Number(n), 0))
-      stats.value[2].value = String(c.apps ?? 0)
+      const userTotal = (c.human_user ?? 0) + (c.service_user ?? 0) + (c.ai_agent ?? 0)
+      stats.value[0].value = String(userTotal || 0)
+      stats.value[2].value = String(c.app ?? 0)
     }
     if (orgs.status === 'fulfilled') {
       stats.value[1].value = String(Array.isArray(orgs.value) ? orgs.value.length : 0)

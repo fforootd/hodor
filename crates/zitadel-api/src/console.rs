@@ -23,21 +23,39 @@ async fn bootstrap(State(s): State<ApiState>) -> Response {
     });
 
     // Count entities for sidebar badges.
+    // Keys must match the x-catalog type names so the frontend's applyCounts()
+    // can resolve them — aggregate parents (e.g. "users") sum their children
+    // (human_user + service_user + ai_agent), so we return per-subtype counts.
     let counts_queries: Vec<(&str, &str)> = vec![
-        ("users", "SELECT COUNT(*) FROM users WHERE instance_id = $1"),
+        (
+            "human_user",
+            "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND user_type = 'human'",
+        ),
+        (
+            "service_user",
+            "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND user_type = 'service'",
+        ),
+        (
+            "ai_agent",
+            "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND user_type = 'ai_agent'",
+        ),
         ("org", "SELECT COUNT(*) FROM orgs WHERE instance_id = $1"),
         (
-            "groups",
+            "group",
             "SELECT COUNT(*) FROM groups WHERE instance_id = $1",
         ),
         (
-            "projects",
+            "project",
             "SELECT COUNT(*) FROM projects WHERE instance_id = $1",
         ),
-        ("apps", "SELECT COUNT(*) FROM apps WHERE instance_id = $1"),
+        ("app", "SELECT COUNT(*) FROM apps WHERE instance_id = $1"),
         (
-            "providers",
+            "provider",
             "SELECT COUNT(*) FROM providers WHERE instance_id = $1",
+        ),
+        (
+            "login_flow",
+            "SELECT COUNT(*) FROM login_flows WHERE instance_id = $1",
         ),
     ];
     let mut counts = serde_json::Map::new();
@@ -85,20 +103,35 @@ async fn bootstrap(State(s): State<ApiState>) -> Response {
 async fn entity_counts(State(s): State<ApiState>) -> Response {
     let scoped = s.db.scoped_default();
     let counts = vec![
-        ("users", "SELECT COUNT(*) FROM users WHERE instance_id = $1"),
-        ("orgs", "SELECT COUNT(*) FROM orgs WHERE instance_id = $1"),
         (
-            "groups",
+            "human_user",
+            "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND user_type = 'human'",
+        ),
+        (
+            "service_user",
+            "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND user_type = 'service'",
+        ),
+        (
+            "ai_agent",
+            "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND user_type = 'ai_agent'",
+        ),
+        ("org", "SELECT COUNT(*) FROM orgs WHERE instance_id = $1"),
+        (
+            "group",
             "SELECT COUNT(*) FROM groups WHERE instance_id = $1",
         ),
         (
-            "projects",
+            "project",
             "SELECT COUNT(*) FROM projects WHERE instance_id = $1",
         ),
-        ("apps", "SELECT COUNT(*) FROM apps WHERE instance_id = $1"),
+        ("app", "SELECT COUNT(*) FROM apps WHERE instance_id = $1"),
         (
-            "providers",
+            "provider",
             "SELECT COUNT(*) FROM providers WHERE instance_id = $1",
+        ),
+        (
+            "login_flow",
+            "SELECT COUNT(*) FROM login_flows WHERE instance_id = $1",
         ),
     ];
     let mut result = serde_json::Map::new();

@@ -3,7 +3,7 @@
 Zitadel now has one default local workflow:
 
 ```bash
-make dev
+just dev
 ```
 
 That starts:
@@ -18,13 +18,13 @@ That starts:
 
 | Command | Use it for |
 |---|---|
-| `make dev` | The default flow: Rust API + Vite HMR + frontend seed data |
-| `make dev-embed` | Backend work when you do not need Vite |
-| `make dev-web` | Frontend-only work against an already running API |
-| `make dev-embed` | Parity mode with embedded web assets instead of Vite |
-| `make dev-reset` | Wipe `./data` SQLite files and restart local dev |
-| `make dev-seed SEED=<name>` | Reapply a named seed pack without wiping the DB |
-| `make dev-status` | Print the current local dev paths, credentials, and seed pack |
+| `just dev` | The default flow: Rust API + Vite HMR + frontend seed data |
+| `just dev-embed` | Backend work when you do not need Vite |
+| `just dev-web` | Frontend-only work against an already running API |
+| `just dev-embed` | Parity mode with embedded web assets instead of Vite |
+| `just dev-reset` | Wipe `./data` SQLite files and restart local dev |
+| `just dev-seed <name>` | Reapply a named seed pack without wiping the DB |
+| `just dev-status` | Print the current local dev paths, credentials, and seed pack |
 
 ## Seed Packs
 
@@ -39,9 +39,9 @@ Seed packs live in [fixtures/seeds](../../fixtures/seeds):
 Examples:
 
 ```bash
-make dev-seed
-make dev-seed SEED=minimal
-make dev-seed SEED=e2e
+just dev-seed
+just dev-seed minimal
+just dev-seed e2e
 ```
 
 The CLI entrypoint is also available directly:
@@ -60,7 +60,7 @@ Local development is standardized around repo-root `./data`:
 - database: `data/zitadel.db`
 - analytics cache: `data/zitadel-cache.db`
 
-`make dev-reset` removes those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and refuses to run when `ZITADEL_STORAGE_STATEFUL_URL` is not SQLite.
+`just dev-reset` removes those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and refuses to run when `ZITADEL_STORAGE_STATEFUL_URL` is not SQLite.
 
 ## Credentials And Mock OIDC
 

@@ -73,7 +73,7 @@ packages/
 ## Consequences
 
 - Every new API endpoint must add an `OpenAPIOperation` registration
-- `make quality` validates the spec + SDK compile as part of CI
+- `just quality` validates the spec + SDK compile as part of CI
 - Breaking API changes surface as TypeScript compile errors in both the console and SDK
 - External consumers get first-class TypeScript support
 

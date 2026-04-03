@@ -1,5 +1,5 @@
 # Frontend local seed pack.
-# Default for `make dev` so console and login flows have deterministic data.
+# Default for `just dev` so console and login flows have deterministic data.
 
 users:
   - identifier: admin
@@ -47,6 +47,19 @@ users:
     profile:
       email: alice@example.com
       display_name: Alice Wonder
+
+# Default login flow — the identifier-first flow used by the login SPA.
+login_flows:
+  - name: Default
+    strategy: identifier_first
+    is_default: true
+    enabled: true
+    state: active
+    priority: 100
+    auth_methods:
+      password: { enabled: true, interactive: true, position: 0 }
+      passkey:  { enabled: true, interactive: true, position: 1 }
+      sso:      { enabled: true, interactive: true, position: 2 }
 
 # Instance-level settings
 settings:

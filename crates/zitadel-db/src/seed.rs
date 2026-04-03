@@ -22,6 +22,8 @@ pub struct SeedFile {
     pub providers: Vec<SeedProvider>,
     #[serde(default)]
     pub settings: Vec<SeedSetting>,
+    #[serde(default)]
+    pub login_flows: Vec<SeedLoginFlow>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +32,35 @@ pub struct SeedSetting {
     pub type_: String,
     #[serde(default)]
     pub data: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeedLoginFlow {
+    pub name: String,
+    #[serde(default = "default_strategy")]
+    pub strategy: String,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_active")]
+    pub state: String,
+    #[serde(default)]
+    pub priority: i64,
+    #[serde(default)]
+    pub auth_methods: serde_json::Value,
+    #[serde(default)]
+    pub config: serde_json::Value,
+}
+
+fn default_strategy() -> String {
+    "identifier_first".into()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_active() -> String {
+    "active".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -416,6 +447,61 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         );
     }
 
+    // Seed login flows.
+    for flow in &seed.login_flows {
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM login_flows WHERE instance_id = 'default' AND name = $1",
+        )
+        .bind(&flow.name)
+        .fetch_optional(pool)
+        .await?;
+
+        let auth_methods = serde_json::to_string(&flow.auth_methods).unwrap_or_else(|_| "{}".into());
+        let config = serde_json::to_string(&flow.config).unwrap_or_else(|_| "{}".into());
+
+        if let Some(row) = existing {
+            let sql = format!(
+                "UPDATE login_flows SET strategy = $1, is_default = $2, enabled = $3, state = $4, priority = $5, \
+                 auth_methods = {}, config = {}, updated_at = CURRENT_TIMESTAMP WHERE id = $8",
+                scoped.json_bind(6),
+                scoped.json_bind(7),
+            );
+            sqlx::query(&sql)
+                .bind(&flow.strategy)
+                .bind(flow.is_default)
+                .bind(flow.enabled)
+                .bind(&flow.state)
+                .bind(flow.priority)
+                .bind(&auth_methods)
+                .bind(&config)
+                .bind(&row.0)
+                .execute(pool)
+                .await?;
+        } else {
+            let id = Uuid::new_v4().to_string();
+            let sql = format!(
+                "INSERT INTO login_flows (id, instance_id, name, strategy, is_default, enabled, state, priority, auth_methods, config) \
+                 VALUES ($1, 'default', $2, $3, $4, $5, $6, $7, {}, {})",
+                scoped.json_bind(8),
+                scoped.json_bind(9),
+            );
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(&flow.name)
+                .bind(&flow.strategy)
+                .bind(flow.is_default)
+                .bind(flow.enabled)
+                .bind(&flow.state)
+                .bind(flow.priority)
+                .bind(&auth_methods)
+                .bind(&config)
+                .execute(pool)
+                .await?;
+        }
+
+        tracing::debug!(name = flow.name, "seeded login flow");
+    }
+
     // Seed settings (bot_protection, branding, etc.).
     for setting in &seed.settings {
         let id = Uuid::new_v4().to_string();
@@ -452,6 +538,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         users = seed.users.len(),
         apps = seed.apps.len(),
         providers = seed.providers.len(),
+        login_flows = seed.login_flows.len(),
         "seed applied"
     );
     Ok(())

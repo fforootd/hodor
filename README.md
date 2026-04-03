@@ -10,7 +10,7 @@
 
 ```bash
 # Fresh clone: install web deps, build embedded assets, start Rust + Vite
-make dev
+just dev
 ```
 
 Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` for the Rust API / OIDC endpoints.
@@ -20,7 +20,7 @@ Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` f
 ### Fresh clone
 
 ```bash
-make dev
+just dev
 ```
 
 Default local credentials:
@@ -31,7 +31,7 @@ Default local credentials:
 ### Backend-only dev
 
 ```bash
-make dev-embed
+just dev-embed
 ```
 
 This builds `web/dist` and serves the embedded frontend directly from the Rust binary on `http://localhost:8080`.
@@ -40,22 +40,22 @@ This builds `web/dist` and serves the embedded frontend directly from the Rust b
 
 ```bash
 # Start the backend in another terminal
-make dev-embed
+just dev-embed
 
 # Then run Vite HMR
-make dev-web
+just dev-web
 ```
 
 To point Vite at a different API:
 
 ```bash
-ZITADEL_API_BASE=http://localhost:8081 make dev-web
+ZITADEL_API_BASE=http://localhost:8081 just dev-web
 ```
 
 ### Reset local DB
 
 ```bash
-make dev-reset
+just dev-reset
 ```
 
 This deletes local SQLite files under `./data/`, refuses to run against non-SQLite `ZITADEL_STORAGE_STATEFUL_URL` values, and then boots the default frontend seed pack again.
@@ -63,12 +63,12 @@ This deletes local SQLite files under `./data/`, refuses to run against non-SQLi
 ### Reseed data
 
 ```bash
-# Default pack used by make dev
-make dev-seed
+# Default pack used by just dev
+just dev-seed
 
 # Alternate packs
-make dev-seed SEED=minimal
-make dev-seed SEED=e2e
+just dev-seed minimal
+just dev-seed e2e
 ```
 
 Named seed packs live in [fixtures/seeds](fixtures/seeds). Validate one without touching the DB:
@@ -85,7 +85,7 @@ The zero-config path still works:
 cargo run -p zitadel -- server start
 ```
 
-That uses SQLite at `./data/zitadel.db` with no required config file. For deterministic local credentials such as `admin / admin123`, prefer `make dev` or run with `fixtures/zitadel.dev.toml`, which applies the frontend seed pack on startup.
+That uses SQLite at `./data/zitadel.db` with no required config file. For deterministic local credentials such as `admin / admin123`, prefer `just dev` or run with `fixtures/zitadel.dev.toml`, which applies the frontend seed pack on startup.
 
 For an explicit migration + bootstrap pass before serving, use:
 
@@ -113,17 +113,17 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 
 ```bash
 # Run Rust tests
-make test
+just test
 
 # Run the local Rust quality gate
-make rust-check
+just rust-check
 
 # Run web unit tests
-make test-web
+just test-web
 
 # Run browser smoke or full suites
-make e2e-smoke
-make test-e2e
+just e2e-smoke
+just test-e2e
 ```
 
 ## Configuration

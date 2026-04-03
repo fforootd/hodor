@@ -19,8 +19,8 @@ use zitadel_config::{Config, password::PasswordHasherConfig};
 use zitadel_db::{DEFAULT_INSTANCE_ID, Dialect};
 use zitadel_fga::{
     AuthorizationModelWriteRequest, BatchCheckItem, BatchCheckRequest, BatchCheckResponse,
-    CheckRequest, CheckResponse, Evaluator, ModelRepository, StoreResolver, TupleKey, TupleKeySet,
-    TupleRepository, TypeDefinition, WriteRequest,
+    CheckRequest, CheckResponse, Evaluator, ModelRepository, ReadRequest, StoreResolver,
+    TupleFilter, TupleKey, TupleKeySet, TupleRepository, TypeDefinition, WriteRequest,
 };
 use zitadel_testkit::{AuthActor, PatFixture, SessionFixture, TestApp, TestContext, UserFixture};
 
@@ -805,6 +805,99 @@ async fn collect_scenarios(
                         .await?;
                     if !changed {
                         bail!("perf session revoke reported no change");
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await?,
+    );
+
+    let fga = env.ctx().api_state.fga.clone();
+    let store_id = env.store_id.clone();
+    reports.push(
+        measure_serial(
+            "fga_read_model_active",
+            dataset_profile,
+            tuning.serial_warmup_rounds,
+            tuning.serial_rounds,
+            move || {
+                let fga = fga.clone();
+                let store_id = store_id.clone();
+                async move {
+                    let model = fga.read_model(DEFAULT_INSTANCE_ID, &store_id, None).await?;
+                    if model.authorization_model_id.is_empty() {
+                        bail!("perf active fga model lookup returned empty model id");
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await?,
+    );
+
+    let fga = env.ctx().api_state.fga.clone();
+    let store_id = env.store_id.clone();
+    let direct_tuple_request = ReadRequest {
+        tuple_key: Some(TupleFilter {
+            user: None,
+            relation: Some("viewer".into()),
+            object: Some("document:doc-direct-00000".into()),
+        }),
+        page_size: Some(10),
+        continuation_token: None,
+    };
+    reports.push(
+        measure_serial(
+            "fga_read_tuples_direct_viewer",
+            dataset_profile,
+            tuning.serial_warmup_rounds,
+            tuning.serial_rounds,
+            move || {
+                let fga = fga.clone();
+                let store_id = store_id.clone();
+                let request = direct_tuple_request.clone();
+                async move {
+                    let response = fga
+                        .read_tuples(DEFAULT_INSTANCE_ID, &store_id, request)
+                        .await?;
+                    if response.tuples.is_empty() {
+                        bail!("perf direct tuple lookup unexpectedly returned no tuples");
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await?,
+    );
+
+    let fga = env.ctx().api_state.fga.clone();
+    let store_id = env.store_id.clone();
+    let nested_tuple_request = ReadRequest {
+        tuple_key: Some(TupleFilter {
+            user: None,
+            relation: Some("parent".into()),
+            object: Some("document:doc-nested-00000".into()),
+        }),
+        page_size: Some(10),
+        continuation_token: None,
+    };
+    reports.push(
+        measure_serial(
+            "fga_read_tuples_nested_parent",
+            dataset_profile,
+            tuning.serial_warmup_rounds,
+            tuning.serial_rounds,
+            move || {
+                let fga = fga.clone();
+                let store_id = store_id.clone();
+                let request = nested_tuple_request.clone();
+                async move {
+                    let response = fga
+                        .read_tuples(DEFAULT_INSTANCE_ID, &store_id, request)
+                        .await?;
+                    if response.tuples.is_empty() {
+                        bail!("perf nested tuple lookup unexpectedly returned no tuples");
                     }
                     Ok(())
                 }

@@ -220,7 +220,7 @@ mod tests {
         // Verify it's valid JSON.
         let _: serde_json::Value = serde_json::from_str(&schema).unwrap();
 
-        // Write schema to file if SCHEMA_OUT env var is set (used by `make config-schema`).
+        // Write schema to file if SCHEMA_OUT env var is set (used by `just config-schema`).
         if let Ok(path) = std::env::var("SCHEMA_OUT") {
             std::fs::write(&path, &schema).unwrap();
         }

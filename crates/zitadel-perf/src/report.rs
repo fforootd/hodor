@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
@@ -146,20 +147,99 @@ pub fn render_markdown_summary(current: &[DbPerfReport], previous: &[DbPerfRepor
                 ),
             ));
         }
+        append_postgres_fga_focus(&mut output, report, &previous_by_key);
         output.push('\n');
     }
 
     output
 }
 
+fn append_postgres_fga_focus(
+    output: &mut String,
+    report: &DbPerfReport,
+    previous_by_key: &BTreeMap<(String, String), &ScenarioReport>,
+) {
+    if report.backend != PerfBackend::Postgres {
+        return;
+    }
+
+    let mut fga_scenarios = report
+        .scenarios
+        .iter()
+        .filter(|scenario| is_fga_scenario(&scenario.scenario))
+        .collect::<Vec<_>>();
+    if fga_scenarios.is_empty() {
+        return;
+    }
+
+    fga_scenarios.sort_by(|left, right| {
+        right
+            .p95_ms
+            .partial_cmp(&left.p95_ms)
+            .unwrap_or(Ordering::Equal)
+    });
+
+    output.push_str("### Postgres FGA Focus\n\n");
+    for scenario in fga_scenarios.iter().take(5) {
+        let previous = previous_by_key
+            .get(&(
+                report.backend.as_str().to_string(),
+                scenario.scenario.clone(),
+            ))
+            .copied();
+        let p95_delta = delta_percent(previous.map(|value| value.p95_ms), scenario.p95_ms);
+        let ops_delta = delta_percent(
+            previous.map(|value| value.ops_per_sec),
+            scenario.ops_per_sec,
+        );
+        let marker = if is_large_regression(p95_delta, ops_delta) {
+            " [large regression]"
+        } else {
+            ""
+        };
+        output.push_str(&format!(
+            "- `{}`: P95 {:.2} ms, {:.2} ops/s{}{}\n",
+            scenario.scenario,
+            scenario.p95_ms,
+            scenario.ops_per_sec,
+            format_delta_summary(p95_delta, ops_delta),
+            marker,
+        ));
+    }
+    output.push('\n');
+}
+
+fn is_fga_scenario(scenario: &str) -> bool {
+    scenario.starts_with("fga_") || scenario.starts_with("http_fga_")
+}
+
+fn delta_percent(previous: Option<f64>, current: f64) -> Option<f64> {
+    let previous = previous?;
+    if previous.abs() < f64::EPSILON {
+        return None;
+    }
+    Some(((current - previous) / previous) * 100.0)
+}
+
+fn is_large_regression(p95_delta: Option<f64>, ops_delta: Option<f64>) -> bool {
+    p95_delta.is_some_and(|delta| delta >= 50.0) || ops_delta.is_some_and(|delta| delta <= -25.0)
+}
+
+fn format_delta_summary(p95_delta: Option<f64>, ops_delta: Option<f64>) -> String {
+    match (p95_delta, ops_delta) {
+        (None, None) => String::new(),
+        (p95, ops) => format!(
+            " (Δ P95 {}, Δ Ops/s {})",
+            p95.map_or_else(|| "n/a".into(), |delta| format!("{delta:+.1}%")),
+            ops.map_or_else(|| "n/a".into(), |delta| format!("{delta:+.1}%"))
+        ),
+    }
+}
+
 fn format_delta_percent(previous: Option<f64>, current: f64) -> String {
-    let Some(previous) = previous else {
+    let Some(delta) = delta_percent(previous, current) else {
         return "n/a".into();
     };
-    if previous.abs() < f64::EPSILON {
-        return "n/a".into();
-    }
-    let delta = ((current - previous) / previous) * 100.0;
     format!("{delta:+.1}%")
 }
 

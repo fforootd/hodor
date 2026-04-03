@@ -1,5 +1,5 @@
 # Dev config — deterministic secrets for reproducible local dev.
-# Usage: make dev (or: cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml)
+# Usage: just dev (or: cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml)
 #
 # Admin: admin / admin123
 # Dev PAT: zit_pat_zitadel-dev-pat-do-not-use-in-production
