@@ -7,7 +7,8 @@ use crate::oidc::{
 };
 use base64::Engine;
 use jsonwebtoken::{Algorithm, Header, Validation};
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
+use zitadel_db::current_instance_id_or;
 
 pub trait ClientStore: Clone + Send + Sync + 'static {
     async fn find_client(
@@ -164,6 +165,10 @@ impl<C, A, K, U> Provider<C, A, K, U> {
         &self.issuer
     }
 
+    fn effective_instance_id(&self) -> Cow<'_, str> {
+        current_instance_id_or(&self.instance_id)
+    }
+
     pub fn discovery_document(&self) -> OpenIdConfiguration {
         let issuer = self.issuer.clone();
         OpenIdConfiguration {
@@ -217,9 +222,10 @@ where
     U: ClaimSource,
 {
     pub async fn jwks(&self) -> Result<JsonWebKeySet, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         let key = self
             .keys
-            .active_signing_key(&self.instance_id)
+            .active_signing_key(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
@@ -233,6 +239,7 @@ where
         &self,
         request: &AuthorizeRequest,
     ) -> Result<AuthorizeRedirect, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         if request.client_id.is_empty() {
             return Err(ProtocolError::invalid_request("client_id required"));
         }
@@ -252,7 +259,7 @@ where
 
         let client = self
             .clients
-            .find_client(&self.instance_id, &request.client_id)
+            .find_client(instance_id.as_ref(), &request.client_id)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
 
@@ -274,7 +281,7 @@ where
         let auth_request_id = self
             .auth_requests
             .create_auth_request(
-                &self.instance_id,
+                instance_id.as_ref(),
                 &NewAuthRequest {
                     client_id: request.client_id.clone(),
                     redirect_uri: request.redirect_uri.clone(),
@@ -308,11 +315,16 @@ where
         client_id: &str,
         redirect_uri: &str,
     ) -> bool {
+        let instance_id = self.effective_instance_id();
         if client_id.is_empty() || redirect_uri.is_empty() {
             return false;
         }
 
-        let Ok(Some(client)) = self.clients.find_client(&self.instance_id, client_id).await else {
+        let Ok(Some(client)) = self
+            .clients
+            .find_client(instance_id.as_ref(), client_id)
+            .await
+        else {
             return false;
         };
 
@@ -337,13 +349,14 @@ where
         &self,
         access_token: &str,
     ) -> Result<AccessTokenClaims, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         if access_token.is_empty() {
             return Err(ProtocolError::invalid_request("Bearer token required"));
         }
 
         let key = self
             .keys
-            .active_signing_key(&self.instance_id)
+            .active_signing_key(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
@@ -362,13 +375,14 @@ where
         &self,
         refresh_token: &str,
     ) -> Result<RefreshTokenClaims, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         if refresh_token.is_empty() {
             return Err(ProtocolError::invalid_request("refresh_token required"));
         }
 
         let key = self
             .keys
-            .active_signing_key(&self.instance_id)
+            .active_signing_key(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
@@ -384,11 +398,12 @@ where
     }
 
     pub async fn userinfo(&self, access_token: &str) -> Result<UserInfoResponse, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         let token = self.validate_access_token(access_token).await?;
 
         let claims = self
             .claims
-            .load_user_claims(&self.instance_id, &token.sub)
+            .load_user_claims(instance_id.as_ref(), &token.sub)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load user claims: {error}")))?;
 
@@ -490,6 +505,7 @@ where
         &self,
         request: &TokenExchangeRequest,
     ) -> Result<TokenResponse, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         let auth = request
             .client_auth
             .as_ref()
@@ -497,7 +513,7 @@ where
 
         let client = self
             .clients
-            .find_client(&self.instance_id, &auth.client_id)
+            .find_client(instance_id.as_ref(), &auth.client_id)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
         let client = client.ok_or_else(|| ProtocolError::invalid_client("unknown client_id"))?;
@@ -506,7 +522,11 @@ where
             auth.client_secret.is_empty()
         } else {
             self.clients
-                .authenticate_client_secret(&self.instance_id, &auth.client_id, &auth.client_secret)
+                .authenticate_client_secret(
+                    instance_id.as_ref(),
+                    &auth.client_id,
+                    &auth.client_secret,
+                )
                 .await
                 .map_err(|error| {
                     ProtocolError::server_error(format!("authenticate client: {error}"))
@@ -528,7 +548,7 @@ where
 
         let granted = self
             .auth_requests
-            .consume_auth_code(&self.instance_id, &request.code)
+            .consume_auth_code(instance_id.as_ref(), &request.code)
             .await
             .map_err(|error| ProtocolError::server_error(format!("consume auth code: {error}")))?;
 
@@ -563,14 +583,14 @@ where
 
         let user = self
             .claims
-            .load_user_claims(&self.instance_id, &granted.user_id)
+            .load_user_claims(instance_id.as_ref(), &granted.user_id)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load user claims: {error}")))?;
 
         let user = user.ok_or_else(|| ProtocolError::invalid_grant("subject not found"))?;
         let key = self
             .keys
-            .active_signing_key(&self.instance_id)
+            .active_signing_key(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
@@ -616,6 +636,7 @@ where
         &self,
         request: &TokenExchangeRequest,
     ) -> Result<TokenResponse, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         let auth = request
             .client_auth
             .as_ref()
@@ -623,7 +644,7 @@ where
 
         let client = self
             .clients
-            .find_client(&self.instance_id, &auth.client_id)
+            .find_client(instance_id.as_ref(), &auth.client_id)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
         let client = client.ok_or_else(|| ProtocolError::invalid_client("unknown client_id"))?;
@@ -640,7 +661,7 @@ where
 
         let authenticated = self
             .clients
-            .authenticate_client_secret(&self.instance_id, &auth.client_id, &auth.client_secret)
+            .authenticate_client_secret(instance_id.as_ref(), &auth.client_id, &auth.client_secret)
             .await
             .map_err(|error| {
                 ProtocolError::server_error(format!("authenticate client: {error}"))
@@ -651,7 +672,7 @@ where
 
         let key = self
             .keys
-            .active_signing_key(&self.instance_id)
+            .active_signing_key(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
@@ -675,6 +696,7 @@ where
         &self,
         request: &TokenExchangeRequest,
     ) -> Result<TokenResponse, ProtocolError> {
+        let instance_id = self.effective_instance_id();
         let auth = request
             .client_auth
             .as_ref()
@@ -682,7 +704,7 @@ where
 
         let client = self
             .clients
-            .find_client(&self.instance_id, &auth.client_id)
+            .find_client(instance_id.as_ref(), &auth.client_id)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
         let client = client.ok_or_else(|| ProtocolError::invalid_client("unknown client_id"))?;
@@ -701,7 +723,11 @@ where
             auth.client_secret.is_empty()
         } else {
             self.clients
-                .authenticate_client_secret(&self.instance_id, &auth.client_id, &auth.client_secret)
+                .authenticate_client_secret(
+                    instance_id.as_ref(),
+                    &auth.client_id,
+                    &auth.client_secret,
+                )
                 .await
                 .map_err(|error| {
                     ProtocolError::server_error(format!("authenticate client: {error}"))
@@ -720,14 +746,14 @@ where
 
         let user = self
             .claims
-            .load_user_claims(&self.instance_id, &refresh.sub)
+            .load_user_claims(instance_id.as_ref(), &refresh.sub)
             .await
             .map_err(|error| ProtocolError::server_error(format!("load user claims: {error}")))?;
         let user = user.ok_or_else(|| ProtocolError::invalid_grant("subject not found"))?;
 
         let key = self
             .keys
-            .active_signing_key(&self.instance_id)
+            .active_signing_key(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))

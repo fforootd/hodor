@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_db::current_instance_id;
 use zitadel_storage::{LoginFlowRuntimeState, NewLoginFlowState};
 
 use crate::LoginState;
@@ -259,6 +259,7 @@ pub(crate) async fn flow_create(
     headers: axum::http::HeaderMap,
     Json(req): Json<FlowCreateRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     let flow_id = Uuid::new_v4().to_string();
 
     // Check for existing session from cookie.
@@ -268,7 +269,7 @@ pub(crate) async fn flow_create(
     let requirements = if !req.auth_request_id.is_empty() {
         state
             .transient
-            .load_auth_request_prompts(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+            .load_auth_request_prompts(&instance_id, &req.auth_request_id)
             .await
             .unwrap_or_default()
     } else {
@@ -294,7 +295,7 @@ pub(crate) async fn flow_create(
                 let _ = state
                     .transient
                     .complete_auth_request(
-                        DEFAULT_INSTANCE_ID,
+                        &instance_id,
                         &req.auth_request_id,
                         &trusted_user.user_id,
                         &code,
@@ -303,7 +304,7 @@ pub(crate) async fn flow_create(
                     .await;
                 if let Ok(Some(auth_req)) = state
                     .transient
-                    .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+                    .load_auth_request_redirect(&instance_id, &req.auth_request_id)
                     .await
                 {
                     let redirect =
@@ -335,7 +336,7 @@ pub(crate) async fn flow_create(
             if !req.auth_request_id.is_empty() {
                 if let Ok(Some(auth_req)) = state
                     .transient
-                    .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+                    .load_auth_request_redirect(&instance_id, &req.auth_request_id)
                     .await
                 {
                     let redirect = build_auth_error_redirect(
@@ -377,7 +378,7 @@ pub(crate) async fn flow_create(
             if !req.auth_request_id.is_empty() {
                 if let Ok(Some(auth_req)) = state
                     .transient
-                    .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+                    .load_auth_request_redirect(&instance_id, &req.auth_request_id)
                     .await
                 {
                     let redirect = build_auth_error_redirect(
@@ -419,7 +420,7 @@ pub(crate) async fn flow_create(
     let initial_step_str = initial_step.as_str().to_string();
 
     // Load bot protection setting from DB.
-    let bp = load_bot_protection(state.db.pool(), DEFAULT_INSTANCE_ID).await;
+    let bp = load_bot_protection(state.db.pool(), &instance_id).await;
 
     // Conditionally score request based on bot protection mode.
     let (risk_score, risk_signals) = if !bp.is_disabled() {
@@ -443,7 +444,7 @@ pub(crate) async fn flow_create(
         };
         emit_bot_detection_event(
             state.db.pool(),
-            DEFAULT_INSTANCE_ID,
+            &instance_id,
             &flow_id,
             &req.fingerprint,
             &risk,
@@ -480,7 +481,7 @@ pub(crate) async fn flow_create(
     if let Err(e) = state
         .transient
         .create_login_flow(
-            DEFAULT_INSTANCE_ID,
+            &instance_id,
             &NewLoginFlowState {
                 flow_id: flow_id.clone(),
                 state: req.state.clone(),
@@ -516,9 +517,10 @@ pub(crate) async fn flow_get(
     State(state): State<LoginState>,
     Path(flow_id): Path<String>,
 ) -> Response {
+    let instance_id = current_instance_id();
     let flow = match state
         .transient
-        .load_login_flow(DEFAULT_INSTANCE_ID, &flow_id)
+        .load_login_flow(&instance_id, &flow_id)
         .await
     {
         Ok(row) => row,
@@ -570,9 +572,10 @@ pub(crate) async fn flow_submit(
     headers: axum::http::HeaderMap,
     Json(req): Json<FlowSubmitRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     let flow = match state
         .transient
-        .load_login_flow(DEFAULT_INSTANCE_ID, &flow_id)
+        .load_login_flow(&instance_id, &flow_id)
         .await
     {
         Ok(row) => row,
@@ -604,11 +607,7 @@ pub(crate) async fn flow_submit(
         "back" => {
             let result = state
                 .transient
-                .set_login_flow_step(
-                    DEFAULT_INSTANCE_ID,
-                    &flow_id,
-                    LoginStep::Identifier.as_str(),
-                )
+                .set_login_flow_step(&instance_id, &flow_id, LoginStep::Identifier.as_str())
                 .await;
             match result {
                 Ok(true) => {}
@@ -651,6 +650,7 @@ pub(crate) async fn handle_identifier_step(
     req: &FlowSubmitRequest,
     data: &serde_json::Value,
 ) -> Response {
+    let instance_id = current_instance_id();
     if req.identifier.is_empty() {
         return Json(FlowStepResponse {
             flow_id: flow_id.to_string(),
@@ -671,7 +671,7 @@ pub(crate) async fn handle_identifier_step(
 
     let user = match state
         .stateful
-        .find_active_user_by_identifier(DEFAULT_INSTANCE_ID, &req.identifier)
+        .find_active_user_by_identifier(&instance_id, &req.identifier)
         .await
     {
         Ok(user) => user,
@@ -689,7 +689,7 @@ pub(crate) async fn handle_identifier_step(
     let user_id = user.map(|u| u.user_id).unwrap_or_default();
     match state
         .transient
-        .advance_login_flow_to_password(DEFAULT_INSTANCE_ID, flow_id, &user_id, &next_data)
+        .advance_login_flow_to_password(&instance_id, flow_id, &user_id, &next_data)
         .await
     {
         Ok(true) => {}
@@ -794,6 +794,7 @@ pub(crate) async fn handle_password_step(
     data: &serde_json::Value,
     flow_redirect: &str,
 ) -> Response {
+    let instance_id = current_instance_id();
     let identifier = data
         .get("identifier")
         .and_then(|v| v.as_str())
@@ -801,7 +802,7 @@ pub(crate) async fn handle_password_step(
 
     let user = match state
         .stateful
-        .find_active_user_by_identifier(DEFAULT_INSTANCE_ID, identifier)
+        .find_active_user_by_identifier(&instance_id, identifier)
         .await
     {
         Ok(user) => user,
@@ -837,7 +838,7 @@ pub(crate) async fn handle_password_step(
 
     let hash = match state
         .stateful
-        .load_password_hash(DEFAULT_INSTANCE_ID, &user.user_id)
+        .load_password_hash(&instance_id, &user.user_id)
         .await
     {
         Ok(hash) => hash,
@@ -899,7 +900,7 @@ pub(crate) async fn handle_password_step(
         .unwrap_or_default();
     let auth_request = match state
         .transient
-        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, auth_request_id)
+        .load_auth_request_redirect(&instance_id, auth_request_id)
         .await
     {
         Ok(auth_request) => auth_request,
@@ -920,7 +921,7 @@ pub(crate) async fn handle_password_step(
     let created_session = match state
         .transient
         .create_session(
-            DEFAULT_INSTANCE_ID,
+            &instance_id,
             &user.user_id,
             &user.org_id,
             "",
@@ -950,7 +951,7 @@ pub(crate) async fn handle_password_step(
         if let Err(e) = state
             .transient
             .complete_auth_request(
-                DEFAULT_INSTANCE_ID,
+                &instance_id,
                 auth_request_id,
                 &user.user_id,
                 &code,
@@ -969,7 +970,7 @@ pub(crate) async fn handle_password_step(
 
     match state
         .transient
-        .complete_login_flow(DEFAULT_INSTANCE_ID, flow_id)
+        .complete_login_flow(&instance_id, flow_id)
         .await
     {
         Ok(true) => {}
@@ -1030,6 +1031,7 @@ async fn handle_fingerprint_submit(
     flow: &LoginFlowRuntimeState,
     req: &FlowSubmitRequest,
 ) -> Response {
+    let instance_id = current_instance_id();
     let visitor_id = req
         ._extra
         .get("visitor_id")
@@ -1049,7 +1051,7 @@ async fn handle_fingerprint_submit(
 
     if let Err(e) = state
         .transient
-        .update_login_flow_data(DEFAULT_INSTANCE_ID, flow_id, &data)
+        .update_login_flow_data(&instance_id, flow_id, &data)
         .await
     {
         return (
@@ -1085,6 +1087,7 @@ async fn handle_captcha_submit(
     flow: &LoginFlowRuntimeState,
     req: &FlowSubmitRequest,
 ) -> Response {
+    let instance_id = current_instance_id();
     // Accept altcha_payload (PoW solution).
     let altcha = req._extra.get("altcha_payload");
     let has_token = req
@@ -1186,7 +1189,7 @@ async fn handle_captcha_submit(
 
     if let Err(e) = state
         .transient
-        .update_login_flow_data(DEFAULT_INSTANCE_ID, flow_id, &data)
+        .update_login_flow_data(&instance_id, flow_id, &data)
         .await
     {
         return (
@@ -1218,6 +1221,7 @@ pub(crate) async fn handle_use_session(
     data: &serde_json::Value,
     headers: &axum::http::HeaderMap,
 ) -> Response {
+    let instance_id = current_instance_id();
     let trusted_user_id = data
         .get("trusted_user_id")
         .and_then(|v| v.as_str())
@@ -1269,7 +1273,7 @@ pub(crate) async fn handle_use_session(
 
     let requirements = state
         .transient
-        .load_auth_request_prompts(DEFAULT_INSTANCE_ID, auth_request_id)
+        .load_auth_request_prompts(&instance_id, auth_request_id)
         .await
         .unwrap_or_default();
     let current_user = current_user.expect("validated current session");
@@ -1300,7 +1304,7 @@ pub(crate) async fn handle_use_session(
     if let Err(e) = state
         .transient
         .complete_auth_request(
-            DEFAULT_INSTANCE_ID,
+            &instance_id,
             auth_request_id,
             trusted_user_id,
             &code,
@@ -1317,7 +1321,7 @@ pub(crate) async fn handle_use_session(
 
     let redirect = match state
         .transient
-        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, auth_request_id)
+        .load_auth_request_redirect(&instance_id, auth_request_id)
         .await
     {
         Ok(Some(auth_req)) => build_auth_redirect(&auth_req.redirect_uri, &auth_req.state, &code),

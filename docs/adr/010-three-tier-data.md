@@ -15,6 +15,7 @@ The later `storage.*` role model overlays this ADR rather than replacing it:
 - `storage.stateful`, `storage.read`, `storage.kv`, and `storage.sink` shape transactional and transient runtime paths
 - `storage.analytics` aligns analytical storage with the same config namespace
 - the observability SQLite buffer remains the durable analytics ingest path in the current POC
+- ADR-029 defines how those roles participate in control-plane vs auth data-plane continuity
 
 ## The Three Tiers
 
@@ -72,7 +73,9 @@ tx.Exec("INSERT INTO events (...) VALUES (...)", "entity.updated", category, ...
 tx.Commit() // both or neither
 ```
 
-**Failure = user-visible error.** If the event INSERT fails, the entire transaction rolls back and the user gets an error response. This guarantees audit completeness for security-critical operations.
+**Failure = user-visible error.** If the event INSERT fails, the entire transaction rolls back and the user gets an error response. This guarantees audit completeness for authoritative retained operations.
+
+This rule applies to the authoritative retained OLTP plane. It does **not** mean that every authentication step must synchronously depend on one central or home-region relational write path. Under the storage-role model, transient regional auth continuity may first land in `storage.kv` and reconcile through `storage.sink` before being materialized into retained session or token state.
 
 ## Tier 2: OLAP (Durable Analytics)
 

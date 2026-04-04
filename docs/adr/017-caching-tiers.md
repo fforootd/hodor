@@ -53,6 +53,12 @@ It is not:
 
 This separation is intentional. It keeps “cache” from becoming a catch-all word for every fast path.
 
+It also defines degraded-mode behavior clearly:
+
+- regional auth continuity rides `kv` and `sink`
+- freshness-critical invalidation does not ride `process_cache`
+- `process_cache` never makes auth correctness decisions for the distributed system
+
 ## Default Implementation
 
 The default implementation in this phase is:

@@ -31,6 +31,14 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "00006_retention_scheduler",
         include_str!("../../../migrations/sqlite/00006_retention_scheduler.sql"),
     ),
+    (
+        "00008_instance_routing_control_plane",
+        include_str!("../../../migrations/sqlite/00008_instance_routing_control_plane.sql"),
+    ),
+    (
+        "00009_cloud_backend_registry",
+        include_str!("../../../migrations/sqlite/00009_cloud_backend_registry.sql"),
+    ),
 ];
 
 const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
@@ -61,6 +69,14 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
     (
         "00006_retention_scheduler",
         include_str!("../../../migrations/postgres/00006_retention_scheduler.sql"),
+    ),
+    (
+        "00008_instance_routing_control_plane",
+        include_str!("../../../migrations/postgres/00008_instance_routing_control_plane.sql"),
+    ),
+    (
+        "00009_cloud_backend_registry",
+        include_str!("../../../migrations/postgres/00009_cloud_backend_registry.sql"),
     ),
 ];
 

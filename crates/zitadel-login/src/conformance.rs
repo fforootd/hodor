@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 use uuid::Uuid;
-use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_db::current_instance_id;
 
 use crate::{
     LoginState,
@@ -37,6 +37,7 @@ pub(crate) async fn login_get(
     headers: HeaderMap,
     Query(query): Query<ConformanceLoginQuery>,
 ) -> Response {
+    let instance_id = current_instance_id();
     if !state.conformance_login_html {
         let target = if query.auth_request_id.is_empty() {
             "/login".to_string()
@@ -55,7 +56,7 @@ pub(crate) async fn login_get(
 
     let requirements = match state
         .transient
-        .load_auth_request_prompts(DEFAULT_INSTANCE_ID, &query.auth_request_id)
+        .load_auth_request_prompts(&instance_id, &query.auth_request_id)
         .await
     {
         Ok(requirements) => requirements,
@@ -108,6 +109,7 @@ pub(crate) async fn login_post(
     headers: HeaderMap,
     Form(form): Form<ConformanceLoginForm>,
 ) -> Response {
+    let instance_id = current_instance_id();
     if !state.conformance_login_html {
         return Redirect::temporary("/login").into_response();
     }
@@ -132,7 +134,7 @@ pub(crate) async fn login_post(
         };
         let requirements = match state
             .transient
-            .load_auth_request_prompts(DEFAULT_INSTANCE_ID, &form.auth_request_id)
+            .load_auth_request_prompts(&instance_id, &form.auth_request_id)
             .await
         {
             Ok(requirements) => requirements,
@@ -175,7 +177,7 @@ pub(crate) async fn login_post(
 
     let user = match state
         .stateful
-        .find_active_user_by_identifier(DEFAULT_INSTANCE_ID, &form.identifier)
+        .find_active_user_by_identifier(&instance_id, &form.identifier)
         .await
     {
         Ok(Some(user)) => user,
@@ -199,7 +201,7 @@ pub(crate) async fn login_post(
 
     let hash = match state
         .stateful
-        .load_password_hash(DEFAULT_INSTANCE_ID, &user.user_id)
+        .load_password_hash(&instance_id, &user.user_id)
         .await
     {
         Ok(Some(hash)) => hash,
@@ -234,7 +236,7 @@ pub(crate) async fn login_post(
 
     let created_session = match state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "", "")
+        .create_session(&instance_id, &user.user_id, &user.org_id, "", "", "")
         .await
     {
         Ok(session) => session,
@@ -279,16 +281,11 @@ async fn complete_auth_request_location(
     user_id: &str,
     auth_time: Option<&str>,
 ) -> Result<String, Response> {
+    let instance_id = current_instance_id();
     let code = Uuid::new_v4().to_string();
     if let Err(error) = state
         .transient
-        .complete_auth_request(
-            DEFAULT_INSTANCE_ID,
-            auth_request_id,
-            user_id,
-            &code,
-            auth_time,
-        )
+        .complete_auth_request(&instance_id, auth_request_id, user_id, &code, auth_time)
         .await
     {
         return Err(html_response(
@@ -301,7 +298,7 @@ async fn complete_auth_request_location(
 
     match state
         .transient
-        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, auth_request_id)
+        .load_auth_request_redirect(&instance_id, auth_request_id)
         .await
     {
         Ok(Some(auth_req)) => Ok(build_auth_redirect(
@@ -325,9 +322,10 @@ async fn auth_error_redirect_response(
     auth_request_id: &str,
     error: &str,
 ) -> Response {
+    let instance_id = current_instance_id();
     match state
         .transient
-        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, auth_request_id)
+        .load_auth_request_redirect(&instance_id, auth_request_id)
         .await
     {
         Ok(Some(auth_req)) => {

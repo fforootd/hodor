@@ -29,16 +29,17 @@
 | [018](adr/018-startup-lifecycle.md) | Startup Lifecycle & Schema Migration | Proposed | 2026-03-28 |
 | [019](adr/019-server-driven-login-wc.md) | Server-Driven Login UI + Web Components | Accepted | 2026-03-28 |
 | [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Marketplace Modules | Accepted | 2026-03-29 |
-| [021](adr/021-login-flow-schema.md) | Login Flow Schema — Composable Bot Detection & Behavioral Telemetry | Accepted | 2026-03-29 |
-| [021](adr/021-multi-tenancy.md) | Multi-Tenancy via Instance Isolation | Accepted | 2026-03-30 |
+| [021-login](adr/021-login-flow-schema.md) | Login Flow Schema — Composable Bot Detection & Behavioral Telemetry | Accepted | 2026-03-29 |
+| [021-tenancy](adr/021-multi-tenancy.md) | Multi-Tenancy via Instance Boundaries | Accepted | 2026-04-04 |
 | [022](adr/022-dedicated-resource-tables.md) | Dedicated Resource Tables + Metadata Extensions | Proposed | 2026-03-30 |
 | [022](adr/022-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
 | [023](adr/023-wide-events.md) | Wide Events as Internal Observability Primitive | Accepted | 2026-03-29 |
 | [024](adr/024-risk-evaluation-policy-consumers.md) | Risk Evaluation and Policy Consumers | Accepted | 2026-03-30 |
 | [025](adr/025-explicit-bootstrap-and-local-recovery.md) | Explicit Bootstrap and Local Break-Glass Recovery | Proposed | 2026-03-31 |
-| [026](adr/026-cloud-container-per-tenant.md) | Cloud Deployment — Container-per-Tenant with D1 | Proposed | 2026-03-31 |
+| [026](adr/026-cloud-container-per-tenant.md) | Cloud Deployment — Control-Plane Routing and Regional Backends | Proposed | 2026-04-04 |
 | [027](adr/027-fips-compliance.md) | FIPS Compliance — Opt-in Compile Target | Proposed | 2026-04-02 |
 | [028](adr/028-secrets-hashers-key-lifecycle.md) | Configurable Secrets, Hashers & Key Lifecycle | Proposed | 2026-04-02 |
+| [029](adr/029-control-plane-auth-data-plane.md) | Control Plane, Auth Data Plane, and Bounded Eventual Consistency | Accepted | 2026-04-04 |
 
 ## Architecture
 
@@ -106,10 +107,12 @@ graph TD
     A005 --> A021
 ```
 
+Historical note: the repo currently contains legacy duplicate ADR numbers for `021` and `022`. The index disambiguates them by link label until the file layout is normalized.
+
 ## Conventions
 
 - **ADR location**: All ADRs live in `docs/adr/`
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 029
+- **Next ADR number**: 030

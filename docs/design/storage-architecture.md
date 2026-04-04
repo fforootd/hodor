@@ -65,6 +65,15 @@ Internally the runtime is always built from the same role set:
 
 These roles are semantic. Backends are implementation choices underneath them.
 
+## Control Plane And Auth Data Plane
+
+The storage-role model exists partly to support a specific failure model:
+
+- the **control plane** owns admin mutations, routing, placement, provider and policy authoring
+- the **auth data plane** owns end-user login, session and token handling, and auth runtime state
+
+That means `storage.read`, `storage.kv`, and `storage.sink` are not only about performance. They are also the building blocks for regional auth continuity when the authoritative control-plane or home-region write path is degraded.
+
 ## Derived Defaults
 
 ### SQLite default
@@ -175,6 +184,7 @@ Properties:
 - the hot path should avoid blocking on durable persistence
 - local correctness comes from `KvStore`
 - durable retention comes from `Sink` ingesting into `StatefulStore`
+- in regional continuity mode, this layer can continue even when control-plane writes are paused
 
 ### Analytics and observability
 
@@ -201,6 +211,7 @@ That separation matters because the sink is the fault-isolation boundary between
 - transient hot-path state
 - durable retained state
 - future archive/export paths
+- regional auth continuity and authoritative reconciliation
 
 ## Process Cache
 
@@ -214,6 +225,17 @@ This keeps it distinct from:
 
 - `KvStore`, which owns transient auth correctness
 - the observability SQLite buffer, which is a durable analytics drain path
+- the control-plane routing cache, which must not become an auth correctness dependency
+
+## Regional Continuity
+
+For larger managed deployments, regional read models and replicas exist for auth continuity, not only for lower latency:
+
+- `storage.read` can provide the regional stable-data read path during control-plane or home-region degradation
+- `storage.kv` is the writable regional auth-runtime layer
+- `storage.sink` is the replay and reconciliation path back to the authoritative plane
+
+This is why `process_cache` remains intentionally narrow. It is not allowed to stand in for distributed auth correctness.
 
 SQLite-backed process cache is a valid future optimization, but not part of the default runtime in this pass.
 

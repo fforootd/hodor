@@ -139,6 +139,6 @@ Adding a new schema type with the right `x-display` annotations automatically ad
 - **Uniform model**: users, apps, orgs, providers, rules — all entities with different schemas
 - **No separate tables**: per-concept config lives in schema `data`
 - **Extensible**: new schema types add nav entries and API routes automatically
-- **Org scoping**: everything filters by org context
+- **Instance-first scoping**: runtime isolation filters by instance context, with org-level filtering applied inside the resolved instance when needed
 - **Groups and projects both exist today**: keep terminology and APIs aligned with the catalog/runtime
 - **Cascade config**: instance defaults with org/app overrides

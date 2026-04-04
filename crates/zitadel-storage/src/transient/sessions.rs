@@ -97,22 +97,15 @@ pub(crate) async fn find_session_by_token_impl(
     instance_id: &str,
     raw_token: &str,
 ) -> anyhow::Result<Option<SessionRecord>> {
-    let scoped = kv.scoped(instance_id);
-    let created_at = scoped.as_text("created_at");
-    let created_at_epoch = scoped.epoch_seconds("created_at");
-    let expires_at = scoped.as_text("expires_at");
-    let revoked_at = scoped.as_text("revoked_at");
-    let sql = format!(
-        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
-         FROM sessions \
-         WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
-         AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
-    );
-    let row: Option<SessionRow> = sqlx::query_as(&sql)
-        .bind(scoped.instance_id())
-        .bind(token_hash(raw_token))
-        .fetch_optional(scoped.pool())
-        .await?;
+    let hashed = token_hash(raw_token);
+    if let Some(row) = fetch_session_by_token(&kv.scoped(instance_id), &hashed).await? {
+        return Ok(Some(map_session_row(row)));
+    }
+
+    let row = match kv.authoritative_scoped(instance_id) {
+        Some(scoped) => fetch_session_by_token(&scoped, &hashed).await?,
+        None => None,
+    };
 
     Ok(row.map(map_session_row))
 }
@@ -143,20 +136,14 @@ pub(crate) async fn get_session_impl(
     instance_id: &str,
     session_id: &str,
 ) -> anyhow::Result<Option<SessionRecord>> {
-    let scoped = kv.scoped(instance_id);
-    let created_at = scoped.as_text("created_at");
-    let created_at_epoch = scoped.epoch_seconds("created_at");
-    let expires_at = scoped.as_text("expires_at");
-    let revoked_at = scoped.as_text("revoked_at");
-    let sql = format!(
-        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
-         FROM sessions WHERE instance_id = $1 AND id = $2"
-    );
-    let row: Option<SessionRow> = sqlx::query_as(&sql)
-        .bind(scoped.instance_id())
-        .bind(session_id)
-        .fetch_optional(scoped.pool())
-        .await?;
+    if let Some(row) = fetch_session_by_id(&kv.scoped(instance_id), session_id).await? {
+        return Ok(Some(map_session_row(row)));
+    }
+
+    let row = match kv.authoritative_scoped(instance_id) {
+        Some(scoped) => fetch_session_by_id(&scoped, session_id).await?,
+        None => None,
+    };
 
     Ok(row.map(map_session_row))
 }
@@ -176,4 +163,50 @@ pub(crate) async fn revoke_session_impl(
     .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+async fn fetch_session_by_token(
+    scoped: &zitadel_db::scoped::ScopedDb,
+    hashed_token: &str,
+) -> anyhow::Result<Option<SessionRow>> {
+    let created_at = scoped.as_text("created_at");
+    let created_at_epoch = scoped.epoch_seconds("created_at");
+    let expires_at = scoped.as_text("expires_at");
+    let revoked_at = scoped.as_text("revoked_at");
+    let sql = format!(
+        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
+         FROM sessions \
+         WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
+         AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
+    );
+
+    let row = sqlx::query_as(&sql)
+        .bind(scoped.instance_id())
+        .bind(hashed_token)
+        .fetch_optional(scoped.pool())
+        .await?;
+
+    Ok(row)
+}
+
+async fn fetch_session_by_id(
+    scoped: &zitadel_db::scoped::ScopedDb,
+    session_id: &str,
+) -> anyhow::Result<Option<SessionRow>> {
+    let created_at = scoped.as_text("created_at");
+    let created_at_epoch = scoped.epoch_seconds("created_at");
+    let expires_at = scoped.as_text("expires_at");
+    let revoked_at = scoped.as_text("revoked_at");
+    let sql = format!(
+        "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
+         FROM sessions WHERE instance_id = $1 AND id = $2"
+    );
+
+    let row = sqlx::query_as(&sql)
+        .bind(scoped.instance_id())
+        .bind(session_id)
+        .fetch_optional(scoped.pool())
+        .await?;
+
+    Ok(row)
 }

@@ -93,6 +93,43 @@ jobs:
       - name: Run cargo nextest
         run: cargo nextest run --workspace
 
+  postgres-storage-integration:
+    name: Postgres Storage Integration
+    if: inputs.run_fast_rust
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Ensure embedded web placeholder exists
+        run: just ensure-webdist
+
+      - name: Run Postgres storage integration tests
+        env:
+          ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test -p zitadel-storage --test postgres_roles -- --nocapture
+
   fuzz-quick:
     name: Fuzz Quick
     if: inputs.run_fuzz

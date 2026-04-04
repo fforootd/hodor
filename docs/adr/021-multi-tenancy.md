@@ -1,69 +1,73 @@
-# ADR-021: Multi-Tenancy via Instance Isolation
+# ADR-021: Multi-Tenancy via Instance Boundaries
 
-**Status:** Accepted  
-**Date:** 2026-03-30  
+**Status:** Accepted
+**Date:** 2026-04-04
 **Depends-on:** ADR-020 (Authorization Model), ADR-022 (Dedicated Resource Tables)
+**Related:** ADR-029 (Control Plane, Auth Data Plane, and Bounded Eventual Consistency)
 
 ## Context
 
-Zitadel needs to support multiple isolated customer deployments within a single infrastructure. Each customer requires their own users, orgs, schemas, and configuration without data leakage. Additionally, Zitadel staff need to manage all customer instances from a unified console.
+The prototype drifted into treating organizations as the infrastructure tenant, while upstream ZITADEL terminology and earlier product thinking use an **instance** as the top-level environment that contains one or more organizations.
+
+We need one model that works across:
+- SQLite for low-friction single-instance self-hosting
+- Postgres for enterprise self-hosting
+- Shared cloud multitenancy without turning every organization into its own infrastructure unit
 
 ## Decision
 
-We adopt a **Root Instance + Sub-instance** model with **shared-database, row-level discrimination** using an `instance_id` column on all tenant-scoped tables.
+We standardize on **instance-first isolation**:
 
-### Key Design Choices
+1. `instance_id` is the top-level runtime and storage boundary.
+2. `org_id` is always a resource inside an instance, never the host-routing key.
+3. `customer_id` is a cloud control-plane/account concept only. One customer can own multiple instances.
+4. Request routing resolves to `instance_id` before auth/session middleware runs.
 
-1. **Database Strategy**: Shared database with `instance_id` discrimination column.
-   - All tenant-scoped tables carry `instance_id TEXT NOT NULL DEFAULT 'inst_root'`
-   - Indexed for efficient filtering
-   - No separate databases per tenant (simplifies ops, enables cross-instance queries for root staff)
+## Backend Matrix
 
-2. **Instance Hierarchy**: 
-   - `inst_root` is the Zitadel-managed root instance (marked `is_root = true`)
-   - Sub-instances are customer tenants created via the API
-   - Root instance cannot be deleted or deactivated
+| Operating mode | Backend | Instance shape |
+|---|---|---|
+| Small self-hosted | SQLite | One instance per deployment |
+| Enterprise self-hosted | Postgres | One instance per deployment |
+| Zitadel Cloud | Managed cloud backend selected by `backend_key` | Many instances routed by the control plane |
 
-3. **FGA Strategy**: Single shared OpenFGA store
-   - `instance:inst_root → parent → instance:{sub}` tuples link hierarchy
-   - Root staff inherit access to sub-instances through FGA's parent chain
-   - Instance-scoped checks use `instance:{id}` from request context
+Self-hosted deployments default to one local instance and should not force operators to understand the cloud routing model.
 
-4. **Instance Resolution** (priority order):
-   1. Nested path: `/v1/instances/{iid}/...` (proxy strips prefix, sets context)
-   2. `X-Zitadel-Instance` header (explicit override)
-   3. Domain lookup: `Host` → `instances.domain` (customer-facing)
-   4. Default: `inst_root`
+## Storage and Query Model
 
-5. **Console UI**: 
-   - Instance switcher dropdown in header bar
-   - "All Instances" management page
-   - Nested API paths for root staff drill-down
+All tenant-scoped cloud tables use `instance_id` as the primary scoping key. In shared-schema cloud backends, `instance_id` should be the leading component in primary keys and secondary indexes for tenant-scoped tables.
 
-## Tables Affected
+Examples of tenant-scoped resources:
+- `users`, `orgs`, `apps`, `providers`, `schemas`
+- `sessions`, `tokens`, `settings`, `events`
+- `groups`, `projects`, `login_flows`
 
-All tenant-scoped tables now carry `instance_id`:
-- `schemas`, `users`, `providers`, `apps`, `actions`, `login_flows`
-- `sessions`, `events`, `domains`, `settings`
-- `groups`, `projects`
+## Routing Model
 
-The `instances` table gains:
-- `domain TEXT` — for domain-based routing
-- `is_root BOOLEAN` — marks the root instance
+Runtime resolution order:
+1. Self-hosted single-instance mode returns the configured/default local `instance_id`
+2. Trusted `X-Zitadel-Instance` header may override when the request came through configured trusted proxies
+3. Cloud host lookup resolves `Host -> instance_id`
+4. Unknown cloud host is rejected
+
+The resolved instance context is request-scoped and available before auth/session middleware executes.
+
+ADR-029 defines the degraded-mode behavior once an instance has been resolved. This ADR only defines the routing and isolation boundary.
 
 ## Consequences
 
 ### Positive
-- Single deployment serves unlimited customers
-- Root staff can manage all instances from one console
-- FGA provides natural authorization boundaries
-- No infrastructure provisioning needed per customer
+- Terminology matches upstream ZITADEL: instances contain organizations
+- Self-hosted deployments stay simple
+- Cloud can share infrastructure while preserving a single runtime boundary
+- Query helpers and middleware can enforce one canonical isolation key
 
 ### Negative
-- All SQL queries must be instance-scoped (enforced by convention + code review)
-- Noisy-neighbor risk in shared database (mitigate with rate limiting per instance)
-- Schema migrations affect all instances simultaneously
+- Shared-schema cloud storage still requires every tenant-scoped query to be instance-aware
+- Schema changes hit all cloud instances in a backend together
+- Premium hard-isolation offerings require explicit migration to a different backend strategy later
 
 ### Risks
-- Missed `instance_id` filter → cross-tenant data leak (mitigate: query helpers, code review)
-- Performance at scale with row discrimination (mitigate: proper indexing, partitioning later)
+- Missed `instance_id` scoping in request paths can leak data across instances
+- Shared backends still carry noisy-neighbor risk without rate limits and capacity controls
+- Terminology drift can reappear unless docs and APIs consistently keep orgs nested inside instances

@@ -682,6 +682,7 @@ fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
             tracing::info!("schema is up to date");
         } else {
             zitadel_db::migrate::migrate(&db).await?;
+            zitadel_storage::prepare_postgres_role_databases(&cfg.storage, &db).await?;
             if args.bootstrap {
                 let changed = zitadel_db::bootstrap::bootstrap(&db).await?;
                 tracing::info!(bootstrapped = changed, "migration command completed");

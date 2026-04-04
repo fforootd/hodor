@@ -245,20 +245,35 @@ impl Sink for NoopSink {
 
 #[derive(Clone)]
 pub struct SqlKvStore {
-    db: Db,
+    primary_db: Db,
+    authoritative_db: Option<Db>,
     session_max_age_secs: u64,
 }
 
 impl SqlKvStore {
-    pub fn new(db: Db, session_max_age_secs: u64) -> Self {
+    pub fn new(primary_db: Db, authoritative_db: Option<Db>, session_max_age_secs: u64) -> Self {
         Self {
-            db,
+            primary_db,
+            authoritative_db,
             session_max_age_secs,
         }
     }
 
+    pub fn local_only(primary_db: Db, session_max_age_secs: u64) -> Self {
+        Self::new(primary_db, None, session_max_age_secs)
+    }
+
     pub(crate) fn scoped(&self, instance_id: &str) -> zitadel_db::scoped::ScopedDb {
-        self.db.scoped(instance_id.to_string())
+        self.primary_db.scoped(instance_id.to_string())
+    }
+
+    pub(crate) fn authoritative_scoped(
+        &self,
+        instance_id: &str,
+    ) -> Option<zitadel_db::scoped::ScopedDb> {
+        self.authoritative_db
+            .as_ref()
+            .map(|db| db.scoped(instance_id.to_string()))
     }
 
     pub(crate) fn session_max_age_secs(&self) -> u64 {
@@ -452,7 +467,7 @@ impl MemoryKvStore {
     }
 
     fn sql(&self) -> SqlKvStore {
-        SqlKvStore::new(self.db.clone(), self.session_max_age_secs)
+        SqlKvStore::local_only(self.db.clone(), self.session_max_age_secs)
     }
 }
 
@@ -1427,29 +1442,47 @@ impl Sink for ChannelSink {
 
 #[derive(Clone)]
 pub struct SqlSink {
-    db: Db,
+    buffer_db: Db,
+    target_db: Db,
+    batch_size: usize,
 }
 
 impl SqlSink {
-    pub async fn new(db: Db, batch_size: usize, flush_interval: Duration) -> anyhow::Result<Self> {
-        ensure_sink_inbox_table(&db).await?;
-        let db_clone = db.clone();
+    pub async fn new(
+        buffer_db: Db,
+        target_db: Db,
+        batch_size: usize,
+        flush_interval: Duration,
+    ) -> anyhow::Result<Self> {
+        ensure_sink_inbox_table(&buffer_db).await?;
+        let buffer_db_clone = buffer_db.clone();
+        let target_db_clone = target_db.clone();
         tokio::spawn(async move {
             let mut ticker = time::interval(flush_interval);
             loop {
                 ticker.tick().await;
-                if let Err(error) = drain_sink_inbox(&db_clone, batch_size.max(1)).await {
+                if let Err(error) =
+                    drain_sink_inbox(&buffer_db_clone, &target_db_clone, batch_size.max(1)).await
+                {
                     tracing::warn!(stream = "event_pusher", %error, "sql sink drain failed");
                 }
             }
         });
-        Ok(Self { db })
+        Ok(Self {
+            buffer_db,
+            target_db,
+            batch_size: batch_size.max(1),
+        })
+    }
+
+    pub async fn drain_once(&self) -> anyhow::Result<()> {
+        drain_sink_inbox(&self.buffer_db, &self.target_db, self.batch_size).await
     }
 }
 
 impl Sink for SqlSink {
     async fn emit(&self, record: TransientRecord) -> anyhow::Result<()> {
-        insert_sink_record(&self.db, &record).await
+        insert_sink_record(&self.buffer_db, &record).await
     }
 }
 
@@ -1536,6 +1569,110 @@ async fn ensure_sink_inbox_table(db: &Db) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn prepare_postgres_kv_schema(db: &Db, unlogged: bool) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        db.dialect() == zitadel_db::Dialect::Postgres,
+        "postgres KV schema preparation requires a Postgres database"
+    );
+
+    let table_prefix = if unlogged { "UNLOGGED " } else { "" };
+    let ddl = [
+        format!(
+            "CREATE {table_prefix}TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                instance_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT NOT NULL,
+                org_id TEXT NOT NULL DEFAULT '1',
+                token_hash TEXT NOT NULL DEFAULT '',
+                user_agent TEXT DEFAULT '',
+                ip_address TEXT DEFAULT '',
+                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ,
+                revoked_at TIMESTAMPTZ,
+                fingerprint TEXT DEFAULT ''
+            )"
+        ),
+        format!(
+            "CREATE {table_prefix}TABLE IF NOT EXISTS auth_states (
+                id TEXT PRIMARY KEY,
+                instance_id TEXT NOT NULL DEFAULT 'default',
+                type TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT '',
+                redirect_uri TEXT NOT NULL DEFAULT '',
+                data JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                step TEXT NOT NULL DEFAULT '',
+                user_id TEXT NOT NULL DEFAULT '',
+                done BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )"
+        ),
+        format!(
+            "CREATE {table_prefix}TABLE IF NOT EXISTS oidc_auth_requests (
+                id TEXT PRIMARY KEY,
+                instance_id TEXT NOT NULL DEFAULT 'default',
+                client_id TEXT NOT NULL,
+                redirect_uri TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT '',
+                nonce TEXT NOT NULL DEFAULT '',
+                response_type TEXT NOT NULL DEFAULT 'code',
+                code_challenge TEXT NOT NULL DEFAULT '',
+                code_challenge_method TEXT NOT NULL DEFAULT '',
+                prompt JSONB NOT NULL DEFAULT '[]'::jsonb,
+                login_hint TEXT NOT NULL DEFAULT '',
+                user_id TEXT NOT NULL DEFAULT '',
+                code TEXT NOT NULL DEFAULT '',
+                done BOOLEAN NOT NULL DEFAULT FALSE,
+                auth_time TIMESTAMPTZ,
+                max_age BIGINT,
+                expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes'),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )"
+        ),
+        format!(
+            "CREATE {table_prefix}TABLE IF NOT EXISTS oidc_rp_auth_states (
+                id TEXT PRIMARY KEY,
+                instance_id TEXT NOT NULL DEFAULT 'default',
+                provider_id TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL,
+                nonce TEXT NOT NULL DEFAULT '',
+                pkce_verifier TEXT NOT NULL DEFAULT '',
+                flow_id TEXT NOT NULL DEFAULT '',
+                redirect_uri TEXT NOT NULL DEFAULT '',
+                expected_issuer TEXT NOT NULL DEFAULT '',
+                callback_uri TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
+            )"
+        ),
+        "CREATE INDEX IF NOT EXISTS idx_sessions_instance ON sessions(instance_id)".to_string(),
+        "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)".to_string(),
+        "CREATE INDEX IF NOT EXISTS idx_auth_states_instance ON auth_states(instance_id)".to_string(),
+        "CREATE INDEX IF NOT EXISTS idx_oidc_auth_requests_instance ON oidc_auth_requests(instance_id, created_at)".to_string(),
+        "CREATE INDEX IF NOT EXISTS idx_oidc_auth_requests_code ON oidc_auth_requests(instance_id, code) WHERE code != ''".to_string(),
+        "CREATE INDEX IF NOT EXISTS idx_oidc_auth_requests_client ON oidc_auth_requests(instance_id, client_id)".to_string(),
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_oidc_rp_auth_states_state ON oidc_rp_auth_states(instance_id, state)".to_string(),
+        "CREATE INDEX IF NOT EXISTS idx_oidc_rp_auth_states_provider ON oidc_rp_auth_states(instance_id, provider_id)".to_string(),
+    ];
+
+    for statement in ddl {
+        sqlx::query(&statement).execute(db.pool()).await?;
+    }
+
+    Ok(())
+}
+
+pub async fn prepare_postgres_sink_schema(db: &Db) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        db.dialect() == zitadel_db::Dialect::Postgres,
+        "postgres sink schema preparation requires a Postgres database"
+    );
+    ensure_sink_inbox_table(db).await
+}
+
 fn record_type(record: &TransientRecord) -> &'static str {
     match record {
         TransientRecord::SessionCreated { .. } => "session.created",
@@ -1560,12 +1697,12 @@ async fn insert_sink_record(db: &Db, record: &TransientRecord) -> anyhow::Result
     Ok(())
 }
 
-async fn drain_sink_inbox(db: &Db, batch_size: usize) -> anyhow::Result<()> {
+async fn drain_sink_inbox(buffer_db: &Db, target_db: &Db, batch_size: usize) -> anyhow::Result<()> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT id, payload FROM storage_sink_inbox ORDER BY created_at ASC LIMIT $1",
     )
     .bind(batch_size as i64)
-    .fetch_all(db.pool())
+    .fetch_all(buffer_db.pool())
     .await?;
 
     if rows.is_empty() {
@@ -1584,9 +1721,9 @@ async fn drain_sink_inbox(db: &Db, batch_size: usize) -> anyhow::Result<()> {
         .iter()
         .map(|(_, record)| record.clone())
         .collect::<Vec<_>>();
-    apply_transient_records(db, &records).await?;
+    apply_transient_records(target_db, &records).await?;
 
-    let mut tx = db.pool().begin().await?;
+    let mut tx = buffer_db.pool().begin().await?;
     for (id, _) in parsed {
         sqlx::query("DELETE FROM storage_sink_inbox WHERE id = $1")
             .bind(id)
@@ -1607,9 +1744,17 @@ async fn apply_transient_records(db: &Db, records: &[TransientRecord]) -> anyhow
                 session,
             } => {
                 let scoped = db.scoped(instance_id.to_string());
+                let created_at_bind = match db.dialect() {
+                    zitadel_db::Dialect::Postgres => "$9::timestamptz",
+                    zitadel_db::Dialect::Sqlite => "$9",
+                };
+                let expires_at_bind = match db.dialect() {
+                    zitadel_db::Dialect::Postgres => "$10::timestamptz",
+                    zitadel_db::Dialect::Sqlite => "$10",
+                };
                 let sql = format!(
                     "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, expires_at) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, {}, $9, $10) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {created_at_bind}, {expires_at_bind}) \
                      ON CONFLICT(id) DO UPDATE SET user_id = EXCLUDED.user_id, org_id = EXCLUDED.org_id, token_hash = EXCLUDED.token_hash, user_agent = EXCLUDED.user_agent, ip_address = EXCLUDED.ip_address, metadata = EXCLUDED.metadata, expires_at = EXCLUDED.expires_at",
                     scoped.json_bind(8),
                 );
@@ -1797,7 +1942,8 @@ mod tests {
             .unwrap();
 
         let sink = RecordingSink::default();
-        let storage = TransientStorage::new(SqlKvStore::new(db.clone(), 86_400), sink.clone());
+        let storage =
+            TransientStorage::new(SqlKvStore::local_only(db.clone(), 86_400), sink.clone());
 
         let created = storage
             .create_session(
@@ -1942,7 +2088,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(40)).await;
 
-        let found = SqlKvStore::new(db, 86_400)
+        let found = SqlKvStore::local_only(db, 86_400)
             .find_session_by_token(zitadel_db::DEFAULT_INSTANCE_ID, &created.token)
             .await
             .unwrap();

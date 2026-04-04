@@ -12,9 +12,18 @@ OpenFGA (CNCF incubating) — vendor-neutral, no competitor supply-chain risk (P
 
 Start at `v1`. The unified identity model is fundamentally different from current Zitadel — calling it `v3` sets wrong expectations. Clean break, new product.
 
-### D-003: Multi-Tenancy Model → Shared DB ✅
+### D-003: Multi-Tenancy Model → Instance-First Backend Matrix ✅
 
-Shared DB with `org_id` row filtering. DB-per-tenant deferred to when an enterprise contract demands hard isolation.
+`instance_id` is the top-level runtime boundary. `org_id` remains a resource inside an instance and is never the infrastructure routing key.
+
+Deployment matrix:
+- SQLite for small self-hosted deployments
+- Postgres for enterprise self-hosted deployments
+- managed cloud backends selected by `backend_key` for Zitadel Cloud
+
+Cloud routing resolves host or trusted header to `instance_id`, then to placement metadata such as `backend_key` and `region_key`. The bootstrap `cloud.control_plane` config only tells the binary how to reach the control-plane database; regional backend bindings are read from the `cloud_backends` table at runtime.
+
+The failure model is intentionally split: control-plane writes may pause while regional auth continuity continues through `read`, `kv`, and `sink` with bounded eventual consistency.
 
 ### D-004: SAML Library → Fork `crewjam/saml` ✅
 

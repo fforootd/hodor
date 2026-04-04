@@ -189,6 +189,29 @@ backend = "memory"
 # Reserved for future dedicated analytics storage.
 # backend = "same_stateful"
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLOUD — Instance routing and backend registry for managed cloud deployments
+# ═══════════════════════════════════════════════════════════════════════════════
+[cloud]
+# Enable cloud instance resolution. Leave false for normal self-hosted installs.
+enabled = false
+
+# In-process route cache used for hostname -> instance lookups.
+resolver_cache_capacity = 50000
+positive_cache_ttl_secs = 60
+negative_cache_ttl_secs = 10
+
+# Bootstrap connection for the cloud control plane. Leave `url` empty to read
+# control-plane tables from the main `[storage.stateful]` database. In managed
+# cloud this is typically a separate Spanner/Postgres control-plane database.
+#
+# The Customer Portal owns the authoritative `instances`, `instance_domains`,
+# and `cloud_backends` tables. Regional placement and backend binding are read
+# from those tables at runtime; they are no longer configured statically in TOML.
+[cloud.control_plane]
+# url = "postgres://pgadapter@control-plane:5432/zitadel_control"
+# secret_ref = "projects/my-project/secrets/control-plane-db"
+
 [storage.retention.events]
 keep_for = "14d"
 

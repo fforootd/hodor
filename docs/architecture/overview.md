@@ -20,7 +20,7 @@ graph TB
         direction TB
         
         subgraph Ingress["Ingress"]
-            DomainResolver["Domain Resolver<br/>(tenant routing)"]
+            DomainResolver["Instance Resolver<br/>(instance routing)"]
             RateLimit["Rate Limiter<br/>(token bucket)"]
             SessionMW["Session Middleware<br/>(cookie / bearer)"]
         end
@@ -66,8 +66,8 @@ graph TB
     end
 
     subgraph Storage["Storage Roles"]
-        Stateful_S["Stateful<br/>(SQLite or Postgres)"]
-        Read_S["Read<br/>(same connection, primary, replica)"]
+        Stateful_S["Stateful<br/>(SQLite, Postgres, or managed cloud backend)"]
+        Read_S["Read<br/>(same connection, primary, replica, read model)"]
         KV_S["KV<br/>(memory, Postgres transient, Redis/Valkey)"]
         Sink_S["Sink<br/>(channel, PG inbox, Redis stream)"]
         Analytics_S["Analytics<br/>(same DB or dedicated)"]
@@ -152,7 +152,7 @@ See [ADR-010](../adr/010-three-tier-data.md) for the full data flow across these
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant DR as Domain Resolver
+    participant DR as Instance Resolver
     participant RL as Rate Limiter
     participant SM as Session MW
     participant FGA as OpenFGA
@@ -161,13 +161,13 @@ sequenceDiagram
     participant EW as Event Writer
 
     C->>DR: HTTP Request<br/>Host: tenant.auth.example.com
-    DR->>DR: Resolve org from domain<br/>(DB lookup, cached)
-    DR->>RL: Request + org context
-    RL->>RL: Check bucket<br/>(per-IP, per-org)
+    DR->>DR: Resolve instance from host/header<br/>(control-plane lookup, cached)
+    DR->>RL: Request + instance context
+    RL->>RL: Check bucket<br/>(per-IP, per-instance)
     alt Rate limited
         RL-->>C: 429 + Retry-After
     end
-    RL->>SM: Request + org context
+    RL->>SM: Request + instance context
     SM->>SM: Extract session<br/>(cookie or Bearer token)
     SM->>FGA: Batch pre-fetch<br/>authz context
     FGA-->>SM: Permissions map
@@ -180,11 +180,12 @@ sequenceDiagram
 
 ### Pipeline Rules
 
-1. **Single transaction** — entity write + event append in ONE database transaction. If either fails, both roll back.
+1. **Single transaction for authoritative retained facts** — entity write + retained domain event append happen in ONE authoritative transaction. If either fails, both roll back.
 2. **FGA is pre-fetched** — authorization context batch-loaded BEFORE handler execution. Zero live FGA calls during request.
 3. **Response before async** — client gets a response immediately after DB commit. Notifications and threat evaluation happen asynchronously.
 4. **Events drive everything** — notifications, OTEL export, and threat detection all consume from the events table.
 5. **Session provenance is persisted** — when available, sessions and auth events record `auth_method`, `provider_id`, `provider_kind`, and `login_flow_id`.
+6. **Regional auth continuity is allowed** — not every login must synchronously depend on a central control-plane write path; transient regional auth state may flow through `read`, `kv`, and `sink`.
 
 ## External Domain Handling
 
@@ -200,32 +201,60 @@ graph LR
     end
 
     subgraph Zitadel
-        DR["Domain Resolver"]
-        DomainTable["domains table<br/>domain → org_id"]
+        DR["Instance Resolver"]
+        Domains["instance_domains<br/>domain → instance_id"]
+        Instances["instances<br/>instance_id → placement"]
     end
 
     D1 --> AutoTLS
     D2 --> AutoTLS
     AutoTLS --> DR
-    DR --> DomainTable
+    DR --> Domains
+    DR --> Instances
 ```
 
 **Resolution priority** (from request Host header):
-1. Exact match in `domains` table → org found
-2. Subdomain matching: `acme.zitadel.cloud` → strip suffix → look up org
-3. Header-based: `X-Zitadel-Org: org_id` → direct (API clients)
-4. Default org (single-tenant mode)
+1. Self-hosted single-instance mode → configured/default local `instance_id`
+2. Trusted header: `X-Zitadel-Instance: instance_id` → direct override from trusted proxies only
+3. Exact match in `instance_domains` → `instance_id`
+4. Unknown host in cloud mode → request rejected
+
+The authoritative routing data is portal-managed control-plane state. The runtime keeps an in-process LRU/TTL cache, but `instance_id` resolution is still driven by the `instances` and `instance_domains` tables.
 
 ## Deployment Topologies
 
-The system uses one role-based storage runtime with different derived defaults at each level. Most operators only configure `storage.stateful`; the runtime derives `read`, `kv`, `sink`, `process_cache`, and `analytics`. See [Storage Architecture](../design/storage-architecture.md) for full details.
+The system uses one role-based storage runtime with different defaults by operating mode. Most operators only configure `storage.stateful`; the runtime derives `read`, `kv`, `sink`, `process_cache`, and `analytics`. See [Storage Architecture](../design/storage-architecture.md) for full details.
 
-| Level | `stateful` | `read` | `kv` | `sink` | `analytics` |
-|---|---|---|---|---|---|
-| **0 — Local** | SQLite | same connection | memory | channel | same SQLite |
-| **1 — Shared Postgres** | Postgres | same primary | Postgres transient tables | Postgres inbox | same Postgres |
-| **2 — Split Hot Path** | Postgres | same primary or replica | Redis / Valkey | Postgres or Redis stream | same Postgres or dedicated |
-| **3 — Multi-Region** | Postgres primary | per-region replicas | per-region Redis / Valkey | regional queue / stream | dedicated analytics |
+| Mode | Primary backend | Instance model | Placement |
+|---|---|---|---|
+| **Small self-hosted** | SQLite | One instance per deployment | Local operator-managed |
+| **Enterprise self-hosted** | Postgres | One instance per deployment | Operator-managed |
+| **ZITADEL Cloud** | Managed cloud backend selected by `backend_key` | Many instances routed by the control plane | `global` or `regional` via control-plane placement |
+
+For cloud, the request resolver returns `instance_id`, `customer_id`, `placement_mode`, `region_key`, and `backend_key` before auth/session middleware runs. The binary reaches the control plane via `cloud.control_plane`, then reads `instances`, `instance_domains`, and `cloud_backends` to resolve the live backend binding. Specific backend choice is intentionally left open between shared-schema and regional managed-backend topologies.
+
+## Planes And Consistency Classes
+
+The architecture separates the management side of the system from the end-user auth runtime.
+
+| Consistency class | Typical examples | Default behavior |
+|---|---|---|
+| **Strong / control-plane authoritative** | user creation, provider config, policy edits, placement changes | writes go to the authoritative plane; if unavailable, the mutation fails |
+| **Bounded eventual / auth continuity** | session creation, login runtime state, auth request progress, regional auth projections | regional auth may continue; state lands in `storage.kv` and is reconciled via `storage.sink` |
+| **Freshness-critical / priority path** | disable user, logout-all, token or session revocation, factor removal, emergency policy changes | use a priority invalidation path; if freshness cannot be proven within budget, fail closed |
+
+This is why the storage-role split exists even when multiple roles may map to the same physical backend in small deployments.
+
+## Degraded-Mode Defaults
+
+The design goal is explicit: brief control-plane outages are acceptable, and login continuity is more important than immediate admin mutation availability.
+
+| Operation | Planned maintenance | Unplanned central outage |
+|---|---|---|
+| **New login** | allowed after control-plane writes are frozen and regional reads are known-good | allowed with bounded stale-data risk through regional read models plus `kv + sink` |
+| **Existing session validation** | allowed regionally | allowed regionally |
+| **Control-plane mutation** | blocked until the authoritative plane returns | blocked until the authoritative plane returns |
+| **Revocation / disable / logout-all** | routed through the priority invalidation path; if freshness budget is not met, fail closed | routed through the priority invalidation path; if freshness budget is not met, fail closed |
 
 ## Provider / Flow / Session Boundaries
 

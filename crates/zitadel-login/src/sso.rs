@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 use zitadel_db::{
-    DEFAULT_INSTANCE_ID,
+    current_instance_id,
     provider::{self, ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
 };
 use zitadel_oidc::rp::{
@@ -85,6 +85,7 @@ async fn sso_start(
     Path(provider_id): Path<String>,
     Query(params): Query<SsoStartParams>,
 ) -> Response {
+    let instance_id = current_instance_id();
     let scoped = state.db.scoped_default();
     let provider = match provider::get_provider(&scoped, &provider_id).await {
         Ok(Some(provider)) => provider,
@@ -142,7 +143,7 @@ async fn sso_start(
     let result = match state
         .rp
         .start_with_store(
-            DEFAULT_INSTANCE_ID,
+            &instance_id,
             &RpStartRequest {
                 provider: spec,
                 flow_id: params.flow_id,
@@ -183,6 +184,7 @@ async fn sso_callback(
     State(state): State<LoginState>,
     Query(params): Query<SsoCallbackParams>,
 ) -> Response {
+    let instance_id = current_instance_id();
     if !params.error.is_empty() {
         tracing::warn!(
             error = %params.error,
@@ -198,7 +200,7 @@ async fn sso_callback(
     let store = TransientRpStateStore {
         transient: state.transient.clone(),
     };
-    let stored_state = match store.take_state(DEFAULT_INSTANCE_ID, &params.state).await {
+    let stored_state = match store.take_state(&instance_id, &params.state).await {
         Ok(Some(state)) => state,
         Ok(None) => return redirect_login_error("sso_failed", "invalid or expired state"),
         Err(error) => {
@@ -275,6 +277,7 @@ async fn complete_federated_login(
     stored_state: &RpAuthState,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<Response> {
+    let instance_id = current_instance_id();
     let scoped = state.db.scoped_default();
     let schema = load_target_schema(&scoped, &provider.payload).await?;
     let defaults = schema
@@ -300,7 +303,7 @@ async fn complete_federated_login(
 
     let created = state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user_id, &org_id, "", "", "")
+        .create_session(&instance_id, &user_id, &org_id, "", "", "")
         .await?;
 
     let metadata = serde_json::json!({

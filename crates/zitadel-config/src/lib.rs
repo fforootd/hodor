@@ -1,3 +1,4 @@
+mod cloud;
 mod crypto;
 mod env;
 mod generators;
@@ -8,6 +9,7 @@ mod server;
 pub mod session;
 mod storage;
 
+pub use cloud::*;
 pub use crypto::*;
 pub use generators::*;
 pub use observability::*;
@@ -44,6 +46,7 @@ pub struct Config {
     pub oidc: OidcConfig,
     pub session: SessionConfig,
     pub generators: GeneratorsConfig,
+    pub cloud: CloudConfig,
 }
 
 impl Config {

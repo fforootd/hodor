@@ -78,6 +78,8 @@ mime_guess = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 webbrowser = "1"
 keyring = "3"
+lru = "0.12"
+ipnet = "2"
 
 # Workspace crate references
 zitadel-config = { path = "crates/zitadel-config" }

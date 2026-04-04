@@ -6,7 +6,7 @@ use axum::{
     routing::get,
 };
 use serde::Serialize;
-use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_db::current_instance_id;
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -26,7 +26,8 @@ struct SessionResponse {
 }
 
 async fn list_sessions(State(s): State<ApiState>) -> Response {
-    match s.transient.list_sessions(DEFAULT_INSTANCE_ID).await {
+    let instance_id = current_instance_id();
+    match s.transient.list_sessions(&instance_id).await {
         Ok(rows) => {
             let items: Vec<SessionResponse> = rows
                 .into_iter()
@@ -50,7 +51,8 @@ async fn list_sessions(State(s): State<ApiState>) -> Response {
 }
 
 async fn get_session(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match s.transient.get_session(DEFAULT_INSTANCE_ID, &id).await {
+    let instance_id = current_instance_id();
+    match s.transient.get_session(&instance_id, &id).await {
         Ok(Some(r)) => response::json_ok(SessionResponse {
             id: r.id,
             user_id: r.user_id,
@@ -65,7 +67,8 @@ async fn get_session(State(s): State<ApiState>, Path(id): Path<String>) -> Respo
 }
 
 async fn revoke_session(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match s.transient.revoke_session(DEFAULT_INSTANCE_ID, &id).await {
+    let instance_id = current_instance_id();
+    match s.transient.revoke_session(&instance_id, &id).await {
         Ok(false) => response::not_found("session not found"),
         Ok(true) => response::no_content(),
         Err(e) => response::internal_error(format!("{e}")),

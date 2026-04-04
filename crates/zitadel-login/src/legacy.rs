@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_db::current_instance_id;
 
 use crate::LoginState;
 use crate::redirect::build_auth_redirect;
@@ -32,9 +32,10 @@ pub(crate) async fn login(
     State(state): State<LoginState>,
     Json(req): Json<LoginRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     let user = match state
         .stateful
-        .find_active_user_by_identifier(DEFAULT_INSTANCE_ID, &req.identifier)
+        .find_active_user_by_identifier(&instance_id, &req.identifier)
         .await
     {
         Ok(user) => user,
@@ -58,7 +59,7 @@ pub(crate) async fn login(
     };
     let hash = match state
         .stateful
-        .load_password_hash(DEFAULT_INSTANCE_ID, &user.user_id)
+        .load_password_hash(&instance_id, &user.user_id)
         .await
     {
         Ok(hash) => hash,
@@ -109,7 +110,7 @@ pub(crate) async fn login(
 
     let auth_request = match state
         .transient
-        .load_auth_request_redirect(DEFAULT_INSTANCE_ID, &req.auth_request_id)
+        .load_auth_request_redirect(&instance_id, &req.auth_request_id)
         .await
     {
         Ok(auth_request) => auth_request,
@@ -123,7 +124,7 @@ pub(crate) async fn login(
     };
     let created_session = match state
         .transient
-        .create_session(DEFAULT_INSTANCE_ID, &user.user_id, &user.org_id, "", "", "")
+        .create_session(&instance_id, &user.user_id, &user.org_id, "", "", "")
         .await
     {
         Ok(r) => r,
@@ -141,7 +142,7 @@ pub(crate) async fn login(
         if let Err(e) = state
             .transient
             .complete_auth_request(
-                DEFAULT_INSTANCE_ID,
+                &instance_id,
                 &req.auth_request_id,
                 &user.user_id,
                 &code,

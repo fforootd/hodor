@@ -1,163 +1,164 @@
-# ADR-026: Cloud Deployment Architecture — Container-per-Tenant with D1
+# ADR-026: Cloud Deployment Architecture — Control-Plane Routing and Regional Backends
 
 **Status:** Proposed
-**Date:** 2026-03-31
-**Depends-on:** ADR-021 (Multi-Tenancy via Instance Isolation)
-**Supersedes:** ADR-021 — for cloud deployment topology only. Self-hosted retains the shared-database model.
+**Date:** 2026-04-04
+**Depends-on:** ADR-021 (Multi-Tenancy via Instance Boundaries)
+**Supersedes:** The earlier container-per-tenant D1 proposal in this file.
 
 ## Context
 
-ADR-021 adopted shared-database row-level discrimination (`instance_id` on every table) for multi-tenancy. This works for self-hosted single-binary deployments where a single database is simpler to operate.
+Zitadel Cloud needs:
+- many customer instances in shared infrastructure
+- instance-level routing owned by the Customer Portal
+- optional regional placement for data residency
+- backend selection that stays independent from the request-routing contract
+- a model that works whether the managed backend is shared-schema SQL or a regional primary/replica topology
 
-For Zitadel Cloud on Cloudflare, we want stronger isolation guarantees: each customer gets their own container process, own database, own encryption keys, own cookie secrets. The goal is to keep the Rust runtime completely single-tenant while letting the Cloudflare Worker layer handle multi-tenancy, routing, and configuration.
-
-Cloudflare's infrastructure provides the building blocks:
-- **Containers** run per-tenant Rust binaries with per-instance env vars
-- **Durable Objects** provide strongly consistent per-instance config storage
-- **D1** provides managed SQLite databases provisionable via REST API
-- **outboundByHost** lets the Worker intercept container HTTP calls and bridge them to D1
+The container-per-tenant + D1 proposal optimized for process isolation, but it makes fleet-wide schema evolution and control-plane operations much harder at cloud scale.
 
 ## Decision
 
-### Container-per-tenant with D1 as default database
+We adopt **portal-managed control-plane routing plus regional backend selection** for Zitadel Cloud.
 
-Each customer instance gets:
-- Its own Durable Object (managing container lifecycle + config)
-- Its own D1 database (provisioned automatically)
-- Its own container process (scale-to-zero when idle)
-- Its own encryption keys, cookie secrets, admin credentials
+This ADR is intentionally backend-neutral. It defines:
 
-The runtime sees `ZITADEL_STORAGE_STATEFUL_URL=d1://d1.local` and connects via the existing d1driver. The Worker's `outboundByHost` intercepts these HTTP calls and bridges them to the correct D1 database using the REST API.
+- how instances are resolved
+- how placement chooses a backend via `backend_key`
+- how the cloud control plane owns routing and placement state
 
-### Architecture
+It does not choose Spanner, Postgres, or AlloyDB as the only valid managed-cloud interpretation.
 
-```
-Request (acme.zitadel.cloud)
-  -> Worker fetch()
-  -> ZitadelRouter DO (singleton)
-     - domain -> instance lookup from DO SQLite
-  -> ZitadelContainer DO (per-instance)
-     - loads config from DO SQLite
-     - sets container envVars
-     - outboundByHost bridges d1.local -> D1 REST API
-  -> Container (Rust binary)
-     - reads env vars, connects to d1://d1.local
-     - d1driver sends HTTP to d1.local
-     - outboundByHost intercepts and queries tenant's D1
-```
+### Canonical cloud routing data
 
-### Two Durable Object classes
+Authoritative tables:
 
-**ZitadelRouter** (singleton): Lightweight domain-to-instance routing table. Queried on every request to resolve which container handles this hostname.
+`instances`
+- `instance_id`
+- `customer_id`
+- `state`
+- `primary_domain`
+- `placement_mode` with values `global | regional`
+- `region_key` nullable for `global`
+- `backend_key`
+- `updated_at`
 
-**ZitadelContainer** (per-instance): Full instance configuration in a key-value table. Reads config at container boot, builds env vars, manages the D1 bridge.
+`instance_domains`
+- normalized `domain`
+- `instance_id`
+- `is_primary`
+- `state`
+- `updated_at`
 
-### Database strategy
+`cloud_backends`
+- `backend_key`
+- `kind`
+- `url`
+- `secret_ref`
+- `region_key`
+- `state`
+- `global_default`
+- `updated_at`
 
-| Tier | Database | Provisioning | Data residency |
-|------|----------|-------------|----------------|
-| Free / Standard | Cloudflare D1 | Automatic via REST API | Cloudflare-managed |
-| Enterprise BYODB | Customer's Turso or Postgres | Customer provides URL + token | Customer-managed |
+The Customer Portal is the only writer for these tables. The runtime is read-only.
 
-For D1 tenants, the container URL is `d1://d1.local` and the outboundByHost bridge routes queries to the tenant's D1 database ID via Cloudflare's REST API.
+### Runtime routing flow
 
-For BYODB tenants, the container gets `ZITADEL_STORAGE_STATEFUL_URL=libsql://...` or `postgres://...` directly. The outbound bridge is never hit.
+For each request:
+1. Self-hosted mode returns the configured/default local instance immediately
+2. Trusted `X-Zitadel-Instance` may override only from configured trusted proxies
+3. Otherwise `Host` resolves through `instance_domains`
+4. The runtime caches the routing result in-process with positive and negative TTLs
 
-Migration from D1 to BYODB: D1 export API produces a SQL dump, customer imports into their database, config is updated to point to the new URL.
+The resolved request context includes:
+- `instance_id`
+- `customer_id`
+- `placement_mode`
+- `region_key`
+- `backend_key`
+- `host`
+- `source`
 
-### Three database connections per instance
+### Backend registry and secrets
 
-The Rust binary opens three connections at startup. All use the same D1 database (via the bridge), except the analytics cache:
+`backend_key` is the binding from an instance to a row in `cloud_backends`.
 
-| Connection | Target | Purpose |
-|-----------|--------|---------|
-| Main app | D1 (via bridge) | Identity, schemas, sessions, tokens, providers, events |
-| OpenFGA | Same D1 (separate sql.DB handle) | Authorization tuples and models. Separate handle avoids SQLite write-lock contention. |
-| Analytics cache | Local SQLite (`/data/zitadel-cache.db`) | Ephemeral ring buffer. Drains into D1 events table. Container disk is ephemeral — cache loss on restart is acceptable. |
+The binary uses a small bootstrap config, `cloud.control_plane`, to reach the control-plane database. Backend and region metadata are then read from `cloud_backends` at runtime instead of being statically configured in TOML.
 
-### Version pinning (Phase 2)
+### Placement model
 
-Cloudflare Containers do not support per-instance image selection. All containers in one Worker deployment share the same image. Per-tenant version pinning requires:
+`placement_mode = global`
+- uses the default/global cloud backend defined by the control plane and runtime config
 
-1. Multiple Worker deployments (one per active Zitadel version)
-2. Router Worker uses Service Bindings to dispatch to the correct versioned Worker
-3. Instance config includes `version_channel` (stable, canary, or pinned semver)
+`placement_mode = regional`
+- pins the instance to one customer-selected region
+- `region_key` identifies the placement region
+- `backend_key` identifies the regional backend binding
 
-Phase 1 ignores version pinning — all tenants run the same version.
+v1 does not support one instance writing to multiple regional backends at the same time.
 
-## DO SQLite Schema
+## Failure Model Alignment
 
-### ZitadelRouter (singleton)
+Cloud routing and backend selection are control-plane concerns. Login continuity is an auth data-plane concern.
 
-```sql
-CREATE TABLE domains (
-    domain       TEXT PRIMARY KEY,
-    instance_id  TEXT NOT NULL,
-    customer_id  TEXT NOT NULL,
-    is_primary   INTEGER NOT NULL DEFAULT 0,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
+During planned maintenance or unplanned central outages:
 
-CREATE INDEX idx_domains_instance ON domains(instance_id);
-CREATE INDEX idx_domains_customer ON domains(customer_id);
-```
+- request routing still resolves to `instance_id`
+- regional auth continuity may continue from replicated reads plus `storage.kv` and `storage.sink`
+- control-plane mutations are allowed to pause while auth continues
+- freshness-critical invalidations still require a stricter path and fail closed if freshness cannot be proven
 
-### ZitadelContainer (per-instance)
+ADR-029 is the canonical source for those degraded-mode semantics.
 
-```sql
-CREATE TABLE config (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
+## Shared-Schema Notes
 
-CREATE TABLE instance_domains (
-    domain     TEXT PRIMARY KEY,
-    is_primary INTEGER NOT NULL DEFAULT 0
-);
-```
+If a shared-schema backend is used, cloud tenant-scoped tables use `instance_id` as the leading scoping key for tenant data and indexes.
 
-Config keys: `customer_id`, `name`, `database_type`, `d1_database_id`, `database_url`, `database_token`, `admin_email`, `admin_password`, `admin_pat`, `cookie_secrets`, `encryption_keys`, `encryption_key_id`, `migrate`, `bootstrap`, `log_level`, `version_channel`, `state`.
+This keeps cloud schema updates to:
+- once per backend
+- not once per instance
 
-Key-value design avoids schema migrations when adding new config fields.
+`org_id` remains subordinate to `instance_id`.
 
-## D1 Bridge Protocol
+## Backend-Specific Migration Policy
 
-The existing Go d1driver (`internal/database/d1driver/`) sends:
+Migration semantics belong to the selected managed backend. This ADR does not assume Postgres or Spanner DDL behavior.
 
-```
-POST http://d1.local/query   -> {"sql": "...", "params": [...]}
-POST http://d1.local/exec    -> {"sql": "...", "params": [...]}
-```
+Backend-specific deployment docs may require:
 
-The Worker's outboundByHost handler translates this to:
+- additive expand/contract migrations only
+- backend-specific DDL runners
+- compatibility across adjacent application and schema versions
 
-```
-POST https://api.cloudflare.com/client/v4/accounts/{acct}/d1/database/{db}/query
-Authorization: Bearer {token}
-Body: {"sql": "...", "params": [...]}
-```
+Cross-backend moves are explicit control-plane migrations, not transparent request routing.
 
-Response translation: unwrap `result[0]`, extract column names from first result row for `meta.columns` (which the d1driver requires for consistent column ordering).
+## Implementation Notes
+
+Current implementation work in the prototype includes:
+- control-plane `instances` and `instance_domains` tables
+- control-plane `cloud_backends` table
+- request-scoped instance resolution before auth/session middleware
+- in-process route caching with trusted proxy support
+- placement and backend metadata on the resolved instance context
+
+Still planned:
+- multiple live backend pools selected by `backend_key`
+- backend-specific transport or driver integration
+- dedicated migration runners where required by the selected backend
 
 ## Consequences
 
 ### Positive
-
-- True process-level isolation per tenant (no `instance_id` filtering, no cross-tenant data leak risk)
-- Per-tenant scale-to-zero (idle tenants cost nothing)
-- BYODB unlocks enterprise data residency without any Go code changes
-- D1 free tier (5M reads/day, 100K writes/day) covers small tenants at zero cost
-- The Rust binary is unchanged — same code runs locally on SQLite, self-hosted on Postgres, or in cloud on D1
+- One routing and placement contract regardless of the managed backend behind `backend_key`
+- Regional placement fits naturally into the routing model
+- Customer Portal owns cloud placement and routing state
+- Self-hosted stays simple while cloud gains richer routing behavior
 
 ### Negative
-
-- D1 REST API bridge adds ~10-30ms latency vs direct binding (~1-5ms)
-- One D1 database per tenant requires automated provisioning and lifecycle management
-- Version pinning requires multiple Worker deployments (Phase 2)
-- Analytics events drain through D1 before R2+Iceberg is ready (Phase 4)
+- Shared-schema topologies still depend on correct `instance_id` scoping everywhere
+- Premium hard-isolation offerings require explicit migration paths later
+- Regional backend operations become part of the cloud control plane
 
 ### Risks
-
-- D1 REST API rate limits could throttle high-traffic tenants (mitigate: monitor, upgrade to direct binding when available)
-- outboundByHost is relatively new in @cloudflare/containers (mitigate: fallback to Turso if bridge fails)
-- Many D1 databases per account may hit Cloudflare plan limits (mitigate: monitor, contact Cloudflare for enterprise limits)
+- Missing `instance_id` filters remain the primary safety risk in shared-schema topologies
+- Poor backend-key hygiene could couple control-plane mistakes to live traffic
+- Backend-specific rollout discipline still matters, but is intentionally outside this ADR's routing contract

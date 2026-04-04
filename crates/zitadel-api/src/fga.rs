@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_db::current_instance_id;
 use zitadel_fga::{
     AuthorizationModelWriteRequest, BatchCheckRequest, ChangeRepository, CheckRequest,
     CheckResponse, Evaluator, ExpandRequest, FgaApi, FgaError, ListObjectsRequest,
@@ -107,15 +107,17 @@ fn fga_error_response(error: FgaError) -> Response {
 }
 
 async fn current_store(state: &ApiState) -> Result<String, FgaError> {
-    Ok(state.fga.discover_store(DEFAULT_INSTANCE_ID).await?.id)
+    let instance_id = current_instance_id();
+    Ok(state.fga.discover_store(&instance_id).await?.id)
 }
 
 async fn discover_store(State(state): State<ApiState>) -> Response {
-    match state.fga.discover_store(DEFAULT_INSTANCE_ID).await {
+    let instance_id = current_instance_id();
+    match state.fga.discover_store(&instance_id).await {
         Ok(store) => response::json_ok(json!({
             "store_id": store.id,
             "name": store.name,
-            "instance_id": DEFAULT_INSTANCE_ID,
+            "instance_id": instance_id.as_ref(),
         })),
         Err(error) => fga_error_response(error),
     }
@@ -132,11 +134,12 @@ async fn legacy_check(
     State(state): State<ApiState>,
     Json(body): Json<LegacyCheckRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match current_store(&state).await {
         Ok(store_id) => match state
             .fga
             .check(
-                DEFAULT_INSTANCE_ID,
+                &instance_id,
                 &store_id,
                 CheckRequest {
                     tuple_key: TupleKey {
@@ -175,11 +178,12 @@ async fn legacy_read_tuples(
     State(state): State<ApiState>,
     Query(query): Query<LegacyTupleQuery>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match current_store(&state).await {
         Ok(store_id) => match state
             .fga
             .read_tuples(
-                DEFAULT_INSTANCE_ID,
+                &instance_id,
                 &store_id,
                 ReadRequest {
                     tuple_key: Some(TupleFilter {
@@ -212,11 +216,12 @@ async fn legacy_write_tuples(
     Json(body): Json<LegacyTupleWriteRequest>,
 ) -> Response {
     let count = body.tuples.len();
+    let instance_id = current_instance_id();
     match current_store(&state).await {
         Ok(store_id) => match state
             .fga
             .write_tuples(
-                DEFAULT_INSTANCE_ID,
+                &instance_id,
                 &store_id,
                 WriteRequest {
                     writes: TupleKeySet {
@@ -243,11 +248,12 @@ async fn legacy_delete_tuples(
     Json(body): Json<LegacyTupleWriteRequest>,
 ) -> Response {
     let count = body.tuples.len();
+    let instance_id = current_instance_id();
     match current_store(&state).await {
         Ok(store_id) => match state
             .fga
             .write_tuples(
-                DEFAULT_INSTANCE_ID,
+                &instance_id,
                 &store_id,
                 WriteRequest {
                     writes: TupleKeySet { tuple_keys: vec![] },
@@ -273,12 +279,9 @@ async fn legacy_list_objects(
     State(state): State<ApiState>,
     Json(body): Json<ListObjectsRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match current_store(&state).await {
-        Ok(store_id) => match state
-            .fga
-            .list_objects(DEFAULT_INSTANCE_ID, &store_id, body)
-            .await
-        {
+        Ok(store_id) => match state.fga.list_objects(&instance_id, &store_id, body).await {
             Ok(result) => response::json_ok(result),
             Err(error) => fga_error_response(error),
         },
@@ -287,7 +290,8 @@ async fn legacy_list_objects(
 }
 
 async fn legacy_model(State(state): State<ApiState>) -> Response {
-    match state.fga.legacy_model(DEFAULT_INSTANCE_ID).await {
+    let instance_id = current_instance_id();
+    match state.fga.legacy_model(&instance_id).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -297,12 +301,9 @@ async fn legacy_write_model(
     State(state): State<ApiState>,
     Json(body): Json<AuthorizationModelWriteRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match current_store(&state).await {
-        Ok(store_id) => match state
-            .fga
-            .write_model(DEFAULT_INSTANCE_ID, &store_id, body)
-            .await
-        {
+        Ok(store_id) => match state.fga.write_model(&instance_id, &store_id, body).await {
             Ok(result) => response::json_ok(result),
             Err(error) => fga_error_response(error),
         },
@@ -311,15 +312,17 @@ async fn legacy_write_model(
 }
 
 async fn legacy_model_graph(State(state): State<ApiState>) -> Response {
-    match state.fga.legacy_model_graph(DEFAULT_INSTANCE_ID).await {
+    let instance_id = current_instance_id();
+    match state.fga.legacy_model_graph(&instance_id).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
 }
 
 async fn legacy_expand(State(state): State<ApiState>, Json(body): Json<ExpandRequest>) -> Response {
+    let instance_id = current_instance_id();
     match current_store(&state).await {
-        Ok(store_id) => match state.fga.expand(DEFAULT_INSTANCE_ID, &store_id, body).await {
+        Ok(store_id) => match state.fga.expand(&instance_id, &store_id, body).await {
             Ok(result) => response::json_ok(result),
             Err(error) => fga_error_response(error),
         },
@@ -344,6 +347,7 @@ async fn legacy_batch_test(
     State(state): State<ApiState>,
     Json(body): Json<LegacyBatchRequest>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match current_store(&state).await {
         Ok(store_id) => {
             let request = BatchCheckRequest {
@@ -367,7 +371,7 @@ async fn legacy_batch_test(
             };
             match state
                 .fga
-                .batch_check(DEFAULT_INSTANCE_ID, &store_id, request)
+                .batch_check(&instance_id, &store_id, request)
                 .await
             {
                 Ok(result) => {
@@ -410,7 +414,8 @@ async fn check_store(
     Path(store_id): Path<String>,
     Json(body): Json<CheckRequest>,
 ) -> Response {
-    match state.fga.check(DEFAULT_INSTANCE_ID, &store_id, body).await {
+    let instance_id = current_instance_id();
+    match state.fga.check(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -421,11 +426,8 @@ async fn batch_check_store(
     Path(store_id): Path<String>,
     Json(body): Json<BatchCheckRequest>,
 ) -> Response {
-    match state
-        .fga
-        .batch_check(DEFAULT_INSTANCE_ID, &store_id, body)
-        .await
-    {
+    let instance_id = current_instance_id();
+    match state.fga.batch_check(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -436,11 +438,8 @@ async fn read_store(
     Path(store_id): Path<String>,
     Json(body): Json<ReadRequest>,
 ) -> Response {
-    match state
-        .fga
-        .read_tuples(DEFAULT_INSTANCE_ID, &store_id, body)
-        .await
-    {
+    let instance_id = current_instance_id();
+    match state.fga.read_tuples(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -451,11 +450,8 @@ async fn write_store(
     Path(store_id): Path<String>,
     Json(body): Json<WriteRequest>,
 ) -> Response {
-    match state
-        .fga
-        .write_tuples(DEFAULT_INSTANCE_ID, &store_id, body)
-        .await
-    {
+    let instance_id = current_instance_id();
+    match state.fga.write_tuples(&instance_id, &store_id, body).await {
         Ok(()) => response::json_ok(json!({})),
         Err(error) => fga_error_response(error),
     }
@@ -466,7 +462,8 @@ async fn expand_store(
     Path(store_id): Path<String>,
     Json(body): Json<ExpandRequest>,
 ) -> Response {
-    match state.fga.expand(DEFAULT_INSTANCE_ID, &store_id, body).await {
+    let instance_id = current_instance_id();
+    match state.fga.expand(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -477,11 +474,8 @@ async fn list_objects_store(
     Path(store_id): Path<String>,
     Json(body): Json<ListObjectsRequest>,
 ) -> Response {
-    match state
-        .fga
-        .list_objects(DEFAULT_INSTANCE_ID, &store_id, body)
-        .await
-    {
+    let instance_id = current_instance_id();
+    match state.fga.list_objects(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -492,11 +486,8 @@ async fn list_users_store(
     Path(store_id): Path<String>,
     Json(body): Json<ListUsersRequest>,
 ) -> Response {
-    match state
-        .fga
-        .list_users(DEFAULT_INSTANCE_ID, &store_id, body)
-        .await
-    {
+    let instance_id = current_instance_id();
+    match state.fga.list_users(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -515,10 +506,11 @@ async fn read_changes_store(
     Path(store_id): Path<String>,
     Query(query): Query<ReadChangesQuery>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match state
         .fga
         .read_changes(
-            DEFAULT_INSTANCE_ID,
+            &instance_id,
             &store_id,
             query.object_type.as_deref(),
             query.page_size.unwrap_or(50),
@@ -535,7 +527,8 @@ async fn read_authorization_models_store(
     State(state): State<ApiState>,
     Path(store_id): Path<String>,
 ) -> Response {
-    match state.fga.read_models(DEFAULT_INSTANCE_ID, &store_id).await {
+    let instance_id = current_instance_id();
+    match state.fga.read_models(&instance_id, &store_id).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -545,9 +538,10 @@ async fn read_authorization_model_store(
     State(state): State<ApiState>,
     Path((store_id, model_id)): Path<(String, String)>,
 ) -> Response {
+    let instance_id = current_instance_id();
     match state
         .fga
-        .read_model(DEFAULT_INSTANCE_ID, &store_id, Some(&model_id))
+        .read_model(&instance_id, &store_id, Some(&model_id))
         .await
     {
         Ok(result) => response::json_ok(result),
@@ -560,11 +554,8 @@ async fn write_authorization_model_store(
     Path(store_id): Path<String>,
     Json(body): Json<AuthorizationModelWriteRequest>,
 ) -> Response {
-    match state
-        .fga
-        .write_model(DEFAULT_INSTANCE_ID, &store_id, body)
-        .await
-    {
+    let instance_id = current_instance_id();
+    match state.fga.write_model(&instance_id, &store_id, body).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }

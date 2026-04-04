@@ -6,7 +6,7 @@ use std::{
 use axum::{Router, http::HeaderMap};
 use serde_json::json;
 use zitadel_db::DEFAULT_INSTANCE_ID;
-use zitadel_server::{AppState, build_router};
+use zitadel_server::{AppState, build_router, routing::InstanceResolver};
 use zitadel_testkit::{AuthActor, TestApp, TestContext};
 
 async fn build_test_app() -> anyhow::Result<TestApp> {
@@ -16,6 +16,7 @@ async fn build_test_app() -> anyhow::Result<TestApp> {
         db: ctx.db.db.clone(),
         secret_box: Arc::new(zitadel_crypto::SecretBox::new("", &HashMap::new())?),
         ready: AtomicBool::new(true),
+        instance_resolver: Arc::new(InstanceResolver::new(&ctx.config, ctx.db.db.clone())),
     });
     let router: Router = build_router(
         app_state,

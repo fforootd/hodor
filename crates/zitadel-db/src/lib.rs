@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub mod context;
 pub mod migrate;
 pub mod provider;
 pub mod scoped;
@@ -8,6 +9,10 @@ use sqlx::{AnyPool, any::AnyPoolOptions};
 use std::fmt;
 
 pub const DEFAULT_INSTANCE_ID: &str = "default";
+pub use context::{
+    InstanceContext, current_instance_context, current_instance_id, current_instance_id_or,
+    with_instance_context,
+};
 
 /// Supported SQL dialects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,7 +134,7 @@ impl Db {
         scoped::ScopedDb::new(
             self.pool.clone(),
             self.dialect,
-            DEFAULT_INSTANCE_ID.to_string(),
+            current_instance_id_or(DEFAULT_INSTANCE_ID).into_owned(),
         )
     }
 

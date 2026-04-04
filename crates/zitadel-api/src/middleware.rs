@@ -6,7 +6,7 @@ use axum::{
     response::Response,
 };
 use tracing::Span;
-use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_db::current_instance_id;
 
 use crate::ApiState;
 use crate::response;
@@ -84,9 +84,11 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
 
 /// Resolve a raw token (PAT or session token) to an Identity.
 async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Option<Identity>> {
+    let instance_id = current_instance_id();
+
     if let Some(identity) = state
         .stateful
-        .resolve_pat_token(DEFAULT_INSTANCE_ID, raw_token)
+        .resolve_pat_token(&instance_id, raw_token)
         .await?
     {
         return Ok(Some(Identity {
@@ -99,7 +101,7 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
 
     if let Some(session) = state
         .transient
-        .find_session_by_token(DEFAULT_INSTANCE_ID, raw_token)
+        .find_session_by_token(&instance_id, raw_token)
         .await?
     {
         return Ok(Some(Identity {

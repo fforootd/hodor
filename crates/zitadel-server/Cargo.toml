@@ -26,6 +26,8 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 sqlx = { workspace = true }
 uuid = { workspace = true }
+lru = { workspace = true }
+ipnet = { workspace = true }
 
 [dev-dependencies]
 zitadel-testkit = { workspace = true }

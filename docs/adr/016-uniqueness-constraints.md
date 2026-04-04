@@ -104,8 +104,8 @@ The login flow resolves an identifier to an entity using a two-phase lookup:
 
 The login page determines org context through multiple mechanisms (in priority order):
 
-1. **Custom domain**: `login.acme.com` → resolves to org via domain registry
-2. **Subdomain**: `acme.zitadel.com` → org slug "acme"
+1. **Custom domain**: `login.acme.com` → resolves to instance via domain registry
+2. **Subdomain**: `acme.zitadel.com` → instance or org-specific login context, depending on deployment policy
 3. **URL parameter**: `/login?org=acme` or `/login?org_id=019...`
 4. **Login flow context**: Passed as parameter in `POST /v1/login/flows`
 5. **No context**: Only instance-scoped identifiers can match. Org-scoped identifiers require explicit context.

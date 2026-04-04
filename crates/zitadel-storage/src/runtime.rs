@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use zitadel_config::StorageConfig;
 use zitadel_db::{Db, Dialect};
@@ -6,7 +6,8 @@ use zitadel_db::{Db, Dialect};
 use crate::{
     ChannelSink, DefaultAnalyticsStorage, DefaultKvStore, DefaultSink, DefaultStatefulStorage,
     DefaultTransientStorage, MemoryKvStore, NoopAnalyticsSink, SqlAnalyticsQueryBackend,
-    SqlKvStore, SqlReadStore, SqlSink, SqlStatefulStore,
+    SqlKvStore, SqlReadStore, SqlSink, SqlStatefulStore, prepare_postgres_kv_schema,
+    prepare_postgres_sink_schema,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,7 @@ impl StorageRuntime {
         db: Db,
         session_max_age_secs: u64,
     ) -> anyhow::Result<Self> {
+        let mut opened_role_dbs = HashMap::new();
         let stateful_backend = match db.dialect() {
             Dialect::Sqlite => "sqlite",
             Dialect::Postgres => "postgres",
@@ -45,7 +47,13 @@ impl StorageRuntime {
                     "storage.read.url is required when storage.read.backend = \"postgres_replica\""
                 );
             }
-            let read_db = Db::open(&config.read.url).await?;
+            let read_db = resolve_role_db(
+                &config.read.url,
+                &config.stateful.url,
+                &db,
+                &mut opened_role_dbs,
+            )
+            .await?;
             SqlReadStore::new(read_db)
         } else {
             SqlReadStore::new(db.clone())
@@ -67,7 +75,24 @@ impl StorageRuntime {
                         "storage.kv.backend = \"postgres_unlogged\" requires a Postgres stateful store"
                     );
                 }
-                DefaultKvStore::Sql(SqlKvStore::new(db.clone(), session_max_age_secs))
+                let kv_db = resolve_role_db(
+                    &config.kv.url,
+                    &config.stateful.url,
+                    &db,
+                    &mut opened_role_dbs,
+                )
+                .await?;
+                let authoritative_db =
+                    if role_uses_stateful_db(&config.kv.url, &config.stateful.url) {
+                        None
+                    } else {
+                        Some(db.clone())
+                    };
+                DefaultKvStore::Sql(SqlKvStore::new(
+                    kv_db,
+                    authoritative_db,
+                    session_max_age_secs,
+                ))
             }
             "redis" => anyhow::bail!(
                 "storage.kv.backend = \"redis\" is not implemented yet in this POC runtime"
@@ -90,9 +115,21 @@ impl StorageRuntime {
                         "storage.sink.backend = \"postgres\" requires a Postgres stateful store"
                     );
                 }
+                let buffer_db = resolve_role_db(
+                    &config.sink.url,
+                    &config.stateful.url,
+                    &db,
+                    &mut opened_role_dbs,
+                )
+                .await?;
                 DefaultSink::Sql(
-                    SqlSink::new(db.clone(), config.sink.batch_size as usize, flush_interval)
-                        .await?,
+                    SqlSink::new(
+                        buffer_db,
+                        db.clone(),
+                        config.sink.batch_size as usize,
+                        flush_interval,
+                    )
+                    .await?,
                 )
             }
             "redis" => anyhow::bail!(
@@ -133,6 +170,58 @@ impl StorageRuntime {
             },
         })
     }
+}
+
+pub async fn prepare_postgres_role_databases(
+    config: &StorageConfig,
+    stateful_db: &Db,
+) -> anyhow::Result<()> {
+    if stateful_db.dialect() != Dialect::Postgres {
+        return Ok(());
+    }
+
+    let mut opened_role_dbs = HashMap::new();
+
+    let read_backend = derive_read_backend(config, Dialect::Postgres)?;
+    if read_backend == "postgres_replica" {
+        if config.read.url.is_empty() {
+            anyhow::bail!(
+                "storage.read.url is required when storage.read.backend = \"postgres_replica\""
+            );
+        }
+        if !role_uses_stateful_db(&config.read.url, &config.stateful.url) {
+            tracing::info!(role = "read", url = %config.read.url, "skipping schema preparation for read replica");
+        }
+    }
+
+    let kv_backend = derive_kv_backend(config, Dialect::Postgres)?;
+    if kv_backend == "postgres_unlogged"
+        && !role_uses_stateful_db(&config.kv.url, &config.stateful.url)
+    {
+        let kv_db = resolve_role_db(
+            &config.kv.url,
+            &config.stateful.url,
+            stateful_db,
+            &mut opened_role_dbs,
+        )
+        .await?;
+        prepare_postgres_kv_schema(&kv_db, true).await?;
+    }
+
+    let sink_backend = derive_sink_backend(config, Dialect::Postgres)?;
+    if sink_backend == "postgres" && !role_uses_stateful_db(&config.sink.url, &config.stateful.url)
+    {
+        let sink_db = resolve_role_db(
+            &config.sink.url,
+            &config.stateful.url,
+            stateful_db,
+            &mut opened_role_dbs,
+        )
+        .await?;
+        prepare_postgres_sink_schema(&sink_db).await?;
+    }
+
+    Ok(())
 }
 
 fn derive_read_backend(config: &StorageConfig, dialect: Dialect) -> anyhow::Result<String> {
@@ -213,6 +302,29 @@ fn parse_duration(raw: &str) -> std::time::Duration {
     std::time::Duration::from_millis(100)
 }
 
+fn role_uses_stateful_db(role_url: &str, stateful_url: &str) -> bool {
+    role_url.is_empty() || role_url == stateful_url
+}
+
+async fn resolve_role_db(
+    role_url: &str,
+    stateful_url: &str,
+    stateful_db: &Db,
+    opened_role_dbs: &mut HashMap<String, Db>,
+) -> anyhow::Result<Db> {
+    if role_uses_stateful_db(role_url, stateful_url) {
+        return Ok(stateful_db.clone());
+    }
+
+    if let Some(db) = opened_role_dbs.get(role_url) {
+        return Ok(db.clone());
+    }
+
+    let db = Db::open(role_url).await?;
+    opened_role_dbs.insert(role_url.to_string(), db.clone());
+    Ok(db)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +389,18 @@ mod tests {
                 .to_string()
                 .contains("storage.kv.backend = \"redis\" is not implemented yet")
         );
+    }
+
+    #[test]
+    fn empty_or_matching_role_urls_reuse_stateful_db() {
+        assert!(role_uses_stateful_db("", "postgres://primary"));
+        assert!(role_uses_stateful_db(
+            "postgres://primary",
+            "postgres://primary"
+        ));
+        assert!(!role_uses_stateful_db(
+            "postgres://kv",
+            "postgres://primary"
+        ));
     }
 }

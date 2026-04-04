@@ -2,6 +2,7 @@ pub mod assets;
 pub mod health;
 mod jobs;
 pub mod openapi;
+pub mod routing;
 
 use axum::Router;
 use std::net::SocketAddr;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub db: zitadel_db::Db,
     pub secret_box: Arc<zitadel_crypto::SecretBox>,
     pub ready: AtomicBool,
+    pub instance_resolver: Arc<routing::InstanceResolver>,
 }
 
 /// Build the full axum Router with all routes registered.
@@ -41,6 +43,9 @@ pub fn build_router(
         // Static frontend assets + SPA fallback
         .merge(assets::routes())
         // Middleware
+        .layer(routing::InstanceContextLayer::new(
+            state.instance_resolver.clone(),
+        ))
         .layer(axum::middleware::from_fn(
             zitadel_observability::request_context_middleware,
         ))
@@ -81,6 +86,8 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
             tracing::warn!(path = %config.dev.seed_file, "seed file not found, skipping");
         }
     }
+
+    zitadel_storage::prepare_postgres_role_databases(&config.storage, &db).await?;
 
     jobs::start(&config, db.clone()).await?;
 
@@ -176,6 +183,9 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     };
 
     let state = Arc::new(AppState {
+        instance_resolver: Arc::new(
+            routing::InstanceResolver::from_config(&config, db.clone()).await?,
+        ),
         config,
         db,
         secret_box,
@@ -192,9 +202,12 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     tracing::info!("Zitadel server listening on http://{}", addr);
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     Ok(())
 }

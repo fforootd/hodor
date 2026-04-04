@@ -14,11 +14,19 @@ This document defines the core vocabulary and terminology mappings for the Zitad
 | **Provider Kind** | The marketplace/provider family identifier, such as `google`, `github`, `gitlab`, `entra`, or `custom`. | Template family / vendor preset |
 | **Protocol** | The runtime federation adapter used by a provider, such as `oidc`, `oauth2`, or `saml`. | Federation protocol |
 | **Catalog Ref** | Metadata linking an installed resource back to a catalog template and version. | Template origin |
-| **Org** | Organization. The top-level scope/context for filtering entities. | Tenant |
+| **Instance** | The top-level ZITADEL runtime boundary. An instance contains organizations, users, apps, providers, settings, and authorization state. | Tenant / Environment |
+| **Org** | Organization inside an instance. Used for business structure, ownership, and policy, but not for infrastructure routing. | Organization / Workspace |
+| **Customer** | Cloud control-plane account that can own one or more instances. Not a data-access discriminator. | Billing account / Subscription owner |
+| **Placement Mode** | Cloud placement policy for an instance: `global` or `regional`. | Data residency / home region policy |
+| **Backend Key** | Logical binding from an instance to an operator-managed backend configuration, such as a regional managed backend. | Backend alias / connection profile |
+| **Control Plane** | Portal and management side of the system: routing, placement, admin mutations, provider and policy authoring. | Management plane |
+| **Auth Data Plane** | End-user authentication runtime: login, session and token handling, auth runtime state, revocation checks. | Auth serving plane |
 
 ## Public Naming Model
 
 - **Public API families** use concrete nouns such as `users`, `apps`, `orgs`, `groups`, and `providers`.
+- **`orgs`** are domain resources inside the currently resolved instance.
+- **`instances`** are primarily a runtime/control-plane concern. Self-hosted deployments normally run exactly one instance; cloud resolves the current instance before API handlers run.
 - **Users** is a typed family that currently covers `human_user`, `service_user`, and `ai_agent`.
 - **Apps** is a typed family for application schemas.
 - **`schema_id`** is the canonical write-time discriminator in request bodies.
@@ -31,6 +39,8 @@ This document defines the core vocabulary and terminology mappings for the Zitad
 1. **Apps and users share the same schema-driven model**: Service accounts, AI agents, and applications are all backed by schemas even when they live behind different public API families.
 2. **If it doesn't have a schema, it doesn't exist**: All persistent domain objects must be entities defined by a JSON Schema.
 3. **Relationships via FGA**: Relationships between entities (e.g., membership in a group, ownership of an org) are represented as graph edges in OpenFGA, not relational tables.
+4. **Instances contain orgs**: `instance_id` is the infrastructure and routing boundary; `org_id` stays inside that boundary as product/domain data.
+5. **Control plane and auth data plane are separate**: brief control-plane outages are acceptable when regional auth continuity can continue through `read`, `kv`, and `sink`.
 
 ## Observability
 

@@ -1,4 +1,5 @@
 use crate::LoginState;
+use zitadel_db::current_instance_id;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionUser {
@@ -32,6 +33,7 @@ pub(crate) async fn extract_session_user(
     state: &LoginState,
     headers: &axum::http::HeaderMap,
 ) -> Option<SessionUser> {
+    let instance_id = current_instance_id();
     let cookie_header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
 
     // Parse cookies to find the session cookie.
@@ -42,7 +44,7 @@ pub(crate) async fn extract_session_user(
             let token = zitadel_authn::cookie::verify(value, &state.cookie_config.secrets)?;
             let session = state
                 .transient
-                .find_session_by_token(zitadel_db::DEFAULT_INSTANCE_ID, &token)
+                .find_session_by_token(&instance_id, &token)
                 .await
                 .ok()??;
 
