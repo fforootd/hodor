@@ -1,156 +1,95 @@
 <template>
-  <ResourceCreateCockpit
-    v-model:active-tab="activeTab"
-    v-model:json-content="jsonContent"
-    back-route="/applications"
-    :badges="badges"
-    :curl-snippets="curlSnippets"
-    description="Start with the application profile, validate protocol posture before creation, and keep developer tooling separated."
-    details-description="Capture the application details operators care about first."
-    :error="error"
-    eyebrow="Application creation"
-    :extra-tabs="[{ label: 'Protocol', value: 'protocol' }]"
-    :json-error="jsonError"
-    :json-valid="jsonValid"
-    :review-rows="reviewRows"
-    :review-summary-cards="reviewSummaryCards"
-    :schema="schemaContext.schema"
-    singular-title="Application"
-    :submitting="submitting"
-    :summary-cards="summaryCards"
-    @submit="submit"
-    @json-valid="onJsonValid"
-    @json-error="onJsonError"
-  >
-    <template #details>
-      <SchemaFieldEditor
-        v-if="schemaContext.schema"
-        v-model="formData"
-        :fields="schemaFields"
-      />
-      <div v-else class="flex items-center gap-2 text-sm text-muted-foreground">
-        Loading schema…
-      </div>
-    </template>
-
-    <template #tab-protocol>
-      <div class="grid gap-6 xl:grid-cols-2">
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <CardTitle class="text-lg">Protocol posture</CardTitle>
-            <p class="text-sm text-muted-foreground">
-              Review the application protocol defaults before creating the resource.
-            </p>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div
-              v-for="(row, rowIndex) in protocolRows"
-              :key="rowIndex"
-              class="rounded-2xl border bg-muted/20 px-4 py-3"
+  <div class="mx-auto max-w-lg space-y-8">
+    <div>
+      <router-link to="/applications" class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+        <ArrowLeft class="size-4" />
+        Back to Applications
+      </router-link>
+    </div>
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Create Application</h1>
+      <p class="text-sm text-muted-foreground mt-1">Register a new application for authentication.</p>
+    </div>
+    <Card>
+      <CardContent class="pt-6 space-y-4">
+        <div class="space-y-2">
+          <Label for="name">Name</Label>
+          <Input id="name" v-model="form.name" placeholder="My Web App" />
+        </div>
+        <div class="space-y-2">
+          <Label>Type</Label>
+          <div class="grid grid-cols-2 gap-3">
+            <button
+              v-for="t in appTypes"
+              :key="t.value"
+              type="button"
+              class="flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors hover:bg-accent"
+              :class="form.app_type === t.value ? 'border-primary bg-accent' : 'border-border'"
+              @click="form.app_type = t.value"
             >
-              <p class="text-[11px] uppercase tracking-wider text-muted-foreground">{{ row.label }}</p>
-              <p class="mt-1 text-sm font-medium">{{ row.value }}</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card class="rounded-3xl shadow-sm">
-          <CardHeader class="pb-3">
-            <CardTitle class="text-lg">Readiness</CardTitle>
-          </CardHeader>
-          <CardContent class="space-y-3">
-            <div class="rounded-2xl border bg-muted/20 px-4 py-3">
-              <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Redirect URIs</p>
-              <p class="mt-1 text-sm font-medium">{{ redirectUriSummary }}</p>
-            </div>
-            <div class="rounded-2xl border bg-muted/20 px-4 py-3">
-              <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Grant types</p>
-              <p class="mt-1 text-sm font-medium">{{ grantTypeSummary }}</p>
-            </div>
-            <div class="rounded-2xl border bg-muted/20 px-4 py-3">
-              <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Response types</p>
-              <p class="mt-1 text-sm font-medium">{{ responseTypeSummary }}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </template>
-  </ResourceCreateCockpit>
+              <span class="text-sm font-medium">{{ t.label }}</span>
+              <span class="text-xs text-muted-foreground">{{ t.description }}</span>
+            </button>
+          </div>
+        </div>
+        <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ error }}</div>
+      </CardContent>
+    </Card>
+    <div class="flex items-center justify-end gap-3">
+      <Button variant="outline" as-child><router-link to="/applications">Cancel</router-link></Button>
+      <Button :disabled="!canSubmit || submitting" @click="submit">
+        <Spinner v-if="submitting" class="mr-2 size-4" />
+        Create Application
+      </Button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref, reactive, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { appApi } from '@/api/resources'
-import ResourceCreateCockpit from '@/console/components/ResourceCreateCockpit.vue'
-import SchemaFieldEditor from '@/console/components/SchemaFieldEditor.vue'
-import { useResourceCreate } from '@/console/composables/useResourceCreate'
-import { useOrgContext } from '@/console/composables/useOrgContext'
-import { extractSchemaFields, type SummaryFact } from '@/console/utils/schema-resource'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { notifySuccess, notifyError } from '@/lib/notify'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { ArrowLeft } from 'lucide-vue-next'
 
-const activeTab = ref('details')
-const { currentOrgId } = useOrgContext()
+const router = useRouter()
+const submitting = ref(false)
+const error = ref('')
 
-const {
-  schemaContext,
-  formData,
-  jsonValid,
-  jsonContent,
-  jsonError,
-  submitting,
-  error,
-  payload,
-  curlSnippets,
-  reviewFacts,
-  submit,
-  onJsonValid,
-  onJsonError,
-} = useResourceCreate({
-  schemaType: 'app',
-  apiPath: '/v1/apps',
-  resourceName: 'Application',
-  listRoute: '/applications',
-  createFn: appApi.create,
-  includeOrgHeader: true,
-  defaultFormData: {
-    app_type: 'web',
-    redirect_uris: [],
-    grant_types: ['authorization_code'],
-    response_types: ['code'],
-  },
+const form = reactive({
+  name: '',
+  app_type: 'web',
 })
 
-const schemaFields = computed(() => extractSchemaFields(schemaContext.value.schema))
-const appName = computed(() => String(formData.value.client_name || formData.value.name || 'Pending application name'))
-const appType = computed(() => String(formData.value.app_type || 'web'))
-const redirectUris = computed(() => Array.isArray(formData.value.redirect_uris) ? formData.value.redirect_uris : [])
-const grantTypes = computed(() => Array.isArray(formData.value.grant_types) ? formData.value.grant_types : [])
-const responseTypes = computed(() => Array.isArray(formData.value.response_types) ? formData.value.response_types : [])
-const redirectUriSummary = computed(() =>
-  redirectUris.value.length ? `${redirectUris.value.length} configured` : 'No redirect URIs yet',
-)
-const grantTypeSummary = computed(() => grantTypes.value.length ? grantTypes.value.join(', ') : 'No grant types configured')
-const responseTypeSummary = computed(() => responseTypes.value.length ? responseTypes.value.join(', ') : 'No response types configured')
-const badges = computed(() => ([
-  { label: 'Application', variant: 'outline' as const },
-  { label: schemaContext.value.schemaType || 'app', variant: 'secondary' as const },
-  ...(currentOrgId.value ? [{ label: currentOrgId.value, variant: 'secondary' as const }] : []),
-]))
-const summaryCards = computed<SummaryFact[]>(() => ([
-  { label: 'Application', value: appName.value },
-  { label: 'App type', value: appType.value },
-  { label: 'Organization context', value: currentOrgId.value || 'No org selected' },
-]))
-const protocolRows = computed<SummaryFact[]>(() => ([
-  { label: 'Application type', value: appType.value },
-  { label: 'Grant types', value: grantTypeSummary.value },
-  { label: 'Response types', value: responseTypeSummary.value },
-  { label: 'Redirect URIs', value: redirectUriSummary.value },
-]))
-const reviewRows = computed(() => reviewFacts.value)
-const reviewSummaryCards = computed<SummaryFact[]>(() => ([
-  { label: 'Application', value: appName.value },
-  { label: 'Protocol', value: `${appType.value} application` },
-  { label: 'Developer payload', value: `${Object.keys(payload.value.data || {}).length} schema fields in payload` },
-]))
+const appTypes = [
+  { value: 'web', label: 'Web', description: 'Browser-based app with server' },
+  { value: 'native', label: 'Native', description: 'Mobile or desktop app' },
+  { value: 'api', label: 'API', description: 'Backend service or API' },
+  { value: 'machine', label: 'Machine', description: 'Service-to-service (no user)' },
+]
+
+const canSubmit = computed(() => form.name.trim().length > 0)
+
+async function submit() {
+  submitting.value = true
+  error.value = ''
+  try {
+    const created = await appApi.create({
+      name: form.name.trim(),
+      metadata: { app_type: form.app_type },
+    })
+    notifySuccess('Application created', `${form.name} is ready.`)
+    router.push(`/applications/${created.id}`)
+  } catch (e: any) {
+    error.value = e?.error || e?.message || 'Failed to create application'
+    notifyError('Failed to create application', e)
+  } finally {
+    submitting.value = false
+  }
+}
 </script>

@@ -1,91 +1,64 @@
 <template>
-  <ResourceCreateCockpit
-    v-model:active-tab="activeTab"
-    v-model:json-content="jsonContent"
-    back-route="/groups"
-    :badges="badges"
-    :curl-snippets="curlSnippets"
-    description="Define the group around schema-backed fields, keep org context visible, and separate developer tooling from the main operator flow."
-    details-description="Capture the group profile and collaboration framing first."
-    :error="error"
-    eyebrow="Group creation"
-    :json-error="jsonError"
-    :json-valid="jsonValid"
-    :review-rows="reviewRows"
-    :review-summary-cards="reviewSummaryCards"
-    :schema="schemaContext.schema"
-    singular-title="Group"
-    :submitting="submitting"
-    :summary-cards="summaryCards"
-    @submit="submit"
-    @json-valid="onJsonValid"
-    @json-error="onJsonError"
-  >
-    <template #details>
-      <SchemaFieldEditor
-        v-if="schemaContext.schema"
-        v-model="formData"
-        :fields="schemaFields"
-      />
-      <div v-else class="flex items-center gap-2 text-sm text-muted-foreground">
-        Loading schema…
-      </div>
-    </template>
-  </ResourceCreateCockpit>
+  <div class="mx-auto max-w-lg space-y-8">
+    <div>
+      <router-link to="/groups" class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+        <ArrowLeft class="size-4" />
+        Back to Groups
+      </router-link>
+    </div>
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Create Group</h1>
+      <p class="text-sm text-muted-foreground mt-1">Groups let you manage permissions for multiple users at once.</p>
+    </div>
+    <Card>
+      <CardContent class="pt-6 space-y-4">
+        <div class="space-y-2">
+          <Label for="name">Name</Label>
+          <Input id="name" v-model="form.name" placeholder="Engineering" />
+        </div>
+        <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ error }}</div>
+      </CardContent>
+    </Card>
+    <div class="flex items-center justify-end gap-3">
+      <Button variant="outline" as-child><router-link to="/groups">Cancel</router-link></Button>
+      <Button :disabled="!canSubmit || submitting" @click="submit">
+        <Spinner v-if="submitting" class="mr-2 size-4" />
+        Create Group
+      </Button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref, reactive, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { groupApi } from '@/api/resources'
-import ResourceCreateCockpit from '@/console/components/ResourceCreateCockpit.vue'
-import SchemaFieldEditor from '@/console/components/SchemaFieldEditor.vue'
-import { useResourceCreate } from '@/console/composables/useResourceCreate'
-import { useOrgContext } from '@/console/composables/useOrgContext'
-import { extractSchemaFields, type SummaryFact } from '@/console/utils/schema-resource'
+import { notifySuccess, notifyError } from '@/lib/notify'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { ArrowLeft } from 'lucide-vue-next'
 
-const activeTab = ref('details')
-const { currentOrgId } = useOrgContext()
+const router = useRouter()
+const submitting = ref(false)
+const error = ref('')
+const form = reactive({ name: '' })
+const canSubmit = computed(() => form.name.trim().length > 0)
 
-const {
-  schemaContext,
-  formData,
-  jsonValid,
-  jsonContent,
-  jsonError,
-  submitting,
-  error,
-  payload,
-  curlSnippets,
-  reviewFacts,
-  submit,
-  onJsonValid,
-  onJsonError,
-} = useResourceCreate({
-  schemaType: 'group',
-  apiPath: '/v1/groups',
-  resourceName: 'Group',
-  listRoute: '/groups',
-  createFn: groupApi.create,
-  includeOrgHeader: true,
-})
-
-const schemaFields = computed(() => extractSchemaFields(schemaContext.value.schema))
-const groupName = computed(() => String(formData.value.name || 'Pending group name'))
-const groupDescription = computed(() => String(formData.value.description || 'No description yet'))
-const badges = computed(() => ([
-  { label: 'Group', variant: 'outline' as const },
-  { label: schemaContext.value.schemaType || 'group', variant: 'secondary' as const },
-  ...(currentOrgId.value ? [{ label: currentOrgId.value, variant: 'secondary' as const }] : []),
-]))
-const summaryCards = computed<SummaryFact[]>(() => ([
-  { label: 'Group', value: groupName.value },
-  { label: 'Organization context', value: currentOrgId.value || 'No org selected' },
-  { label: 'Description', value: groupDescription.value },
-]))
-const reviewRows = computed(() => reviewFacts.value)
-const reviewSummaryCards = computed<SummaryFact[]>(() => ([
-  { label: 'Group', value: groupName.value },
-  { label: 'Org context', value: currentOrgId.value || 'No org selected' },
-  { label: 'Developer payload', value: `${Object.keys(payload.value.data || {}).length} schema fields in payload` },
-]))
+async function submit() {
+  submitting.value = true
+  error.value = ''
+  try {
+    const created = await groupApi.create({ name: form.name.trim() })
+    notifySuccess('Group created', `${form.name} is ready.`)
+    router.push(`/groups/${created.id}`)
+  } catch (e: any) {
+    error.value = e?.error || e?.message || 'Failed to create group'
+    notifyError('Failed to create group', e)
+  } finally {
+    submitting.value = false
+  }
+}
 </script>

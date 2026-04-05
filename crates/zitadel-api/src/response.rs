@@ -2,7 +2,6 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use zitadel_db::scoped::ScopedDb;
 
 /// Standard list response with cursor pagination.
 #[derive(Serialize)]
@@ -67,21 +66,6 @@ pub fn bad_request(msg: impl Into<String>) -> Response {
 
 pub fn internal_error(msg: impl Into<String>) -> Response {
     error(StatusCode::INTERNAL_SERVER_ERROR, msg)
-}
-
-/// Generic DELETE by id for a scoped table. Returns 204 or 404.
-pub async fn delete_by_id(scoped: &ScopedDb, table: &str, id: &str, entity: &str) -> Response {
-    let sql = format!("DELETE FROM {table} WHERE instance_id = $1 AND id = $2");
-    match sqlx::query(&sql)
-        .bind(scoped.instance_id())
-        .bind(id)
-        .execute(scoped.pool())
-        .await
-    {
-        Ok(r) if r.rows_affected() == 0 => not_found(format!("{entity} not found")),
-        Ok(_) => no_content(),
-        Err(e) => internal_error(format!("{e}")),
-    }
 }
 
 /// Handle the result of an UPDATE/INSERT that should affect exactly one row.

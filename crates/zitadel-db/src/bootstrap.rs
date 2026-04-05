@@ -1,32 +1,52 @@
-use crate::{DEFAULT_INSTANCE_ID, Db};
+use crate::{DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db};
+use google_cloud_spanner::mutation::insert_or_update;
 use uuid::Uuid;
 
 /// Bootstrap creates the default org and admin user if they don't exist.
 /// Safe to run repeatedly; it only inserts missing defaults.
 pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
+    if let Some(spanner) = db.spanner() {
+        bootstrap_spanner(spanner).await?;
+        tracing::info!("bootstrapped default org, admin user, and login flow for spanner");
+        return Ok(true);
+    }
+
     let pool = db.pool();
     let mut tx = pool.begin().await?;
     let mut changed = false;
 
-    let org_id = match sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM orgs WHERE instance_id = $1 ORDER BY created_at ASC LIMIT 1",
+    let operator_metadata = r#"{"capabilities":["operator_admin"]}"#;
+    let root_updated = sqlx::query(
+        "UPDATE instances \
+         SET kind = 'root', state = 'active', placement_mode = 'global', updated_at = CURRENT_TIMESTAMP \
+         WHERE instance_id = $1 AND kind != 'root'",
     )
     .bind(DEFAULT_INSTANCE_ID)
+    .execute(&mut *tx)
+    .await?;
+    if root_updated.rows_affected() > 0 {
+        changed = true;
+    }
+
+    let org_id = match sqlx::query_as::<_, (String,)>(
+        "SELECT id FROM orgs WHERE instance_id = $1 AND id = $2 LIMIT 1",
+    )
+    .bind(DEFAULT_INSTANCE_ID)
+    .bind(DEFAULT_ORG_ID)
     .fetch_optional(&mut *tx)
     .await?
     {
         Some((id,)) => id,
         None => {
-            let id = Uuid::new_v4().to_string();
             sqlx::query(
                 "INSERT INTO orgs (id, instance_id, name, state) VALUES ($1, $2, 'Default', 'active')"
             )
-            .bind(&id)
+            .bind(DEFAULT_ORG_ID)
             .bind(DEFAULT_INSTANCE_ID)
             .execute(&mut *tx)
             .await?;
             changed = true;
-            id
+            DEFAULT_ORG_ID.to_string()
         }
     };
 
@@ -43,18 +63,33 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
         None => {
             let id = Uuid::new_v4().to_string();
             sqlx::query(
-                "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state) \
-                 VALUES ($1, $2, $3, 'admin', 'Admin', 'human', 'active')"
+                "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, metadata) \
+                 VALUES ($1, $2, $3, 'admin', 'Admin', 'human', 'active', $4)"
             )
             .bind(&id)
             .bind(DEFAULT_INSTANCE_ID)
             .bind(&org_id)
+            .bind(operator_metadata)
             .execute(&mut *tx)
             .await?;
             changed = true;
             id
         }
     };
+
+    let operator_metadata_updated = sqlx::query(
+        "UPDATE users SET metadata = $1, updated_at = CURRENT_TIMESTAMP \
+         WHERE instance_id = $2 AND id = $3 AND identifier = 'admin' \
+         AND COALESCE(CAST(metadata AS TEXT), '{}') != $1",
+    )
+    .bind(operator_metadata)
+    .bind(DEFAULT_INSTANCE_ID)
+    .bind(&admin_id)
+    .execute(&mut *tx)
+    .await?;
+    if operator_metadata_updated.rows_affected() > 0 {
+        changed = true;
+    }
 
     // Ensure a default login flow exists.
     let has_login_flow = sqlx::query_as::<_, (i64,)>(
@@ -92,6 +127,89 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
     }
 
     Ok(changed)
+}
+
+async fn bootstrap_spanner(spanner: &crate::SpannerDb) -> anyhow::Result<()> {
+    let operator_metadata = r#"{"capabilities":["operator_admin"]}"#;
+    let auth_methods = r#"{"password":{"enabled":true,"interactive":true,"position":0},"passkey":{"enabled":true,"interactive":true,"position":1},"sso":{"enabled":true,"interactive":true,"position":2}}"#;
+
+    let mutations = vec![
+        insert_or_update(
+            "instances",
+            &[
+                "instance_id",
+                "kind",
+                "state",
+                "placement_mode",
+                "feature_overrides",
+            ],
+            &[&DEFAULT_INSTANCE_ID, &"root", &"active", &"global", &"{}"],
+        ),
+        insert_or_update(
+            "orgs",
+            &["instance_id", "id", "name", "state", "metadata"],
+            &[
+                &DEFAULT_INSTANCE_ID,
+                &DEFAULT_ORG_ID,
+                &"Default",
+                &"active",
+                &"{}",
+            ],
+        ),
+        insert_or_update(
+            "users",
+            &[
+                "instance_id",
+                "id",
+                "org_id",
+                "identifier",
+                "display_name",
+                "user_type",
+                "state",
+                "metadata",
+            ],
+            &[
+                &DEFAULT_INSTANCE_ID,
+                &"default-admin",
+                &DEFAULT_ORG_ID,
+                &"admin",
+                &"Admin",
+                &"human",
+                &"active",
+                &operator_metadata,
+            ],
+        ),
+        insert_or_update(
+            "login_flows",
+            &[
+                "instance_id",
+                "id",
+                "org_id",
+                "name",
+                "strategy",
+                "is_default",
+                "enabled",
+                "state",
+                "priority",
+                "auth_methods",
+            ],
+            &[
+                &DEFAULT_INSTANCE_ID,
+                &"default-login-flow",
+                &DEFAULT_ORG_ID,
+                &"Default",
+                &"identifier_first",
+                &true,
+                &true,
+                &"active",
+                &100i64,
+                &auth_methods,
+            ],
+        ),
+    ];
+
+    spanner.client().apply(mutations).await?;
+    Ok(())
 }
 
 #[cfg(test)]

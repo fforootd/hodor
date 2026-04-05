@@ -16,7 +16,7 @@
     {
       "name": "frontend",
       "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "source $HOME/.nvm/nvm.sh && make dev-web"],
+      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && source $HOME/.nvm/nvm.sh && just dev-web"],
       "port": 5173
     }
   ]

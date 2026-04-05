@@ -6,6 +6,10 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use zitadel_db::{
+    current_instance_id, list_fingerprints as db_list_fingerprints,
+    upsert_fingerprint,
+};
 
 /// Authenticated routes (list fingerprints).
 pub fn routes() -> Router<ApiState> {
@@ -41,32 +45,20 @@ async fn list_fingerprints(
     State(s): State<ApiState>,
     Query(p): Query<response::PaginationParams>,
 ) -> Response {
-    let scoped = s.db.scoped_default();
     let cursor = p.cursor.unwrap_or_default();
     let limit = p.limit.min(200);
-    let created_at = scoped.as_text("created_at");
-    let sql = format!(
-        "SELECT id, type, raw_data, {created_at} \
-         FROM fingerprints WHERE instance_id = $1 AND id > $2 ORDER BY id LIMIT $3"
-    );
-    match sqlx::query_as::<_, (String, String, String, String)>(&sql)
-        .bind(scoped.instance_id())
-        .bind(&cursor)
-        .bind(limit + 1)
-        .fetch_all(scoped.pool())
-        .await
-    {
+    match db_list_fingerprints(&s.db, current_instance_id().as_ref(), &cursor, limit + 1).await {
         Ok(rows) => {
             let has_more = rows.len() as i64 > limit;
             let items: Vec<FingerprintResponse> = rows
                 .into_iter()
                 .take(limit as usize)
                 .map(|r| FingerprintResponse {
-                    id: r.0,
-                    type_: r.1,
-                    raw_data: serde_json::from_str(&r.2)
+                    id: r.id,
+                    type_: r.type_,
+                    raw_data: serde_json::from_str(&r.raw_data_json)
                         .unwrap_or(serde_json::Value::Object(Default::default())),
-                    created_at: r.3,
+                    created_at: r.created_at,
                 })
                 .collect();
             let next_cursor = if has_more {
@@ -89,7 +81,6 @@ async fn ingest_fingerprint(
     State(s): State<ApiState>,
     Json(req): Json<IngestFingerprintRequest>,
 ) -> Response {
-    let scoped = s.db.scoped_default();
     let id = if req.id.is_empty() {
         uuid::Uuid::new_v4().to_string()
     } else {
@@ -101,21 +92,14 @@ async fn ingest_fingerprint(
         req.type_
     };
     let raw_data = serde_json::to_string(&req.raw_data).unwrap_or_else(|_| "{}".into());
-    // Upsert: update raw_data if the fingerprint ID already exists (same device, new login).
-    let sql = format!(
-        "INSERT INTO fingerprints (id, instance_id, type, raw_data, created_at) \
-         VALUES ($1, $2, $3, {}, {}) \
-         ON CONFLICT (id) DO UPDATE SET raw_data = excluded.raw_data, type = excluded.type",
-        scoped.json_bind(4),
-        scoped.timestamp_now(),
-    );
-    match sqlx::query(&sql)
-        .bind(&id)
-        .bind(scoped.instance_id())
-        .bind(&type_)
-        .bind(&raw_data)
-        .execute(scoped.pool())
-        .await
+    match upsert_fingerprint(
+        &s.db,
+        current_instance_id().as_ref(),
+        &id,
+        &type_,
+        &raw_data,
+    )
+    .await
     {
         Ok(_) => response::json_created(serde_json::json!({"id": id})),
         Err(e) => response::bad_request(format!("ingest fingerprint: {e}")),

@@ -367,6 +367,11 @@ async fn seed_persisted_sessions(
              VALUES ($1, $2, $3, $4, $5, $6, $7, {}, NOW() - INTERVAL '1 hour', NOW() - INTERVAL '5 minutes', NOW() + INTERVAL '1 day', NULL, $9)",
             scoped.json_bind(8),
         ),
+        Dialect::Spanner => format!(
+            "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, last_active_at, expires_at, revoked_at, fingerprint) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, {}, TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR), TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 5 MINUTE), TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY), NULL, $9)",
+            scoped.json_bind(8),
+        ),
     };
     let revoked_sql = match scoped.dialect() {
         Dialect::Sqlite => format!(
@@ -379,6 +384,11 @@ async fn seed_persisted_sessions(
              VALUES ($1, $2, $3, $4, $5, $6, $7, {}, NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day', NOW() + INTERVAL '1 day', NOW() - INTERVAL '12 hours', $9)",
             scoped.json_bind(8),
         ),
+        Dialect::Spanner => format!(
+            "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, last_active_at, expires_at, revoked_at, fingerprint) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, {}, TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 DAY), TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY), TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY), TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 12 HOUR), $9)",
+            scoped.json_bind(8),
+        ),
     };
     let expired_sql = match scoped.dialect() {
         Dialect::Sqlite => format!(
@@ -389,6 +399,11 @@ async fn seed_persisted_sessions(
         Dialect::Postgres => format!(
             "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, last_active_at, expires_at, revoked_at, fingerprint) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, {}, NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 hour', NULL, $9)",
+            scoped.json_bind(8),
+        ),
+        Dialect::Spanner => format!(
+            "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, metadata, created_at, last_active_at, expires_at, revoked_at, fingerprint) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, {}, TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 DAY), TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY), TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR), NULL, $9)",
             scoped.json_bind(8),
         ),
     };

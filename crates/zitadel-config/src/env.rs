@@ -48,6 +48,41 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             Value::String(v),
         );
     }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_DATABASE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "database"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_EMULATOR_HOST") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "emulator_host"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_CREDENTIALS_FILE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "credentials_file"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_CREDENTIALS_JSON") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "credentials_json"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_BACKEND") {
+        merge_path(
+            &mut overrides,
+            &["storage", "stateful", "backend"],
+            Value::String(v),
+        );
+    }
     if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_MIGRATE") {
         merge_path(
             &mut overrides,

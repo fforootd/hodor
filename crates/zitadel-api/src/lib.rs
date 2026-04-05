@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod admin;
 pub mod analytics;
 pub mod apps;
 pub mod auth;
@@ -7,6 +8,7 @@ pub mod console;
 pub mod events;
 pub mod fga;
 pub mod groups;
+pub mod instances;
 pub mod jobs;
 pub mod login_flows;
 pub mod middleware;
@@ -47,64 +49,55 @@ pub struct ApiState {
 }
 
 /// Build the REST API router with all /v1/* routes.
+///
+/// Product routes are mounted both flat (`/v1/users`) and nested under
+/// instances (`/v1/instances/{instanceId}/users`). The InstanceResolver
+/// extracts the instance ID from the URL path and sets `current_instance_id()`.
 pub fn routes(state: ApiState) -> Router {
-    let authed = Router::new()
-        // Users
+    // Product handlers — mounted twice: flat (root/self-hosted) and instance-scoped.
+    let product_handlers = Router::new()
         .merge(users::routes())
-        // Orgs
         .merge(orgs::routes())
-        // Groups
         .merge(groups::routes())
-        // Projects
         .merge(projects::routes())
-        // Apps
         .merge(apps::routes())
-        // Sessions (admin)
         .merge(sessions::routes())
-        // Background jobs
-        .merge(jobs::routes())
-        // PATs
-        .merge(pats::routes())
-        // Events
         .merge(events::routes())
-        // Search
         .merge(search::routes())
-        // Settings
-        .merge(settings::routes())
-        // Providers
         .merge(providers::routes())
-        // Console bootstrap + counts
         .merge(console::routes())
-        // Schemas + meta-schema
         .merge(schemas::routes())
-        // Login flows
         .merge(login_flows::routes())
-        // FGA / authorization
         .merge(fga::routes())
-        // Analytics (query + schema browser)
-        .merge(analytics::routes())
-        // Observability overview
         .merge(observability::routes())
-        // Actions
         .merge(actions::routes())
-        // Telemetry (fingerprints)
         .merge(telemetry::routes())
-        // Auth/session info
+        .merge(catalog::routes());
+
+    let authed = Router::new()
+        // Instance-scoped: /v1/instances/{instanceId}/users, etc.
+        .nest("/instances/{instanceId}", product_handlers.clone())
+        // Instance management CRUD (operates on parent)
+        .merge(instances::routes())
+        // Root/admin APIs
+        .merge(admin::routes())
         .merge(auth::routes())
-        // Catalog / marketplace
-        .merge(catalog::routes())
-        // Auth middleware — validates Bearer token or session cookie.
+        .merge(pats::routes())
+        .merge(jobs::routes())
+        .merge(settings::routes())
+        .merge(analytics::routes())
+        // Flat product routes (root / self-hosted single-instance)
+        .merge(product_handlers)
+        // Auth middleware
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::auth_gate,
         ));
 
-    // Public routes (no auth required).
     let public = Router::new()
-        // Telemetry ingest (fingerprints) — called during login before session exists.
         .merge(telemetry::public_routes());
 
-    Router::new()
-        .nest("/v1", authed.merge(public))
-        .with_state(state)
+    let v1 = authed.merge(public);
+
+    Router::new().nest("/v1", v1).with_state(state)
 }

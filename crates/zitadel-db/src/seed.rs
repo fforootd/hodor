@@ -1,5 +1,5 @@
 use crate::{
-    Db,
+    DEFAULT_ORG_ID, Db,
     provider::{
         ProviderCatalogRef, ProviderConnection, ProviderLinking, ProviderLinkingMode,
         ProviderMapping, ProviderPayload, ProviderTarget, ProviderUi, get_provider,
@@ -162,6 +162,26 @@ fn token_hash(token: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(token.as_bytes()))
 }
 
+fn seed_user_metadata(user: &SeedUser) -> serde_json::Value {
+    let mut metadata = serde_json::Map::new();
+    if !user.capabilities.is_empty() {
+        metadata.insert(
+            "capabilities".into(),
+            serde_json::Value::Array(
+                user.capabilities
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    if !user.profile.is_null() {
+        metadata.insert("profile".into(), user.profile.clone());
+    }
+    serde_json::Value::Object(metadata)
+}
+
 impl SeedProvider {
     fn to_payload(&self) -> ProviderPayload {
         let display_name = if self.display_name.is_empty() {
@@ -244,21 +264,21 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
 
     // Get default org (first org, or create one).
     let org_id: String = match sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM orgs WHERE instance_id = 'default' LIMIT 1",
+        "SELECT id FROM orgs WHERE instance_id = 'default' AND id = $1 LIMIT 1",
     )
+    .bind(DEFAULT_ORG_ID)
     .fetch_optional(pool)
     .await?
     {
         Some(row) => row.0,
         None => {
-            let id = Uuid::new_v4().to_string();
             sqlx::query(
                 "INSERT INTO orgs (id, instance_id, name, state) VALUES ($1, 'default', 'Default', 'active')",
             )
-            .bind(&id)
+            .bind(DEFAULT_ORG_ID)
             .execute(pool)
             .await?;
-            id
+            DEFAULT_ORG_ID.to_string()
         }
     };
 
@@ -268,6 +288,8 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         } else {
             &user.display_name
         };
+        let metadata = seed_user_metadata(user);
+        let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".into());
 
         // Check if user exists.
         let existing: Option<(String,)> = sqlx::query_as(
@@ -279,27 +301,33 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
 
         let user_id = if let Some(row) = existing {
             if user.on_conflict == "update" {
-                sqlx::query(
-                    "UPDATE users SET display_name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
-                )
-                .bind(display_name)
-                .bind(&row.0)
-                .execute(pool)
-                .await?;
+                let sql = format!(
+                    "UPDATE users SET display_name = $1, metadata = {}, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+                    scoped.json_bind(2),
+                );
+                sqlx::query(&sql)
+                    .bind(display_name)
+                    .bind(&metadata_json)
+                    .bind(&row.0)
+                    .execute(pool)
+                    .await?;
             }
             row.0
         } else {
+            let sql = format!(
+                "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, metadata) \
+                 VALUES ($1, 'default', $2, $3, $4, 'human', 'active', {})",
+                scoped.json_bind(5),
+            );
             let id = Uuid::new_v4().to_string();
-            sqlx::query(
-                "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state) \
-                 VALUES ($1, 'default', $2, $3, $4, 'human', 'active')",
-            )
-            .bind(&id)
-            .bind(&org_id)
-            .bind(&user.identifier)
-            .bind(display_name)
-            .execute(pool)
-            .await?;
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(&org_id)
+                .bind(&user.identifier)
+                .bind(display_name)
+                .bind(&metadata_json)
+                .execute(pool)
+                .await?;
             id
         };
 

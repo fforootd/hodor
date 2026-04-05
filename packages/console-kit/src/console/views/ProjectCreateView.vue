@@ -1,91 +1,64 @@
 <template>
-  <ResourceCreateCockpit
-    v-model:active-tab="activeTab"
-    v-model:json-content="jsonContent"
-    back-route="/projects"
-    :badges="badges"
-    :curl-snippets="curlSnippets"
-    description="Shape the project around its schema-backed fields, keep org context visible, and leave developer tooling in its own lane."
-    details-description="Capture the project details that matter for operators and collaboration."
-    :error="error"
-    eyebrow="Project creation"
-    :json-error="jsonError"
-    :json-valid="jsonValid"
-    :review-rows="reviewRows"
-    :review-summary-cards="reviewSummaryCards"
-    :schema="schemaContext.schema"
-    singular-title="Project"
-    :submitting="submitting"
-    :summary-cards="summaryCards"
-    @submit="submit"
-    @json-valid="onJsonValid"
-    @json-error="onJsonError"
-  >
-    <template #details>
-      <SchemaFieldEditor
-        v-if="schemaContext.schema"
-        v-model="formData"
-        :fields="schemaFields"
-      />
-      <div v-else class="flex items-center gap-2 text-sm text-muted-foreground">
-        Loading schema…
-      </div>
-    </template>
-  </ResourceCreateCockpit>
+  <div class="mx-auto max-w-lg space-y-8">
+    <div>
+      <router-link to="/projects" class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+        <ArrowLeft class="size-4" />
+        Back to Projects
+      </router-link>
+    </div>
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Create Project</h1>
+      <p class="text-sm text-muted-foreground mt-1">Projects organize applications and their settings.</p>
+    </div>
+    <Card>
+      <CardContent class="pt-6 space-y-4">
+        <div class="space-y-2">
+          <Label for="name">Name</Label>
+          <Input id="name" v-model="form.name" placeholder="My Project" />
+        </div>
+        <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ error }}</div>
+      </CardContent>
+    </Card>
+    <div class="flex items-center justify-end gap-3">
+      <Button variant="outline" as-child><router-link to="/projects">Cancel</router-link></Button>
+      <Button :disabled="!canSubmit || submitting" @click="submit">
+        <Spinner v-if="submitting" class="mr-2 size-4" />
+        Create Project
+      </Button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref, reactive, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { projectApi } from '@/api/resources'
-import ResourceCreateCockpit from '@/console/components/ResourceCreateCockpit.vue'
-import SchemaFieldEditor from '@/console/components/SchemaFieldEditor.vue'
-import { useResourceCreate } from '@/console/composables/useResourceCreate'
-import { useOrgContext } from '@/console/composables/useOrgContext'
-import { extractSchemaFields, type SummaryFact } from '@/console/utils/schema-resource'
+import { notifySuccess, notifyError } from '@/lib/notify'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { ArrowLeft } from 'lucide-vue-next'
 
-const activeTab = ref('details')
-const { currentOrgId } = useOrgContext()
+const router = useRouter()
+const submitting = ref(false)
+const error = ref('')
+const form = reactive({ name: '' })
+const canSubmit = computed(() => form.name.trim().length > 0)
 
-const {
-  schemaContext,
-  formData,
-  jsonValid,
-  jsonContent,
-  jsonError,
-  submitting,
-  error,
-  payload,
-  curlSnippets,
-  reviewFacts,
-  submit,
-  onJsonValid,
-  onJsonError,
-} = useResourceCreate({
-  schemaType: 'project',
-  apiPath: '/v1/projects',
-  resourceName: 'Project',
-  listRoute: '/projects',
-  createFn: projectApi.create,
-  includeOrgHeader: true,
-})
-
-const schemaFields = computed(() => extractSchemaFields(schemaContext.value.schema))
-const projectName = computed(() => String(formData.value.name || 'Pending project name'))
-const projectDescription = computed(() => String(formData.value.description || 'No description yet'))
-const badges = computed(() => ([
-  { label: 'Project', variant: 'outline' as const },
-  { label: schemaContext.value.schemaType || 'project', variant: 'secondary' as const },
-  ...(currentOrgId.value ? [{ label: currentOrgId.value, variant: 'secondary' as const }] : []),
-]))
-const summaryCards = computed<SummaryFact[]>(() => ([
-  { label: 'Project', value: projectName.value },
-  { label: 'Organization context', value: currentOrgId.value || 'No org selected' },
-  { label: 'Description', value: projectDescription.value },
-]))
-const reviewRows = computed(() => reviewFacts.value)
-const reviewSummaryCards = computed<SummaryFact[]>(() => ([
-  { label: 'Project', value: projectName.value },
-  { label: 'Org context', value: currentOrgId.value || 'No org selected' },
-  { label: 'Developer payload', value: `${Object.keys(payload.value.data || {}).length} schema fields in payload` },
-]))
+async function submit() {
+  submitting.value = true
+  error.value = ''
+  try {
+    const created = await projectApi.create({ name: form.name.trim() })
+    notifySuccess('Project created', `${form.name} is ready.`)
+    router.push(`/projects/${created.id}`)
+  } catch (e: any) {
+    error.value = e?.error || e?.message || 'Failed to create project'
+    notifyError('Failed to create project', e)
+  } finally {
+    submitting.value = false
+  }
+}
 </script>

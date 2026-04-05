@@ -7,6 +7,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zitadel_db::{
+    create_named_resource, current_instance_id, delete_instance_row, get_named_resource,
+    list_named_resources, update_named_resource_name,
+};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -34,14 +38,14 @@ pub struct ItemResponse {
     pub updated_at: String,
 }
 
-impl From<(String, String, String, String, String)> for ItemResponse {
-    fn from(r: (String, String, String, String, String)) -> Self {
+impl From<zitadel_db::NamedResourceRecord> for ItemResponse {
+    fn from(r: zitadel_db::NamedResourceRecord) -> Self {
         Self {
-            id: r.0,
-            name: r.1,
-            state: r.2,
-            created_at: r.3,
-            updated_at: r.4,
+            id: r.id,
+            name: r.name,
+            state: r.state,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
         }
     }
 }
@@ -50,40 +54,17 @@ async fn create(State(s): State<ApiState>, Json(req): Json<CreateRequest>) -> Re
     if req.name.is_empty() {
         return response::bad_request("name is required");
     }
-    let scoped = s.db.scoped_default();
     let id = Uuid::new_v4().to_string();
-    match sqlx::query(
-        "INSERT INTO projects (id, instance_id, name, state) VALUES ($1, $2, $3, 'active')",
-    )
-    .bind(&id)
-    .bind(scoped.instance_id())
-    .bind(&req.name)
-    .execute(scoped.pool())
-    .await
+    match create_named_resource(&s.db, current_instance_id().as_ref(), "projects", &id, &req.name)
+        .await
     {
-        Ok(_) => response::json_created(ItemResponse {
-            id,
-            name: req.name,
-            state: "active".into(),
-            created_at: String::new(),
-            updated_at: String::new(),
-        }),
+        Ok(record) => response::json_created(ItemResponse::from(record)),
         Err(e) => response::bad_request(format!("{e}")),
     }
 }
 
 async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    let scoped = s.db.scoped_default();
-    let (created_at, updated_at) = scoped.select_timestamps();
-    let sql = format!(
-        "SELECT id, name, state, {created_at}, {updated_at} FROM projects WHERE instance_id = $1 AND id = $2"
-    );
-    match sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
-        .bind(scoped.instance_id())
-        .bind(&id)
-        .fetch_optional(scoped.pool())
-        .await
-    {
+    match get_named_resource(&s.db, current_instance_id().as_ref(), "projects", &id).await {
         Ok(Some(r)) => response::json_ok(ItemResponse::from(r)),
         Ok(None) => response::not_found("not found"),
         Err(e) => response::internal_error(format!("{e}")),
@@ -91,18 +72,15 @@ async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response 
 }
 
 async fn list(State(s): State<ApiState>, Query(p): Query<response::PaginationParams>) -> Response {
-    let scoped = s.db.scoped_default();
     let cursor = p.cursor.unwrap_or_default();
-    let (created_at, updated_at) = scoped.select_timestamps();
-    let sql = format!(
-        "SELECT id, name, state, {created_at}, {updated_at} FROM projects WHERE instance_id = $1 AND id > $2 ORDER BY id LIMIT $3"
-    );
-    match sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
-        .bind(scoped.instance_id())
-        .bind(&cursor)
-        .bind(p.limit.min(200))
-        .fetch_all(scoped.pool())
-        .await
+    match list_named_resources(
+        &s.db,
+        current_instance_id().as_ref(),
+        "projects",
+        &cursor,
+        p.limit.min(200),
+    )
+    .await
     {
         Ok(rows) => {
             let items: Vec<ItemResponse> = rows.into_iter().map(ItemResponse::from).collect();
@@ -121,17 +99,28 @@ async fn update(
     Path(id): Path<String>,
     Json(req): Json<CreateRequest>,
 ) -> Response {
-    let scoped = s.db.scoped_default();
     if req.name.is_empty() {
         return response::bad_request("name required");
     }
-    let result = sqlx::query("UPDATE projects SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE instance_id = $2 AND id = $3")
-        .bind(&req.name).bind(scoped.instance_id()).bind(&id).execute(scoped.pool()).await;
-    response::handle_mutation(result, "project", || {
-        response::json_ok(serde_json::json!({"id": id, "updated": true}))
-    })
+    match update_named_resource_name(
+        &s.db,
+        current_instance_id().as_ref(),
+        "projects",
+        &id,
+        &req.name,
+    )
+    .await
+    {
+        Ok(true) => response::json_ok(serde_json::json!({"id": id, "updated": true})),
+        Ok(false) => response::not_found("project not found"),
+        Err(e) => response::internal_error(format!("{e}")),
+    }
 }
 
 async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    response::delete_by_id(&s.db.scoped_default(), "projects", &id, "project").await
+    match delete_instance_row(&s.db, current_instance_id().as_ref(), "projects", &id).await {
+        Ok(true) => response::no_content(),
+        Ok(false) => response::not_found("project not found"),
+        Err(e) => response::internal_error(format!("{e}")),
+    }
 }

@@ -9,30 +9,23 @@ import { getDeviceFingerprint } from '../lib/telemetry'
 // standalone console and the cloud portal.
 
 let _getBaseUrl: () => string = () => ''
-let _getOrgId: () => string | null = () => null
-let _getInstanceId: () => string | null = () => null
 let _onUnauthorized: (() => void) | null = null
 
+// Legacy stubs — kept for backward compat with code that imports these.
+// Instance scoping is now URL-path-based; org filtering is query-param-based.
+/** @deprecated Instance context is now URL-path-based. This is a no-op. */
+export function setInstanceContext(_instanceId: string | null) {}
+/** @deprecated Instance context is now URL-path-based. Always returns null. */
+export function getInstanceContext(): string | null { return null }
+
 export interface ApiClientConfig {
-  /** Static base URL string, or a function for dynamic resolution.
-   *  Use a function when the base URL changes at runtime (e.g., the portal
-   *  switches between the central portal API and regional instance APIs
-   *  per ADR-030 — regional admin traffic goes direct to the region). */
   baseUrl: string | (() => string)
-  getOrgId?: () => string | null
-  /** Instance ID header for cloud portal routing. When the portal
-   *  talks directly to a regional Zitadel API, this header may not
-   *  be needed (the region already knows the instance). It is still
-   *  useful when routing through a shared regional endpoint. */
-  getInstanceId?: () => string | null
   onUnauthorized?: () => void
 }
 
 export function configureApi(config: ApiClientConfig) {
   const bu = config.baseUrl
   _getBaseUrl = typeof bu === 'function' ? bu : () => bu
-  if (config.getOrgId) _getOrgId = config.getOrgId
-  if (config.getInstanceId) _getInstanceId = config.getInstanceId
   if (config.onUnauthorized) _onUnauthorized = config.onUnauthorized
 }
 
@@ -165,23 +158,10 @@ export function credentialsMode(baseUrl = _getBaseUrl()): RequestCredentials {
   }
 }
 
-export function getCurrentOrgHeader(): string | null {
-  try {
-    const orgId = _getOrgId()
-    return orgId && orgId.trim() ? orgId.trim() : null
-  } catch {
-    return null
-  }
-}
-
-export function getCurrentInstanceHeader(): string | null {
-  try {
-    const instanceId = _getInstanceId()
-    return instanceId && instanceId.trim() ? instanceId.trim() : null
-  } catch {
-    return null
-  }
-}
+/** @deprecated Org filtering is now query-param-based. */
+export function getCurrentOrgHeader(): string | null { return null }
+/** @deprecated Instance scoping is now URL-path-based. */
+export function getCurrentInstanceHeader(): string | null { return null }
 
 // ─── Request Context ───────────────────────────────────────
 // Each page navigation generates a new request_id (transmitted via W3C
@@ -220,21 +200,24 @@ async function fetchWithContext(
   if (!(opts.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  if (!headers.has('X-Org-Id')) {
-    const orgId = getCurrentOrgHeader()
-    if (orgId) {
-      headers.set('X-Org-Id', orgId)
-    }
-  }
-  if (!headers.has('X-Zitadel-Instance')) {
-    const instanceId = getCurrentInstanceHeader()
-    if (instanceId) {
-      headers.set('X-Zitadel-Instance', instanceId)
-    }
+
+  // Rewrite /v1/... to /v1/instances/:id/... when inside an instance scope.
+  // Skip rewriting for root-level endpoints (console bootstrap, admin, auth, instances CRUD).
+  let resolvedPath = path
+  const instanceMatch = window.location.pathname.match(/\/console\/instances\/([^/]+)/)
+  if (
+    instanceMatch &&
+    path.startsWith('/v1/') &&
+    !path.startsWith('/v1/instances') &&
+    !path.startsWith('/v1/console/') &&
+    !path.startsWith('/v1/admin/') &&
+    !path.startsWith('/v1/auth/')
+  ) {
+    resolvedPath = `/v1/instances/${instanceMatch[1]}${path.slice(3)}`
   }
 
   try {
-    return await fetch(`${baseUrl}${path}`, {
+    return await fetch(`${baseUrl}${resolvedPath}`, {
       ...opts,
       headers: {
         Traceparent: traceparent,

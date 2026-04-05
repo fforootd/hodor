@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use zitadel_config::StorageConfig;
-use zitadel_db::{Db, Dialect};
+use zitadel_db::{BackendKind, Db};
 
 use crate::{
     ChannelSink, DefaultAnalyticsStorage, DefaultKvStore, DefaultSink, DefaultStatefulStorage,
-    DefaultTransientStorage, MemoryKvStore, NoopAnalyticsSink, SqlAnalyticsQueryBackend,
-    SqlKvStore, SqlReadStore, SqlSink, SqlStatefulStore, prepare_postgres_kv_schema,
+    DefaultTransientStorage, MemoryKvStore, NoopAnalyticsSink, SpannerAnalyticsQueryBackend,
+    SpannerKvStore, SpannerReadStore, SpannerStatefulStore, SqlAnalyticsQueryBackend, SqlKvStore,
+    SqlReadStore, SqlSink, SqlStatefulStore, prepare_postgres_kv_schema,
     prepare_postgres_sink_schema,
 };
 
@@ -34,13 +35,9 @@ impl StorageRuntime {
         session_max_age_secs: u64,
     ) -> anyhow::Result<Self> {
         let mut opened_role_dbs = HashMap::new();
-        let stateful_backend = match db.dialect() {
-            Dialect::Sqlite => "sqlite",
-            Dialect::Postgres => "postgres",
-        }
-        .to_string();
+        let stateful_backend = db.backend().to_string();
 
-        let read_backend = derive_read_backend(config, db.dialect())?;
+        let read_backend = derive_read_backend(config, db.backend())?;
         let read_store = if read_backend == "postgres_replica" {
             if config.read.url.is_empty() {
                 anyhow::bail!(
@@ -59,18 +56,23 @@ impl StorageRuntime {
             SqlReadStore::new(db.clone())
         };
 
-        let stateful = Arc::new(DefaultStatefulStorage::new(
-            SqlStatefulStore::new(db.clone()),
-            read_store,
-        ));
+        let stateful = Arc::new(match db.backend() {
+            BackendKind::Spanner => DefaultStatefulStorage::new_spanner(
+                SpannerStatefulStore::new(db.clone()),
+                SpannerReadStore::new(db.clone()),
+            ),
+            BackendKind::Sqlite | BackendKind::Postgres => {
+                DefaultStatefulStorage::new_sql(SqlStatefulStore::new(db.clone()), read_store)
+            }
+        });
 
-        let kv_backend = derive_kv_backend(config, db.dialect())?;
+        let kv_backend = derive_kv_backend(config, db.backend())?;
         let kv = match kv_backend.as_str() {
             "memory" => {
                 DefaultKvStore::Memory(MemoryKvStore::new(db.clone(), session_max_age_secs))
             }
             "postgres_unlogged" => {
-                if db.dialect() != Dialect::Postgres {
+                if db.backend() != BackendKind::Postgres {
                     anyhow::bail!(
                         "storage.kv.backend = \"postgres_unlogged\" requires a Postgres stateful store"
                     );
@@ -94,13 +96,38 @@ impl StorageRuntime {
                     session_max_age_secs,
                 ))
             }
+            "shared_sql" => match db.backend() {
+                BackendKind::Spanner => {
+                    DefaultKvStore::Spanner(SpannerKvStore::new(db.clone(), session_max_age_secs))
+                }
+                BackendKind::Sqlite | BackendKind::Postgres => {
+                    let kv_db = resolve_role_db(
+                        &config.kv.url,
+                        &config.stateful.url,
+                        &db,
+                        &mut opened_role_dbs,
+                    )
+                    .await?;
+                    let authoritative_db =
+                        if role_uses_stateful_db(&config.kv.url, &config.stateful.url) {
+                            None
+                        } else {
+                            Some(db.clone())
+                        };
+                    DefaultKvStore::Sql(SqlKvStore::new(
+                        kv_db,
+                        authoritative_db,
+                        session_max_age_secs,
+                    ))
+                }
+            },
             "redis" => anyhow::bail!(
                 "storage.kv.backend = \"redis\" is not implemented yet in this POC runtime"
             ),
             other => anyhow::bail!("unsupported storage.kv.backend: {other}"),
         };
 
-        let sink_backend = derive_sink_backend(config, db.dialect())?;
+        let sink_backend = derive_sink_backend(config, db.backend())?;
         let flush_interval = parse_duration(&config.sink.flush_interval);
         let sink = match sink_backend.as_str() {
             "channel" => DefaultSink::Channel(ChannelSink::new(
@@ -110,7 +137,7 @@ impl StorageRuntime {
                 flush_interval,
             )),
             "postgres" => {
-                if db.dialect() != Dialect::Postgres {
+                if db.backend() != BackendKind::Postgres {
                     anyhow::bail!(
                         "storage.sink.backend = \"postgres\" requires a Postgres stateful store"
                     );
@@ -151,10 +178,16 @@ impl StorageRuntime {
         }
 
         let analytics_backend = derive_analytics_backend(config)?;
-        let analytics = Arc::new(DefaultAnalyticsStorage::new(
-            NoopAnalyticsSink,
-            SqlAnalyticsQueryBackend::new(db.clone()),
-        ));
+        let analytics = Arc::new(match db.backend() {
+            BackendKind::Spanner => DefaultAnalyticsStorage::new_spanner(
+                NoopAnalyticsSink,
+                SpannerAnalyticsQueryBackend::new(db.clone()),
+            ),
+            BackendKind::Sqlite | BackendKind::Postgres => DefaultAnalyticsStorage::new_sql(
+                NoopAnalyticsSink,
+                SqlAnalyticsQueryBackend::new(db.clone()),
+            ),
+        });
 
         Ok(Self {
             stateful,
@@ -176,13 +209,13 @@ pub async fn prepare_postgres_role_databases(
     config: &StorageConfig,
     stateful_db: &Db,
 ) -> anyhow::Result<()> {
-    if stateful_db.dialect() != Dialect::Postgres {
+    if stateful_db.backend() != BackendKind::Postgres {
         return Ok(());
     }
 
     let mut opened_role_dbs = HashMap::new();
 
-    let read_backend = derive_read_backend(config, Dialect::Postgres)?;
+    let read_backend = derive_read_backend(config, BackendKind::Postgres)?;
     if read_backend == "postgres_replica" {
         if config.read.url.is_empty() {
             anyhow::bail!(
@@ -194,7 +227,7 @@ pub async fn prepare_postgres_role_databases(
         }
     }
 
-    let kv_backend = derive_kv_backend(config, Dialect::Postgres)?;
+    let kv_backend = derive_kv_backend(config, BackendKind::Postgres)?;
     if kv_backend == "postgres_unlogged"
         && !role_uses_stateful_db(&config.kv.url, &config.stateful.url)
     {
@@ -208,7 +241,7 @@ pub async fn prepare_postgres_role_databases(
         prepare_postgres_kv_schema(&kv_db, true).await?;
     }
 
-    let sink_backend = derive_sink_backend(config, Dialect::Postgres)?;
+    let sink_backend = derive_sink_backend(config, BackendKind::Postgres)?;
     if sink_backend == "postgres" && !role_uses_stateful_db(&config.sink.url, &config.stateful.url)
     {
         let sink_db = resolve_role_db(
@@ -224,52 +257,55 @@ pub async fn prepare_postgres_role_databases(
     Ok(())
 }
 
-fn derive_read_backend(config: &StorageConfig, dialect: Dialect) -> anyhow::Result<String> {
+fn derive_read_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Result<String> {
     if config.read.backend.is_empty() {
-        return Ok(match dialect {
-            Dialect::Sqlite => "same_connection",
-            Dialect::Postgres => "same_primary",
+        return Ok(match backend {
+            BackendKind::Sqlite => "same_connection",
+            BackendKind::Postgres | BackendKind::Spanner => "same_primary",
         }
         .to_string());
     }
 
     match config.read.backend.as_str() {
-        "same_connection" if dialect == Dialect::Sqlite => Ok("same_connection".into()),
-        "same_primary" if dialect == Dialect::Postgres => Ok("same_primary".into()),
-        "postgres_replica" if dialect == Dialect::Postgres => Ok("postgres_replica".into()),
+        "same_connection" if backend == BackendKind::Sqlite => Ok("same_connection".into()),
+        "same_primary" if backend != BackendKind::Sqlite => Ok("same_primary".into()),
+        "postgres_replica" if backend == BackendKind::Postgres => Ok("postgres_replica".into()),
         other => anyhow::bail!("unsupported storage.read.backend for this stateful store: {other}"),
     }
 }
 
-fn derive_kv_backend(config: &StorageConfig, dialect: Dialect) -> anyhow::Result<String> {
+fn derive_kv_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Result<String> {
     if config.kv.backend.is_empty() {
-        return Ok(match dialect {
-            Dialect::Sqlite => "memory",
-            Dialect::Postgres => "postgres_unlogged",
+        return Ok(match backend {
+            BackendKind::Sqlite => "memory",
+            BackendKind::Postgres => "postgres_unlogged",
+            BackendKind::Spanner => "shared_sql",
         }
         .to_string());
     }
 
     match config.kv.backend.as_str() {
         "memory" => Ok("memory".into()),
-        "postgres_unlogged" => Ok("postgres_unlogged".into()),
+        "postgres_unlogged" if backend == BackendKind::Postgres => Ok("postgres_unlogged".into()),
+        "shared_sql" if backend != BackendKind::Sqlite => Ok("shared_sql".into()),
         "redis" => Ok("redis".into()),
         other => anyhow::bail!("unsupported storage.kv.backend: {other}"),
     }
 }
 
-fn derive_sink_backend(config: &StorageConfig, dialect: Dialect) -> anyhow::Result<String> {
+fn derive_sink_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Result<String> {
     if config.sink.backend.is_empty() {
-        return Ok(match dialect {
-            Dialect::Sqlite => "channel",
-            Dialect::Postgres => "postgres",
+        return Ok(match backend {
+            BackendKind::Sqlite => "channel",
+            BackendKind::Postgres => "postgres",
+            BackendKind::Spanner => "noop",
         }
         .to_string());
     }
 
     match config.sink.backend.as_str() {
         "channel" => Ok("channel".into()),
-        "postgres" => Ok("postgres".into()),
+        "postgres" if backend == BackendKind::Postgres => Ok("postgres".into()),
         "redis" => Ok("redis".into()),
         "noop" => Ok("noop".into()),
         other => anyhow::bail!("unsupported storage.sink.backend: {other}"),
@@ -348,6 +384,7 @@ mod tests {
     async fn postgres_like_config_selects_postgres_defaults() {
         let config = StorageConfig {
             stateful: zitadel_config::StatefulStorageConfig {
+                backend: "postgres".into(),
                 url: "postgres://user:pass@localhost/zitadel".into(),
                 ..Default::default()
             },
@@ -356,9 +393,9 @@ mod tests {
 
         let roles = StorageRoleSummary {
             stateful: "postgres".into(),
-            read: derive_read_backend(&config, Dialect::Postgres).unwrap(),
-            kv: derive_kv_backend(&config, Dialect::Postgres).unwrap(),
-            sink: derive_sink_backend(&config, Dialect::Postgres).unwrap(),
+            read: derive_read_backend(&config, BackendKind::Postgres).unwrap(),
+            kv: derive_kv_backend(&config, BackendKind::Postgres).unwrap(),
+            sink: derive_sink_backend(&config, BackendKind::Postgres).unwrap(),
             process_cache: "memory".into(),
             analytics: derive_analytics_backend(&config).unwrap(),
         };
@@ -367,6 +404,31 @@ mod tests {
         assert_eq!(roles.read, "same_primary");
         assert_eq!(roles.kv, "postgres_unlogged");
         assert_eq!(roles.sink, "postgres");
+    }
+
+    #[test]
+    fn spanner_like_config_selects_shared_sql_and_noop_sink() {
+        let config = StorageConfig {
+            stateful: zitadel_config::StatefulStorageConfig {
+                backend: "spanner".into(),
+                url: "postgres://localhost/spanner".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let roles = StorageRoleSummary {
+            stateful: "spanner".into(),
+            read: derive_read_backend(&config, BackendKind::Spanner).unwrap(),
+            kv: derive_kv_backend(&config, BackendKind::Spanner).unwrap(),
+            sink: derive_sink_backend(&config, BackendKind::Spanner).unwrap(),
+            process_cache: "memory".into(),
+            analytics: derive_analytics_backend(&config).unwrap(),
+        };
+
+        assert_eq!(roles.read, "same_primary");
+        assert_eq!(roles.kv, "shared_sql");
+        assert_eq!(roles.sink, "noop");
     }
 
     #[tokio::test]

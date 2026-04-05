@@ -8,13 +8,9 @@ use crate::DEFAULT_INSTANCE_ID;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InstanceContext {
     pub instance_id: String,
-    pub customer_id: String,
+    pub resolved_org_id: Option<String>,
     pub placement_mode: String,
     pub region_key: Option<String>,
-    pub backend_key: String,
-    pub backend_kind: String,
-    pub backend_url: String,
-    pub backend_secret_ref: String,
     pub host: String,
     pub source: String,
 }
@@ -23,13 +19,9 @@ impl InstanceContext {
     pub fn new(instance_id: impl Into<String>) -> Self {
         Self {
             instance_id: instance_id.into(),
-            customer_id: String::new(),
+            resolved_org_id: None,
             placement_mode: "global".into(),
             region_key: None,
-            backend_key: "default".into(),
-            backend_kind: String::new(),
-            backend_url: String::new(),
-            backend_secret_ref: String::new(),
             host: String::new(),
             source: String::new(),
         }
@@ -75,13 +67,9 @@ mod tests {
         let scoped = with_instance_context(
             InstanceContext {
                 instance_id: "inst_cloud".into(),
-                customer_id: "cust_1".into(),
+                resolved_org_id: Some("org_parent".into()),
                 placement_mode: "regional".into(),
                 region_key: Some("europe-west1".into()),
-                backend_key: "eu-primary".into(),
-                backend_kind: "spanner".into(),
-                backend_url: "spanner://projects/example/instances/eu/databases/identity".into(),
-                backend_secret_ref: "projects/example/secrets/eu-primary".into(),
                 host: "login.example.com".into(),
                 source: "host".into(),
             },
@@ -93,8 +81,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(scoped.backend_key, "eu-primary");
-        assert_eq!(scoped.backend_kind, "spanner");
+        assert_eq!(scoped.resolved_org_id.as_deref(), Some("org_parent"));
         assert_eq!(current_instance_id().as_ref(), DEFAULT_INSTANCE_ID);
     }
 }

@@ -6,6 +6,7 @@ use axum::{
     routing::get,
 };
 use serde::Serialize;
+use zitadel_db::{current_instance_id, delete_instance_row, get_action, list_actions};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -34,23 +35,7 @@ struct ActionResponse {
 }
 
 async fn list(State(s): State<ApiState>) -> Response {
-    let scoped = s.db.scoped_default();
-    let config = scoped.as_text("config");
-    let metadata = scoped.as_text("metadata");
-    let created_at = scoped.as_text("created_at");
-    let enabled = scoped.bool_as_int("enabled");
-    let fail_open = scoped.bool_as_int("fail_open");
-    let sql = format!(
-        "SELECT id, name, hook, action_type, COALESCE(trigger_expr, 'true'), \
-         COALESCE({config}, '{{}}'), priority, {enabled}, {fail_open}, \
-         COALESCE({metadata}, '{{}}'), {created_at} \
-         FROM actions WHERE instance_id = $1 ORDER BY priority, name"
-    );
-    match sqlx::query_as::<_, ActionRow>(&sql)
-        .bind(scoped.instance_id())
-        .fetch_all(scoped.pool())
-        .await
-    {
+    match list_actions(&s.db, current_instance_id().as_ref()).await {
         Ok(rows) => {
             let items: Vec<ActionResponse> = rows.into_iter().map(action_from_row).collect();
             response::json_ok(serde_json::json!({ "items": items }))
@@ -60,24 +45,7 @@ async fn list(State(s): State<ApiState>) -> Response {
 }
 
 async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    let scoped = s.db.scoped_default();
-    let config = scoped.as_text("config");
-    let metadata = scoped.as_text("metadata");
-    let created_at = scoped.as_text("created_at");
-    let enabled = scoped.bool_as_int("enabled");
-    let fail_open = scoped.bool_as_int("fail_open");
-    let sql = format!(
-        "SELECT id, name, hook, action_type, COALESCE(trigger_expr, 'true'), \
-         COALESCE({config}, '{{}}'), priority, {enabled}, {fail_open}, \
-         COALESCE({metadata}, '{{}}'), {created_at} \
-         FROM actions WHERE instance_id = $1 AND id = $2"
-    );
-    match sqlx::query_as::<_, ActionRow>(&sql)
-        .bind(scoped.instance_id())
-        .bind(&id)
-        .fetch_optional(scoped.pool())
-        .await
-    {
+    match get_action(&s.db, current_instance_id().as_ref(), &id).await {
         Ok(Some(r)) => response::json_ok(action_from_row(r)),
         Ok(None) => response::not_found("action not found"),
         Err(e) => response::internal_error(format!("{e}")),
@@ -85,28 +53,18 @@ async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response 
 }
 
 async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    response::delete_by_id(&s.db.scoped_default(), "actions", &id, "action").await
+    match delete_instance_row(&s.db, current_instance_id().as_ref(), "actions", &id).await {
+        Ok(true) => response::no_content(),
+        Ok(false) => response::not_found("action not found"),
+        Err(e) => response::internal_error(format!("{e}")),
+    }
 }
 
-type ActionRow = (
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    i64,
-    i64,
-    i64,
-    String,
-    String,
-);
-
-fn action_from_row(r: ActionRow) -> ActionResponse {
-    let enabled = r.7 != 0;
-    let name = r.1.clone();
+fn action_from_row(r: zitadel_db::ActionRecord) -> ActionResponse {
+    let enabled = r.enabled;
+    let name = r.name.clone();
     ActionResponse {
-        id: r.0,
+        id: r.id,
         name: name.clone(),
         identifier: name.clone(),
         display_name: name,
@@ -115,14 +73,14 @@ fn action_from_row(r: ActionRow) -> ActionResponse {
         } else {
             "disabled".into()
         },
-        hook: r.2,
-        action_type: r.3,
-        trigger_expr: r.4,
-        config: serde_json::from_str(&r.5).unwrap_or_default(),
-        priority: r.6,
+        hook: r.hook,
+        action_type: r.action_type,
+        trigger_expr: r.trigger_expr,
+        config: serde_json::from_str(&r.config_json).unwrap_or_default(),
+        priority: r.priority,
         enabled,
-        fail_open: r.8 != 0,
-        metadata: serde_json::from_str(&r.9).unwrap_or_default(),
-        created_at: r.10,
+        fail_open: r.fail_open,
+        metadata: serde_json::from_str(&r.metadata_json).unwrap_or_default(),
+        created_at: r.created_at,
     }
 }

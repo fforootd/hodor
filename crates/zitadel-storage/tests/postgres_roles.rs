@@ -8,8 +8,8 @@ use zitadel_config::{
 use zitadel_crypto::token_hash;
 use zitadel_db::{Db, migrate};
 use zitadel_storage::{
-    ReadStore, SessionRecord, Sink, SqlKvStore, SqlSink, StorageRuntime, TransientRecord,
-    TransientStorage, prepare_postgres_role_databases,
+    SessionRecord, Sink, SqlKvStore, SqlSink, StorageRuntime, TransientRecord, TransientStorage,
+    prepare_postgres_role_databases,
 };
 
 #[tokio::test]
@@ -94,7 +94,6 @@ async fn storage_runtime_uses_distinct_postgres_roles_and_session_fallback() -> 
 
     let user = runtime
         .stateful
-        .read()
         .find_active_user_by_identifier("instance-a", "reader@example.com")
         .await?;
     assert_eq!(user.unwrap().user_id, "reader-a");

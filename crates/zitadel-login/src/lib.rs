@@ -113,6 +113,17 @@ mod tests {
         password: &str,
     ) {
         let scoped = state.db.scoped(instance_id.to_string());
+        // Ensure the instance row exists (no-op if it's "default" which is seeded by migration).
+        // Managed children need (parent_instance_id, owner_org_id) pointing to an
+        // existing org in the parent — bootstrap creates org "1" in "default".
+        sqlx::query(
+            "INSERT OR IGNORE INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'default', '1', 'managed', 'active', 'global', '{}')",
+        )
+        .bind(scoped.instance_id())
+        .execute(scoped.pool())
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
             .bind(org_id)
             .bind(scoped.instance_id())

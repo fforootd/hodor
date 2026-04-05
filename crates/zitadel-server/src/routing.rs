@@ -14,18 +14,19 @@ use lru::LruCache;
 use serde::Serialize;
 use tower::{Layer, Service};
 use zitadel_config::Config;
-use zitadel_db::{DEFAULT_INSTANCE_ID, Db, InstanceContext, with_instance_context};
+use zitadel_db::{
+    DEFAULT_INSTANCE_ID, Db, InstanceContext, resolve_domain_route, resolve_instance_route,
+    with_instance_context,
+};
 
 #[derive(Clone)]
 pub struct InstanceResolver {
-    control_plane_db: Db,
+    routing_db: Db,
     cloud_enabled: bool,
     trusted_proxies: Vec<IpNet>,
     cache: Arc<Mutex<LruCache<String, CacheEntry>>>,
     positive_ttl: Duration,
     negative_ttl: Duration,
-    default_backend_kind: String,
-    default_backend_url: String,
 }
 
 #[derive(Clone)]
@@ -49,18 +50,7 @@ struct CacheEntry {
 struct RequestRoutingInput {
     host: String,
     trusted_instance_id: Option<String>,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct InstanceRouteRow {
-    instance_id: String,
-    customer_id: String,
-    placement_mode: String,
-    region_key: Option<String>,
-    backend_key: String,
-    backend_kind: String,
-    backend_url: String,
-    backend_secret_ref: String,
+    path_instance_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -71,42 +61,17 @@ struct ErrorBody {
 
 impl InstanceResolver {
     pub fn new(config: &Config, db: Db) -> Self {
-        Self::from_parts(
-            config,
-            db.clone(),
-            db.dialect().to_string(),
-            config.storage.stateful.url.clone(),
-        )
+        Self::from_parts(config, db)
     }
 
     pub async fn from_config(config: &Config, stateful_db: Db) -> anyhow::Result<Self> {
-        let control_plane_url = config
-            .cloud
-            .resolve_control_plane_url(&config.storage.stateful.url);
-        let control_plane_db =
-            if control_plane_url.is_empty() || control_plane_url == config.storage.stateful.url {
-                stateful_db.clone()
-            } else {
-                Db::open(control_plane_url).await?
-            };
-
-        Ok(Self::from_parts(
-            config,
-            control_plane_db,
-            stateful_db.dialect().to_string(),
-            config.storage.stateful.url.clone(),
-        ))
+        Ok(Self::from_parts(config, stateful_db))
     }
 
-    fn from_parts(
-        config: &Config,
-        control_plane_db: Db,
-        default_backend_kind: String,
-        default_backend_url: String,
-    ) -> Self {
+    fn from_parts(config: &Config, routing_db: Db) -> Self {
         let capacity = NonZeroUsize::new(config.cloud.resolve_cache_capacity()).unwrap();
         Self {
-            control_plane_db,
+            routing_db,
             cloud_enabled: config.cloud.enabled,
             trusted_proxies: config
                 .server
@@ -117,8 +82,6 @@ impl InstanceResolver {
             cache: Arc::new(Mutex::new(LruCache::new(capacity))),
             positive_ttl: Duration::from_secs(config.cloud.resolve_positive_cache_ttl_secs()),
             negative_ttl: Duration::from_secs(config.cloud.resolve_negative_cache_ttl_secs()),
-            default_backend_kind,
-            default_backend_url,
         }
     }
 
@@ -126,6 +89,7 @@ impl InstanceResolver {
         RequestRoutingInput {
             host: normalized_host(req),
             trusted_instance_id: trusted_instance_override(req, &self.trusted_proxies),
+            path_instance_id: extract_path_instance_id(req.uri().path()),
         }
     }
 
@@ -133,21 +97,34 @@ impl InstanceResolver {
         let RequestRoutingInput {
             host,
             trusted_instance_id,
+            path_instance_id,
         } = input;
 
+        // Path param takes highest priority — works regardless of cloud.enabled.
+        // This is the primary mechanism for the console frontend.
+        if let Some(instance_id) = path_instance_id {
+            let cache_key = format!("instance:{instance_id}");
+            if let Some(cached) = self.cached(&cache_key) {
+                return cached;
+            }
+
+            let resolved = self
+                .load_by_instance_id(&instance_id)
+                .await?
+                .map(|mut ctx| {
+                    ctx.source = "path_param".into();
+                    ctx.host = host.clone();
+                    ctx
+                });
+            self.remember(cache_key, resolved.clone());
+            return resolved.ok_or_else(|| anyhow::anyhow!("instance not found"));
+        }
+
         if !self.cloud_enabled {
-            return Ok(InstanceContext {
-                instance_id: DEFAULT_INSTANCE_ID.into(),
-                customer_id: String::new(),
-                placement_mode: "global".into(),
-                region_key: None,
-                backend_key: "default".into(),
-                backend_kind: self.default_backend_kind.clone(),
-                backend_url: self.default_backend_url.clone(),
-                backend_secret_ref: String::new(),
-                host,
-                source: "self_host_default".into(),
-            });
+            let mut ctx = InstanceContext::new(DEFAULT_INSTANCE_ID);
+            ctx.host = host;
+            ctx.source = "self_host_default".into();
+            return Ok(ctx);
         }
 
         if let Some(instance_id) = trusted_instance_id {
@@ -217,30 +194,12 @@ impl InstanceResolver {
     }
 
     async fn load_by_host(&self, host: &str) -> anyhow::Result<Option<InstanceContext>> {
-        let row = sqlx::query_as::<_, InstanceRouteRow>(
-            "SELECT i.instance_id, i.customer_id, i.placement_mode, \
-                    COALESCE(NULLIF(i.region_key, ''), NULLIF(b.region_key, '')) AS region_key, \
-                    i.backend_key, b.kind AS backend_kind, b.url AS backend_url, \
-                    b.secret_ref AS backend_secret_ref \
-             FROM instance_domains d \
-             JOIN instances i ON i.instance_id = d.instance_id \
-             JOIN cloud_backends b ON b.backend_key = i.backend_key \
-             WHERE d.domain = $1 AND d.state = 'active' AND i.state = 'active' AND b.state = 'active' \
-             ORDER BY d.is_primary DESC LIMIT 1",
-        )
-        .bind(host)
-        .fetch_optional(self.control_plane_db.pool())
-        .await?;
-
+        let row = resolve_domain_route(&self.routing_db, host).await?;
         Ok(row.map(|row| InstanceContext {
             instance_id: row.instance_id,
-            customer_id: row.customer_id,
+            resolved_org_id: row.resolved_org_id,
             placement_mode: row.placement_mode,
             region_key: row.region_key,
-            backend_key: row.backend_key,
-            backend_kind: row.backend_kind,
-            backend_url: row.backend_url,
-            backend_secret_ref: row.backend_secret_ref,
             host: host.into(),
             source: "host".into(),
         }))
@@ -250,28 +209,12 @@ impl InstanceResolver {
         &self,
         instance_id: &str,
     ) -> anyhow::Result<Option<InstanceContext>> {
-        let row = sqlx::query_as::<_, InstanceRouteRow>(
-            "SELECT i.instance_id, i.customer_id, i.placement_mode, \
-                    COALESCE(NULLIF(i.region_key, ''), NULLIF(b.region_key, '')) AS region_key, \
-                    i.backend_key, b.kind AS backend_kind, b.url AS backend_url, \
-                    b.secret_ref AS backend_secret_ref \
-             FROM instances i \
-             JOIN cloud_backends b ON b.backend_key = i.backend_key \
-             WHERE i.instance_id = $1 AND i.state = 'active' AND b.state = 'active' LIMIT 1",
-        )
-        .bind(instance_id)
-        .fetch_optional(self.control_plane_db.pool())
-        .await?;
-
+        let row = resolve_instance_route(&self.routing_db, instance_id).await?;
         Ok(row.map(|row| InstanceContext {
             instance_id: row.instance_id,
-            customer_id: row.customer_id,
+            resolved_org_id: None,
             placement_mode: row.placement_mode,
             region_key: row.region_key,
-            backend_key: row.backend_key,
-            backend_kind: row.backend_kind,
-            backend_url: row.backend_url,
-            backend_secret_ref: row.backend_secret_ref,
             host: String::new(),
             source: "trusted_header".into(),
         }))
@@ -366,6 +309,18 @@ fn normalize_host(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Extract instance ID from URL path: `/v1/instances/{id}/...` → `Some(id)`.
+/// Only matches when there's a sub-path after the ID (not bare `/v1/instances` or `/v1/instances/{id}`).
+fn extract_path_instance_id(path: &str) -> Option<String> {
+    let stripped = path.strip_prefix("/v1/instances/")?;
+    let id = stripped.split('/').next().filter(|s| !s.is_empty())?;
+    // Only match when id is followed by a sub-resource path
+    if !stripped[id.len()..].starts_with('/') {
+        return None;
+    }
+    Some(id.to_string())
+}
+
 fn trusted_instance_override<B>(req: &Request<B>, trusted_proxies: &[IpNet]) -> Option<String> {
     if trusted_proxies.is_empty() || !request_from_trusted_proxy(req, trusted_proxies) {
         return None;
@@ -399,23 +354,17 @@ mod tests {
     async fn seeded_resolver() -> InstanceResolver {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
         sqlx::query(
-            "INSERT INTO cloud_backends (backend_key, kind, url, secret_ref, region_key, state, global_default) \
-             VALUES ('eu-primary', 'spanner', 'spanner://projects/example/instances/eu/databases/identity', \
-                     'projects/example/secrets/eu-primary', 'europe-west1', 'active', 0)",
+            "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, region_key, feature_overrides) \
+             VALUES ('inst_eu', 'default', '1', 'managed', 'active', 'regional', 'europe-west1', '{}')",
         )
         .execute(db.pool())
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO instances (instance_id, customer_id, state, primary_domain, placement_mode, region_key, backend_key) \
-             VALUES ('inst_eu', 'cust_1', 'active', 'login.example.com', 'regional', 'europe-west1', 'eu-primary')",
-        )
-        .execute(db.pool())
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO instance_domains (domain, instance_id, is_primary, state) VALUES ('login.example.com', 'inst_eu', 1, 'active')",
+            "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
+             VALUES ('login.example.com', 'inst_eu', NULL, 1, 'active', 0)",
         )
         .execute(db.pool())
         .await
@@ -442,17 +391,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ctx.instance_id, "inst_eu");
-        assert_eq!(ctx.backend_key, "eu-primary");
-        assert_eq!(ctx.backend_kind, "spanner");
-        assert_eq!(
-            ctx.backend_url,
-            "spanner://projects/example/instances/eu/databases/identity"
-        );
-        assert_eq!(
-            ctx.backend_secret_ref,
-            "projects/example/secrets/eu-primary"
-        );
+        assert_eq!(ctx.resolved_org_id, None);
         assert_eq!(ctx.region_key.as_deref(), Some("europe-west1"));
+        assert_eq!(ctx.placement_mode, "regional");
+    }
+
+    #[tokio::test]
+    async fn resolves_org_bound_domain_and_sets_resolved_org_id() {
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, region_key, feature_overrides) \
+             VALUES ('inst_child', 'default', '1', 'managed', 'active', 'regional', 'us-central1', '{}')",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO orgs (instance_id, id, name, state) VALUES ('inst_child', 'org_child', 'Child', 'active')",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
+             VALUES ('team.example.com', 'inst_child', 'org_child', 1, 'active', 1)",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let mut config = Config::default();
+        config.cloud.enabled = true;
+        let resolver = InstanceResolver::new(&config, db);
+        let req = Request::builder()
+            .header(header::HOST, "team.example.com")
+            .body(Body::empty())
+            .unwrap();
+
+        let ctx = resolver
+            .resolve(resolver.request_input(&req))
+            .await
+            .unwrap();
+        assert_eq!(ctx.instance_id, "inst_child");
+        assert_eq!(ctx.resolved_org_id.as_deref(), Some("org_child"));
     }
 
     #[tokio::test]
@@ -467,20 +450,12 @@ mod tests {
             .resolve(resolver.request_input(&req))
             .await
             .unwrap();
-        assert_eq!(first.backend_key, "eu-primary");
+        assert_eq!(first.region_key.as_deref(), Some("europe-west1"));
 
         sqlx::query(
-            "INSERT INTO cloud_backends (backend_key, kind, url, secret_ref, region_key, state, global_default) \
-             VALUES ('eu-secondary', 'spanner', 'spanner://projects/example/instances/eu2/databases/identity', \
-                     'projects/example/secrets/eu-secondary', 'europe-west2', 'active', 0)",
+            "UPDATE instances SET region_key = 'europe-west2' WHERE instance_id = 'inst_eu'",
         )
-        .execute(resolver.control_plane_db.pool())
-        .await
-        .unwrap();
-        sqlx::query(
-            "UPDATE instances SET backend_key = 'eu-secondary', region_key = 'europe-west2' WHERE instance_id = 'inst_eu'",
-        )
-        .execute(resolver.control_plane_db.pool())
+        .execute(resolver.routing_db.pool())
         .await
         .unwrap();
 
@@ -488,57 +463,19 @@ mod tests {
             .resolve(resolver.request_input(&req))
             .await
             .unwrap();
-        assert_eq!(second.backend_key, "eu-primary");
+        assert_eq!(second.region_key.as_deref(), Some("europe-west1"));
     }
 
     #[tokio::test]
-    async fn falls_back_to_backend_region_when_instance_region_is_empty() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
-        sqlx::query(
-            "INSERT INTO cloud_backends (backend_key, kind, url, secret_ref, region_key, state, global_default) \
-             VALUES ('us-primary', 'spanner', 'spanner://projects/example/instances/us/databases/identity', \
-                     'projects/example/secrets/us-primary', 'us-central1', 'active', 1)",
-        )
-        .execute(db.pool())
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO instances (instance_id, customer_id, state, primary_domain, placement_mode, region_key, backend_key) \
-             VALUES ('inst_us', 'cust_2', 'active', 'us.example.com', 'regional', NULL, 'us-primary')",
-        )
-        .execute(db.pool())
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO instance_domains (domain, instance_id, is_primary, state) VALUES ('us.example.com', 'inst_us', 1, 'active')",
-        )
-        .execute(db.pool())
-        .await
-        .unwrap();
-
-        let mut config = Config::default();
-        config.cloud.enabled = true;
-        let resolver = InstanceResolver::new(&config, db);
-        let req = Request::builder()
-            .header(header::HOST, "us.example.com")
-            .body(Body::empty())
-            .unwrap();
-
-        let ctx = resolver
-            .resolve(resolver.request_input(&req))
-            .await
-            .unwrap();
-        assert_eq!(ctx.region_key.as_deref(), Some("us-central1"));
-    }
-
-    #[tokio::test]
-    async fn resolves_routes_from_a_separate_control_plane_database() {
+    async fn from_config_uses_stateful_database_for_routing() {
         let (stateful_path, stateful_url) = temp_sqlite_url("stateful");
         let (control_plane_path, control_plane_url) = temp_sqlite_url("control-plane");
 
         let stateful_db = Db::open(&stateful_url).await.unwrap();
         zitadel_db::migrate::migrate(&stateful_db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&stateful_db)
+            .await
+            .unwrap();
 
         let control_plane_db = Db::open(&control_plane_url).await.unwrap();
         zitadel_db::migrate::migrate(&control_plane_db)
@@ -546,34 +483,19 @@ mod tests {
             .unwrap();
 
         sqlx::query(
-            "INSERT INTO cloud_backends (backend_key, kind, url, secret_ref, region_key, state, global_default) \
-             VALUES ('apac-primary', 'spanner', 'spanner://projects/example/instances/apac/databases/identity', \
-                     'projects/example/secrets/apac-primary', 'australia-southeast1', 'active', 0)",
+            "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, region_key, feature_overrides) \
+             VALUES ('inst_apac', 'default', '1', 'managed', 'active', 'regional', 'australia-southeast1', '{}')",
         )
-        .execute(control_plane_db.pool())
+        .execute(stateful_db.pool())
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO instances (instance_id, customer_id, state, primary_domain, placement_mode, region_key, backend_key) \
-             VALUES ('inst_apac', 'cust_3', 'active', 'apac.example.com', 'regional', 'australia-southeast1', 'apac-primary')",
+            "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
+             VALUES ('apac.example.com', 'inst_apac', NULL, 1, 'active', 0)",
         )
-        .execute(control_plane_db.pool())
+        .execute(stateful_db.pool())
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO instance_domains (domain, instance_id, is_primary, state) VALUES ('apac.example.com', 'inst_apac', 1, 'active')",
-        )
-        .execute(control_plane_db.pool())
-        .await
-        .unwrap();
-
-        let stateful_row: Option<(String,)> =
-            sqlx::query_as("SELECT instance_id FROM instance_domains WHERE domain = $1")
-                .bind("apac.example.com")
-                .fetch_optional(stateful_db.pool())
-                .await
-                .unwrap();
-        assert!(stateful_row.is_none());
 
         let mut config = Config::default();
         config.cloud.enabled = true;
@@ -593,8 +515,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ctx.instance_id, "inst_apac");
-        assert_eq!(ctx.backend_key, "apac-primary");
-        assert_eq!(ctx.backend_kind, "spanner");
         assert_eq!(ctx.region_key.as_deref(), Some("australia-southeast1"));
 
         drop(resolver);

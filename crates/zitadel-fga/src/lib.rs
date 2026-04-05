@@ -5,14 +5,20 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_recursion::async_recursion;
 use async_trait::async_trait;
+use google_cloud_spanner::{
+    client::Error as SpannerError, row::Row as SpannerRow, statement::Statement,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sqlx::Row;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use zitadel_db::{Db, Dialect};
+use zitadel_db::{
+    Db, Dialect, list_active_child_instance_ownerships, list_active_org_users,
+};
 
 pub const SCHEMA_VERSION_1_1: &str = "1.1";
+pub const CORE_MODEL_VERSION: &str = "core-2026-04-05-root-hierarchy-v1";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoreInfo {
@@ -477,6 +483,200 @@ impl FgaService {
         self.db.scoped(instance_id.to_string())
     }
 
+    fn spanner_db(&self) -> Result<&zitadel_db::SpannerDb, FgaError> {
+        self.db
+            .spanner()
+            .ok_or_else(|| anyhow::anyhow!("FGA Spanner path requires native Spanner db").into())
+    }
+
+    async fn spanner_query_one(
+        &self,
+        stmt: Statement,
+        context: &'static str,
+    ) -> Result<Option<SpannerRow>, FgaError> {
+        let spanner = self.spanner_db()?;
+        let mut tx = spanner.client().single().await.context(context)?;
+        let mut rows = tx.query(stmt).await.context(context)?;
+        rows.next().await.context(context).map_err(Into::into)
+    }
+
+    async fn spanner_query_all(
+        &self,
+        stmt: Statement,
+        context: &'static str,
+    ) -> Result<Vec<SpannerRow>, FgaError> {
+        let spanner = self.spanner_db()?;
+        let mut tx = spanner.client().single().await.context(context)?;
+        let mut rows = tx.query(stmt).await.context(context)?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.context(context)? {
+            out.push(row);
+        }
+        Ok(out)
+    }
+
+    pub async fn reconcile_root_hierarchy(&self, root_instance_id: &str) -> Result<(), FgaError> {
+        let store = self.initialize_instance(root_instance_id).await?;
+        for child in list_active_child_instance_ownerships(&self.db, root_instance_id)
+            .await
+            .map_err(FgaError::Internal)?
+        {
+            self.initialize_instance(&child.instance_id).await?;
+        }
+
+        let desired = self
+            .desired_root_hierarchy_tuples(root_instance_id)
+            .await
+            .map_err(FgaError::Internal)?;
+        let current = self
+            .read_all_managed_root_tuples(root_instance_id, &store.id)
+            .await?;
+
+        let desired_set = desired
+            .iter()
+            .map(tuple_identity)
+            .collect::<BTreeSet<String>>();
+        let current_set = current
+            .iter()
+            .map(tuple_identity)
+            .collect::<BTreeSet<String>>();
+
+        let writes = desired
+            .into_iter()
+            .filter(|tuple| !current_set.contains(&tuple_identity(tuple)))
+            .collect::<Vec<_>>();
+        let deletes = current
+            .into_iter()
+            .filter(|tuple| !desired_set.contains(&tuple_identity(tuple)))
+            .collect::<Vec<_>>();
+
+        if writes.is_empty() && deletes.is_empty() {
+            return Ok(());
+        }
+
+        self.write_tuples(
+            root_instance_id,
+            &store.id,
+            WriteRequest {
+                writes: TupleKeySet { tuple_keys: writes },
+                deletes: TupleKeySet { tuple_keys: deletes },
+                authorization_model_id: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn root_relation_allowed(
+        &self,
+        root_instance_id: &str,
+        user_id: &str,
+        relation: &str,
+        object: &str,
+    ) -> Result<bool, FgaError> {
+        let store = self.discover_store(root_instance_id).await?;
+        Ok(self
+            .check(
+                root_instance_id,
+                &store.id,
+                CheckRequest {
+                    tuple_key: TupleKey {
+                        user: format!("user:{user_id}"),
+                        relation: relation.to_string(),
+                        object: object.to_string(),
+                        condition: None,
+                    },
+                    authorization_model_id: None,
+                    contextual_tuples: None,
+                    context: None,
+                },
+            )
+            .await?
+            .allowed)
+    }
+
+    async fn desired_root_hierarchy_tuples(
+        &self,
+        root_instance_id: &str,
+    ) -> anyhow::Result<Vec<TupleKey>> {
+        let mut tuples = Vec::new();
+        for link in list_active_org_users(&self.db, root_instance_id).await? {
+            let user = format!("user:{}", link.user_id);
+            let object = format!("org:{}", link.org_id);
+            for relation in ["owner", "admin", "member", "viewer"] {
+                tuples.push(TupleKey {
+                    user: user.clone(),
+                    relation: relation.to_string(),
+                    object: object.clone(),
+                    condition: None,
+                });
+            }
+        }
+
+        for child in list_active_child_instance_ownerships(&self.db, root_instance_id).await? {
+            let object = format!("instance:{}", child.instance_id);
+            tuples.push(TupleKey {
+                user: format!("instance:{root_instance_id}"),
+                relation: "parent".to_string(),
+                object: object.clone(),
+                condition: None,
+            });
+            tuples.push(TupleKey {
+                user: format!("org:{}#owner", child.owner_org_id),
+                relation: "owner".to_string(),
+                object: object.clone(),
+                condition: None,
+            });
+            tuples.push(TupleKey {
+                user: format!("org:{}#admin", child.owner_org_id),
+                relation: "admin".to_string(),
+                object: object.clone(),
+                condition: None,
+            });
+            tuples.push(TupleKey {
+                user: format!("org:{}#viewer", child.owner_org_id),
+                relation: "viewer".to_string(),
+                object,
+                condition: None,
+            });
+        }
+
+        Ok(tuples)
+    }
+
+    async fn read_all_managed_root_tuples(
+        &self,
+        root_instance_id: &str,
+        store_id: &str,
+    ) -> Result<Vec<TupleKey>, FgaError> {
+        let mut continuation = None;
+        let mut tuples = Vec::new();
+        loop {
+            let response = self
+                .read_tuples(
+                    root_instance_id,
+                    store_id,
+                    ReadRequest {
+                        tuple_key: None,
+                        page_size: Some(500),
+                        continuation_token: continuation.clone(),
+                    },
+                )
+                .await?;
+            tuples.extend(
+                response
+                    .tuples
+                    .into_iter()
+                    .map(|record| record.key)
+                    .filter(is_managed_root_tuple),
+            );
+            if response.continuation_token.is_none() {
+                break;
+            }
+            continuation = response.continuation_token;
+        }
+        Ok(tuples)
+    }
+
     async fn cached_store(&self, instance_id: &str) -> Option<StoreInfo> {
         self.store_cache.read().await.get(instance_id).cloned()
     }
@@ -557,19 +757,40 @@ impl FgaService {
             return Ok(Some(store));
         }
 
-        let scoped = self.scoped(instance_id);
-        let row = sqlx::query_as::<_, (String,)>(
-            "SELECT store_id FROM fga_instance_stores WHERE instance_id = $1",
-        )
-        .bind(scoped.instance_id())
-        .fetch_optional(scoped.pool())
-        .await
-        .context("load instance store")?;
+        let store = match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let row = sqlx::query_as::<_, (String,)>(
+                    "SELECT store_id FROM fga_instance_stores WHERE instance_id = $1",
+                )
+                .bind(scoped.instance_id())
+                .fetch_optional(scoped.pool())
+                .await
+                .context("load instance store")?;
 
-        let store = row.map(|row| StoreInfo {
-            id: row.0,
-            name: format!("zitadel-{instance_id}"),
-        });
+                row.map(|row| StoreInfo {
+                    id: row.0,
+                    name: format!("zitadel-{instance_id}"),
+                })
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(
+                    "SELECT store_id FROM fga_instance_stores WHERE instance_id = @instance_id LIMIT 1",
+                );
+                stmt.add_param("instance_id", &instance_id);
+                let row: Option<SpannerRow> =
+                    self.spanner_query_one(stmt, "load instance store").await?;
+                row.map(|row| -> Result<StoreInfo, FgaError> {
+                    Ok(StoreInfo {
+                        id: row
+                            .column_by_name::<String>("store_id")
+                            .context("read spanner store_id")?,
+                        name: format!("zitadel-{instance_id}"),
+                    })
+                })
+                .transpose()?
+            }
+        };
         if let Some(store) = &store {
             self.cache_store(instance_id, store).await;
         }
@@ -581,26 +802,67 @@ impl FgaService {
             return Ok(store);
         }
 
-        let scoped = self.scoped(instance_id);
-        let store_id = instance_id.to_string();
-        let insert = match scoped.dialect() {
-            Dialect::Sqlite => {
-                "INSERT OR IGNORE INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2)"
+        let store = match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let store_id = instance_id.to_string();
+                let insert = match scoped.dialect() {
+                    Dialect::Sqlite => {
+                        "INSERT OR IGNORE INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2)"
+                    }
+                    Dialect::Postgres => {
+                        "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2) ON CONFLICT (instance_id) DO NOTHING"
+                    }
+                    Dialect::Spanner => unreachable!("native Spanner does not use ScopedDb"),
+                };
+                sqlx::query(insert)
+                    .bind(scoped.instance_id())
+                    .bind(&store_id)
+                    .execute(scoped.pool())
+                    .await
+                    .context("insert instance store")?;
+                StoreInfo {
+                    id: store_id,
+                    name: format!("zitadel-{instance_id}"),
+                }
             }
-            Dialect::Postgres => {
-                "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2) ON CONFLICT (instance_id) DO NOTHING"
-            }
-        };
-        sqlx::query(insert)
-            .bind(scoped.instance_id())
-            .bind(&store_id)
-            .execute(scoped.pool())
-            .await
-            .context("insert instance store")?;
+            Db::Spanner(spanner) => {
+                let instance_id = instance_id.to_string();
+                let store_id = instance_id.clone();
+                let (_, store) = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let instance_id = instance_id.clone();
+                        let store_id = store_id.clone();
+                        Box::pin(async move {
+                            let mut check = Statement::new(
+                                "SELECT store_id FROM fga_instance_stores WHERE instance_id = @instance_id LIMIT 1",
+                            );
+                            check.add_param("instance_id", &instance_id);
+                            let mut rows = tx.query(check).await?;
+                            if let Some(row) = rows.next().await? {
+                                return Ok::<StoreInfo, SpannerError>(StoreInfo {
+                                    id: row.column_by_name::<String>("store_id")?,
+                                    name: format!("zitadel-{instance_id}"),
+                                });
+                            }
 
-        let store = StoreInfo {
-            id: store_id,
-            name: format!("zitadel-{instance_id}"),
+                            let mut insert = Statement::new(
+                                "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES (@instance_id, @store_id)",
+                            );
+                            insert.add_param("instance_id", &instance_id);
+                            insert.add_param("store_id", &store_id);
+                            tx.update(insert).await?;
+                            Ok::<StoreInfo, SpannerError>(StoreInfo {
+                                id: store_id,
+                                name: format!("zitadel-{instance_id}"),
+                            })
+                        })
+                    })
+                    .await
+                    .context("insert instance store")?;
+                store
+            }
         };
         self.cache_store(instance_id, &store).await;
         self.ensure_default_model(instance_id, &store.id).await?;
@@ -616,52 +878,198 @@ impl FgaService {
         if self
             .cached_active_model(instance_id, store_id)
             .await
-            .is_some()
+            .is_some_and(|cached| cached.core_model_version == CORE_MODEL_VERSION)
         {
             return Ok(());
         }
-        let scoped = self.scoped(instance_id);
-        let existing: Option<(String,)> = sqlx::query_as(
-            "SELECT model_id FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 LIMIT 1",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .fetch_optional(scoped.pool())
-        .await
-        .context("load active fga model")?;
-        if existing.is_some() {
+        if let Some(fragments) = self.load_active_model_fragments(instance_id, store_id).await? {
+            if fragments.core_model_version == CORE_MODEL_VERSION {
+                if self.cached_active_model(instance_id, store_id).await.is_none() {
+                    let cached = self
+                        .load_model_row_from_db(instance_id, store_id, None)
+                        .await?
+                        .ok_or_else(|| {
+                            FgaError::NotFound("authorization model not found".into())
+                        })?;
+                    self.cache_model(instance_id, store_id, &cached, true).await;
+                }
+                return Ok(());
+            }
+
+            let rebuilt =
+                rebuild_model_from_fragments(&fragments.custom_model, &fragments.module_fragments)?;
+            self.persist_model(instance_id, store_id, rebuilt).await?;
             return Ok(());
         }
 
-        let default_model = core_authorization_model();
-        let raw = serde_json::to_string(&default_model).context("serialize default model")?;
-        let custom = json!({
-            "schema_version": default_model.schema_version,
-            "type_definitions": [],
-            "conditions": {}
-        });
-        let model_id = Uuid::now_v7().to_string();
-        sqlx::query(
-            "INSERT INTO fga_authorization_models (instance_id, store_id, model_id, schema_version, compiled_model, custom_model, module_fragments, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, 1)",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(&model_id)
-        .bind(&default_model.schema_version)
-        .bind(&raw)
-        .bind(custom.to_string())
-        .bind("[]")
-        .execute(scoped.pool())
-        .await
-        .context("insert default fga model")?;
+        self.persist_model(instance_id, store_id, core_authorization_model())
+            .await?;
+        Ok(())
+    }
 
+    async fn load_active_model_fragments(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+    ) -> Result<Option<StoredModelFragments>, FgaError> {
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let row = sqlx::query_as::<_, (String, String, String)>(
+                    "SELECT core_model_version, CAST(custom_model AS TEXT), CAST(module_fragments AS TEXT) \
+                     FROM fga_authorization_models \
+                     WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 \
+                     ORDER BY created_at DESC LIMIT 1",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .fetch_optional(scoped.pool())
+                .await
+                .context("load active fga model fragments")?;
+                Ok(row.map(
+                    |(core_model_version, custom_model, module_fragments)| StoredModelFragments {
+                        core_model_version,
+                        custom_model,
+                        module_fragments,
+                    },
+                ))
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(
+                    "SELECT IFNULL(core_model_version, '') AS core_model_version, \
+                            IFNULL(custom_model, '{}') AS custom_model, \
+                            IFNULL(module_fragments, '[]') AS module_fragments \
+                     FROM fga_authorization_models \
+                     WHERE instance_id = @instance_id AND store_id = @store_id AND is_active = 1 \
+                     ORDER BY created_at DESC LIMIT 1",
+                );
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                let row = self
+                    .spanner_query_one(stmt, "load active fga model fragments")
+                    .await?;
+                Ok(row.map(|row| StoredModelFragments {
+                    core_model_version: row
+                        .column_by_name::<String>("core_model_version")
+                        .unwrap_or_default(),
+                    custom_model: row
+                        .column_by_name::<String>("custom_model")
+                        .unwrap_or_else(|_| "{}".to_string()),
+                    module_fragments: row
+                        .column_by_name::<String>("module_fragments")
+                        .unwrap_or_else(|_| "[]".to_string()),
+                }))
+            }
+        }
+    }
+
+    async fn persist_model(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: AuthorizationModelWriteRequest,
+    ) -> Result<String, FgaError> {
+        if !request.conditions.is_empty() {
+            return Err(FgaError::Unsupported(
+                "conditions are not supported by the embedded v1 server".into(),
+            ));
+        }
+
+        let compiled = CompiledModel::from_request(&request)?;
+        validate_sealed_core(&compiled)?;
+        let model_id = Uuid::now_v7().to_string();
+        let raw = serde_json::to_string(&request).context("serialize authorization model")?;
+        let custom = extract_custom_fragment(&request);
+
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let mut tx = scoped
+                    .pool()
+                    .begin()
+                    .await
+                    .context("begin model transaction")?;
+                sqlx::query(
+                    "UPDATE fga_authorization_models SET is_active = 0 WHERE instance_id = $1 AND store_id = $2",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .execute(&mut *tx)
+                .await
+                .context("deactivate previous models")?;
+                sqlx::query(
+                    "INSERT INTO fga_authorization_models \
+                     (instance_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .bind(&model_id)
+                .bind(&compiled.schema_version)
+                .bind(CORE_MODEL_VERSION)
+                .bind(&raw)
+                .bind(custom.to_string())
+                .bind("[]")
+                .execute(&mut *tx)
+                .await
+                .context("insert authorization model")?;
+                tx.commit().await.context("commit model transaction")?;
+            }
+            Db::Spanner(spanner) => {
+                let instance_id = instance_id.to_string();
+                let store_id = store_id.to_string();
+                let schema_version = compiled.schema_version.clone();
+                let model_id = model_id.clone();
+                let raw = raw.clone();
+                let custom = custom.to_string();
+                let _ = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let instance_id = instance_id.clone();
+                        let store_id = store_id.clone();
+                        let schema_version = schema_version.clone();
+                        let model_id = model_id.clone();
+                        let raw = raw.clone();
+                        let custom = custom.clone();
+                        Box::pin(async move {
+                            let mut deactivate = Statement::new(
+                                "UPDATE fga_authorization_models SET is_active = 0 \
+                                 WHERE instance_id = @instance_id AND store_id = @store_id",
+                            );
+                            deactivate.add_param("instance_id", &instance_id);
+                            deactivate.add_param("store_id", &store_id);
+                            tx.update(deactivate).await?;
+
+                            let mut insert = Statement::new(
+                                "INSERT INTO fga_authorization_models \
+                                 (instance_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
+                                 VALUES \
+                                 (@instance_id, @store_id, @model_id, @schema_version, @core_model_version, @compiled_model, @custom_model, @module_fragments, 1)",
+                            );
+                            insert.add_param("instance_id", &instance_id);
+                            insert.add_param("store_id", &store_id);
+                            insert.add_param("model_id", &model_id);
+                            insert.add_param("schema_version", &schema_version);
+                            insert.add_param("core_model_version", &CORE_MODEL_VERSION);
+                            insert.add_param("compiled_model", &raw);
+                            insert.add_param("custom_model", &custom);
+                            insert.add_param("module_fragments", &"[]");
+                            tx.update(insert).await?;
+                            Ok::<(), SpannerError>(())
+                        })
+                    })
+                    .await
+                    .context("commit spanner model transaction")?;
+            }
+        }
+
+        self.invalidate_model_caches(instance_id, store_id).await;
         let cached = self
             .load_model_row_from_db(instance_id, store_id, Some(&model_id))
             .await?
             .ok_or_else(|| FgaError::NotFound("authorization model not found".into()))?;
         self.cache_model(instance_id, store_id, &cached, true).await;
-
-        Ok(())
+        Ok(model_id)
     }
 
     async fn require_store(
@@ -684,6 +1092,7 @@ impl FgaService {
         model_id: String,
         raw: String,
         created_at: String,
+        core_model_version: String,
     ) -> Result<CachedModel, FgaError> {
         let request: AuthorizationModelWriteRequest =
             serde_json::from_str(&raw).context("parse compiled authorization model")?;
@@ -692,6 +1101,7 @@ impl FgaService {
             model_id,
             raw,
             created_at,
+            core_model_version,
             compiled: Arc::new(compiled),
         })
     }
@@ -702,32 +1112,87 @@ impl FgaService {
         store_id: &str,
         model_id: Option<&str>,
     ) -> Result<Option<CachedModel>, FgaError> {
-        let scoped = self.scoped(instance_id);
-        let row = if let Some(model_id) = model_id {
-            sqlx::query_as::<_, (String, String, String)>(
-                "SELECT model_id, compiled_model, CAST(created_at AS TEXT) FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 AND model_id = $3 LIMIT 1",
-            )
-            .bind(scoped.instance_id())
-            .bind(store_id)
-            .bind(model_id)
-            .fetch_optional(scoped.pool())
-            .await
-            .context("load fga model by id")?
-        } else {
-            sqlx::query_as::<_, (String, String, String)>(
-                "SELECT model_id, compiled_model, CAST(created_at AS TEXT) FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 ORDER BY created_at DESC LIMIT 1",
-            )
-            .bind(scoped.instance_id())
-            .bind(store_id)
-            .fetch_optional(scoped.pool())
-            .await
-            .context("load active fga model")?
+        let cached = match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let row = if let Some(model_id) = model_id {
+                    sqlx::query_as::<_, (String, String, String, String)>(
+                        "SELECT model_id, compiled_model, CAST(created_at AS TEXT), core_model_version \
+                         FROM fga_authorization_models \
+                         WHERE instance_id = $1 AND store_id = $2 AND model_id = $3 LIMIT 1",
+                    )
+                    .bind(scoped.instance_id())
+                    .bind(store_id)
+                    .bind(model_id)
+                    .fetch_optional(scoped.pool())
+                    .await
+                    .context("load fga model by id")?
+                } else {
+                    sqlx::query_as::<_, (String, String, String, String)>(
+                        "SELECT model_id, compiled_model, CAST(created_at AS TEXT), core_model_version \
+                         FROM fga_authorization_models \
+                         WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 \
+                         ORDER BY created_at DESC LIMIT 1",
+                    )
+                    .bind(scoped.instance_id())
+                    .bind(store_id)
+                    .fetch_optional(scoped.pool())
+                    .await
+                    .context("load active fga model")?
+                };
+                let Some((resolved_model_id, raw, created_at, core_model_version)) = row else {
+                    return Ok(None);
+                };
+                self.build_cached_model(resolved_model_id, raw, created_at, core_model_version)?
+            }
+            Db::Spanner(_) => {
+                let mut stmt = if model_id.is_some() {
+                    Statement::new(
+                        "SELECT model_id, compiled_model, CAST(created_at AS STRING) AS created_at, \
+                                IFNULL(core_model_version, '') AS core_model_version \
+                         FROM fga_authorization_models \
+                         WHERE instance_id = @instance_id AND store_id = @store_id AND model_id = @model_id LIMIT 1",
+                    )
+                } else {
+                    Statement::new(
+                        "SELECT model_id, compiled_model, CAST(created_at AS STRING) AS created_at, \
+                                IFNULL(core_model_version, '') AS core_model_version \
+                         FROM fga_authorization_models \
+                         WHERE instance_id = @instance_id AND store_id = @store_id AND is_active = 1 \
+                         ORDER BY created_at DESC LIMIT 1",
+                    )
+                };
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                if let Some(model_id) = model_id {
+                    stmt.add_param("model_id", &model_id);
+                }
+                let row: Option<SpannerRow> = self
+                    .spanner_query_one(
+                        stmt,
+                        if model_id.is_some() {
+                            "load fga model by id"
+                        } else {
+                            "load active fga model"
+                        },
+                    )
+                    .await?;
+                let Some(row) = row else {
+                    return Ok(None);
+                };
+                self.build_cached_model(
+                    row.column_by_name::<String>("model_id")
+                        .context("read spanner model_id")?,
+                    row.column_by_name::<String>("compiled_model")
+                        .context("read spanner compiled_model")?,
+                    row.column_by_name::<String>("created_at")
+                        .context("read spanner created_at")?,
+                    row.column_by_name::<String>("core_model_version")
+                        .unwrap_or_default(),
+                )?
+            }
         };
 
-        let Some((resolved_model_id, raw, created_at)) = row else {
-            return Ok(None);
-        };
-        let cached = self.build_cached_model(resolved_model_id, raw, created_at)?;
         self.cache_model(instance_id, store_id, &cached, model_id.is_none())
             .await;
         Ok(Some(cached))
@@ -803,30 +1268,65 @@ impl FgaService {
         relation: &str,
         contextual: &[ParsedTupleKey],
     ) -> Result<Vec<StoredTuple>, FgaError> {
-        let scoped = self.scoped(instance_id);
-        let rows = sqlx::query(
-            "SELECT object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(&object.object_type)
-        .bind(&object.object_id)
-        .bind(relation)
-        .fetch_all(scoped.pool())
-        .await
-        .context("load direct tuples")?;
+        let mut tuples: Vec<StoredTuple> = match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let rows = sqlx::query(
+                    "SELECT object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .bind(&object.object_type)
+                .bind(&object.object_id)
+                .bind(relation)
+                .fetch_all(scoped.pool())
+                .await
+                .context("load direct tuples")?;
 
-        let mut tuples: Vec<StoredTuple> = rows
-            .into_iter()
-            .map(|row| StoredTuple {
-                user: stored_user_from_parts(
-                    &row.get::<String, _>("user_type"),
-                    &row.get::<String, _>("user_id"),
-                    &row.get::<String, _>("user_relation"),
-                ),
-                raw_user: row.get::<String, _>("raw_user"),
-            })
-            .collect();
+                rows.into_iter()
+                    .map(|row| StoredTuple {
+                        user: stored_user_from_parts(
+                            &row.get::<String, _>("user_type"),
+                            &row.get::<String, _>("user_id"),
+                            &row.get::<String, _>("user_relation"),
+                        ),
+                        raw_user: row.get::<String, _>("raw_user"),
+                    })
+                    .collect()
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(
+                    "SELECT user_type, user_id, user_relation, raw_user \
+                     FROM fga_tuples \
+                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                       AND object_type = @object_type AND object_id = @object_id AND relation = @relation",
+                );
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                stmt.add_param("object_type", &object.object_type);
+                stmt.add_param("object_id", &object.object_id);
+                stmt.add_param("relation", &relation);
+                let rows: Vec<SpannerRow> =
+                    self.spanner_query_all(stmt, "load direct tuples").await?;
+                rows.into_iter()
+                    .map(|row| -> Result<StoredTuple, FgaError> {
+                        Ok(StoredTuple {
+                            user: stored_user_from_parts(
+                                &row.column_by_name::<String>("user_type")
+                                    .context("read spanner user_type")?,
+                                &row.column_by_name::<String>("user_id")
+                                    .context("read spanner user_id")?,
+                                &row.column_by_name::<String>("user_relation")
+                                    .context("read spanner user_relation")?,
+                            ),
+                            raw_user: row
+                                .column_by_name::<String>("raw_user")
+                                .context("read spanner raw_user")?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
 
         tuples.extend(
             contextual
@@ -847,22 +1347,49 @@ impl FgaService {
         object_type: &str,
         contextual: &[ParsedTupleKey],
     ) -> Result<Vec<ObjectRef>, FgaError> {
-        let scoped = self.scoped(instance_id);
-        let rows = sqlx::query(
-            "SELECT DISTINCT object_type, object_id FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 ORDER BY object_id",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(object_type)
-        .fetch_all(scoped.pool())
-        .await
-        .context("load candidate objects")?;
         let mut set = BTreeSet::new();
-        for row in rows {
-            set.insert(ObjectRef {
-                object_type: row.get::<String, _>("object_type"),
-                object_id: row.get::<String, _>("object_id"),
-            });
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let rows = sqlx::query(
+                    "SELECT DISTINCT object_type, object_id FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 ORDER BY object_id",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .bind(object_type)
+                .fetch_all(scoped.pool())
+                .await
+                .context("load candidate objects")?;
+                for row in rows {
+                    set.insert(ObjectRef {
+                        object_type: row.get::<String, _>("object_type"),
+                        object_id: row.get::<String, _>("object_id"),
+                    });
+                }
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(
+                    "SELECT DISTINCT object_type, object_id FROM fga_tuples \
+                     WHERE instance_id = @instance_id AND store_id = @store_id AND object_type = @object_type \
+                     ORDER BY object_id",
+                );
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                stmt.add_param("object_type", &object_type);
+                let rows: Vec<SpannerRow> = self
+                    .spanner_query_all(stmt, "load candidate objects")
+                    .await?;
+                for row in rows {
+                    set.insert(ObjectRef {
+                        object_type: row
+                            .column_by_name::<String>("object_type")
+                            .context("read spanner object_type")?,
+                        object_id: row
+                            .column_by_name::<String>("object_id")
+                            .context("read spanner object_id")?,
+                    });
+                }
+            }
         }
         for tuple in contextual {
             if tuple.object.object_type == object_type {
@@ -879,30 +1406,63 @@ impl FgaService {
         filter: &UserFilter,
         contextual: &[ParsedTupleKey],
     ) -> Result<Vec<UserRef>, FgaError> {
-        let scoped = self.scoped(instance_id);
-        let rows = sqlx::query(
-            "SELECT DISTINCT user_type, user_id, user_relation FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND user_type = $3 ORDER BY user_id",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(&filter.user_type)
-        .fetch_all(scoped.pool())
-        .await
-        .context("load candidate users")?;
-
         let mut set = BTreeSet::new();
-        for row in rows {
-            let user = stored_user_from_parts(
-                &row.get::<String, _>("user_type"),
-                &row.get::<String, _>("user_id"),
-                &row.get::<String, _>("user_relation"),
-            );
-            if filter
-                .relation
-                .as_deref()
-                .is_none_or(|rel| user.relation_name() == Some(rel))
-            {
-                set.insert(user);
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let rows = sqlx::query(
+                    "SELECT DISTINCT user_type, user_id, user_relation FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND user_type = $3 ORDER BY user_id",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .bind(&filter.user_type)
+                .fetch_all(scoped.pool())
+                .await
+                .context("load candidate users")?;
+
+                for row in rows {
+                    let user = stored_user_from_parts(
+                        &row.get::<String, _>("user_type"),
+                        &row.get::<String, _>("user_id"),
+                        &row.get::<String, _>("user_relation"),
+                    );
+                    if filter
+                        .relation
+                        .as_deref()
+                        .is_none_or(|rel| user.relation_name() == Some(rel))
+                    {
+                        set.insert(user);
+                    }
+                }
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(
+                    "SELECT DISTINCT user_type, user_id, user_relation FROM fga_tuples \
+                     WHERE instance_id = @instance_id AND store_id = @store_id AND user_type = @user_type \
+                     ORDER BY user_id",
+                );
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                stmt.add_param("user_type", &filter.user_type);
+                let rows: Vec<SpannerRow> =
+                    self.spanner_query_all(stmt, "load candidate users").await?;
+                for row in rows {
+                    let user = stored_user_from_parts(
+                        &row.column_by_name::<String>("user_type")
+                            .context("read spanner user_type")?,
+                        &row.column_by_name::<String>("user_id")
+                            .context("read spanner user_id")?,
+                        &row.column_by_name::<String>("user_relation")
+                            .context("read spanner user_relation")?,
+                    );
+                    if filter
+                        .relation
+                        .as_deref()
+                        .is_none_or(|rel| user.relation_name() == Some(rel))
+                    {
+                        set.insert(user);
+                    }
+                }
             }
         }
 
@@ -982,28 +1542,66 @@ impl ModelRepository for FgaService {
         store_id: &str,
     ) -> Result<AuthorizationModelsListResponse, FgaError> {
         self.require_store(instance_id, store_id).await?;
-        let scoped = self.scoped(instance_id);
-        let rows = sqlx::query(
-            "SELECT model_id, compiled_model, CAST(created_at AS TEXT) AS created_at FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 ORDER BY created_at DESC",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .fetch_all(scoped.pool())
-        .await
-        .context("list authorization models")?;
+        let mut models = Vec::new();
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let rows = sqlx::query(
+                    "SELECT model_id, compiled_model, CAST(created_at AS TEXT) AS created_at FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 ORDER BY created_at DESC",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .fetch_all(scoped.pool())
+                .await
+                .context("list authorization models")?;
 
-        let mut models = Vec::with_capacity(rows.len());
-        for row in rows {
-            let raw = row.get::<String, _>("compiled_model");
-            let request: AuthorizationModelWriteRequest =
-                serde_json::from_str(&raw).context("parse authorization model in list")?;
-            models.push(AuthorizationModelMetadata {
-                authorization_model_id: row.get::<String, _>("model_id"),
-                schema_version: request.schema_version,
-                type_definitions: request.type_definitions,
-                conditions: request.conditions,
-                created_at: row.get::<String, _>("created_at"),
-            });
+                models.reserve(rows.len());
+                for row in rows {
+                    let raw = row.get::<String, _>("compiled_model");
+                    let request: AuthorizationModelWriteRequest =
+                        serde_json::from_str(&raw).context("parse authorization model in list")?;
+                    models.push(AuthorizationModelMetadata {
+                        authorization_model_id: row.get::<String, _>("model_id"),
+                        schema_version: request.schema_version,
+                        type_definitions: request.type_definitions,
+                        conditions: request.conditions,
+                        created_at: row.get::<String, _>("created_at"),
+                    });
+                }
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(
+                    "SELECT model_id, compiled_model, CAST(created_at AS STRING) AS created_at \
+                     FROM fga_authorization_models \
+                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                     ORDER BY created_at DESC",
+                );
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                let rows: Vec<SpannerRow> = self
+                    .spanner_query_all(stmt, "list authorization models")
+                    .await?;
+
+                models.reserve(rows.len());
+                for row in rows {
+                    let raw = row
+                        .column_by_name::<String>("compiled_model")
+                        .context("read spanner compiled_model")?;
+                    let request: AuthorizationModelWriteRequest =
+                        serde_json::from_str(&raw).context("parse authorization model in list")?;
+                    models.push(AuthorizationModelMetadata {
+                        authorization_model_id: row
+                            .column_by_name::<String>("model_id")
+                            .context("read spanner model_id")?,
+                        schema_version: request.schema_version,
+                        type_definitions: request.type_definitions,
+                        conditions: request.conditions,
+                        created_at: row
+                            .column_by_name::<String>("created_at")
+                            .context("read spanner created_at")?,
+                    });
+                }
+            }
         }
 
         Ok(AuthorizationModelsListResponse {
@@ -1018,52 +1616,7 @@ impl ModelRepository for FgaService {
         request: AuthorizationModelWriteRequest,
     ) -> Result<AuthorizationModelWriteResponse, FgaError> {
         self.require_store(instance_id, store_id).await?;
-        if !request.conditions.is_empty() {
-            return Err(FgaError::Unsupported(
-                "conditions are not supported by the embedded v1 server".into(),
-            ));
-        }
-
-        let compiled = CompiledModel::from_request(&request)?;
-        validate_sealed_core(&compiled)?;
-        let model_id = Uuid::now_v7().to_string();
-        let raw = serde_json::to_string(&request).context("serialize authorization model")?;
-        let custom = extract_custom_fragment(&request);
-        let scoped = self.scoped(instance_id);
-        let mut tx = scoped
-            .pool()
-            .begin()
-            .await
-            .context("begin model transaction")?;
-        sqlx::query(
-            "UPDATE fga_authorization_models SET is_active = 0 WHERE instance_id = $1 AND store_id = $2",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .execute(&mut *tx)
-        .await
-        .context("deactivate previous models")?;
-        sqlx::query(
-            "INSERT INTO fga_authorization_models (instance_id, store_id, model_id, schema_version, compiled_model, custom_model, module_fragments, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, 1)",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(&model_id)
-        .bind(&compiled.schema_version)
-        .bind(&raw)
-        .bind(custom.to_string())
-        .bind("[]")
-        .execute(&mut *tx)
-        .await
-        .context("insert authorization model")?;
-        tx.commit().await.context("commit model transaction")?;
-
-        self.invalidate_model_caches(instance_id, store_id).await;
-        let cached = self
-            .load_model_row_from_db(instance_id, store_id, Some(&model_id))
-            .await?
-            .ok_or_else(|| FgaError::NotFound("authorization model not found".into()))?;
-        self.cache_model(instance_id, store_id, &cached, true).await;
+        let model_id = self.persist_model(instance_id, store_id, request).await?;
 
         Ok(AuthorizationModelWriteResponse {
             authorization_model_id: model_id,
@@ -1080,7 +1633,6 @@ impl TupleRepository for FgaService {
         request: ReadRequest,
     ) -> Result<ReadResponse, FgaError> {
         self.require_store(instance_id, store_id).await?;
-        let scoped = self.scoped(instance_id);
         let page_size = request.page_size.unwrap_or(100).clamp(1, 500) as i64;
         let offset = decode_offset(request.continuation_token.as_deref())?;
         let filter = request.tuple_key.unwrap_or(TupleFilter {
@@ -1088,41 +1640,86 @@ impl TupleRepository for FgaService {
             relation: None,
             object: None,
         });
+        let tuples = match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let rows = sqlx::query(
+                    "SELECT raw_user, relation, raw_object, CAST(inserted_at AS TEXT) AS inserted_at
+                     FROM fga_tuples
+                     WHERE instance_id = $1
+                       AND store_id = $2
+                       AND ($3 = '' OR raw_user = $3)
+                       AND ($4 = '' OR relation = $4)
+                       AND ($5 = '' OR raw_object = $5)
+                     ORDER BY raw_object, relation, raw_user
+                     LIMIT $6 OFFSET $7",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .bind(filter.user.clone().unwrap_or_default())
+                .bind(filter.relation.clone().unwrap_or_default())
+                .bind(filter.object.clone().unwrap_or_default())
+                .bind(page_size)
+                .bind(offset)
+                .fetch_all(scoped.pool())
+                .await
+                .context("read tuples")?;
 
-        let rows = sqlx::query(
-            "SELECT raw_user, relation, raw_object, CAST(inserted_at AS TEXT) AS inserted_at
-             FROM fga_tuples
-             WHERE instance_id = $1
-               AND store_id = $2
-               AND ($3 = '' OR raw_user = $3)
-               AND ($4 = '' OR relation = $4)
-               AND ($5 = '' OR raw_object = $5)
-             ORDER BY raw_object, relation, raw_user
-             LIMIT $6 OFFSET $7",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(filter.user.unwrap_or_default())
-        .bind(filter.relation.unwrap_or_default())
-        .bind(filter.object.unwrap_or_default())
-        .bind(page_size)
-        .bind(offset)
-        .fetch_all(scoped.pool())
-        .await
-        .context("read tuples")?;
-
-        let tuples: Vec<TupleRecord> = rows
-            .iter()
-            .map(|row| TupleRecord {
-                key: TupleKey {
-                    user: row.get::<String, _>("raw_user"),
-                    relation: row.get::<String, _>("relation"),
-                    object: row.get::<String, _>("raw_object"),
-                    condition: None,
-                },
-                timestamp: Some(row.get::<String, _>("inserted_at")),
-            })
-            .collect();
+                rows.iter()
+                    .map(|row| TupleRecord {
+                        key: TupleKey {
+                            user: row.get::<String, _>("raw_user"),
+                            relation: row.get::<String, _>("relation"),
+                            object: row.get::<String, _>("raw_object"),
+                            condition: None,
+                        },
+                        timestamp: Some(row.get::<String, _>("inserted_at")),
+                    })
+                    .collect()
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(&format!(
+                    "SELECT raw_user, relation, raw_object, CAST(inserted_at AS STRING) AS inserted_at \
+                     FROM fga_tuples \
+                     WHERE instance_id = @instance_id \
+                       AND store_id = @store_id \
+                       AND (@raw_user = '' OR raw_user = @raw_user) \
+                       AND (@relation = '' OR relation = @relation) \
+                       AND (@raw_object = '' OR raw_object = @raw_object) \
+                     ORDER BY raw_object, relation, raw_user \
+                     LIMIT {} OFFSET {}",
+                    page_size, offset
+                ));
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                stmt.add_param("raw_user", &filter.user.unwrap_or_default());
+                stmt.add_param("relation", &filter.relation.unwrap_or_default());
+                stmt.add_param("raw_object", &filter.object.unwrap_or_default());
+                let rows: Vec<SpannerRow> = self.spanner_query_all(stmt, "read tuples").await?;
+                rows.into_iter()
+                    .map(|row| -> Result<TupleRecord, FgaError> {
+                        Ok(TupleRecord {
+                            key: TupleKey {
+                                user: row
+                                    .column_by_name::<String>("raw_user")
+                                    .context("read spanner raw_user")?,
+                                relation: row
+                                    .column_by_name::<String>("relation")
+                                    .context("read spanner relation")?,
+                                object: row
+                                    .column_by_name::<String>("raw_object")
+                                    .context("read spanner raw_object")?,
+                                condition: None,
+                            },
+                            timestamp: Some(
+                                row.column_by_name::<String>("inserted_at")
+                                    .context("read spanner inserted_at")?,
+                            ),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
         let next = if tuples.len() as i64 == page_size {
             Some((offset + page_size).to_string())
         } else {
@@ -1153,103 +1750,283 @@ impl TupleRepository for FgaService {
             .load_compiled_model(instance_id, store_id, Some(&model_id))
             .await?;
         validate_duplicate_request_tuples(&request)?;
+        let writes = request
+            .writes
+            .tuple_keys
+            .into_iter()
+            .map(ParsedTupleKey::parse)
+            .collect::<Result<Vec<_>, _>>()?;
+        let deletes = request
+            .deletes
+            .tuple_keys
+            .into_iter()
+            .map(ParsedTupleKey::parse)
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let scoped = self.scoped(instance_id);
-        let mut tx = scoped
-            .pool()
-            .begin()
-            .await
-            .context("begin tuple transaction")?;
-
-        for tuple in request.writes.tuple_keys {
-            let parsed = ParsedTupleKey::parse(tuple)?;
+        for parsed in &writes {
             if parsed.condition.is_some() {
                 return Err(FgaError::Unsupported(
                     "conditional tuples are not supported by the embedded v1 server".into(),
                 ));
             }
-            model.validate_tuple(&parsed)?;
-            let insert = match scoped.dialect() {
-                Dialect::Sqlite => {
-                    "INSERT OR IGNORE INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
-                }
-                Dialect::Postgres => {
-                    "INSERT INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
-                }
-            };
-            let result = sqlx::query(insert)
-                .bind(scoped.instance_id())
-                .bind(store_id)
-                .bind(&parsed.object.object_type)
-                .bind(&parsed.object.object_id)
-                .bind(&parsed.relation)
-                .bind(parsed.user.user_type())
-                .bind(parsed.user.user_id())
-                .bind(parsed.user.relation_name().unwrap_or_default())
-                .bind(parsed.object.as_raw())
-                .bind(parsed.user.as_raw())
-                .execute(&mut *tx)
-                .await
-                .context("insert fga tuple")?;
-            if result.rows_affected() > 0 {
-                sqlx::query(
-                    "INSERT INTO fga_tuple_changes (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'WRITE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-                )
-                .bind(scoped.instance_id())
-                .bind(store_id)
-                .bind(&parsed.object.object_type)
-                .bind(&parsed.object.object_id)
-                .bind(&parsed.relation)
-                .bind(parsed.user.user_type())
-                .bind(parsed.user.user_id())
-                .bind(parsed.user.relation_name().unwrap_or_default())
-                .bind(parsed.object.as_raw())
-                .bind(parsed.user.as_raw())
-                .bind(&model_id)
-                .execute(&mut *tx)
-                .await
-                .context("insert tuple change")?;
-            }
+            model.validate_tuple(parsed)?;
         }
 
-        for tuple in request.deletes.tuple_keys {
-            let parsed = ParsedTupleKey::parse(tuple)?;
-            let result = sqlx::query(
-                "DELETE FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5 AND user_type = $6 AND user_id = $7 AND user_relation = $8",
-            )
-            .bind(scoped.instance_id())
-            .bind(store_id)
-            .bind(&parsed.object.object_type)
-            .bind(&parsed.object.object_id)
-            .bind(&parsed.relation)
-            .bind(parsed.user.user_type())
-            .bind(parsed.user.user_id())
-            .bind(parsed.user.relation_name().unwrap_or_default())
-            .execute(&mut *tx)
-            .await
-            .context("delete fga tuple")?;
-            if result.rows_affected() > 0 {
-                sqlx::query(
-                    "INSERT INTO fga_tuple_changes (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'DELETE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-                )
-                .bind(scoped.instance_id())
-                .bind(store_id)
-                .bind(&parsed.object.object_type)
-                .bind(&parsed.object.object_id)
-                .bind(&parsed.relation)
-                .bind(parsed.user.user_type())
-                .bind(parsed.user.user_id())
-                .bind(parsed.user.relation_name().unwrap_or_default())
-                .bind(parsed.object.as_raw())
-                .bind(parsed.user.as_raw())
-                .bind(&model_id)
-                .execute(&mut *tx)
-                .await
-                .context("insert tuple delete change")?;
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let mut tx = scoped
+                    .pool()
+                    .begin()
+                    .await
+                    .context("begin tuple transaction")?;
+
+                for parsed in &writes {
+                    let insert = match scoped.dialect() {
+                        Dialect::Sqlite => {
+                            "INSERT OR IGNORE INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                        }
+                        Dialect::Postgres => {
+                            "INSERT INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
+                        }
+                        Dialect::Spanner => unreachable!("native Spanner does not use ScopedDb"),
+                    };
+                    let result = sqlx::query(insert)
+                        .bind(scoped.instance_id())
+                        .bind(store_id)
+                        .bind(&parsed.object.object_type)
+                        .bind(&parsed.object.object_id)
+                        .bind(&parsed.relation)
+                        .bind(parsed.user.user_type())
+                        .bind(parsed.user.user_id())
+                        .bind(parsed.user.relation_name().unwrap_or_default())
+                        .bind(parsed.object.as_raw())
+                        .bind(parsed.user.as_raw())
+                        .execute(&mut *tx)
+                        .await
+                        .context("insert fga tuple")?;
+                    if result.rows_affected() > 0 {
+                        sqlx::query(
+                            "INSERT INTO fga_tuple_changes (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'WRITE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                        )
+                        .bind(scoped.instance_id())
+                        .bind(store_id)
+                        .bind(&parsed.object.object_type)
+                        .bind(&parsed.object.object_id)
+                        .bind(&parsed.relation)
+                        .bind(parsed.user.user_type())
+                        .bind(parsed.user.user_id())
+                        .bind(parsed.user.relation_name().unwrap_or_default())
+                        .bind(parsed.object.as_raw())
+                        .bind(parsed.user.as_raw())
+                        .bind(&model_id)
+                        .execute(&mut *tx)
+                        .await
+                        .context("insert tuple change")?;
+                    }
+                }
+
+                for parsed in &deletes {
+                    let result = sqlx::query(
+                        "DELETE FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5 AND user_type = $6 AND user_id = $7 AND user_relation = $8",
+                    )
+                    .bind(scoped.instance_id())
+                    .bind(store_id)
+                    .bind(&parsed.object.object_type)
+                    .bind(&parsed.object.object_id)
+                    .bind(&parsed.relation)
+                    .bind(parsed.user.user_type())
+                    .bind(parsed.user.user_id())
+                    .bind(parsed.user.relation_name().unwrap_or_default())
+                    .execute(&mut *tx)
+                    .await
+                    .context("delete fga tuple")?;
+                    if result.rows_affected() > 0 {
+                        sqlx::query(
+                            "INSERT INTO fga_tuple_changes (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'DELETE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                        )
+                        .bind(scoped.instance_id())
+                        .bind(store_id)
+                        .bind(&parsed.object.object_type)
+                        .bind(&parsed.object.object_id)
+                        .bind(&parsed.relation)
+                        .bind(parsed.user.user_type())
+                        .bind(parsed.user.user_id())
+                        .bind(parsed.user.relation_name().unwrap_or_default())
+                        .bind(parsed.object.as_raw())
+                        .bind(parsed.user.as_raw())
+                        .bind(&model_id)
+                        .execute(&mut *tx)
+                        .await
+                        .context("insert tuple delete change")?;
+                    }
+                }
+
+                tx.commit().await.context("commit tuple transaction")?;
+            }
+            Db::Spanner(spanner) => {
+                let instance_id = instance_id.to_string();
+                let store_id = store_id.to_string();
+                let model_id = model_id.clone();
+                let writes = writes.clone();
+                let deletes = deletes.clone();
+                let _ = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let instance_id = instance_id.clone();
+                        let store_id = store_id.clone();
+                        let model_id = model_id.clone();
+                        let writes = writes.clone();
+                        let deletes = deletes.clone();
+                        Box::pin(async move {
+                            for parsed in writes {
+                                let mut exists = Statement::new(
+                                    "SELECT raw_user FROM fga_tuples \
+                                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                                       AND object_type = @object_type AND object_id = @object_id \
+                                       AND relation = @relation AND user_type = @user_type \
+                                       AND user_id = @user_id AND user_relation = @user_relation \
+                                     LIMIT 1",
+                                );
+                                exists.add_param("instance_id", &instance_id);
+                                exists.add_param("store_id", &store_id);
+                                exists.add_param("object_type", &parsed.object.object_type);
+                                exists.add_param("object_id", &parsed.object.object_id);
+                                exists.add_param("relation", &parsed.relation);
+                                exists.add_param("user_type", &parsed.user.user_type());
+                                exists.add_param("user_id", &parsed.user.user_id());
+                                exists.add_param(
+                                    "user_relation",
+                                    &parsed.user.relation_name().unwrap_or_default(),
+                                );
+                                let mut rows = tx.query(exists).await?;
+                                if rows.next().await?.is_some() {
+                                    continue;
+                                }
+
+                                let raw_object = parsed.object.as_raw();
+                                let raw_user = parsed.user.as_raw();
+                                let mut insert = Statement::new(
+                                    "INSERT INTO fga_tuples \
+                                     (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
+                                     VALUES \
+                                     (@instance_id, @store_id, @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user)",
+                                );
+                                insert.add_param("instance_id", &instance_id);
+                                insert.add_param("store_id", &store_id);
+                                insert.add_param("object_type", &parsed.object.object_type);
+                                insert.add_param("object_id", &parsed.object.object_id);
+                                insert.add_param("relation", &parsed.relation);
+                                insert.add_param("user_type", &parsed.user.user_type());
+                                insert.add_param("user_id", &parsed.user.user_id());
+                                insert.add_param(
+                                    "user_relation",
+                                    &parsed.user.relation_name().unwrap_or_default(),
+                                );
+                                insert.add_param("raw_object", &raw_object);
+                                insert.add_param("raw_user", &raw_user);
+                                tx.update(insert).await?;
+
+                                let mut change = Statement::new(
+                                    "INSERT INTO fga_tuple_changes \
+                                     (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) \
+                                     VALUES \
+                                     (@instance_id, @store_id, 'WRITE', @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user, @authorization_model_id)",
+                                );
+                                change.add_param("instance_id", &instance_id);
+                                change.add_param("store_id", &store_id);
+                                change.add_param("object_type", &parsed.object.object_type);
+                                change.add_param("object_id", &parsed.object.object_id);
+                                change.add_param("relation", &parsed.relation);
+                                change.add_param("user_type", &parsed.user.user_type());
+                                change.add_param("user_id", &parsed.user.user_id());
+                                change.add_param(
+                                    "user_relation",
+                                    &parsed.user.relation_name().unwrap_or_default(),
+                                );
+                                change.add_param("raw_object", &raw_object);
+                                change.add_param("raw_user", &raw_user);
+                                change.add_param("authorization_model_id", &model_id);
+                                tx.update(change).await?;
+                            }
+
+                            for parsed in deletes {
+                                let mut exists = Statement::new(
+                                    "SELECT raw_user FROM fga_tuples \
+                                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                                       AND object_type = @object_type AND object_id = @object_id \
+                                       AND relation = @relation AND user_type = @user_type \
+                                       AND user_id = @user_id AND user_relation = @user_relation \
+                                     LIMIT 1",
+                                );
+                                exists.add_param("instance_id", &instance_id);
+                                exists.add_param("store_id", &store_id);
+                                exists.add_param("object_type", &parsed.object.object_type);
+                                exists.add_param("object_id", &parsed.object.object_id);
+                                exists.add_param("relation", &parsed.relation);
+                                exists.add_param("user_type", &parsed.user.user_type());
+                                exists.add_param("user_id", &parsed.user.user_id());
+                                exists.add_param(
+                                    "user_relation",
+                                    &parsed.user.relation_name().unwrap_or_default(),
+                                );
+                                let mut rows = tx.query(exists).await?;
+                                if rows.next().await?.is_none() {
+                                    continue;
+                                }
+
+                                let raw_object = parsed.object.as_raw();
+                                let raw_user = parsed.user.as_raw();
+                                let mut delete = Statement::new(
+                                    "DELETE FROM fga_tuples \
+                                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                                       AND object_type = @object_type AND object_id = @object_id \
+                                       AND relation = @relation AND user_type = @user_type \
+                                       AND user_id = @user_id AND user_relation = @user_relation",
+                                );
+                                delete.add_param("instance_id", &instance_id);
+                                delete.add_param("store_id", &store_id);
+                                delete.add_param("object_type", &parsed.object.object_type);
+                                delete.add_param("object_id", &parsed.object.object_id);
+                                delete.add_param("relation", &parsed.relation);
+                                delete.add_param("user_type", &parsed.user.user_type());
+                                delete.add_param("user_id", &parsed.user.user_id());
+                                delete.add_param(
+                                    "user_relation",
+                                    &parsed.user.relation_name().unwrap_or_default(),
+                                );
+                                tx.update(delete).await?;
+
+                                let mut change = Statement::new(
+                                    "INSERT INTO fga_tuple_changes \
+                                     (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) \
+                                     VALUES \
+                                     (@instance_id, @store_id, 'DELETE', @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user, @authorization_model_id)",
+                                );
+                                change.add_param("instance_id", &instance_id);
+                                change.add_param("store_id", &store_id);
+                                change.add_param("object_type", &parsed.object.object_type);
+                                change.add_param("object_id", &parsed.object.object_id);
+                                change.add_param("relation", &parsed.relation);
+                                change.add_param("user_type", &parsed.user.user_type());
+                                change.add_param("user_id", &parsed.user.user_id());
+                                change.add_param(
+                                    "user_relation",
+                                    &parsed.user.relation_name().unwrap_or_default(),
+                                );
+                                change.add_param("raw_object", &raw_object);
+                                change.add_param("raw_user", &raw_user);
+                                change.add_param("authorization_model_id", &model_id);
+                                tx.update(change).await?;
+                            }
+
+                            Ok::<(), SpannerError>(())
+                        })
+                    })
+                    .await
+                    .context("commit spanner tuple transaction")?;
             }
         }
-
-        tx.commit().await.context("commit tuple transaction")?;
         Ok(())
     }
 }
@@ -1265,43 +2042,94 @@ impl ChangeRepository for FgaService {
         continuation_token: Option<&str>,
     ) -> Result<ReadChangesResponse, FgaError> {
         self.require_store(instance_id, store_id).await?;
-        let scoped = self.scoped(instance_id);
         let after_seq = decode_offset(continuation_token)?;
         let limit = page_size.clamp(1, 500) as i64;
-        let rows = sqlx::query(
-            "SELECT seq, operation, raw_user, relation, raw_object, CAST(created_at AS TEXT) AS created_at
-             FROM fga_tuple_changes
-             WHERE instance_id = $1
-               AND store_id = $2
-               AND seq > $3
-               AND ($4 = '' OR object_type = $4)
-             ORDER BY seq ASC
-             LIMIT $5",
-        )
-        .bind(scoped.instance_id())
-        .bind(store_id)
-        .bind(after_seq)
-        .bind(object_type.unwrap_or_default())
-        .bind(limit)
-        .fetch_all(scoped.pool())
-        .await
-        .context("read fga changes")?;
-
         let mut next = None;
-        let mut changes = Vec::with_capacity(rows.len());
-        for row in rows {
-            let seq: i64 = row.get("seq");
-            next = Some(seq.to_string());
-            changes.push(TupleChangeRecord {
-                tuple_key: TupleKey {
-                    user: row.get("raw_user"),
-                    relation: row.get("relation"),
-                    object: row.get("raw_object"),
-                    condition: None,
-                },
-                operation: row.get("operation"),
-                timestamp: row.get("created_at"),
-            });
+        let mut changes = Vec::new();
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(instance_id);
+                let rows = sqlx::query(
+                    "SELECT seq, operation, raw_user, relation, raw_object, CAST(created_at AS TEXT) AS created_at
+                     FROM fga_tuple_changes
+                     WHERE instance_id = $1
+                       AND store_id = $2
+                       AND seq > $3
+                       AND ($4 = '' OR object_type = $4)
+                     ORDER BY seq ASC
+                     LIMIT $5",
+                )
+                .bind(scoped.instance_id())
+                .bind(store_id)
+                .bind(after_seq)
+                .bind(object_type.unwrap_or_default())
+                .bind(limit)
+                .fetch_all(scoped.pool())
+                .await
+                .context("read fga changes")?;
+
+                changes.reserve(rows.len());
+                for row in rows {
+                    let seq: i64 = row.get("seq");
+                    next = Some(seq.to_string());
+                    changes.push(TupleChangeRecord {
+                        tuple_key: TupleKey {
+                            user: row.get("raw_user"),
+                            relation: row.get("relation"),
+                            object: row.get("raw_object"),
+                            condition: None,
+                        },
+                        operation: row.get("operation"),
+                        timestamp: row.get("created_at"),
+                    });
+                }
+            }
+            Db::Spanner(_) => {
+                let mut stmt = Statement::new(&format!(
+                    "SELECT seq, operation, raw_user, relation, raw_object, CAST(created_at AS STRING) AS created_at \
+                     FROM fga_tuple_changes \
+                     WHERE instance_id = @instance_id \
+                       AND store_id = @store_id \
+                       AND seq > @after_seq \
+                       AND (@object_type = '' OR object_type = @object_type) \
+                     ORDER BY seq ASC \
+                     LIMIT {}",
+                    limit
+                ));
+                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("store_id", &store_id);
+                stmt.add_param("after_seq", &after_seq);
+                stmt.add_param("object_type", &object_type.unwrap_or_default());
+                let rows: Vec<SpannerRow> =
+                    self.spanner_query_all(stmt, "read fga changes").await?;
+                changes.reserve(rows.len());
+                for row in rows {
+                    let seq = row
+                        .column_by_name::<i64>("seq")
+                        .context("read spanner change seq")?;
+                    next = Some(seq.to_string());
+                    changes.push(TupleChangeRecord {
+                        tuple_key: TupleKey {
+                            user: row
+                                .column_by_name::<String>("raw_user")
+                                .context("read spanner raw_user")?,
+                            relation: row
+                                .column_by_name::<String>("relation")
+                                .context("read spanner relation")?,
+                            object: row
+                                .column_by_name::<String>("raw_object")
+                                .context("read spanner raw_object")?,
+                            condition: None,
+                        },
+                        operation: row
+                            .column_by_name::<String>("operation")
+                            .context("read spanner change operation")?,
+                        timestamp: row
+                            .column_by_name::<String>("created_at")
+                            .context("read spanner change created_at")?,
+                    });
+                }
+            }
         }
         if changes.len() < limit as usize {
             next = None;
@@ -1689,10 +2517,18 @@ struct StoredTuple {
 }
 
 #[derive(Clone, Debug)]
+struct StoredModelFragments {
+    core_model_version: String,
+    custom_model: String,
+    module_fragments: String,
+}
+
+#[derive(Clone, Debug)]
 struct CachedModel {
     model_id: String,
     raw: String,
     created_at: String,
+    core_model_version: String,
     compiled: Arc<CompiledModel>,
 }
 
@@ -2253,20 +3089,125 @@ fn core_authorization_model() -> AuthorizationModelWriteRequest {
     AuthorizationModelWriteRequest {
         schema_version: SCHEMA_VERSION_1_1.into(),
         type_definitions: vec![
-            direct_type("user", &[]),
-            direct_type("instance", &["owner", "admin", "viewer", "parent"]),
-            direct_type("org", &["owner", "admin", "member", "viewer"]),
-            direct_type("group", &["member", "admin"]),
-            direct_type("project", &["owner", "admin", "member"]),
-            direct_type("app", &["admin", "viewer"]),
-            direct_type("settings", &["admin", "viewer"]),
-            direct_type("session", &["owner"]),
+            TypeDefinition {
+                type_name: "user".into(),
+                relations: Map::new(),
+                metadata: Some(json!({ "relations": {} })),
+            },
+            TypeDefinition {
+                type_name: "instance".into(),
+                relations: Map::from_iter([
+                    ("owner".into(), json!({ "this": {} })),
+                    (
+                        "admin".into(),
+                        json!({
+                            "union": {
+                                "child": [
+                                    { "this": {} },
+                                    { "computedUserset": { "relation": "owner" } }
+                                ]
+                            }
+                        }),
+                    ),
+                    (
+                        "viewer".into(),
+                        json!({
+                            "union": {
+                                "child": [
+                                    { "this": {} },
+                                    { "computedUserset": { "relation": "admin" } }
+                                ]
+                            }
+                        }),
+                    ),
+                    ("parent".into(), json!({ "this": {} })),
+                ]),
+                metadata: Some(json!({
+                    "relations": {
+                        "owner": {
+                            "directly_related_user_types": [
+                                { "type": "user" },
+                                { "type": "org", "relation": "owner" }
+                            ]
+                        },
+                        "admin": {
+                            "directly_related_user_types": [
+                                { "type": "user" },
+                                { "type": "org", "relation": "admin" }
+                            ]
+                        },
+                        "viewer": {
+                            "directly_related_user_types": [
+                                { "type": "user" },
+                                { "type": "org", "relation": "viewer" }
+                            ]
+                        },
+                        "parent": {
+                            "directly_related_user_types": [
+                                { "type": "instance" }
+                            ]
+                        }
+                    }
+                })),
+            },
+            TypeDefinition {
+                type_name: "org".into(),
+                relations: Map::from_iter([
+                    ("owner".into(), json!({ "this": {} })),
+                    (
+                        "admin".into(),
+                        json!({
+                            "union": {
+                                "child": [
+                                    { "this": {} },
+                                    { "computedUserset": { "relation": "owner" } }
+                                ]
+                            }
+                        }),
+                    ),
+                    (
+                        "member".into(),
+                        json!({
+                            "union": {
+                                "child": [
+                                    { "this": {} },
+                                    { "computedUserset": { "relation": "admin" } }
+                                ]
+                            }
+                        }),
+                    ),
+                    (
+                        "viewer".into(),
+                        json!({
+                            "union": {
+                                "child": [
+                                    { "this": {} },
+                                    { "computedUserset": { "relation": "member" } }
+                                ]
+                            }
+                        }),
+                    ),
+                ]),
+                metadata: Some(json!({
+                    "relations": {
+                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
+                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
+                        "member": { "directly_related_user_types": [{ "type": "user" }] },
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                    }
+                })),
+            },
+            simple_direct_type("group", &["member", "admin"]),
+            simple_direct_type("project", &["owner", "admin", "member"]),
+            simple_direct_type("app", &["admin", "viewer"]),
+            simple_direct_type("settings", &["admin", "viewer"]),
+            simple_direct_type("session", &["owner"]),
         ],
         conditions: Map::new(),
     }
 }
 
-fn direct_type(type_name: &str, relations: &[&str]) -> TypeDefinition {
+fn simple_direct_type(type_name: &str, relations: &[&str]) -> TypeDefinition {
     let relation_map = relations
         .iter()
         .map(|relation| (relation.to_string(), json!({ "this": {} })))
@@ -2288,6 +3229,65 @@ fn direct_type(type_name: &str, relations: &[&str]) -> TypeDefinition {
         type_name: type_name.into(),
         relations: relation_map,
         metadata: Some(json!({ "relations": metadata_relations })),
+    }
+}
+
+fn rebuild_model_from_fragments(
+    custom_model: &str,
+    module_fragments: &str,
+) -> Result<AuthorizationModelWriteRequest, FgaError> {
+    let mut rebuilt = core_authorization_model();
+    let modules: Vec<AuthorizationModelWriteRequest> =
+        serde_json::from_str(module_fragments).context("parse module fragments")?;
+    for fragment in modules {
+        merge_model_fragment(&mut rebuilt, fragment)?;
+    }
+    let custom = parse_model_fragment(custom_model)?;
+    merge_model_fragment(&mut rebuilt, custom)?;
+    Ok(rebuilt)
+}
+
+fn parse_model_fragment(raw: &str) -> Result<AuthorizationModelWriteRequest, FgaError> {
+    let value: Value = serde_json::from_str(raw).context("parse model fragment value")?;
+    if value.as_object().is_some_and(|object| object.is_empty()) {
+        return Ok(AuthorizationModelWriteRequest {
+            schema_version: SCHEMA_VERSION_1_1.into(),
+            type_definitions: Vec::new(),
+            conditions: Map::new(),
+        });
+    }
+    serde_json::from_value(value).context("parse model fragment")
+        .map_err(Into::into)
+}
+
+fn merge_model_fragment(
+    target: &mut AuthorizationModelWriteRequest,
+    fragment: AuthorizationModelWriteRequest,
+) -> Result<(), FgaError> {
+    if fragment.schema_version != target.schema_version {
+        return Err(FgaError::BadRequest(format!(
+            "fragment schema_version {} does not match core schema_version {}",
+            fragment.schema_version, target.schema_version
+        )));
+    }
+    if !fragment.conditions.is_empty() {
+        return Err(FgaError::Unsupported(
+            "conditions are not supported by the embedded v1 server".into(),
+        ));
+    }
+    target.type_definitions.extend(fragment.type_definitions);
+    Ok(())
+}
+
+fn tuple_identity(tuple: &TupleKey) -> String {
+    format!("{}|{}|{}", tuple.user, tuple.relation, tuple.object)
+}
+
+fn is_managed_root_tuple(tuple: &TupleKey) -> bool {
+    match tuple.object.split_once(':') {
+        Some(("org", _)) => matches!(tuple.relation.as_str(), "owner" | "admin" | "member" | "viewer"),
+        Some(("instance", _)) => matches!(tuple.relation.as_str(), "parent" | "owner" | "admin" | "viewer"),
+        _ => false,
     }
 }
 
@@ -2330,13 +3330,23 @@ mod tests {
     use super::*;
     use crate::Evaluator;
 
-    use zitadel_db::{DEFAULT_INSTANCE_ID, migrate};
+    use zitadel_db::{
+        CreateManagedInstanceInput, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, create_user, migrate,
+    };
 
     async fn test_service() -> FgaService {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
         zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
         FgaService::new(db)
+    }
+
+    async fn test_service_with_db() -> (Db, FgaService) {
+        let db = Db::open("").await.unwrap();
+        migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        let service = FgaService::new(db.clone());
+        (db, service)
     }
 
     #[tokio::test]
@@ -2738,5 +3748,136 @@ mod tests {
             store.id.clone(),
             written.authorization_model_id
         )));
+    }
+
+    #[tokio::test]
+    async fn initialize_instance_replaces_stale_core_models() {
+        let (db, service) = test_service_with_db().await;
+        let store = service
+            .initialize_instance(DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap();
+        let original = service
+            .read_model(DEFAULT_INSTANCE_ID, &store.id, None)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "UPDATE fga_authorization_models SET core_model_version = '' \
+             WHERE instance_id = $1 AND store_id = $2 AND model_id = $3",
+        )
+        .bind(DEFAULT_INSTANCE_ID)
+        .bind(&store.id)
+        .bind(&original.authorization_model_id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let reloaded = FgaService::new(db.clone());
+        reloaded.initialize_instance(DEFAULT_INSTANCE_ID).await.unwrap();
+        let current = reloaded
+            .read_model(DEFAULT_INSTANCE_ID, &store.id, None)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            current.authorization_model_id,
+            original.authorization_model_id
+        );
+        let instance = current
+            .type_definitions
+            .iter()
+            .find(|type_def| type_def.type_name == "instance")
+            .unwrap();
+        assert_eq!(
+            instance.relations.get("admin"),
+            Some(&json!({
+                "union": {
+                    "child": [
+                        { "this": {} },
+                        { "computedUserset": { "relation": "owner" } }
+                    ]
+                }
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn reconcile_root_hierarchy_materializes_root_store_only() {
+        let (db, service) = test_service_with_db().await;
+        let root_user_id = "root-user";
+        create_user(
+            &db,
+            DEFAULT_INSTANCE_ID,
+            root_user_id,
+            DEFAULT_ORG_ID,
+            "root-user@example.com",
+            "Root User",
+            "",
+            "{}",
+        )
+        .await
+        .unwrap();
+        zitadel_db::create_managed_instance(
+            &db,
+            &CreateManagedInstanceInput {
+                instance_id: "child-a".into(),
+                root_instance_id: DEFAULT_INSTANCE_ID.into(),
+                owner_org_id: DEFAULT_ORG_ID.into(),
+                primary_domain: "child-a.example.com".into(),
+                kind: "managed".into(),
+                placement_mode: "global".into(),
+                region_key: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        service
+            .reconcile_root_hierarchy(DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap();
+
+        let root_store = service.discover_store(DEFAULT_INSTANCE_ID).await.unwrap();
+        let root_allowed = service
+            .check(
+                DEFAULT_INSTANCE_ID,
+                &root_store.id,
+                CheckRequest {
+                    tuple_key: TupleKey {
+                        user: format!("user:{root_user_id}"),
+                        relation: "admin".into(),
+                        object: "instance:child-a".into(),
+                        condition: None,
+                    },
+                    authorization_model_id: None,
+                    contextual_tuples: None,
+                    context: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(root_allowed.allowed);
+
+        let child_store = service.discover_store("child-a").await.unwrap();
+        let child_allowed = service
+            .check(
+                "child-a",
+                &child_store.id,
+                CheckRequest {
+                    tuple_key: TupleKey {
+                        user: format!("user:{root_user_id}"),
+                        relation: "admin".into(),
+                        object: "instance:child-a".into(),
+                        condition: None,
+                    },
+                    authorization_model_id: None,
+                    contextual_tuples: None,
+                    context: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!child_allowed.allowed);
     }
 }

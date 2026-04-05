@@ -7,7 +7,7 @@ users:
     type: human_user_v1
     password: admin123
     on_conflict: update
-    capabilities: [admin, password]
+    capabilities: [operator_admin, admin, password]
     pats:
       - name: dev-admin-token
         token: zitadel-dev-pat-do-not-use-in-production

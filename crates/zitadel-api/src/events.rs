@@ -6,9 +6,10 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::convert::Infallible;
 use tokio_stream::StreamExt;
+use zitadel_db::current_instance_id;
+use zitadel_storage::{AnalyticsQuery, AnalyticsQueryResult};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -58,104 +59,61 @@ pub struct EventResponse {
 }
 
 async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) -> Response {
-    let scoped = s.db.scoped_default();
     let cursor = decode_cursor(p.cursor.as_deref());
-    let (created_at, _) = scoped.select_timestamps();
-    let payload = scoped.as_text("payload");
-    let metadata = scoped.as_text("metadata");
 
-    // Build dynamic WHERE clause with optional filters.
-    // Exclude internal log.* events by default — they're server-side observability
-    // noise and shouldn't appear in the user-facing audit log.
-    let mut conditions = vec!["instance_id = $1".to_string()];
-    let mut bind_idx = 2u32;
-    let mut extra_binds: Vec<String> = Vec::new();
+    let mut conditions = vec![format!(
+        "instance_id = {}",
+        sql_string_literal(current_instance_id().as_ref())
+    )];
 
     if let Some(ref et) = p.event_type {
-        conditions.push(format!("event_type = ${bind_idx}"));
-        extra_binds.push(et.clone());
-        bind_idx += 1;
+        conditions.push(format!("event_type = {}", sql_string_literal(et)));
     } else {
         conditions.push("event_type NOT LIKE 'log.%'".to_string());
     }
     if let Some(ref sid) = p.session_id {
-        conditions.push(format!("session_id = ${bind_idx}"));
-        extra_binds.push(sid.clone());
-        bind_idx += 1;
+        conditions.push(format!("session_id = {}", sql_string_literal(sid)));
     }
     if let Some(ref fp) = p.fingerprint {
-        conditions.push(format!("fingerprint = ${bind_idx}"));
-        extra_binds.push(fp.clone());
-        bind_idx += 1;
+        conditions.push(format!("fingerprint = {}", sql_string_literal(fp)));
     }
     if let Some(ref aid) = p.aggregate_id {
-        conditions.push(format!("aggregate_id = ${bind_idx}"));
-        extra_binds.push(aid.clone());
-        bind_idx += 1;
+        conditions.push(format!("aggregate_id = {}", sql_string_literal(aid)));
     }
     if let Some((cursor_created_at, cursor_id)) = &cursor {
-        let cursor_ts_expr = match s.db.dialect() {
-            zitadel_db::Dialect::Postgres => format!("CAST(${bind_idx} AS TIMESTAMPTZ)"),
-            zitadel_db::Dialect::Sqlite => format!("datetime(${bind_idx})"),
-        };
+        let cursor_ts_expr = timestamp_literal(s.db.dialect(), cursor_created_at);
         conditions.push(format!(
-            "(created_at < {cursor_ts_expr} OR (created_at = {cursor_ts_expr} AND id < ${}))",
-            bind_idx + 1
+            "(created_at < {cursor_ts_expr} OR (created_at = {cursor_ts_expr} AND id < {}))",
+            sql_string_literal(cursor_id)
         ));
-        extra_binds.push(cursor_created_at.clone());
-        extra_binds.push(cursor_id.clone());
-        bind_idx += 2;
     }
 
     let where_clause = conditions.join(" AND ");
     let sql = format!(
         "SELECT id, event_type, category, org_id, actor_id, actor_type, \
-         aggregate_id, aggregate_type, resource_type, \
-         {payload}, {metadata}, \
+         aggregate_id, aggregate_type, resource_type, payload, metadata, \
          request_id, session_id, flow_id, fingerprint, \
-         client_id, token_id, delegation_type, \
-         sdk_name, sdk_version, sequence, {created_at} \
-         FROM events WHERE {where_clause} ORDER BY created_at DESC, id DESC LIMIT ${bind_idx}"
+         client_id, token_id, delegation_type, sdk_name, sdk_version, sequence, created_at \
+         FROM events WHERE {where_clause} ORDER BY created_at DESC, id DESC LIMIT {}",
+        p.limit.min(500),
     );
 
-    let mut query = sqlx::query(&sql).bind(scoped.instance_id());
-    for val in &extra_binds {
-        query = query.bind(val);
-    }
-    query = query.bind(p.limit.min(500));
-
-    match query.fetch_all(scoped.pool()).await {
-        Ok(rows) => {
-            let items: Vec<EventResponse> = rows
-                .into_iter()
-                .map(|r| {
-                    let payload_str: String = r.get(9);
-                    let metadata_str: String = r.get(10);
-                    EventResponse {
-                        id: r.get(0),
-                        event_type: r.get(1),
-                        category: r.get(2),
-                        org_id: r.get(3),
-                        actor_id: r.get(4),
-                        actor_type: r.get(5),
-                        aggregate_id: r.get(6),
-                        aggregate_type: r.get(7),
-                        resource_type: r.get(8),
-                        payload: serde_json::from_str(&payload_str).unwrap_or_default(),
-                        metadata: serde_json::from_str(&metadata_str).unwrap_or_default(),
-                        request_id: r.get(11),
-                        session_id: r.get(12),
-                        flow_id: r.get(13),
-                        fingerprint: r.get(14),
-                        client_id: r.get(15),
-                        token_id: r.get(16),
-                        delegation_type: r.get(17),
-                        sdk_name: r.get(18),
-                        sdk_version: r.get(19),
-                        sequence: r.get(20),
-                        created_at: r.get(21),
-                    }
-                })
+    match s
+        .analytics
+        .query(&AnalyticsQuery {
+            sql,
+            limit: Some(p.limit.min(500)),
+        })
+        .await
+    {
+        Ok(result) => {
+            if let Some(error) = result.error {
+                return response::internal_error(error);
+            }
+            let items: Vec<EventResponse> = result
+                .rows
+                .iter()
+                .map(|row| event_from_analytics_row(&result, row))
                 .collect();
             let next_cursor = items.last().map(|e| encode_cursor(&e.created_at, &e.id));
             response::json_ok(response::ListResponse {
@@ -203,4 +161,102 @@ fn chrono_now() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap();
     format!("{}", d.as_secs())
+}
+
+fn event_from_analytics_row(result: &AnalyticsQueryResult, row: &[serde_json::Value]) -> EventResponse {
+    EventResponse {
+        id: row_string(result, row, "id").unwrap_or_default(),
+        event_type: row_string(result, row, "event_type").unwrap_or_default(),
+        category: row_string(result, row, "category").unwrap_or_default(),
+        org_id: row_string(result, row, "org_id").unwrap_or_default(),
+        actor_id: row_optional_string(result, row, "actor_id"),
+        actor_type: row_optional_string(result, row, "actor_type"),
+        aggregate_id: row_optional_string(result, row, "aggregate_id"),
+        aggregate_type: row_optional_string(result, row, "aggregate_type"),
+        resource_type: row_optional_string(result, row, "resource_type"),
+        payload: row_json(result, row, "payload"),
+        metadata: row_json(result, row, "metadata"),
+        request_id: row_optional_string(result, row, "request_id"),
+        session_id: row_optional_string(result, row, "session_id"),
+        flow_id: row_optional_string(result, row, "flow_id"),
+        fingerprint: row_optional_string(result, row, "fingerprint"),
+        client_id: row_optional_string(result, row, "client_id"),
+        token_id: row_optional_string(result, row, "token_id"),
+        delegation_type: row_optional_string(result, row, "delegation_type"),
+        sdk_name: row_optional_string(result, row, "sdk_name"),
+        sdk_version: row_optional_string(result, row, "sdk_version"),
+        sequence: row_i64(result, row, "sequence"),
+        created_at: row_string(result, row, "created_at").unwrap_or_default(),
+    }
+}
+
+fn column_index(result: &AnalyticsQueryResult, column: &str) -> Option<usize> {
+    result.columns.iter().position(|candidate| candidate == column)
+}
+
+fn row_value<'a>(
+    result: &'a AnalyticsQueryResult,
+    row: &'a [serde_json::Value],
+    column: &str,
+) -> Option<&'a serde_json::Value> {
+    column_index(result, column).and_then(|index| row.get(index))
+}
+
+fn row_string(
+    result: &AnalyticsQueryResult,
+    row: &[serde_json::Value],
+    column: &str,
+) -> Option<String> {
+    match row_value(result, row, column)? {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null => None,
+        other => Some(other.to_string()),
+    }
+}
+
+fn row_optional_string(
+    result: &AnalyticsQueryResult,
+    row: &[serde_json::Value],
+    column: &str,
+) -> Option<String> {
+    row_string(result, row, column)
+}
+
+fn row_i64(
+    result: &AnalyticsQueryResult,
+    row: &[serde_json::Value],
+    column: &str,
+) -> Option<i64> {
+    row_value(result, row, column).and_then(|value| match value {
+        serde_json::Value::Number(number) => number.as_i64(),
+        serde_json::Value::String(raw) => raw.parse().ok(),
+        _ => None,
+    })
+}
+
+fn row_json(
+    result: &AnalyticsQueryResult,
+    row: &[serde_json::Value],
+    column: &str,
+) -> serde_json::Value {
+    match row_value(result, row, column) {
+        Some(serde_json::Value::String(raw)) => serde_json::from_str(raw)
+            .unwrap_or_else(|_| serde_json::Value::String(raw.clone())),
+        Some(other) => other.clone(),
+        None => serde_json::Value::Null,
+    }
+}
+
+fn sql_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn timestamp_literal(dialect: zitadel_db::Dialect, value: &str) -> String {
+    match dialect {
+        zitadel_db::Dialect::Sqlite => format!("datetime({})", sql_string_literal(value)),
+        zitadel_db::Dialect::Postgres => format!("CAST({} AS TIMESTAMPTZ)", sql_string_literal(value)),
+        zitadel_db::Dialect::Spanner => format!("TIMESTAMP({})", sql_string_literal(value)),
+    }
 }

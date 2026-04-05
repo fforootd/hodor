@@ -14,4 +14,8 @@ serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 sha2 = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-googleapis = { workspace = true }
+google-cloud-auth = { workspace = true }
+google-cloud-gax = { workspace = true }
 zitadel-config = { workspace = true }

@@ -72,6 +72,9 @@ impl SessionStore {
             zitadel_db::Dialect::Postgres => {
                 format!("CURRENT_TIMESTAMP + INTERVAL '{max_age_secs} seconds'")
             }
+            zitadel_db::Dialect::Spanner => {
+                format!("TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL {max_age_secs} SECOND)")
+            }
             zitadel_db::Dialect::Sqlite => {
                 format!("datetime(CURRENT_TIMESTAMP, '+{max_age_secs} seconds')")
             }
@@ -254,6 +257,7 @@ mod tests {
         let default_scoped = db.scoped_default();
         let other_scoped = db.scoped("other".to_string());
 
+        // Setup: default instance org + user first (default instance is seeded by migration).
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
             .bind("org-default")
             .bind(default_scoped.instance_id())
@@ -271,6 +275,20 @@ mod tests {
             .await
             .unwrap();
 
+        // Create "other" instance as a child of default (CHECK constraint requires
+        // parent_instance_id + owner_org_id for managed instances).
+        sqlx::query(
+            "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, $2, $3, 'managed', 'active', 'global', '{}')",
+        )
+        .bind(other_scoped.instance_id())
+        .bind(default_scoped.instance_id())
+        .bind("org-default")
+        .execute(other_scoped.pool())
+        .await
+        .unwrap();
+
+        // Setup: other instance org + user.
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
             .bind("org-other")
             .bind(other_scoped.instance_id())

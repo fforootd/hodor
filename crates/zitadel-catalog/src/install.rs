@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 
+use zitadel_db::{first_org_id, upsert_catalog_action};
 use zitadel_db::provider::{
-    ProviderCatalogRef, ProviderPayload, insert_provider, list_providers, update_provider,
+    ProviderCatalogRef, ProviderPayload, insert_provider_for, list_providers_for,
+    update_provider_for,
 };
 
 use crate::Catalog;
@@ -17,7 +19,8 @@ impl Catalog {
         db: &zitadel_db::Db,
     ) -> anyhow::Result<String> {
         let (entry, payload) = self.resolve_payload(id, variables)?;
-        let scoped = db.scoped_default();
+        let instance_id = zitadel_db::current_instance_id_or(zitadel_db::DEFAULT_INSTANCE_ID)
+            .into_owned();
 
         let provider_id = uuid::Uuid::new_v4().to_string();
         let mut provider: ProviderPayload = serde_json::from_value(payload)?;
@@ -31,15 +34,9 @@ impl Catalog {
             docs_url: entry.docs_url.clone(),
         };
 
-        let org_id: String =
-            sqlx::query_as::<_, (String,)>("SELECT id FROM orgs WHERE instance_id = $1 LIMIT 1")
-                .bind(scoped.instance_id())
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|r| r.0)
-                .unwrap_or_default();
+        let org_id = first_org_id(db, &instance_id).await?.unwrap_or_default();
 
-        let existing = list_providers(&scoped)
+        let existing = list_providers_for(db, &instance_id)
             .await?
             .into_iter()
             .find(|candidate| {
@@ -47,10 +44,10 @@ impl Catalog {
             });
 
         let provider_id = if let Some(existing) = existing {
-            update_provider(&scoped, &existing.id, &provider).await?;
+            update_provider_for(db, &instance_id, &existing.id, &provider).await?;
             existing.id
         } else {
-            insert_provider(&scoped, &provider_id, &org_id, &provider).await?;
+            insert_provider_for(db, &instance_id, &provider_id, &org_id, &provider).await?;
             provider_id
         };
 
@@ -66,7 +63,8 @@ impl Catalog {
         db: &zitadel_db::Db,
     ) -> anyhow::Result<String> {
         let (entry, payload) = self.resolve_payload(id, variables)?;
-        let scoped = db.scoped_default();
+        let instance_id = zitadel_db::current_instance_id_or(zitadel_db::DEFAULT_INSTANCE_ID)
+            .into_owned();
 
         let action_id = uuid::Uuid::new_v4().to_string();
         let display_name = payload["display_name"].as_str().unwrap_or(&entry.name);
@@ -78,13 +76,7 @@ impl Catalog {
         let enabled = payload["enabled"].as_bool().unwrap_or(true);
         let fail_open = payload["fail_open"].as_bool().unwrap_or(false);
 
-        let org_id: String =
-            sqlx::query_as::<_, (String,)>("SELECT id FROM orgs WHERE instance_id = $1 LIMIT 1")
-                .bind(scoped.instance_id())
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|r| r.0)
-                .unwrap_or_default();
+        let org_id = first_org_id(db, &instance_id).await?.unwrap_or_default();
 
         let config_json = serde_json::to_string(&config)?;
         let metadata = serde_json::json!({
@@ -93,62 +85,23 @@ impl Catalog {
                 "template_version": entry.version,
             }
         });
-
-        // Upsert: update if action with same name exists.
-        let existing: Option<(String,)> = sqlx::query_as(
-            "SELECT id FROM actions WHERE instance_id = $1 AND org_id = $2 AND name = $3",
+        let metadata_json = serde_json::to_string(&metadata)?;
+        let action_id = upsert_catalog_action(
+            db,
+            &instance_id,
+            &action_id,
+            &org_id,
+            display_name,
+            hook,
+            action_type,
+            trigger_expr,
+            &config_json,
+            priority,
+            enabled,
+            fail_open,
+            &metadata_json,
         )
-        .bind(scoped.instance_id())
-        .bind(&org_id)
-        .bind(display_name)
-        .fetch_optional(scoped.pool())
         .await?;
-
-        let action_id = if let Some((existing_id,)) = existing {
-            let sql = format!(
-                "UPDATE actions SET hook = $1, action_type = $2, trigger_expr = $3, config = {}, \
-                 priority = $4, enabled = $5, fail_open = $6, metadata = {}, updated_at = CURRENT_TIMESTAMP \
-                 WHERE id = $7",
-                scoped.json_bind(8),
-                scoped.json_bind(9),
-            );
-            sqlx::query(&sql)
-                .bind(hook)
-                .bind(action_type)
-                .bind(trigger_expr)
-                .bind(priority)
-                .bind(enabled)
-                .bind(fail_open)
-                .bind(&existing_id)
-                .bind(&config_json)
-                .bind(serde_json::to_string(&metadata)?)
-                .execute(scoped.pool())
-                .await?;
-            existing_id
-        } else {
-            let sql = format!(
-                "INSERT INTO actions (id, instance_id, org_id, name, hook, action_type, trigger_expr, config, priority, enabled, fail_open, metadata) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, {}, $8, $9, $10, {})",
-                scoped.json_bind(11),
-                scoped.json_bind(12),
-            );
-            sqlx::query(&sql)
-                .bind(&action_id)
-                .bind(scoped.instance_id())
-                .bind(&org_id)
-                .bind(display_name)
-                .bind(hook)
-                .bind(action_type)
-                .bind(trigger_expr)
-                .bind(priority)
-                .bind(enabled)
-                .bind(fail_open)
-                .bind(&config_json)
-                .bind(serde_json::to_string(&metadata)?)
-                .execute(scoped.pool())
-                .await?;
-            action_id
-        };
 
         tracing::info!(action_id = %action_id, template = id, name = display_name, "installed action from catalog");
         Ok(action_id)

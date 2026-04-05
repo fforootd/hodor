@@ -59,6 +59,10 @@ opentelemetry-otlp = { version = "0.31", features = ["logs", "grpc-tonic", "http
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "any", "migrate"] }
+google-cloud-spanner = { version = "0.33.0", features = ["auth"] }
+google-cloud-googleapis = "0.16.0"
+google-cloud-auth = "0.17.2"
+google-cloud-gax = "0.19.2"
 
 # Crypto
 argon2 = "0.5"

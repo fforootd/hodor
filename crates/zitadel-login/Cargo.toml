@@ -22,6 +22,7 @@ sha2 = { workspace = true }
 base64 = "0.22"
 rand = "0.8"
 reqwest = { workspace = true }
+google-cloud-spanner = { workspace = true }
 url = "2"
 hex = "0.4"
 

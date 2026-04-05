@@ -1,6 +1,6 @@
 use anyhow::Context;
 use serde_json::{Map, Value, json};
-use zitadel_db::Db;
+use zitadel_db::{Db, list_schema_registry};
 
 const META_SCHEMA: &str = include_str!("meta_schema.json");
 
@@ -68,27 +68,20 @@ struct SchemaRegistryEntry {
 }
 
 async fn load_schema_registry(db: &Db) -> anyhow::Result<Vec<SchemaRegistryEntry>> {
-    let scoped = db.scoped_default();
-    let sql = format!(
-        "SELECT id, type, {}, version, visibility, {} FROM schemas ORDER BY type, version DESC",
-        scoped.as_text("schema"),
-        scoped.bool_as_int("is_default"),
-    );
-    let rows = sqlx::query_as::<_, (String, String, String, i64, String, i64)>(&sql)
-        .fetch_all(scoped.pool())
+    let rows = list_schema_registry(db, "", None, i64::MAX)
         .await
         .context("query schema registry")?;
 
     rows.into_iter()
-        .map(|(id, type_, raw_schema, version, visibility, is_default)| {
-            let schema = serde_json::from_str(&raw_schema)
-                .with_context(|| format!("parse schema registry entry {id}"))?;
+        .map(|row| {
+            let schema = serde_json::from_str(&row.schema_json)
+                .with_context(|| format!("parse schema registry entry {}", row.id))?;
             Ok(SchemaRegistryEntry {
-                id,
-                type_,
-                version,
-                visibility,
-                is_default: is_default != 0,
+                id: row.id,
+                type_: row.type_,
+                version: row.version,
+                visibility: row.visibility,
+                is_default: row.is_default,
                 schema,
             })
         })
@@ -112,12 +105,13 @@ fn base_components(meta_schema: &Value) -> Map<String, Value> {
         "WhoAmIResponse".into(),
         json!({
             "type": "object",
-            "required": ["user_id", "session_id", "token_type", "org_id"],
+            "required": ["user_id", "session_id", "token_type", "org_id", "operator_admin"],
             "properties": {
                 "user_id": {"type": "string"},
                 "session_id": {"type": "string"},
                 "token_type": {"type": "string"},
                 "org_id": {"type": "string"},
+                "operator_admin": {"type": "boolean"},
             }
         }),
     );

@@ -1004,6 +1004,17 @@ async fn insert_event_row(
                 $16, $17, $18, $19, $20, $21, to_timestamp($22::double precision / 1000.0)
             )"
         }
+        Dialect::Spanner => {
+            "INSERT INTO events (
+                id, instance_id, event_type, category, org_id, actor_id, actor_type, aggregate_id,
+                aggregate_type, resource_type, payload, metadata, request_id, session_id, flow_id,
+                fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13, $14, $15,
+                $16, $17, $18, $19, $20, $21, TIMESTAMP_MILLIS($22)
+            )"
+        }
     };
 
     sqlx::query(insert_sql)

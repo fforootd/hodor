@@ -4,7 +4,10 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use zitadel_db::Db;
+use zitadel_db::{
+    Db, consume_oidc_auth_code_record, create_oidc_auth_request_record, get_oidc_client_record,
+    load_user_claims_record,
+};
 
 #[derive(Clone)]
 pub struct ZitadelOpStore {
@@ -14,10 +17,6 @@ pub struct ZitadelOpStore {
 impl ZitadelOpStore {
     pub fn new(db: Db) -> Self {
         Self { db }
-    }
-
-    fn scoped(&self, instance_id: &str) -> zitadel_db::scoped::ScopedDb {
-        self.db.scoped(instance_id.to_string())
     }
 
     fn parse_string_list(raw: &str) -> Vec<String> {
@@ -31,30 +30,16 @@ impl ClientStore for ZitadelOpStore {
         instance_id: &str,
         client_id: &str,
     ) -> anyhow::Result<Option<ClientMetadata>> {
-        let scoped = self.scoped(instance_id);
-        let sql = format!(
-            "SELECT COALESCE(client_secret, ''), COALESCE({}, '[]'), COALESCE({}, '[]'), COALESCE({}, '[]'), COALESCE(state, 'active') \
-             FROM apps WHERE instance_id = $1 AND client_id = $2",
-            scoped.as_text("redirect_uris"),
-            scoped.as_text("grant_types"),
-            scoped.as_text("response_types"),
-        );
-        let row: Option<(String, String, String, String, String)> = sqlx::query_as(&sql)
-            .bind(scoped.instance_id())
-            .bind(client_id)
-            .fetch_optional(scoped.pool())
-            .await?;
-
-        Ok(row.map(
-            |(client_secret, redirect_uris, grant_types, response_types, state)| ClientMetadata {
+        Ok(get_oidc_client_record(&self.db, instance_id, client_id)
+            .await?
+            .map(|record| ClientMetadata {
                 client_id: client_id.to_string(),
-                client_secret,
-                redirect_uris: Self::parse_string_list(&redirect_uris),
-                grant_types: Self::parse_string_list(&grant_types),
-                response_types: Self::parse_string_list(&response_types),
-                state,
-            },
-        ))
+                client_secret: record.client_secret,
+                redirect_uris: Self::parse_string_list(&record.redirect_uris_json),
+                grant_types: Self::parse_string_list(&record.grant_types_json),
+                response_types: Self::parse_string_list(&record.response_types_json),
+                state: record.state,
+            }))
     }
 
     async fn authenticate_client_secret(
@@ -77,29 +62,24 @@ impl AuthRequestStore for ZitadelOpStore {
         instance_id: &str,
         request: &NewAuthRequest,
     ) -> anyhow::Result<String> {
-        let scoped = self.scoped(instance_id);
         let auth_request_id = Uuid::new_v4().to_string();
-        let sql = format!(
-            "INSERT INTO oidc_auth_requests (id, instance_id, client_id, redirect_uri, scope, state, nonce, response_type, code_challenge, code_challenge_method, prompt, login_hint, max_age) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, {}, $12, $13)",
-            scoped.json_bind(11),
-        );
-        sqlx::query(&sql)
-            .bind(&auth_request_id)
-            .bind(scoped.instance_id())
-            .bind(&request.client_id)
-            .bind(&request.redirect_uri)
-            .bind(&request.scope)
-            .bind(&request.state)
-            .bind(&request.nonce)
-            .bind(&request.response_type)
-            .bind(&request.code_challenge)
-            .bind(&request.code_challenge_method)
-            .bind(serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_string()))
-            .bind(&request.login_hint)
-            .bind(request.max_age.map(|value| value as i64))
-            .execute(scoped.pool())
-            .await?;
+        create_oidc_auth_request_record(
+            &self.db,
+            instance_id,
+            &auth_request_id,
+            &request.client_id,
+            &request.redirect_uri,
+            &request.scope,
+            &request.state,
+            &request.nonce,
+            &request.response_type,
+            &request.code_challenge,
+            &request.code_challenge_method,
+            &serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_string()),
+            &request.login_hint,
+            request.max_age.map(|value| value as i64),
+        )
+        .await?;
 
         Ok(auth_request_id)
     }
@@ -109,51 +89,18 @@ impl AuthRequestStore for ZitadelOpStore {
         instance_id: &str,
         code: &str,
     ) -> anyhow::Result<Option<ConsumedAuthRequest>> {
-        let scoped = self.scoped(instance_id);
-        let mut tx = scoped.pool().begin().await?;
-        let auth_time = scoped.epoch_seconds("auth_time");
-        let row: Option<(String, String, String, String, String, String, String, Option<i64>)> =
-            sqlx::query_as(&format!(
-                "SELECT id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, {auth_time} \
-                 FROM oidc_auth_requests WHERE instance_id = $1 AND code = $2 AND done = 1"
-            ))
-            .bind(scoped.instance_id())
-            .bind(code)
-            .fetch_optional(&mut *tx)
-            .await?;
-
-        let Some((
-            auth_request_id,
-            user_id,
-            client_id,
-            redirect_uri,
-            scope,
-            nonce,
-            code_challenge,
-            auth_time,
-        )) = row
-        else {
-            tx.rollback().await?;
-            return Ok(None);
-        };
-
-        sqlx::query("DELETE FROM oidc_auth_requests WHERE instance_id = $1 AND id = $2")
-            .bind(scoped.instance_id())
-            .bind(&auth_request_id)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-
-        Ok(Some(ConsumedAuthRequest {
-            auth_request_id,
-            user_id,
-            client_id,
-            redirect_uri,
-            scope,
-            nonce,
-            code_challenge,
-            auth_time: auth_time.and_then(|value| u64::try_from(value).ok()),
-        }))
+        Ok(consume_oidc_auth_code_record(&self.db, instance_id, code)
+            .await?
+            .map(|record| ConsumedAuthRequest {
+                auth_request_id: record.auth_request_id,
+                user_id: record.user_id,
+                client_id: record.client_id,
+                redirect_uri: record.redirect_uri,
+                scope: record.scope,
+                nonce: record.nonce,
+                code_challenge: record.code_challenge,
+                auth_time: record.auth_time.and_then(|value| u64::try_from(value).ok()),
+            }))
     }
 }
 
@@ -163,21 +110,14 @@ impl ClaimSource for ZitadelOpStore {
         instance_id: &str,
         subject: &str,
     ) -> anyhow::Result<Option<UserClaims>> {
-        let scoped = self.scoped(instance_id);
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT identifier, display_name FROM users WHERE instance_id = $1 AND id = $2",
-        )
-        .bind(scoped.instance_id())
-        .bind(subject)
-        .fetch_optional(scoped.pool())
-        .await?;
-
-        Ok(row.map(|(email, name)| UserClaims {
-            subject: subject.to_string(),
-            name,
-            email: email.clone(),
-            email_verified: !email.is_empty(),
-        }))
+        Ok(load_user_claims_record(&self.db, instance_id, subject)
+            .await?
+            .map(|record| UserClaims {
+                subject: subject.to_string(),
+                name: record.display_name,
+                email_verified: !record.identifier.is_empty(),
+                email: record.identifier,
+            }))
     }
 }
 
@@ -236,6 +176,15 @@ mod tests {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
         let scoped = db.scoped_default();
+
+        // Create the org that the app references.
+        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, 'Test Org')")
+            .bind("org-1")
+            .bind(scoped.instance_id())
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
         let redirect_uris = r#"["https://app.example/callback","https://app.example/alt"]"#;
         let grant_types = r#"["authorization_code","client_credentials"]"#;
         let response_types = r#"["code"]"#;

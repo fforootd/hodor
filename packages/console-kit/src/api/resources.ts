@@ -839,3 +839,68 @@ export const notificationApi = {
     return api.post<NotificationRender>('/v1/notifications/test', body)
   },
 }
+
+// ------------------------------------------------------------------
+// Instance Management API (ADR-031)
+// ------------------------------------------------------------------
+export interface Instance {
+  instance_id: string
+  primary_domain: string | null
+  state: string
+  kind: string
+  placement_mode: string
+  region_key: string | null
+  owner_org_id: string
+  feature_overrides: Record<string, boolean>
+  created_at: string
+  updated_at: string
+}
+
+export interface InstanceDomain {
+  domain: string
+  is_primary: boolean
+  state: string
+  verified: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface InstanceCreatePayload {
+  instance_id?: string
+  domain: string
+  owner_org_id?: string
+  placement_mode?: string
+  region_key?: string
+  kind?: string
+}
+
+export interface InstanceUpdatePayload {
+  state?: string
+  placement_mode?: string
+  region_key?: string
+  feature_overrides?: Record<string, boolean>
+}
+
+export const instanceApi = {
+  list: (params?: { cursor?: string; limit?: number }): Promise<{ items: Instance[]; next_cursor?: string }> => {
+    const query = new URLSearchParams()
+    if (params?.cursor) query.set('cursor', params.cursor)
+    if (params?.limit) query.set('limit', String(params.limit))
+    const qs = query.toString()
+    return api.get<{ items: Instance[]; next_cursor?: string }>(`/v1/instances${qs ? `?${qs}` : ''}`)
+  },
+  get: (id: string): Promise<Instance> =>
+    api.get<Instance>(`/v1/instances/${encodeURIComponent(id)}`),
+  create: (data: InstanceCreatePayload): Promise<Instance> =>
+    api.post<Instance>('/v1/instances', data),
+  update: (id: string, data: InstanceUpdatePayload): Promise<Instance> =>
+    api.patch<Instance>(`/v1/instances/${encodeURIComponent(id)}`, data),
+  delete: (id: string): Promise<void> =>
+    api.delete(`/v1/instances/${encodeURIComponent(id)}`),
+  listDomains: (id: string): Promise<InstanceDomain[]> =>
+    api.get<{ items: InstanceDomain[] }>(`/v1/instances/${encodeURIComponent(id)}/domains`).then(r => r.items ?? []),
+  addDomain: (id: string, domain: string): Promise<InstanceDomain> =>
+    api.post<InstanceDomain>(`/v1/instances/${encodeURIComponent(id)}/domains`, { domain }),
+  removeDomain: (id: string, domain: string): Promise<void> =>
+    api.delete(`/v1/instances/${encodeURIComponent(id)}/domains/${encodeURIComponent(domain)}`),
+}

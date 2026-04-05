@@ -30,13 +30,38 @@ function handleUnauthorized() {
 }
 
 /**
- * Custom fetch that prepends base URL, adds credentials,
- * and handles 401 globally.
+ * Extract the current instance ID from the page URL.
+ * If we're at /console/instances/:id/..., all API calls should go to
+ * /v1/instances/:id/... instead of /v1/...
+ */
+function currentInstancePrefix(): string {
+  const match = window.location.pathname.match(/\/console\/instances\/([^/]+)/)
+  return match ? `/v1/instances/${match[1]}` : ''
+}
+
+/**
+ * Custom fetch that prepends base URL, rewrites API paths for instance scoping,
+ * adds credentials, and handles 401 globally.
  */
 const consoleFetch: typeof fetch = async (input, init) => {
-  const url = typeof input === 'string' && input.startsWith('/')
-    ? `${BASE_URL}${input}`
-    : input
+  let url = input
+  if (typeof url === 'string' && url.startsWith('/')) {
+    // Rewrite /v1/... to /v1/instances/:id/... when inside an instance.
+    // Skip root-level endpoints (console bootstrap, admin, auth, instances CRUD).
+    const prefix = currentInstancePrefix()
+    if (
+      prefix &&
+      url.startsWith('/v1/') &&
+      !url.startsWith('/v1/instances') &&
+      !url.startsWith('/v1/console/') &&
+      !url.startsWith('/v1/admin/') &&
+      !url.startsWith('/v1/auth/')
+    ) {
+      url = `${BASE_URL}${prefix}${url.slice(3)}` // /v1/users → /v1/instances/:id/users
+    } else {
+      url = `${BASE_URL}${url}`
+    }
+  }
 
   const headers = new Headers(init?.headers)
   const fingerprint = getDeviceFingerprint()

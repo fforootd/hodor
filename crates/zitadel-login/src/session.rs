@@ -1,5 +1,5 @@
 use crate::LoginState;
-use zitadel_db::current_instance_id;
+use zitadel_db::{current_instance_id, load_session_user_profile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionUser {
@@ -49,17 +49,10 @@ pub(crate) async fn extract_session_user(
                 .ok()??;
 
             // Load user details.
-            let scoped = state.db.scoped_default();
-            let user: Option<(String, String)> = sqlx::query_as(
-                "SELECT identifier, display_name FROM users WHERE instance_id = $1 AND id = $2",
-            )
-            .bind(scoped.instance_id())
-            .bind(&session.user_id)
-            .fetch_optional(scoped.pool())
-            .await
-            .ok()?;
-
-            let (identifier, display_name) = user?;
+            let (identifier, display_name) =
+                load_session_user_profile(&state.db, &instance_id, &session.user_id)
+                    .await
+                    .ok()??;
             return Some(SessionUser {
                 user_id: session.user_id,
                 identifier,

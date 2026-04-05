@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 use zitadel_db::{
-    current_instance_id,
+    create_linked_identity_record, create_user, current_instance_id,
+    find_active_user_by_identifier, find_linked_identity, first_org_id, get_schema_record,
+    get_user, list_schema_registry, touch_linked_identity, update_session_metadata,
     provider::{self, ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
 };
 use zitadel_oidc::rp::{
@@ -86,8 +88,7 @@ async fn sso_start(
     Query(params): Query<SsoStartParams>,
 ) -> Response {
     let instance_id = current_instance_id();
-    let scoped = state.db.scoped_default();
-    let provider = match provider::get_provider(&scoped, &provider_id).await {
+    let provider = match provider::get_provider_for(&state.db, &instance_id, &provider_id).await {
         Ok(Some(provider)) => provider,
         Ok(None) => {
             return (
@@ -209,8 +210,13 @@ async fn sso_callback(
         }
     };
 
-    let scoped = state.db.scoped_default();
-    let provider = match provider::get_provider(&scoped, &stored_state.provider_id).await {
+    let provider = match provider::get_provider_for(
+        &state.db,
+        &instance_id,
+        &stored_state.provider_id,
+    )
+    .await
+    {
         Ok(Some(provider)) => provider,
         Ok(None) => return redirect_login_error("sso_failed", "provider not found"),
         Err(error) => {
@@ -278,8 +284,7 @@ async fn complete_federated_login(
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<Response> {
     let instance_id = current_instance_id();
-    let scoped = state.db.scoped_default();
-    let schema = load_target_schema(&scoped, &provider.payload).await?;
+    let schema = load_target_schema(&state.db, &provider.payload).await?;
     let defaults = schema
         .as_ref()
         .map(zitadel_schema::claim_defaults)
@@ -289,21 +294,15 @@ async fn complete_federated_login(
         &provider.payload.mapping.claims,
         &identity.claims,
     );
-    let user_id = find_or_create_identity(&scoped, provider, identity, &profile).await?;
-
-    let org_id = sqlx::query_as::<_, (String,)>(
-        "SELECT org_id FROM users WHERE instance_id = $1 AND id = $2",
-    )
-    .bind(scoped.instance_id())
-    .bind(&user_id)
-    .fetch_optional(scoped.pool())
-    .await?
-    .map(|row| row.0)
-    .unwrap_or_default();
+    let user_id = find_or_create_identity(&state.db, instance_id.as_ref(), provider, identity, &profile).await?;
+    let org_id = get_user(&state.db, instance_id.as_ref(), &user_id)
+        .await?
+        .map(|user| user.org_id)
+        .unwrap_or_default();
 
     let created = state
         .transient
-        .create_session(&instance_id, &user_id, &org_id, "", "", "")
+        .create_session(instance_id.as_ref(), &user_id, &org_id, "", "", "")
         .await?;
 
     let metadata = serde_json::json!({
@@ -316,16 +315,14 @@ async fn complete_federated_login(
             "subject": identity.subject
         }
     });
-    let sql = format!(
-        "UPDATE sessions SET metadata = {} WHERE instance_id = $1 AND id = $2",
-        scoped.json_bind(3),
-    );
-    sqlx::query(&sql)
-        .bind(scoped.instance_id())
-        .bind(&created.session_id)
-        .bind(serde_json::to_string(&metadata)?)
-        .execute(scoped.pool())
-        .await?;
+    let metadata_json = serde_json::to_string(&metadata)?;
+    let _ = update_session_metadata(
+        &state.db,
+        instance_id.as_ref(),
+        &created.session_id,
+        &metadata_json,
+    )
+    .await?;
 
     let signed = zitadel_authn::cookie::sign(&created.token, &state.cookie_config.secrets[0]);
     let cookie_name = state.cookie_config.cookie_name();
@@ -349,29 +346,26 @@ async fn complete_federated_login(
 }
 
 async fn load_target_schema(
-    scoped: &zitadel_db::scoped::ScopedDb,
+    db: &zitadel_db::Db,
     provider: &ProviderPayload,
 ) -> anyhow::Result<Option<serde_json::Value>> {
-    let schema_column = scoped.as_text("schema");
-    let schema_row = if !provider.target.schema_id.is_empty() {
-        let sql = format!("SELECT {schema_column} FROM schemas WHERE id = $1 LIMIT 1");
-        sqlx::query_as::<_, (String,)>(&sql)
-            .bind(&provider.target.schema_id)
-            .fetch_optional(scoped.pool())
+    let schema_json = if !provider.target.schema_id.is_empty() {
+        get_schema_record(db, &provider.target.schema_id)
             .await?
+            .map(|record| record.schema_json)
     } else if !provider.target.schema_type.is_empty() {
-        let sql = format!(
-            "SELECT {schema_column} FROM schemas WHERE type = $1 AND is_default = 1 ORDER BY version DESC LIMIT 1"
-        );
-        sqlx::query_as::<_, (String,)>(&sql)
-            .bind(&provider.target.schema_type)
-            .fetch_optional(scoped.pool())
-            .await?
+        let schemas =
+            list_schema_registry(db, "", Some(&provider.target.schema_type), 50).await?;
+        schemas
+            .iter()
+            .find(|schema| schema.is_default)
+            .or_else(|| schemas.first())
+            .map(|schema| schema.schema_json.clone())
     } else {
         None
     };
 
-    if let Some((schema_json,)) = schema_row {
+    if let Some(schema_json) = schema_json {
         return Ok(serde_json::from_str(&schema_json).ok());
     }
 
@@ -385,40 +379,30 @@ async fn load_target_schema(
 }
 
 async fn find_or_create_identity(
-    scoped: &zitadel_db::scoped::ScopedDb,
+    db: &zitadel_db::Db,
+    instance_id: &str,
     provider: &ProviderRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
     profile: &HashMap<String, serde_json::Value>,
 ) -> anyhow::Result<String> {
-    if let Some((user_id,)) = sqlx::query_as::<_, (String,)>(
-        "SELECT user_id FROM linked_identities WHERE instance_id = $1 AND provider_id = $2 AND external_sub = $3",
-    )
-    .bind(scoped.instance_id())
-    .bind(&provider.id)
-    .bind(&identity.subject)
-    .fetch_optional(scoped.pool())
-    .await?
-    {
+    if let Some(linked) = find_linked_identity(db, instance_id, &provider.id, &identity.subject).await? {
         let raw_claims = serde_json::to_string(&identity.claims)?;
-        let update_sql = format!(
-            "UPDATE linked_identities SET last_used_at = CURRENT_TIMESTAMP, external_email = $1, raw_claims = {} \
-             WHERE instance_id = $2 AND provider_id = $3 AND external_sub = $4",
-            scoped.json_bind(5),
-        );
-        sqlx::query(&update_sql)
-            .bind(&identity.email)
-            .bind(scoped.instance_id())
-            .bind(&provider.id)
-            .bind(&identity.subject)
-            .bind(raw_claims)
-            .execute(scoped.pool())
-            .await?;
-        return Ok(user_id);
+        let _ = touch_linked_identity(
+            db,
+            instance_id,
+            &provider.id,
+            &identity.subject,
+            &identity.email,
+            &raw_claims,
+        )
+        .await?;
+        return Ok(linked.user_id);
     }
 
-    if let Some(existing_user_id) = match_existing_user(scoped, provider, identity, profile).await?
+    if let Some(existing_user_id) =
+        match_existing_user(db, instance_id, provider, identity, profile).await?
     {
-        create_linked_identity(scoped, &existing_user_id, provider, identity).await?;
+        create_linked_identity(db, instance_id, &existing_user_id, provider, identity).await?;
         return Ok(existing_user_id);
     }
 
@@ -426,7 +410,7 @@ async fn find_or_create_identity(
         anyhow::bail!("no linked account found and provider is link_only");
     }
 
-    let schema_id = resolve_target_schema_id(scoped, &provider.payload).await?;
+    let schema_id = resolve_target_schema_id(db, &provider.payload).await?;
     let identifier = profile_string(profile, "email")
         .or_else(|| profile_string(profile, "username"))
         .unwrap_or_else(|| {
@@ -438,28 +422,30 @@ async fn find_or_create_identity(
         });
     let display_name =
         profile_string(profile, "display_name").unwrap_or_else(|| identifier.clone());
-    let org_id = get_default_org(scoped).await?;
+    let org_id = first_org_id(db, instance_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no org found"))?;
     let user_id = Uuid::new_v4().to_string();
 
-    sqlx::query(
-        "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, schema_id) \
-         VALUES ($1, $2, $3, $4, $5, 'human', 'active', $6)",
+    let _ = create_user(
+        db,
+        instance_id,
+        &user_id,
+        &org_id,
+        &identifier,
+        &display_name,
+        &schema_id,
+        "{}",
     )
-    .bind(&user_id)
-    .bind(scoped.instance_id())
-    .bind(&org_id)
-    .bind(&identifier)
-    .bind(&display_name)
-    .bind(&schema_id)
-    .execute(scoped.pool())
     .await?;
 
-    create_linked_identity(scoped, &user_id, provider, identity).await?;
+    create_linked_identity(db, instance_id, &user_id, provider, identity).await?;
     Ok(user_id)
 }
 
 async fn match_existing_user(
-    scoped: &zitadel_db::scoped::ScopedDb,
+    db: &zitadel_db::Db,
+    instance_id: &str,
     provider: &ProviderRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
     profile: &HashMap<String, serde_json::Value>,
@@ -488,43 +474,35 @@ async fn match_existing_user(
         return Ok(None);
     };
 
-    Ok(sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM users WHERE instance_id = $1 AND identifier = $2 AND state = 'active'",
-    )
-    .bind(scoped.instance_id())
-    .bind(identifier)
-    .fetch_optional(scoped.pool())
-    .await?
-    .map(|row| row.0))
+    Ok(find_active_user_by_identifier(db, instance_id, &identifier)
+        .await?
+        .map(|user| user.id))
 }
 
 async fn create_linked_identity(
-    scoped: &zitadel_db::scoped::ScopedDb,
+    db: &zitadel_db::Db,
+    instance_id: &str,
     user_id: &str,
     provider: &ProviderRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<()> {
     let raw_claims = serde_json::to_string(&identity.claims)?;
-    let sql = format!(
-        "INSERT INTO linked_identities (id, instance_id, user_id, provider_id, external_sub, external_email, raw_claims) \
-         VALUES ($1, $2, $3, $4, $5, $6, {})",
-        scoped.json_bind(7),
-    );
-    sqlx::query(&sql)
-        .bind(Uuid::new_v4().to_string())
-        .bind(scoped.instance_id())
-        .bind(user_id)
-        .bind(&provider.id)
-        .bind(&identity.subject)
-        .bind(&identity.email)
-        .bind(raw_claims)
-        .execute(scoped.pool())
-        .await?;
+    create_linked_identity_record(
+        db,
+        instance_id,
+        &Uuid::new_v4().to_string(),
+        user_id,
+        &provider.id,
+        &identity.subject,
+        &identity.email,
+        &raw_claims,
+    )
+    .await?;
     Ok(())
 }
 
 async fn resolve_target_schema_id(
-    scoped: &zitadel_db::scoped::ScopedDb,
+    db: &zitadel_db::Db,
     provider: &ProviderPayload,
 ) -> anyhow::Result<String> {
     if !provider.target.schema_id.is_empty() {
@@ -534,23 +512,13 @@ async fn resolve_target_schema_id(
         return Ok(String::new());
     }
 
-    let row = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM schemas WHERE type = $1 AND is_default = 1 ORDER BY version DESC LIMIT 1",
-    )
-    .bind(&provider.target.schema_type)
-    .fetch_optional(scoped.pool())
-    .await?;
-    Ok(row.map(|result| result.0).unwrap_or_default())
-}
-
-async fn get_default_org(scoped: &zitadel_db::scoped::ScopedDb) -> anyhow::Result<String> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM orgs WHERE instance_id = $1 LIMIT 1")
-            .bind(scoped.instance_id())
-            .fetch_optional(scoped.pool())
-            .await?;
-    row.map(|r| r.0)
-        .ok_or_else(|| anyhow::anyhow!("no org found"))
+    let schemas = list_schema_registry(db, "", Some(&provider.target.schema_type), 50).await?;
+    Ok(schemas
+        .iter()
+        .find(|schema| schema.is_default)
+        .or_else(|| schemas.first())
+        .map(|schema| schema.id.clone())
+        .unwrap_or_default())
 }
 
 fn profile_string(profile: &HashMap<String, serde_json::Value>, key: &str) -> Option<String> {

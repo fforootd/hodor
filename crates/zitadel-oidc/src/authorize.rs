@@ -344,6 +344,15 @@ mod tests {
         );
 
         let scoped = db.scoped_default();
+
+        // Create the org that the app references.
+        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, 'Test Org')")
+            .bind("org-1")
+            .bind(scoped.instance_id())
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
         let sql = format!(
             "INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {}, {}, $11)",

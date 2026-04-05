@@ -16,7 +16,12 @@ pub struct StorageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct StatefulStorageConfig {
+    pub backend: String,
     pub url: String,
+    pub database: String,
+    pub emulator_host: String,
+    pub credentials_file: String,
+    pub credentials_json: String,
     pub migrate: String,
     pub bootstrap: String,
     pub max_open_conns: u32,
@@ -27,7 +32,12 @@ pub struct StatefulStorageConfig {
 impl Default for StatefulStorageConfig {
     fn default() -> Self {
         Self {
+            backend: String::new(),
             url: "sqlite://./data/zitadel.db".into(),
+            database: String::new(),
+            emulator_host: String::new(),
+            credentials_file: String::new(),
+            credentials_json: String::new(),
             migrate: String::new(),
             bootstrap: String::new(),
             max_open_conns: 25,
@@ -38,6 +48,17 @@ impl Default for StatefulStorageConfig {
 }
 
 impl StatefulStorageConfig {
+    pub fn resolve_backend(&self) -> &str {
+        match self.backend.as_str() {
+            "sqlite" | "postgres" | "spanner" => self.backend.as_str(),
+            _ if self.url.starts_with("postgres://") || self.url.starts_with("postgresql://") => {
+                "postgres"
+            }
+            _ if !self.database.is_empty() => "spanner",
+            _ => "sqlite",
+        }
+    }
+
     pub fn resolve_migrate_mode(&self) -> &str {
         match self.migrate.as_str() {
             "auto" | "check" | "skip" => self.migrate.as_str(),
@@ -157,6 +178,41 @@ impl Default for TerminalDataRetentionConfig {
         Self {
             retain_terminal_for: "7d".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StatefulStorageConfig;
+
+    #[test]
+    fn resolves_spanner_backend_from_explicit_backend() {
+        let config = StatefulStorageConfig {
+            backend: "spanner".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(config.resolve_backend(), "spanner");
+    }
+
+    #[test]
+    fn resolves_spanner_backend_from_database_name() {
+        let config = StatefulStorageConfig {
+            database: "projects/test/instances/dev/databases/zitadel".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(config.resolve_backend(), "spanner");
+    }
+
+    #[test]
+    fn preserves_postgres_detection_from_url() {
+        let config = StatefulStorageConfig {
+            url: "postgres://localhost/zitadel".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(config.resolve_backend(), "postgres");
     }
 }
 

@@ -40,6 +40,7 @@ impl ScopedDb {
     pub fn json_extract(&self, column: &str, path: &str) -> String {
         match self.dialect {
             Dialect::Postgres => format!("{column}->>'{path}'"),
+            Dialect::Spanner => format!("JSON_VALUE({column}, '$.{path}')"),
             Dialect::Sqlite => format!("json_extract({column}, '$.{path}')"),
         }
     }
@@ -49,13 +50,17 @@ impl ScopedDb {
     pub fn json_bind(&self, n: usize) -> String {
         match self.dialect {
             Dialect::Postgres => format!("CAST(${n} AS JSONB)"),
+            Dialect::Spanner => format!("PARSE_JSON(${n})"),
             Dialect::Sqlite => format!("${n}"),
         }
     }
 
     /// Cast a column/expression to text so handlers can decode through `sqlx::Any`.
     pub fn as_text(&self, expr: &str) -> String {
-        format!("CAST({expr} AS TEXT)")
+        match self.dialect {
+            Dialect::Spanner => format!("CAST({expr} AS STRING)"),
+            Dialect::Postgres | Dialect::Sqlite => format!("CAST({expr} AS TEXT)"),
+        }
     }
 
     /// Normalize booleans to integer 0/1 across SQLite and Postgres.
@@ -67,13 +72,17 @@ impl ScopedDb {
     pub fn epoch_seconds(&self, expr: &str) -> String {
         match self.dialect {
             Dialect::Postgres => format!("CAST(EXTRACT(EPOCH FROM {expr}) AS BIGINT)"),
+            Dialect::Spanner => format!("UNIX_SECONDS({expr})"),
             Dialect::Sqlite => format!("CAST(strftime('%s', {expr}) AS INTEGER)"),
         }
     }
 
     /// Returns dialect-specific current timestamp expression.
     pub fn timestamp_now(&self) -> &str {
-        "CURRENT_TIMESTAMP"
+        match self.dialect {
+            Dialect::Spanner => "CURRENT_TIMESTAMP()",
+            Dialect::Postgres | Dialect::Sqlite => "CURRENT_TIMESTAMP",
+        }
     }
 
     /// Convenience: returns `(as_text("created_at"), as_text("updated_at"))`.
@@ -90,7 +99,7 @@ impl ScopedDb {
 
 /// Rewrite `?` placeholders for the given dialect.
 pub fn rebind_placeholders(query: &str, dialect: Dialect) -> String {
-    if dialect != Dialect::Postgres {
+    if dialect != Dialect::Postgres && dialect != Dialect::Spanner {
         return query.to_string();
     }
     let mut out = String::with_capacity(query.len() + 8);

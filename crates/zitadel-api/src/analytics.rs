@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zitadel_db::{create_saved_query, delete_saved_query, list_saved_queries};
 use zitadel_storage::AnalyticsQuery;
 
 pub fn routes() -> Router<ApiState> {
@@ -16,7 +17,11 @@ pub fn routes() -> Router<ApiState> {
         .route("/analytics/queries", get(list_queries).post(create_query))
         .route(
             "/analytics/queries/{id}",
-            axum::routing::delete(delete_query),
+            axum::routing::delete(
+                |state: State<ApiState>, path: Path<String>| async move {
+                    delete_query(state, path).await
+                },
+            ),
         )
 }
 
@@ -71,26 +76,16 @@ struct CreateQueryRequest {
 
 /// GET /v1/analytics/queries — list saved queries.
 async fn list_queries(State(s): State<ApiState>) -> Response {
-    let scoped = s.db.scoped_default();
-    let created_at = scoped.as_text("created_at");
-    let sql = format!(
-        "SELECT id, name, COALESCE(description, ''), sql_text, {created_at} \
-         FROM saved_queries WHERE instance_id = $1 ORDER BY name"
-    );
-    match sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
-        .bind(scoped.instance_id())
-        .fetch_all(scoped.pool())
-        .await
-    {
+    match list_saved_queries(&s.db, zitadel_db::current_instance_id().as_ref()).await {
         Ok(rows) => {
             let items: Vec<SavedQueryResponse> = rows
                 .into_iter()
-                .map(|r| SavedQueryResponse {
-                    id: r.0,
-                    name: r.1,
-                    description: r.2,
-                    sql: r.3,
-                    created_at: r.4,
+                .map(|row| SavedQueryResponse {
+                    id: row.id,
+                    name: row.name,
+                    description: row.description,
+                    sql: row.sql,
+                    created_at: row.created_at,
                 })
                 .collect();
             response::json_ok(response::ListResponse {
@@ -108,25 +103,23 @@ async fn create_query(State(s): State<ApiState>, Json(req): Json<CreateQueryRequ
     if req.name.is_empty() || req.sql.is_empty() {
         return response::bad_request("name and sql are required");
     }
-    let scoped = s.db.scoped_default();
     let id = format!("sq_{}", Uuid::new_v4());
-    match sqlx::query(
-        "INSERT INTO saved_queries (id, instance_id, name, description, sql_text) VALUES ($1, $2, $3, $4, $5)",
+    match create_saved_query(
+        &s.db,
+        zitadel_db::current_instance_id().as_ref(),
+        &id,
+        &req.name,
+        &req.description,
+        &req.sql,
     )
-    .bind(&id)
-    .bind(scoped.instance_id())
-    .bind(&req.name)
-    .bind(&req.description)
-    .bind(&req.sql)
-    .execute(scoped.pool())
     .await
     {
-        Ok(_) => response::json_created(SavedQueryResponse {
-            id,
-            name: req.name,
-            description: req.description,
-            sql: req.sql,
-            created_at: String::new(),
+        Ok(row) => response::json_created(SavedQueryResponse {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            sql: row.sql,
+            created_at: row.created_at,
         }),
         Err(e) => response::bad_request(format!("{e}")),
     }
@@ -134,5 +127,9 @@ async fn create_query(State(s): State<ApiState>, Json(req): Json<CreateQueryRequ
 
 /// DELETE /v1/analytics/queries/{id} — delete a saved query.
 async fn delete_query(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    response::delete_by_id(&s.db.scoped_default(), "saved_queries", &id, "saved query").await
+    match delete_saved_query(&s.db, zitadel_db::current_instance_id().as_ref(), &id).await {
+        Ok(true) => response::no_content(),
+        Ok(false) => response::not_found("saved query not found"),
+        Err(error) => response::internal_error(format!("{error}")),
+    }
 }

@@ -1,102 +1,61 @@
-use crate::{Db, Dialect};
+use crate::{BackendKind, Db};
 use sqlx::{Connection, Executor};
 
 /// Embedded migration SQL files.
-const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
-    (
-        "00001_initial",
-        include_str!("../../../migrations/sqlite/00001_initial.sql"),
-    ),
-    (
-        "00002_instance_id",
-        include_str!("../../../migrations/sqlite/00002_instance_id.sql"),
-    ),
-    (
-        "00003_fga_runtime",
-        include_str!("../../../migrations/sqlite/00003_fga_runtime.sql"),
-    ),
-    (
-        "00004_oidc_rp_provider",
-        include_str!("../../../migrations/sqlite/00003_oidc_rp_provider.sql"),
-    ),
-    (
-        "00004_oidc_auth_request_max_age",
-        include_str!("../../../migrations/sqlite/00004_oidc_auth_request_max_age.sql"),
-    ),
-    (
-        "00005_events_indexes",
-        include_str!("../../../migrations/sqlite/00005_events_indexes.sql"),
-    ),
-    (
-        "00006_retention_scheduler",
-        include_str!("../../../migrations/sqlite/00006_retention_scheduler.sql"),
-    ),
-    (
-        "00008_instance_routing_control_plane",
-        include_str!("../../../migrations/sqlite/00008_instance_routing_control_plane.sql"),
-    ),
-    (
-        "00009_cloud_backend_registry",
-        include_str!("../../../migrations/sqlite/00009_cloud_backend_registry.sql"),
-    ),
-];
+const SQLITE_MIGRATIONS: &[(&str, &str)] = &[(
+    "00001_initial",
+    include_str!("../../../migrations/sqlite/00001_initial.sql"),
+)];
 
-const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
-    (
-        "00001_initial",
-        include_str!("../../../migrations/postgres/00001_initial.sql"),
-    ),
-    (
-        "00002_instance_id",
-        include_str!("../../../migrations/postgres/00002_instance_id.sql"),
-    ),
-    (
-        "00003_fga_runtime",
-        include_str!("../../../migrations/postgres/00003_fga_runtime.sql"),
-    ),
-    (
-        "00004_oidc_rp_provider",
-        include_str!("../../../migrations/postgres/00003_oidc_rp_provider.sql"),
-    ),
-    (
-        "00004_oidc_auth_request_max_age",
-        include_str!("../../../migrations/postgres/00004_oidc_auth_request_max_age.sql"),
-    ),
-    (
-        "00005_events_indexes",
-        include_str!("../../../migrations/postgres/00005_events_indexes.sql"),
-    ),
-    (
-        "00006_retention_scheduler",
-        include_str!("../../../migrations/postgres/00006_retention_scheduler.sql"),
-    ),
-    (
-        "00008_instance_routing_control_plane",
-        include_str!("../../../migrations/postgres/00008_instance_routing_control_plane.sql"),
-    ),
-    (
-        "00009_cloud_backend_registry",
-        include_str!("../../../migrations/postgres/00009_cloud_backend_registry.sql"),
-    ),
-];
+const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[(
+    "00001_initial",
+    include_str!("../../../migrations/postgres/00001_initial.sql"),
+)];
+
+const SPANNER_MIGRATIONS: &[(&str, &str)] = &[(
+    "00001_initial",
+    include_str!("../../../migrations/spanner/00001_initial.sql"),
+)];
 
 const POSTGRES_MIGRATION_LOCK_ID: i64 = 6_900_181_427_071;
 
 /// Run all pending migrations.
 pub async fn migrate(db: &Db) -> anyhow::Result<()> {
-    let pool = db.pool();
+    let backend = db.backend();
     let dialect = db.dialect();
 
-    let migrations = match dialect {
-        Dialect::Sqlite => SQLITE_MIGRATIONS,
-        Dialect::Postgres => POSTGRES_MIGRATIONS,
+    let migrations = match backend {
+        BackendKind::Sqlite => SQLITE_MIGRATIONS,
+        BackendKind::Postgres => POSTGRES_MIGRATIONS,
+        BackendKind::Spanner => SPANNER_MIGRATIONS,
     };
+
+    if backend == BackendKind::Spanner {
+        let (_, sql) = SPANNER_MIGRATIONS
+            .last()
+            .expect("spanner baseline migration must exist");
+        let up_sql = extract_goose_up(sql);
+        let statements = split_statements(&up_sql);
+        let spanner = db
+            .spanner()
+            .expect("spanner backend should expose native spanner client");
+        spanner.ensure_database(&statements).await?;
+        tracing::info!(
+            backend = %backend,
+            dialect = %dialect,
+            statements = statements.len(),
+            "spanner schema ready"
+        );
+        return Ok(());
+    }
+
+    let pool = db.pool();
 
     // Use a single dedicated connection for all migration work to avoid
     // deadlocking the pool (in-memory SQLite has only 1 connection).
     let mut conn = pool.acquire().await?;
 
-    if dialect == Dialect::Postgres {
+    if backend == BackendKind::Postgres {
         sqlx::query("SELECT pg_advisory_lock($1)")
             .bind(POSTGRES_MIGRATION_LOCK_ID)
             .execute(&mut *conn)
@@ -124,7 +83,7 @@ pub async fn migrate(db: &Db) -> anyhow::Result<()> {
         let up_sql = extract_goose_up(sql);
         tracing::debug!(version, name, "applying migration");
 
-        if dialect == Dialect::Postgres {
+        if backend != BackendKind::Sqlite {
             let mut tx = conn.begin().await?;
             for (si, stmt) in split_statements(&up_sql).iter().enumerate() {
                 let stmt = stmt.trim();
@@ -166,7 +125,7 @@ pub async fn migrate(db: &Db) -> anyhow::Result<()> {
         applied += 1;
     }
 
-    if dialect == Dialect::Postgres {
+    if backend == BackendKind::Postgres {
         let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
             .bind(POSTGRES_MIGRATION_LOCK_ID)
             .execute(&mut *conn)
@@ -176,17 +135,34 @@ pub async fn migrate(db: &Db) -> anyhow::Result<()> {
     drop(conn);
 
     let total = migrations.len() as i64;
-    tracing::info!(dialect = %dialect, version = total, applied, "schema ready");
+    tracing::info!(
+        backend = %backend,
+        dialect = %dialect,
+        version = total,
+        applied,
+        "schema ready"
+    );
     Ok(())
 }
 
 /// Check the current schema version without running DDL.
 pub async fn check_version(db: &Db) -> anyhow::Result<()> {
+    if db.backend() == BackendKind::Spanner {
+        let spanner = db
+            .spanner()
+            .expect("spanner backend should expose native spanner client");
+        let statements = spanner.current_ddl().await?;
+        if statements.is_empty() {
+            anyhow::bail!("spanner baseline has not been applied — run 'zitadel migrate' first");
+        }
+        return Ok(());
+    }
+
     let pool = db.pool();
-    let dialect = db.dialect();
-    let target = match dialect {
-        Dialect::Sqlite => SQLITE_MIGRATIONS.len() as i64,
-        Dialect::Postgres => POSTGRES_MIGRATIONS.len() as i64,
+    let target = match db.backend() {
+        BackendKind::Sqlite => SQLITE_MIGRATIONS.len() as i64,
+        BackendKind::Postgres => POSTGRES_MIGRATIONS.len() as i64,
+        BackendKind::Spanner => unreachable!("spanner is handled above"),
     };
 
     // Check if version table exists.
@@ -363,6 +339,32 @@ mod tests {
             println!("  [{i}]: {}", &s[..s.len().min(80)]);
         }
         assert_eq!(stmts.len(), 3);
+    }
+
+    #[test]
+    fn spanner_baseline_is_native_googlesql_only() {
+        let (_, sql) = SPANNER_MIGRATIONS
+            .last()
+            .expect("spanner baseline migration must exist");
+        let up = extract_goose_up(sql);
+
+        for forbidden in [
+            "JSONB",
+            "BYTEA",
+            "TIMESTAMPTZ",
+            "ON CONFLICT",
+            "INSERT INTO ",
+        ] {
+            assert!(
+                !up.contains(forbidden),
+                "spanner baseline still contains forbidden token: {forbidden}"
+            );
+        }
+
+        assert!(
+            up.contains("STRING(MAX)") && up.contains("CREATE TABLE IF NOT EXISTS instances"),
+            "spanner baseline should contain GoogleSQL string types and the instances table"
+        );
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use zitadel_db::{current_instance_id, search_records};
 
 pub fn routes() -> Router<ApiState> {
     Router::new().route("/search", get(search))
@@ -40,52 +41,20 @@ async fn search(State(s): State<ApiState>, Query(p): Query<SearchParams>) -> Res
         Some(q) if !q.is_empty() => q,
         _ => return response::bad_request("q parameter required"),
     };
-    let scoped = s.db.scoped_default();
-    let pattern = format!("%{q}%");
-
-    let mut results = Vec::new();
-
-    // Search users.
-    if let Ok(rows) = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, identifier, display_name FROM users WHERE instance_id = $1 AND (identifier LIKE $2 OR display_name LIKE $3) LIMIT $4",
-    )
-    .bind(scoped.instance_id())
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(p.limit)
-    .fetch_all(scoped.pool())
-    .await
-    {
-        for r in rows {
-            results.push(SearchResult {
-                resource_type: "user".into(),
-                id: r.0,
-                title: r.2.clone(),
-                subtitle: r.1,
-            });
+    match search_records(&s.db, current_instance_id().as_ref(), &q, p.limit).await {
+        Ok(results) => {
+            let total = results.len();
+            let results = results
+                .into_iter()
+                .map(|record| SearchResult {
+                    resource_type: record.resource_type,
+                    id: record.id,
+                    title: record.title,
+                    subtitle: record.subtitle,
+                })
+                .collect();
+            response::json_ok(SearchResponse { results, total })
         }
+        Err(e) => response::internal_error(format!("{e}")),
     }
-
-    // Search orgs.
-    if let Ok(rows) = sqlx::query_as::<_, (String, String)>(
-        "SELECT id, name FROM orgs WHERE instance_id = $1 AND name LIKE $2 LIMIT $3",
-    )
-    .bind(scoped.instance_id())
-    .bind(&pattern)
-    .bind(p.limit)
-    .fetch_all(scoped.pool())
-    .await
-    {
-        for r in rows {
-            results.push(SearchResult {
-                resource_type: "org".into(),
-                id: r.0.clone(),
-                title: r.1,
-                subtitle: format!("Organization {}", r.0),
-            });
-        }
-    }
-
-    let total = results.len();
-    response::json_ok(SearchResponse { results, total })
 }

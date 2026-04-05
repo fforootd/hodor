@@ -1,3 +1,4 @@
+use google_cloud_spanner::statement::Statement;
 use zitadel_crypto::token_hash;
 use zitadel_db::Db;
 
@@ -51,6 +52,23 @@ impl SqlStatefulStore {
 }
 
 impl StatefulStore for SqlStatefulStore {
+    fn db(&self) -> &Db {
+        &self.db
+    }
+}
+
+#[derive(Clone)]
+pub struct SpannerStatefulStore {
+    db: Db,
+}
+
+impl SpannerStatefulStore {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+}
+
+impl StatefulStore for SpannerStatefulStore {
     fn db(&self) -> &Db {
         &self.db
     }
@@ -142,6 +160,124 @@ impl ReadStore for SqlReadStore {
 }
 
 #[derive(Clone)]
+pub struct SpannerReadStore {
+    db: Db,
+}
+
+impl SpannerReadStore {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+}
+
+impl ReadStore for SpannerReadStore {
+    async fn find_active_user_by_identifier(
+        &self,
+        instance_id: &str,
+        identifier: &str,
+    ) -> anyhow::Result<Option<UserIdentity>> {
+        let client = self
+            .db
+            .spanner()
+            .expect("spanner read store requires native spanner backend")
+            .client();
+        let mut stmt = Statement::new(
+            "SELECT id, org_id FROM users \
+             WHERE instance_id = @instance_id AND identifier = @identifier AND state = 'active' \
+             LIMIT 1",
+        );
+        stmt.add_param("instance_id", &instance_id);
+        stmt.add_param("identifier", &identifier);
+
+        let mut tx = client.single().await?;
+        let mut rows = tx.query(stmt).await?;
+        let row = match rows.next().await? {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        Ok(Some(UserIdentity {
+            user_id: row.column_by_name::<String>("id")?,
+            org_id: row.column_by_name::<String>("org_id")?,
+        }))
+    }
+
+    async fn load_password_hash(
+        &self,
+        instance_id: &str,
+        user_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let client = self
+            .db
+            .spanner()
+            .expect("spanner read store requires native spanner backend")
+            .client();
+        let mut stmt = Statement::new(
+            "SELECT data FROM credentials \
+             WHERE instance_id = @instance_id AND user_id = @user_id AND type = 'password' \
+             LIMIT 1",
+        );
+        stmt.add_param("instance_id", &instance_id);
+        stmt.add_param("user_id", &user_id);
+
+        let mut tx = client.single().await?;
+        let mut rows = tx.query(stmt).await?;
+        let row = match rows.next().await? {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+        let json = row.column_by_name::<String>("data")?;
+
+        Ok(serde_json::from_str::<serde_json::Value>(&json)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("hash")
+                    .and_then(|hash| hash.as_str())
+                    .map(str::to_owned)
+            }))
+    }
+
+    async fn resolve_pat_token(
+        &self,
+        instance_id: &str,
+        raw_token: &str,
+    ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
+        let client = self
+            .db
+            .spanner()
+            .expect("spanner read store requires native spanner backend")
+            .client();
+        let hashed = token_hash(raw_token);
+        let mut stmt = Statement::new(
+            "SELECT t.user_id, t.type, t.session_id, u.org_id \
+             FROM tokens t \
+             JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
+             WHERE t.instance_id = @instance_id AND t.token_hash = @token_hash AND t.revoked_at IS NULL \
+             LIMIT 1",
+        );
+        stmt.add_param("instance_id", &instance_id);
+        stmt.add_param("token_hash", &hashed);
+
+        let mut tx = client.single().await?;
+        let mut rows = tx.query(stmt).await?;
+        let row = match rows.next().await? {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        Ok(Some(ResolvedPatIdentity {
+            user_id: row.column_by_name::<String>("user_id")?,
+            session_id: row
+                .column_by_name::<Option<String>>("session_id")?
+                .unwrap_or_default(),
+            token_type: row.column_by_name::<String>("type")?,
+            org_id: row.column_by_name::<String>("org_id")?,
+        }))
+    }
+}
+
+#[derive(Clone)]
 pub struct StatefulStorage<S, R> {
     stateful: S,
     read: R,
@@ -197,7 +333,69 @@ where
     }
 }
 
-pub type DefaultStatefulStorage = StatefulStorage<SqlStatefulStore, SqlReadStore>;
+#[derive(Clone)]
+pub enum DefaultStatefulStorage {
+    Sql(StatefulStorage<SqlStatefulStore, SqlReadStore>),
+    Spanner(StatefulStorage<SpannerStatefulStore, SpannerReadStore>),
+}
+
+impl DefaultStatefulStorage {
+    pub fn new_sql(stateful: SqlStatefulStore, read: SqlReadStore) -> Self {
+        Self::Sql(StatefulStorage::new(stateful, read))
+    }
+
+    pub fn new_spanner(stateful: SpannerStatefulStore, read: SpannerReadStore) -> Self {
+        Self::Spanner(StatefulStorage::new(stateful, read))
+    }
+
+    pub fn db(&self) -> &Db {
+        match self {
+            Self::Sql(storage) => storage.db(),
+            Self::Spanner(storage) => storage.db(),
+        }
+    }
+
+    pub async fn find_active_user_by_identifier(
+        &self,
+        instance_id: &str,
+        identifier: &str,
+    ) -> anyhow::Result<Option<UserIdentity>> {
+        match self {
+            Self::Sql(storage) => {
+                storage
+                    .find_active_user_by_identifier(instance_id, identifier)
+                    .await
+            }
+            Self::Spanner(storage) => {
+                storage
+                    .find_active_user_by_identifier(instance_id, identifier)
+                    .await
+            }
+        }
+    }
+
+    pub async fn load_password_hash(
+        &self,
+        instance_id: &str,
+        user_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        match self {
+            Self::Sql(storage) => storage.load_password_hash(instance_id, user_id).await,
+            Self::Spanner(storage) => storage.load_password_hash(instance_id, user_id).await,
+        }
+    }
+
+    pub async fn resolve_pat_token(
+        &self,
+        instance_id: &str,
+        raw_token: &str,
+    ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
+        match self {
+            Self::Sql(storage) => storage.resolve_pat_token(instance_id, raw_token).await,
+            Self::Spanner(storage) => storage.resolve_pat_token(instance_id, raw_token).await,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -259,7 +457,7 @@ mod tests {
             .await
             .unwrap();
 
-        let storage = DefaultStatefulStorage::new(
+        let storage = DefaultStatefulStorage::new_sql(
             SqlStatefulStore::new(db.clone()),
             SqlReadStore::new(db.clone()),
         );

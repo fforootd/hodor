@@ -1,4 +1,5 @@
-use crate::scoped::ScopedDb;
+use crate::{Db, scoped::ScopedDb};
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -220,6 +221,30 @@ fn row_to_provider(row: ProviderRow) -> anyhow::Result<ProviderRecord> {
     })
 }
 
+fn spanner_row_to_provider(row: google_cloud_spanner::row::Row) -> anyhow::Result<ProviderRecord> {
+    row_to_provider((
+        row.column_by_name::<String>("id")?,
+        row.column_by_name::<String>("org_id")?,
+        row.column_by_name::<String>("display_name")?,
+        row.column_by_name::<String>("kind")?,
+        row.column_by_name::<String>("protocol")?,
+        row.column_by_name::<String>("connection")?,
+        row.column_by_name::<String>("mapping")?,
+        row.column_by_name::<String>("target")?,
+        row.column_by_name::<String>("linking")?,
+        row.column_by_name::<String>("session")?,
+        row.column_by_name::<String>("ui")?,
+        if row.column_by_name::<bool>("enabled")? {
+            1
+        } else {
+            0
+        },
+        row.column_by_name::<String>("catalog_ref")?,
+        row.column_by_name::<String>("created_at")?,
+        row.column_by_name::<String>("updated_at")?,
+    ))
+}
+
 pub async fn list_providers(scoped: &ScopedDb) -> anyhow::Result<Vec<ProviderRecord>> {
     let enabled = scoped.bool_as_int("enabled");
     let connection = scoped.as_text("connection");
@@ -242,6 +267,28 @@ pub async fn list_providers(scoped: &ScopedDb) -> anyhow::Result<Vec<ProviderRec
         .await?;
 
     rows.into_iter().map(row_to_provider).collect()
+}
+
+pub async fn list_providers_for(db: &Db, instance_id: &str) -> anyhow::Result<Vec<ProviderRecord>> {
+    match db {
+        Db::Sql(_) => list_providers(&db.scoped(instance_id.to_string())).await,
+        Db::Spanner(spanner) => {
+            let mut stmt = Statement::new(
+                "SELECT id, org_id, display_name, kind, protocol, connection, mapping, target, linking, \
+                        session, ui, enabled, catalog_ref, CAST(created_at AS STRING) AS created_at, \
+                        CAST(updated_at AS STRING) AS updated_at \
+                 FROM providers WHERE instance_id = @instance_id ORDER BY display_order, display_name",
+            );
+            stmt.add_param("instance_id", &instance_id);
+            let mut tx = spanner.client().single().await?;
+            let mut rows = tx.query(stmt).await?;
+            let mut providers = Vec::new();
+            while let Some(row) = rows.next().await? {
+                providers.push(spanner_row_to_provider(row)?);
+            }
+            Ok(providers)
+        }
+    }
 }
 
 pub async fn get_provider(scoped: &ScopedDb, id: &str) -> anyhow::Result<Option<ProviderRecord>> {
@@ -267,6 +314,32 @@ pub async fn get_provider(scoped: &ScopedDb, id: &str) -> anyhow::Result<Option<
         .await?;
 
     row.map(row_to_provider).transpose()
+}
+
+pub async fn get_provider_for(
+    db: &Db,
+    instance_id: &str,
+    id: &str,
+) -> anyhow::Result<Option<ProviderRecord>> {
+    match db {
+        Db::Sql(_) => get_provider(&db.scoped(instance_id.to_string()), id).await,
+        Db::Spanner(spanner) => {
+            let mut stmt = Statement::new(
+                "SELECT id, org_id, display_name, kind, protocol, connection, mapping, target, linking, \
+                        session, ui, enabled, catalog_ref, CAST(created_at AS STRING) AS created_at, \
+                        CAST(updated_at AS STRING) AS updated_at \
+                 FROM providers WHERE instance_id = @instance_id AND id = @id LIMIT 1",
+            );
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("id", &id);
+            let mut tx = spanner.client().single().await?;
+            let mut rows = tx.query(stmt).await?;
+            Ok(match rows.next().await? {
+                Some(row) => Some(spanner_row_to_provider(row)?),
+                None => None,
+            })
+        }
+    }
 }
 
 pub async fn insert_provider(
@@ -307,6 +380,57 @@ pub async fn insert_provider(
     Ok(())
 }
 
+pub async fn insert_provider_for(
+    db: &Db,
+    instance_id: &str,
+    id: &str,
+    org_id: &str,
+    provider: &ProviderPayload,
+) -> anyhow::Result<()> {
+    match db {
+        Db::Sql(_) => {
+            insert_provider(&db.scoped(instance_id.to_string()), id, org_id, provider).await
+        }
+        Db::Spanner(spanner) => {
+            let mut stmt = Statement::new(
+                "INSERT INTO providers \
+                 (id, instance_id, org_id, display_name, kind, protocol, connection, mapping, target, linking, session, ui, enabled, display_order, catalog_ref) \
+                 VALUES \
+                 (@id, @instance_id, @org_id, @display_name, @kind, @protocol, @connection, @mapping, @target, @linking, @session, @ui, @enabled, @display_order, @catalog_ref)",
+            );
+            stmt.add_param("id", &id);
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("org_id", &org_id);
+            stmt.add_param("display_name", &provider.display_name);
+            stmt.add_param("kind", &provider.kind);
+            stmt.add_param("protocol", &provider.protocol);
+            stmt.add_param("connection", &serde_json::to_string(&provider.connection)?);
+            stmt.add_param("mapping", &serde_json::to_string(&provider.mapping)?);
+            stmt.add_param("target", &serde_json::to_string(&provider.target)?);
+            stmt.add_param("linking", &serde_json::to_string(&provider.linking)?);
+            stmt.add_param("session", &serde_json::to_string(&provider.session)?);
+            stmt.add_param("ui", &serde_json::to_string(&provider.ui)?);
+            stmt.add_param("enabled", &provider.enabled);
+            stmt.add_param("display_order", &provider.ui.display_order);
+            stmt.add_param(
+                "catalog_ref",
+                &serde_json::to_string(&provider.catalog_ref)?,
+            );
+            let _ = spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let stmt = stmt.clone();
+                    Box::pin(async move {
+                        tx.update(stmt).await?;
+                        Ok::<(), SpannerError>(())
+                    })
+                })
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 pub async fn update_provider(
     scoped: &ScopedDb,
     id: &str,
@@ -343,6 +467,52 @@ pub async fn update_provider(
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn update_provider_for(
+    db: &Db,
+    instance_id: &str,
+    id: &str,
+    provider: &ProviderPayload,
+) -> anyhow::Result<bool> {
+    match db {
+        Db::Sql(_) => update_provider(&db.scoped(instance_id.to_string()), id, provider).await,
+        Db::Spanner(spanner) => {
+            let mut stmt = Statement::new(
+                "UPDATE providers \
+                 SET display_name = @display_name, kind = @kind, protocol = @protocol, connection = @connection, \
+                     mapping = @mapping, target = @target, linking = @linking, session = @session, ui = @ui, \
+                     enabled = @enabled, display_order = @display_order, catalog_ref = @catalog_ref, \
+                     updated_at = CURRENT_TIMESTAMP() \
+                 WHERE instance_id = @instance_id AND id = @id",
+            );
+            stmt.add_param("display_name", &provider.display_name);
+            stmt.add_param("kind", &provider.kind);
+            stmt.add_param("protocol", &provider.protocol);
+            stmt.add_param("connection", &serde_json::to_string(&provider.connection)?);
+            stmt.add_param("mapping", &serde_json::to_string(&provider.mapping)?);
+            stmt.add_param("target", &serde_json::to_string(&provider.target)?);
+            stmt.add_param("linking", &serde_json::to_string(&provider.linking)?);
+            stmt.add_param("session", &serde_json::to_string(&provider.session)?);
+            stmt.add_param("ui", &serde_json::to_string(&provider.ui)?);
+            stmt.add_param("enabled", &provider.enabled);
+            stmt.add_param("display_order", &provider.ui.display_order);
+            stmt.add_param(
+                "catalog_ref",
+                &serde_json::to_string(&provider.catalog_ref)?,
+            );
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("id", &id);
+            let (_, affected) = spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let stmt = stmt.clone();
+                    Box::pin(async move { Ok::<i64, SpannerError>(tx.update(stmt).await?) })
+                })
+                .await?;
+            Ok(affected > 0)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,6 +523,13 @@ mod tests {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
         let scoped = db.scoped_default();
+        sqlx::query("INSERT INTO orgs (instance_id, id, name) VALUES ($1, $2, $3)")
+            .bind(scoped.instance_id())
+            .bind("org-1")
+            .bind("Test Org")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
         let provider = ProviderPayload {
             display_name: "Mock OIDC".to_string(),
             kind: "custom".to_string(),

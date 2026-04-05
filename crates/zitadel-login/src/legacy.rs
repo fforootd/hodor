@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::current_instance_id;
+use zitadel_db::{current_instance_id, update_password_hash};
 
 use crate::LoginState;
 use crate::redirect::build_auth_redirect;
@@ -94,18 +94,8 @@ pub(crate) async fn login(
 
     // Transparent hash migration.
     if let zitadel_authn::password::VerifyResult::NeedUpdate(new_hash) = verify_result {
-        let scoped = state.db.scoped_default();
         let cred_json = zitadel_authn::password::encode_credential_json(&new_hash);
-        let sql = format!(
-            "UPDATE credentials SET data = {} WHERE instance_id = $1 AND user_id = $2 AND type = 'password'",
-            scoped.json_bind(3),
-        );
-        let _ = sqlx::query(&sql)
-            .bind(scoped.instance_id())
-            .bind(&user.user_id)
-            .bind(&cred_json)
-            .execute(scoped.pool())
-            .await;
+        let _ = update_password_hash(&state.db, &instance_id, &user.user_id, &cred_json).await;
     }
 
     let auth_request = match state

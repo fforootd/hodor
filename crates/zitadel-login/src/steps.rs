@@ -6,7 +6,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::current_instance_id;
+use zitadel_db::{
+    Db, append_event, current_instance_id, get_settings_record, replace_password_credential,
+};
 use zitadel_storage::{LoginFlowRuntimeState, NewLoginFlowState};
 
 use crate::LoginState;
@@ -67,24 +69,16 @@ impl BotProtectionSetting {
 }
 
 /// Load bot protection setting from the settings table.
-async fn load_bot_protection(pool: &sqlx::AnyPool, instance_id: &str) -> BotProtectionSetting {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT data FROM settings WHERE instance_id = $1 AND type = 'bot_protection' LIMIT 1",
-    )
-    .bind(instance_id)
-    .fetch_optional(pool)
-    .await
-    .unwrap_or(None);
-
-    match row {
-        Some((data,)) => serde_json::from_str(&data).unwrap_or_default(),
-        None => BotProtectionSetting::default(),
+async fn load_bot_protection(db: &Db, instance_id: &str) -> BotProtectionSetting {
+    match get_settings_record(db, instance_id, "bot_protection").await {
+        Ok(Some(record)) => serde_json::from_str(&record.data_json).unwrap_or_default(),
+        Ok(None) | Err(_) => BotProtectionSetting::default(),
     }
 }
 
 /// Emit a bot_detection event to the events table.
 async fn emit_bot_detection_event(
-    pool: &sqlx::AnyPool,
+    db: &Db,
     instance_id: &str,
     flow_id: &str,
     fingerprint: &str,
@@ -104,17 +98,17 @@ async fn emit_bot_detection_event(
         "mode": bp.mode,
         "threshold": bp.risk_threshold,
     });
-    let _ = sqlx::query(
-        "INSERT INTO events (id, instance_id, event_type, category, flow_id, fingerprint, payload, metadata) \
-         VALUES ($1, $2, 'bot_detection', 'security', $3, $4, $5, $6)",
+    let _ = append_event(
+        db,
+        instance_id,
+        &event_id,
+        "bot_detection",
+        "security",
+        flow_id,
+        fingerprint,
+        &serde_json::to_string(&payload).unwrap_or_default(),
+        &serde_json::to_string(&metadata).unwrap_or_default(),
     )
-    .bind(&event_id)
-    .bind(instance_id)
-    .bind(flow_id)
-    .bind(fingerprint)
-    .bind(serde_json::to_string(&payload).unwrap_or_default())
-    .bind(serde_json::to_string(&metadata).unwrap_or_default())
-    .execute(pool)
     .await;
 }
 
@@ -420,7 +414,7 @@ pub(crate) async fn flow_create(
     let initial_step_str = initial_step.as_str().to_string();
 
     // Load bot protection setting from DB.
-    let bp = load_bot_protection(state.db.pool(), &instance_id).await;
+    let bp = load_bot_protection(&state.db, &instance_id).await;
 
     // Conditionally score request based on bot protection mode.
     let (risk_score, risk_signals) = if !bp.is_disabled() {
@@ -443,7 +437,7 @@ pub(crate) async fn flow_create(
             "allow"
         };
         emit_bot_detection_event(
-            state.db.pool(),
+            &state.db,
             &instance_id,
             &flow_id,
             &req.fingerprint,
@@ -880,18 +874,17 @@ pub(crate) async fn handle_password_step(
     // Transparent hash migration: if the stored hash uses an outdated algorithm,
     // re-hash and persist the updated credential.
     if let zitadel_authn::password::VerifyResult::NeedUpdate(new_hash) = verify_result {
-        let scoped = state.db.scoped_default();
         let cred_json = zitadel_authn::password::encode_credential_json(&new_hash);
-        let sql = format!(
-            "UPDATE credentials SET data = {} WHERE instance_id = $1 AND user_id = $2 AND type = 'password'",
-            scoped.json_bind(3),
-        );
-        let _ = sqlx::query(&sql)
-            .bind(scoped.instance_id())
-            .bind(&user.user_id)
-            .bind(&cred_json)
-            .execute(scoped.pool())
-            .await;
+        let instance_id = current_instance_id().into_owned();
+        let credential_id = format!("cred-{}", user.user_id);
+        let _ = replace_password_credential(
+            &state.db,
+            &instance_id,
+            &user.user_id,
+            &credential_id,
+            &cred_json,
+        )
+        .await;
     }
 
     let auth_request_id = data

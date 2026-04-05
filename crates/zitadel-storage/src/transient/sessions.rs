@@ -51,6 +51,9 @@ pub(crate) async fn create_session_impl(
     let max_age_secs = kv.session_max_age_secs().max(1);
     let expires_expr = match scoped.dialect() {
         Dialect::Postgres => format!("CURRENT_TIMESTAMP + INTERVAL '{max_age_secs} seconds'"),
+        Dialect::Spanner => {
+            format!("TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL {max_age_secs} SECOND)")
+        }
         Dialect::Sqlite => format!("datetime(CURRENT_TIMESTAMP, '+{max_age_secs} seconds')"),
     };
 

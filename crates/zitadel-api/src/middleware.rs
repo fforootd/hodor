@@ -5,8 +5,12 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use std::borrow::Cow;
 use tracing::Span;
-use zitadel_db::current_instance_id;
+use zitadel_db::{
+    current_instance_context, current_instance_id, load_identity_metadata,
+    user_has_capability as db_user_has_capability, DEFAULT_INSTANCE_ID,
+};
 
 use crate::ApiState;
 use crate::response;
@@ -18,6 +22,7 @@ pub struct Identity {
     pub session_id: String,
     pub token_type: String,
     pub org_id: String,
+    pub operator_admin: bool,
 }
 
 /// AuthGate middleware — validates Bearer token or session cookie.
@@ -83,20 +88,33 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
 }
 
 /// Resolve a raw token (PAT or session token) to an Identity.
+///
+/// For path-based instance scoping (/v1/instances/:id/...), the user
+/// authenticated against the root instance but is querying a child.
+/// Auth must resolve against the root; only data queries use the child.
 async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Option<Identity>> {
-    let instance_id = current_instance_id();
+    let ctx = current_instance_context();
+    let instance_id: Cow<'_, str> = match &ctx {
+        Some(c) if c.source == "path_param" => Cow::Borrowed(DEFAULT_INSTANCE_ID),
+        _ => current_instance_id(),
+    };
 
     if let Some(identity) = state
         .stateful
         .resolve_pat_token(&instance_id, raw_token)
         .await?
     {
-        return Ok(Some(Identity {
-            user_id: identity.user_id,
-            session_id: identity.session_id,
-            token_type: identity.token_type,
-            org_id: identity.org_id,
-        }));
+        return Ok(Some(
+            build_identity(
+                state,
+                &instance_id,
+                identity.user_id,
+                identity.session_id,
+                identity.token_type,
+                identity.org_id,
+            )
+            .await?,
+        ));
     }
 
     if let Some(session) = state
@@ -104,33 +122,81 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
         .find_session_by_token(&instance_id, raw_token)
         .await?
     {
-        return Ok(Some(Identity {
-            user_id: session.user_id,
-            session_id: session.id,
-            token_type: "session".to_string(),
-            org_id: session.org_id,
-        }));
+        return Ok(Some(
+            build_identity(
+                state,
+                &instance_id,
+                session.user_id,
+                session.id,
+                "session".to_string(),
+                session.org_id,
+            )
+            .await?,
+        ));
     }
 
     if let Ok(claims) = state.oidc.provider.validate_access_token(raw_token).await {
-        let scoped = state.db.scoped_default();
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT org_id FROM users WHERE instance_id = $1 AND id = $2")
-                .bind(scoped.instance_id())
-                .bind(&claims.sub)
-                .fetch_optional(scoped.pool())
-                .await?;
-        if let Some((org_id,)) = row {
+        if let Some(identity) = load_identity_metadata(&state.db, &instance_id, &claims.sub).await?
+        {
             return Ok(Some(Identity {
                 user_id: claims.sub,
                 session_id: String::new(),
                 token_type: "oidc".to_string(),
-                org_id,
+                org_id: identity.org_id,
+                operator_admin: metadata_has_capability(
+                    &identity.metadata_json,
+                    "operator_admin",
+                ),
             }));
         }
     }
 
     Ok(None)
+}
+
+async fn build_identity(
+    state: &ApiState,
+    instance_id: &str,
+    user_id: String,
+    session_id: String,
+    token_type: String,
+    org_id: String,
+) -> anyhow::Result<Identity> {
+    let operator_admin =
+        user_has_capability(state, instance_id, &user_id, "operator_admin").await?;
+    Ok(Identity {
+        user_id,
+        session_id,
+        token_type,
+        org_id,
+        operator_admin,
+    })
+}
+
+async fn user_has_capability(
+    state: &ApiState,
+    instance_id: &str,
+    user_id: &str,
+    capability: &str,
+) -> anyhow::Result<bool> {
+    db_user_has_capability(&state.db, instance_id, user_id, capability).await
+}
+
+fn metadata_has_capability(metadata: &str, capability: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(metadata)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("capabilities")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+        })
+        .map(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str().is_some_and(|entry| entry == capability))
+        })
+        .unwrap_or(false)
 }
 
 /// Extract the Identity from request extensions (set by auth_gate).

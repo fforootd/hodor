@@ -13,6 +13,7 @@ struct WhoAmIResponse {
     pub session_id: String,
     pub token_type: String,
     pub org_id: String,
+    pub operator_admin: bool,
 }
 
 async fn whoami(Extension(identity): Extension<Identity>) -> Response {
@@ -21,5 +22,6 @@ async fn whoami(Extension(identity): Extension<Identity>) -> Response {
         session_id: identity.session_id,
         token_type: identity.token_type,
         org_id: identity.org_id,
+        operator_admin: identity.operator_admin,
     })
 }

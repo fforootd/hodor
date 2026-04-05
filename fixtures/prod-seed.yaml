@@ -15,7 +15,7 @@ users:
     display_name: Admin
     password: ${ZITADEL_ADMIN_PASSWORD}
     on_conflict: update
-    capabilities: [admin, password]
+    capabilities: [operator_admin, admin, password]
     pats:
       - name: admin-api
         token: ${ZITADEL_ADMIN_PAT}

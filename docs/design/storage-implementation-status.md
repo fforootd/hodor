@@ -1,6 +1,6 @@
 # Storage Implementation Status
 
-**Date**: 2026-04-02  
+**Date**: 2026-04-05  
 **Scope**: current repository state, not future Redis/analytics expansion  
 **Related**: [Storage Architecture](storage-architecture.md), [ADR-010](../adr/010-three-tier-data.md), [ADR-017](../adr/017-caching-tiers.md)
 
@@ -11,7 +11,7 @@ The storage reset is now real in the codebase:
 - `storage.*` is the canonical server config namespace
 - `storage.stateful` is the only required block
 - `StorageRuntime::from_config` derives the remaining roles automatically
-- SQLite and Postgres both run through the same role-based runtime
+- SQLite, Postgres, and native Spanner now share the same backend boundary
 
 The current POC is no longer “just shared SQL pretending to be future architecture.” It now has a working Level 0/Level 1 storage runtime with real role separation.
 
@@ -42,10 +42,11 @@ Implemented:
 
 Current defaults:
 
-| `storage.stateful.url` | Derived `read` | Derived `kv` | Derived `sink` | Derived `process_cache` | Derived `analytics` |
+| `storage.stateful.backend` | Derived `read` | Derived `kv` | Derived `sink` | Derived `process_cache` | Derived `analytics` |
 |---|---|---|---|---|---|
 | SQLite | `same_connection` | `memory` | `channel` | `memory` | same stateful |
 | Postgres | `same_primary` | `postgres_unlogged` | `postgres` | `memory` | same stateful |
+| Spanner | `same_primary` | `shared_sql` | `noop` | `memory` | Spanner analytics backend |
 
 ### 3. `KvStore` is real for auth transient state
 
@@ -96,18 +97,28 @@ Implemented:
 - `ReadStore`
 - `SqlStatefulStore`
 - `SqlReadStore`
+- `SpannerStatefulStore`
+- `SpannerReadStore`
 
 The higher-level server wiring and testkit now depend on these names instead of the older `StateDb`/`EdgeReadDb` naming.
 
-### 6. Analytics remains stable and unchanged
+### 6. Analytics now has a native Spanner lane
 
-Still true today:
+Current behavior:
 
-- observability buffering uses the local SQLite analytics cache
-- analytics queries use the SQL backend
-- `storage.analytics` exists in config/schema/docs, but advanced analytics backends are not implemented yet
+- observability buffering still uses the local SQLite analytics cache
+- SQLite and Postgres analytics query through the SQL backend
+- Spanner analytics query and schema introspection now use the native GoogleSQL backend
+- dedicated external analytics backends are still out of scope for this pass
 
-This is intentional. The analytics workstream remains separate from the storage role reset.
+### 7. Mounted runtime paths now run without Spanner route guards
+
+Current behavior:
+
+- the API no longer uses a `spanner_backend_guard`
+- the login router no longer uses a `spanner_login_guard`
+- catalog install, SSO callback completion, OIDC adapters, and host-based routing now go through backend-aware DB helpers instead of ad-hoc SQL in the route layer
+- `zitadel_db::repos` now provides a domain-oriented facade over the retained-data boundary, even though the internal implementation is still being carved out of the older monolithic module
 
 ## What Is Still Missing
 
@@ -142,14 +153,15 @@ Not implemented yet:
 - ClickHouse backend
 - alternate analytics query runtime
 
-### 4. Full distributed validation for Postgres + sink
+### 4. Full distributed validation for Postgres + Spanner
 
-The code supports the derived Postgres topology and the role model is in place, but the strongest automated coverage today is still SQLite-first plus targeted runtime derivation tests.
+The code supports the derived Postgres topology and the native Spanner topology, but the strongest automated coverage today is still SQLite-first plus targeted contract tests and boundary checks.
 
 Future work should deepen:
 
 - multi-instance Postgres session visibility
 - replica read semantics
+- native Spanner emulator full-matrix end-to-end coverage
 - Redis/Valkey split-topology behavior
 
 ## Test Coverage Snapshot
@@ -159,12 +171,14 @@ Future work should deepen:
 - storage config loading and schema generation
 - SQLite derived role defaults
 - Postgres derived role defaults
+- Spanner derived role defaults
 - legacy `[database]` rejection
 - transient record emission
 - sink failure not breaking the auth hot path
 - consume-once provider auth state
 - channel sink persisting memory-backed sessions into SQLite
 - login flow/session behavior through the shared runtime
+- backend-boundary regression tests for the converted native Spanner runtime paths
 
 ### Still worth expanding
 

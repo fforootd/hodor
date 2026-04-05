@@ -9,7 +9,7 @@
     @retry="retryBootstrap"
   />
 
-  <SidebarProvider v-else>
+  <SidebarProvider v-else :default-open="true">
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
@@ -32,59 +32,29 @@
       </SidebarHeader>
 
       <SidebarContent>
-        <!-- Dashboard (always first) -->
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton as-child :data-active="$route.name === 'dashboard'">
-                  <router-link to="/">
-                    <LayoutDashboard class="size-4" />
-                    <span>Dashboard</span>
-                  </router-link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <!-- Ungrouped primary resources (no nav_group) -->
-        <SidebarGroup v-if="ungroupedItems.length">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem v-for="item in ungroupedItems" :key="item.type">
-                <SidebarMenuButton as-child :data-active="isNavActive(item)">
-                  <router-link :to="item.route">
-                    <component :is="getIcon(item.type)" class="size-4" />
-                    <span>{{ item.label }}</span>
-                    <span
-                      v-if="item.count !== undefined && item.count > 0"
-                      class="ml-auto text-xs text-muted-foreground tabular-nums"
-                      >{{ item.count }}</span
-                    >
-                  </router-link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <!-- Flat groups (items with separator, no group label) -->
-        <template v-for="group in flatGroups" :key="group.key">
+        <!-- ─── Drilled-in view: back button + sub-items ─── -->
+        <template v-if="drilledCategory">
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton @click="drilledCategoryKey = null" :tooltip="'Back'">
+                    <ArrowLeft class="size-4" />
+                    <span>{{ drilledCategory.label }}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
           <SidebarSeparator />
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem v-for="item in group.items" :key="item.type">
-                  <SidebarMenuButton as-child :data-active="isNavActive(item)">
-                    <router-link :to="item.route">
+                <SidebarMenuItem v-for="item in drilledCategory.items" :key="item.type">
+                  <SidebarMenuButton as-child :data-active="isNavActive(item)" :tooltip="item.label">
+                    <router-link :to="resolveRoute(item.route)">
                       <component :is="getIcon(item.type)" class="size-4" />
                       <span>{{ item.label }}</span>
-                      <span
-                        v-if="item.count !== undefined && item.count > 0"
-                        class="ml-auto text-xs text-muted-foreground tabular-nums"
-                        >{{ item.count }}</span
-                      >
                     </router-link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -93,42 +63,96 @@
           </SidebarGroup>
         </template>
 
-        <!-- Collapsible groups (Observability, System) -->
-        <template v-for="group in collapsibleGroups" :key="group.key">
-          <SidebarSeparator />
+        <!-- ─── Top-level navigation ─── -->
+        <template v-else>
+          <!-- Dashboard + Instances -->
           <SidebarGroup>
-            <SidebarMenu>
-              <Collapsible :default-open="isGroupActive(group)" class="group/collapsible">
+            <SidebarGroupContent>
+              <SidebarMenu>
                 <SidebarMenuItem>
-                  <CollapsibleTrigger as-child>
-                    <SidebarMenuButton>
-                      <component :is="getGroupIcon(group.key)" class="size-4" />
-                      <span>{{ group.label }}</span>
-                      <ChevronRight
-                        class="ml-auto size-4 transition-transform group-data-[state=open]/collapsible:rotate-90"
-                      />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub>
-                      <SidebarMenuSubItem v-for="item in group.items" :key="item.type">
-                        <SidebarMenuSubButton as-child :data-active="isNavActive(item)">
-                          <router-link :to="item.route">
-                            <span>{{ item.label }}</span>
-                          </router-link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
+                  <SidebarMenuButton as-child :data-active="$route.name === 'dashboard' || $route.name === 'i-dashboard'" :tooltip="'Dashboard'">
+                    <router-link :to="currentInstanceId ? `/instances/${currentInstanceId}` : '/'">
+                      <LayoutDashboard class="size-4" />
+                      <span>{{ isRootInstance && !currentInstanceId ? 'Getting Started' : 'Dashboard' }}</span>
+                    </router-link>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
-              </Collapsible>
-            </SidebarMenu>
+                <SidebarMenuItem v-if="isRootInstance">
+                  <SidebarMenuButton as-child :data-active="$route.name === 'instances' || $route.name === 'instance-create' || $route.path.startsWith('/instances/')" :tooltip="'Instances'">
+                    <router-link to="/instances">
+                      <Server class="size-4" />
+                      <span>Instances</span>
+                    </router-link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
           </SidebarGroup>
+
+          <!-- Categorized navigation -->
+          <template v-if="showInstanceSection">
+            <template v-for="category in categorizedNav" :key="category.key">
+              <!-- Flat category: label + items always visible -->
+              <SidebarGroup v-if="!category.drillable">
+                <SidebarGroupLabel class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {{ category.label }}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem v-for="item in category.items" :key="item.type">
+                      <SidebarMenuButton as-child :data-active="isNavActive(item)" :tooltip="item.label">
+                        <router-link :to="resolveRoute(item.route)">
+                          <component :is="getIcon(item.type)" class="size-4" />
+                          <span>{{ item.label }}</span>
+                          <span v-if="item.count !== undefined && item.count > 0"
+                            class="ml-auto text-xs text-muted-foreground tabular-nums">{{ item.count }}</span>
+                        </router-link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+
+              <!-- Drillable category: single row that navigates deeper -->
+              <SidebarGroup v-else>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton @click="drilledCategoryKey = category.key" :data-active="isCategoryActive(category)" :tooltip="category.label">
+                        <component :is="category.icon" class="size-4" />
+                        <span>{{ category.label }}</span>
+                        <ChevronRight class="ml-auto size-4 opacity-50" />
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </template>
+          </template>
+
+          <!-- Admin section (operators only, drillable) -->
+          <template v-if="isOperatorAdmin">
+            <SidebarSeparator class="my-1" />
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton @click="drilledCategoryKey = '_admin'" :data-active="isAdminRouteActive" :tooltip="'Admin'">
+                      <ShieldCheck class="size-4" />
+                      <span>Admin</span>
+                      <ChevronRight class="ml-auto size-4 opacity-50" />
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </template>
         </template>
       </SidebarContent>
 
       <SidebarFooter>
         <SidebarMenu>
+          <!-- User profile -->
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
@@ -187,6 +211,40 @@
         </Breadcrumb>
 
         <div class="ml-auto flex items-center gap-2">
+          <!-- Instance Switcher (root only) -->
+          <Popover v-if="isRootInstance" v-model:open="showInstanceDropdown">
+            <PopoverTrigger as-child>
+              <Button variant="outline" size="sm" class="gap-1.5 text-xs">
+                <Server class="size-3.5" />
+                {{ currentInstanceDomain || 'Select instance...' }}
+                <ChevronsUpDown class="size-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent class="w-64 p-0" align="end">
+              <Command>
+                <CommandInput placeholder="Find instance..." />
+                <CommandList>
+                  <CommandEmpty>No instance found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem value="no-instance" @select="selectInstance(null)">
+                      <Globe class="mr-2 size-4" />
+                      No instance selected
+                    </CommandItem>
+                    <CommandItem
+                      v-for="inst in instanceList"
+                      :key="inst.instance_id"
+                      :value="inst.primary_domain || inst.instance_id"
+                      @select="selectInstance(inst)"
+                    >
+                      <Server class="mr-2 size-4" />
+                      {{ inst.primary_domain || inst.instance_id }}
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
           <!-- Org Switcher -->
           <Popover v-model:open="showOrgDropdown">
             <PopoverTrigger as-child>
@@ -304,20 +362,22 @@
 
       <!-- Main Content -->
       <div class="flex-1 overflow-auto p-4 md:p-6">
-        <router-view :key="`${$route.fullPath}__org_${selectedOrgId || 'all'}`" />
+        <router-view :key="`${$route.fullPath}__org_${selectedOrgId || 'all'}__inst_${currentInstanceId || 'none'}`" />
       </div>
     </SidebarInset>
   </SidebarProvider>
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, onMounted, onUnmounted } from 'vue'
+  import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
   import { createReadyzWaiter, useAppBootstrap } from '@/bootstrap/app-bootstrap'
   import { useOrgContext } from '@/console/composables/useOrgContext'
+  import { useInstanceContext } from '@/console/composables/useInstanceContext'
+  import { useInstanceRoutes } from '@/console/composables/useInstanceRoutes'
   import { getUserSchemaLabel, normalizeUserSchemaType } from '@/console/utils/user-routes'
   import { useRoute, useRouter } from 'vue-router'
   import { api } from '@/api/client'
-  import { searchApi, type SearchResult } from '@/api/resources'
+  import { searchApi, instanceApi, countsApi, type SearchResult, type Instance } from '@/api/resources'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
   import { Toaster } from '@/components/ui/sonner'
 
@@ -328,20 +388,17 @@
     SidebarFooter,
     SidebarGroup,
     SidebarGroupContent,
+    SidebarGroupLabel,
     SidebarHeader,
     SidebarInset,
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
-    SidebarMenuSub,
-    SidebarMenuSubButton,
-    SidebarMenuSubItem,
     SidebarProvider,
     SidebarRail,
     SidebarSeparator,
     SidebarTrigger,
   } from '@/components/ui/sidebar'
-  import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
   import { Button } from '@/components/ui/button'
   import { Separator } from '@/components/ui/separator'
   import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -403,10 +460,14 @@
     Plus,
     Link,
     BellRing,
+    CreditCard,
+    Wrench,
+    ArrowLeft,
   } from 'lucide-vue-next'
 
   const route = useRoute()
   const router = useRouter()
+  const { resolveRoute } = useInstanceRoutes()
 
   const basePath = (window as any).__ZITADEL_BASE_PATH__ || ''
 
@@ -426,6 +487,39 @@
     showOrgDropdown.value = false
     setOrg(org?.id ?? null)
   }
+
+  // ─── Instance Switcher ───
+  const { currentInstanceId, currentInstanceDomain, setInstance, clearInstance } = useInstanceContext()
+  const showInstanceDropdown = ref(false)
+  const instanceList = ref<Instance[]>([])
+
+  function selectInstance(inst: Instance | null) {
+    showInstanceDropdown.value = false
+    if (inst) {
+      setInstance(inst.instance_id, inst.primary_domain || inst.instance_id)
+      // Navigate to the instance, preserving current product section if possible
+      const currentPath = route.path
+      const instanceMatch = currentPath.match(/^\/instances\/[^/]+(\/.*)?$/)
+      const productPath = instanceMatch?.[1] || ''
+      router.push(`/instances/${inst.instance_id}${productPath}`)
+    } else {
+      clearInstance()
+      router.push('/')
+    }
+  }
+
+  async function loadInstances() {
+    try {
+      // Instance list is a root-level endpoint (/v1/instances) — not rewritten.
+      const res = await instanceApi.list({ limit: 100 })
+      instanceList.value = res.items ?? []
+    } catch {
+      instanceList.value = []
+    }
+  }
+
+  // ─── Drill-in navigation state ───
+  const drilledCategoryKey = ref<string | null>(null)
 
   // ─── Command Palette ───
   const showCommandPalette = ref(false)
@@ -455,15 +549,14 @@
     showCommandPalette.value = false
     searchResults.value = []
     commandQuery.value = ''
-    // Route generation is owned by the frontend, not the API.
     const routeMap: Record<string, (id: string) => string> = {
-      user: (id) => `/users/${id}`,
-      identity: (id) => `/users/${id}`,
-      org: (id) => `/orgs/${id}`,
-      schema: (id) => `/schemas/${id}`,
-      event: () => '/events',
-      provider: (id) => `/providers/${id}`,
-      session: () => '/sessions',
+      user: (id) => resolveRoute(`/users/${id}`),
+      identity: (id) => resolveRoute(`/users/${id}`),
+      org: (id) => resolveRoute(`/orgs/${id}`),
+      schema: (id) => resolveRoute(`/schemas/${id}`),
+      event: () => resolveRoute('/events'),
+      provider: (id) => resolveRoute(`/providers/${id}`),
+      session: () => resolveRoute('/sessions'),
     }
     const resolver = routeMap[r.resource_type] || (() => '/')
     router.push(resolver(r.id))
@@ -473,7 +566,7 @@
     showCommandPalette.value = false
     searchResults.value = []
     commandQuery.value = ''
-    router.push(path)
+    router.push(resolveRoute(path))
   }
 
   function getResultIcon(resourceType: string) {
@@ -495,7 +588,7 @@
   onMounted(() => document.addEventListener('keydown', handleKeydown))
   onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 
-  // ─── Grouped catalog-driven nav ───
+  // ─── Catalog-driven nav ───
   interface NavItem {
     type: string
     label: string
@@ -521,11 +614,76 @@
     orgs?: {
       items?: Array<Record<string, any>>
     }
+    features?: Record<string, boolean>
+    instance?: {
+      id: string
+      kind: string
+      is_root: boolean
+    }
+    capabilities?: {
+      instance_management: boolean
+      operator_admin: boolean
+      billing: boolean
+    }
   }
+
+  // Reactive bootstrap context.
+  const isRootInstance = ref(false)
+  const isOperatorAdmin = ref(false)
 
   const navItems = ref<NavItem[]>([])
   const navGroupDefs = ref<Record<string, NavGroupDef>>({})
   const entityCounts = ref<Record<string, number>>({})
+
+  // ─── Vercel-style collapsible category definitions ───
+  interface NavCategory {
+    key: string
+    label: string
+    icon: any
+    drillable: boolean   // true = shows as single row that drills deeper on click
+    catalogGroups?: string[]
+    explicitTypes?: string[]
+  }
+
+  const navCategoryDefs: NavCategory[] = [
+    {
+      key: 'identity',
+      label: 'Identity',
+      icon: Users,
+      drillable: false,
+      explicitTypes: ['users', 'human_user', 'service_user', 'ai_agent', 'org', 'group', 'project'],
+    },
+    {
+      key: 'applications',
+      label: 'Applications',
+      icon: AppWindow,
+      drillable: false,
+      explicitTypes: ['applications', 'app', 'provider', 'login_flow'],
+    },
+    {
+      key: 'observability',
+      label: 'Observability',
+      icon: Activity,
+      drillable: true,
+      catalogGroups: ['observability'],
+    },
+    {
+      key: 'authorization',
+      label: 'Authorization',
+      icon: ShieldCheck,
+      drillable: true,
+      catalogGroups: ['authorization'],
+    },
+    {
+      key: 'system',
+      label: 'System',
+      icon: Settings,
+      drillable: true,
+      catalogGroups: ['system'],
+      explicitTypes: ['schema', 'marketplace', 'session', 'event', 'job', 'action', 'notification', 'endpoint'],
+    },
+  ]
+
   const {
     state: bootstrapState,
     error: bootstrapError,
@@ -535,76 +693,156 @@
     dispose: disposeBootstrap,
   } = useAppBootstrap(
     async () => {
+      // Bootstrap always queries the root instance (the /v1/console/bootstrap
+      // path is excluded from instance rewriting in the fetch layer).
       const bootstrap = await api.get<ConsoleBootstrapResponse>('/v1/console/bootstrap')
 
+      isRootInstance.value = bootstrap.instance?.is_root ?? false
+      isOperatorAdmin.value = bootstrap.capabilities?.operator_admin ?? false
+
+      applyOrgs(bootstrap.orgs?.items || [])
       hydrateNav(bootstrap.meta || {})
       applyCounts(bootstrap.counts || {})
-      applyOrgs(bootstrap.orgs?.items || [])
+
+      // Load instances list for the instance switcher (root only).
+      if (isRootInstance.value) {
+        loadInstances()
+      }
     },
     {
       waitForReady: createReadyzWaiter(),
     },
   )
 
-  const ungroupedItems = computed(() =>
-    navItems.value.filter((i) => !i.navGroup).sort((a, b) => a.sortOrder - b.sortOrder),
+  // Whether to show the INSTANCE section in the sidebar.
+  // Always show product nav — the root instance has its own users/orgs/apps.
+  // When inside a child instance, the same nav links point to instance-scoped URLs.
+  const showInstanceSection = computed(() => true)
+
+  // Categorized navigation: groups nav items into categories
+  interface ResolvedCategory {
+    key: string
+    label: string
+    icon: any
+    drillable: boolean
+    items: NavItem[]
+  }
+
+  const categorizedNav = computed<ResolvedCategory[]>(() => {
+    const assigned = new Set<string>()
+    const result: ResolvedCategory[] = []
+
+    for (const category of navCategoryDefs) {
+      const items: NavItem[] = []
+
+      if (category.explicitTypes) {
+        for (const item of navItems.value) {
+          if (category.explicitTypes.includes(item.type) && !assigned.has(item.type)) {
+            items.push(item)
+            assigned.add(item.type)
+          }
+        }
+      }
+
+      if (category.catalogGroups) {
+        for (const item of navItems.value) {
+          if (item.navGroup && category.catalogGroups.includes(item.navGroup) && !assigned.has(item.type)) {
+            items.push(item)
+            assigned.add(item.type)
+          }
+        }
+      }
+
+      items.sort((a, b) => a.sortOrder - b.sortOrder)
+
+      if (items.length > 0) {
+        result.push({
+          key: category.key,
+          label: category.label,
+          icon: category.icon,
+          drillable: category.drillable,
+          items,
+        })
+      }
+    }
+
+    // Catch-all for unassigned items
+    const unassigned = navItems.value.filter(i => !assigned.has(i.type))
+    if (unassigned.length > 0) {
+      result.push({
+        key: 'other',
+        label: 'Other',
+        icon: Database,
+        drillable: true,
+        items: unassigned.sort((a, b) => a.sortOrder - b.sortOrder),
+      })
+    }
+
+    return result
+  })
+
+  // The currently drilled-in category (resolved from key)
+  const adminDrillItems: NavItem[] = [
+    { type: 'admin-instances', label: 'All Instances', route: '/admin/instances', sortOrder: 0, storage: 'dedicated', countable: false },
+    { type: 'admin-events', label: 'Events', route: '/admin/events', sortOrder: 1, storage: 'dedicated', countable: false },
+    { type: 'billing', label: 'Billing', route: '/billing', sortOrder: 2, storage: 'dedicated', countable: false },
+    { type: 'admin-config', label: 'System Config', route: '/admin/config', sortOrder: 3, storage: 'dedicated', countable: false },
+  ]
+
+  const drilledCategory = computed<ResolvedCategory | null>(() => {
+    if (!drilledCategoryKey.value) return null
+    if (drilledCategoryKey.value === '_admin') {
+      return { key: '_admin', label: 'Admin', icon: ShieldCheck, drillable: true, items: adminDrillItems }
+    }
+    return categorizedNav.value.find(c => c.key === drilledCategoryKey.value) || null
+  })
+
+  function isCategoryActive(category: ResolvedCategory): boolean {
+    return category.items.some(item => isNavActive(item))
+  }
+
+  const isAdminRouteActive = computed(() =>
+    ['admin-instances', 'admin-events', 'billing', 'admin-config'].includes(route.name as string)
   )
 
-  function buildGroups(displayFilter: string) {
-    const grouped = new Map<string, NavItem[]>()
-    for (const item of navItems.value) {
-      if (!item.navGroup) continue
-      const def = navGroupDefs.value[item.navGroup]
-      if ((def?.display || 'flat') !== displayFilter) continue
-      if (!grouped.has(item.navGroup)) grouped.set(item.navGroup, [])
-      grouped.get(item.navGroup)!.push(item)
-    }
-    for (const items of grouped.values()) {
-      items.sort((a, b) => a.sortOrder - b.sortOrder)
-    }
-    return Array.from(grouped.entries())
-      .map(([key, items]) => ({
-        key,
-        label: navGroupDefs.value[key]?.label || key.charAt(0).toUpperCase() + key.slice(1),
-        sortOrder: navGroupDefs.value[key]?.sort_order ?? 99,
-        items,
-      }))
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-  }
-
-  const flatGroups = computed(() => buildGroups('flat'))
-  const collapsibleGroups = computed(() => buildGroups('collapsible'))
-
-  function isGroupActive(group: { items: NavItem[] }): boolean {
-    return group.items.some((item) => isNavActive(item))
-  }
-
-  const groupIconMap: Record<string, any> = {
-    observability: Activity,
-    authorization: ShieldCheck,
-    system: Settings,
-  }
-  function getGroupIcon(key: string) {
-    return groupIconMap[key] || Database
-  }
+  // Auto-drill into the matching category when navigating to a sub-item
+  watch(
+    () => route.path,
+    () => {
+      // If already drilled in and the route matches, keep it
+      if (drilledCategory.value && isCategoryActive(drilledCategory.value)) return
+      // Check if we need to auto-drill into a category
+      for (const cat of categorizedNav.value) {
+        if (cat.drillable && isCategoryActive(cat)) {
+          drilledCategoryKey.value = cat.key
+          return
+        }
+      }
+      // Check admin routes
+      if (isAdminRouteActive.value) {
+        drilledCategoryKey.value = '_admin'
+        return
+      }
+      // No match — go back to top level
+      drilledCategoryKey.value = null
+    },
+  )
 
   function isNavActive(item: NavItem): boolean {
     const r = route
-    // Virtual aggregate routes: /users, /applications
+    // Normalize: strip i- prefix for comparison
+    const name = (r.name as string || '').replace(/^i-/, '')
     if (item.route === '/users') {
-      return r.name === 'users' || r.name === 'user-create' || r.name === 'user-detail'
+      return name === 'users' || name === 'user-create' || name === 'user-detail'
     }
     if (item.route === '/applications') {
-      return (
-        r.name === 'applications' ||
-        r.name === 'application-create' ||
-        r.name === 'application-detail'
-      )
+      return name === 'applications' || name === 'application-create' || name === 'application-detail'
     }
-    // Schema-type routes
+    if (item.route === '/instances') {
+      return name === 'instances' || name === 'instance-create' || name === 'instance-detail'
+    }
     if (item.storage === 'entities') return r.params.schemaType === item.type
-    // Dedicated routes
-    return r.name === item.type || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
+    return name === item.type || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
   }
 
   const iconMap: Record<string, any> = {
@@ -628,7 +866,6 @@
     overview: BarChart3,
     explore: Search,
     trace: Workflow,
-    // Authorization sub-pages
     authz_overview: ShieldCheck,
     authz_permissions: ShieldCheck,
     authz_relationships: Workflow,
@@ -637,6 +874,7 @@
     marketplace: Package,
     endpoint: Link,
     notification: BellRing,
+    instances: Server,
   }
 
   function getIcon(type: string) {
@@ -711,12 +949,34 @@
     disposeBootstrap()
   })
 
+  // Sync instance display state and sidebar counts when entering/leaving an instance.
+  watch(
+    () => route.params.instanceId as string | undefined,
+    async (newId) => {
+      if (newId) {
+        setInstance(newId, newId)
+      } else {
+        clearInstance()
+      }
+      // Refresh counts — the /v1/counts call gets rewritten to
+      // /v1/instances/:id/counts by the fetch layer when inside an instance.
+      try {
+        const resp = await countsApi.get()
+        applyCounts(resp as unknown as Record<string, number>)
+      } catch {
+        applyCounts({})
+      }
+    },
+  )
+
   const currentUserCreateType = computed(() => normalizeUserSchemaType(route.query.type))
   const pageTitle = computed(() => {
-    if (route.name === 'users') return 'Users'
-    if (route.name === 'user-create')
+    // Normalize: strip i- prefix for instance-scoped route names
+    const name = (route.name as string || '').replace(/^i-/, '')
+    if (name === 'users') return 'Users'
+    if (name === 'user-create')
       return `New ${getUserSchemaLabel(currentUserCreateType.value)}`
-    if (route.name === 'applications') return 'Applications'
+    if (name === 'applications') return 'Applications'
     if (route.params.schemaType) {
       const st = route.params.schemaType as string
       const entry = navItems.value.find((e) => e.type === st)
@@ -725,6 +985,13 @@
     const titles: Record<string, string> = {
       dashboard: 'Dashboard',
       instances: 'Instances',
+      'instance-create': 'New Instance',
+      'instance-detail': 'Instance',
+      team: 'Team',
+      billing: 'Billing',
+      'admin-instances': 'All Instances',
+      'admin-events': 'Events',
+      'admin-config': 'System Config',
       'user-detail': 'User Detail',
       'identity-create': 'New User',
       orgs: 'Organizations',
@@ -750,10 +1017,11 @@
       authorization: 'System Authorization',
       notifications: 'Notifications',
     }
-    return titles[route.name as string] || 'Console'
+    return titles[name] || 'Console'
   })
 
   // Route-aware breadcrumbs
+  // Maps normalized route name (without i- prefix) → parent info
   const parentRoutes: Record<string, { label: string; path: string }> = {
     'user-detail': { label: 'Users', path: '/users' },
     'user-create': { label: 'Users', path: '/users' },
@@ -765,6 +1033,8 @@
     'group-create': { label: 'Groups', path: '/groups' },
     'project-detail': { label: 'Projects', path: '/projects' },
     'project-create': { label: 'Projects', path: '/projects' },
+    'instance-detail': { label: 'Instances', path: '/instances' },
+    'instance-create': { label: 'Instances', path: '/instances' },
     'schema-detail': { label: 'Schemas', path: '/schemas' },
     'provider-detail': { label: 'Providers', path: '/providers' },
     'provider-create': { label: 'Providers', path: '/providers' },
@@ -775,10 +1045,25 @@
 
   const breadcrumbs = computed(() => {
     const crumbs: { label: string; path: string }[] = []
-    const name = route.name as string
+    const instanceId = route.params.instanceId as string | undefined
+
+    // Instance trail: Instances > domain.com
+    if (instanceId) {
+      crumbs.push({ label: 'Instances', path: '/instances' })
+      crumbs.push({
+        label: currentInstanceDomain.value || instanceId,
+        path: `/instances/${instanceId}`,
+      })
+    }
+
+    // Normalize route name (strip i- prefix for instance-scoped routes)
+    const name = (route.name as string || '').replace(/^i-/, '')
     const parent = parentRoutes[name]
     if (parent) {
-      crumbs.push(parent)
+      crumbs.push({
+        label: parent.label,
+        path: instanceId ? `/instances/${instanceId}${parent.path}` : parent.path,
+      })
     }
     crumbs.push({ label: pageTitle.value, path: route.path })
     return crumbs

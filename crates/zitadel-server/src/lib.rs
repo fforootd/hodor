@@ -62,7 +62,12 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
 pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<()> {
     let port = config.server.port;
-    tracing::info!(dialect = %db.dialect(), url = %config.storage.stateful.url, "database connected");
+    tracing::info!(
+        backend = %db.backend(),
+        dialect = %db.dialect(),
+        url = %config.storage.stateful.url,
+        "database connected"
+    );
 
     // Run migrations based on mode.
     match config.storage.stateful.resolve_migrate_mode() {
@@ -154,6 +159,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     .await?;
     let fga = Arc::new(FgaService::new(db.clone()));
     fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
+    fga.reconcile_root_hierarchy(DEFAULT_INSTANCE_ID).await?;
 
     let api_state = zitadel_api::ApiState {
         db: db.clone(),

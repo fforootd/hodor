@@ -202,8 +202,8 @@ graph LR
 
     subgraph Zitadel
         DR["Instance Resolver"]
-        Domains["instance_domains<br/>domain → instance_id"]
-        Instances["instances<br/>instance_id → placement"]
+        Domains["domains<br/>domain → instance_id / org_id"]
+        Instances["instances<br/>root / child placement"]
     end
 
     D1 --> AutoTLS
@@ -216,10 +216,10 @@ graph LR
 **Resolution priority** (from request Host header):
 1. Self-hosted single-instance mode → configured/default local `instance_id`
 2. Trusted header: `X-Zitadel-Instance: instance_id` → direct override from trusted proxies only
-3. Exact match in `instance_domains` → `instance_id`
+3. Exact match in `domains` → `instance_id`
 4. Unknown host in cloud mode → request rejected
 
-The authoritative routing data is portal-managed control-plane state. The runtime keeps an in-process LRU/TTL cache, but `instance_id` resolution is still driven by the `instances` and `instance_domains` tables.
+The authoritative routing data is root-managed control-plane state. The runtime keeps an in-process LRU/TTL cache, but `instance_id` resolution is still driven by the `instances` and `domains` tables.
 
 ## Deployment Topologies
 
@@ -229,9 +229,9 @@ The system uses one role-based storage runtime with different defaults by operat
 |---|---|---|---|
 | **Small self-hosted** | SQLite | One instance per deployment | Local operator-managed |
 | **Enterprise self-hosted** | Postgres | One instance per deployment | Operator-managed |
-| **ZITADEL Cloud** | Managed cloud backend selected by `backend_key` | Many instances routed by the control plane | `global` or `regional` via control-plane placement |
+| **ZITADEL Cloud** | Native GoogleSQL Spanner | One root instance plus many child instances | `global` or `regional` via `region_key` |
 
-For cloud, the request resolver returns `instance_id`, `customer_id`, `placement_mode`, `region_key`, and `backend_key` before auth/session middleware runs. The binary reaches the control plane via `cloud.control_plane`, then reads `instances`, `instance_domains`, and `cloud_backends` to resolve the live backend binding. Specific backend choice is intentionally left open between shared-schema and regional managed-backend topologies.
+For cloud, the request resolver returns `instance_id`, optional `org_id`, `placement_mode`, and `region_key` before auth/session middleware runs. The binary reads the unified `domains` table and the two-level `instances` table from the same stateful backend. There is no `cloud_backends` indirection on the hot path.
 
 ## Planes And Consistency Classes
 
