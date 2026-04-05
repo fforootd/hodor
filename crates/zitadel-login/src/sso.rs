@@ -12,8 +12,9 @@ use uuid::Uuid;
 use zitadel_db::{
     create_linked_identity_record, create_user, current_instance_id,
     find_active_user_by_identifier, find_linked_identity, first_org_id, get_schema_record,
-    get_user, list_schema_registry, touch_linked_identity, update_session_metadata,
+    list_schema_registry,
     provider::{self, ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
+    touch_linked_identity, update_session_metadata,
 };
 use zitadel_oidc::rp::{
     RpAuthState, RpCallbackRequest, RpProviderSpec, RpStartRequest, StateStore,
@@ -277,6 +278,33 @@ fn provider_to_rp_spec(provider: &ProviderRecord) -> anyhow::Result<RpProviderSp
     })
 }
 
+/// Build an [`ActorContext`] for the login flow.
+///
+/// During federated login, no user session exists yet, so the identity fields
+/// are empty. The instance is resolved from the thread-local context set by
+/// the instance middleware.
+fn login_actor_context() -> zitadel_app::ActorContext {
+    let instance_id = current_instance_id().into_owned();
+    zitadel_app::ActorContext {
+        auth: zitadel_app::context::AuthContext {
+            identity: zitadel_app::context::Identity {
+                user_id: String::new(),
+                session_id: String::new(),
+                token_type: "login_flow".to_string(),
+                org_id: String::new(),
+            },
+            capabilities: vec![],
+        },
+        instance: zitadel_app::context::InstanceContext {
+            instance_id,
+            placement_mode: String::new(),
+            region_key: None,
+            feature_overrides: Default::default(),
+            host: String::new(),
+        },
+    }
+}
+
 async fn complete_federated_login(
     state: &LoginState,
     provider: &ProviderRecord,
@@ -294,16 +322,35 @@ async fn complete_federated_login(
         &provider.payload.mapping.claims,
         &identity.claims,
     );
-    let user_id = find_or_create_identity(&state.db, instance_id.as_ref(), provider, identity, &profile).await?;
-    let org_id = get_user(&state.db, instance_id.as_ref(), &user_id)
-        .await?
-        .map(|user| user.org_id)
-        .unwrap_or_default();
+    // TODO(CLAUDE-2): Replace find_or_create_identity with use case calls:
+    //   - state.app.create_user.execute() for user provisioning
+    //   - state.app.link_identity.execute() for identity linking
+    //   - user lookup via repos for matching existing users
+    // Currently kept as direct DB calls because the SSO linking/matching logic
+    // (match_by strategies, link_only mode) is not yet modelled in use cases.
+    let user_id = find_or_create_identity(
+        &state.db,
+        instance_id.as_ref(),
+        provider,
+        identity,
+        &profile,
+    )
+    .await?;
 
+    // Issue session via the IssueSession use case (ADR-032).
+    let actor = login_actor_context();
     let created = state
-        .transient
-        .create_session(instance_id.as_ref(), &user_id, &org_id, "", "", "")
-        .await?;
+        .app
+        .issue_session
+        .execute(
+            &actor,
+            zitadel_app::auth::IssueSessionCommand {
+                user_id: user_id.clone(),
+                auth_method: "sso".to_string(),
+            },
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("issue_session use case failed: {e}"))?;
 
     let metadata = serde_json::json!({
         "auth_method": "sso",
@@ -354,8 +401,7 @@ async fn load_target_schema(
             .await?
             .map(|record| record.schema_json)
     } else if !provider.target.schema_type.is_empty() {
-        let schemas =
-            list_schema_registry(db, "", Some(&provider.target.schema_type), 50).await?;
+        let schemas = list_schema_registry(db, "", Some(&provider.target.schema_type), 50).await?;
         schemas
             .iter()
             .find(|schema| schema.is_default)
@@ -378,6 +424,13 @@ async fn load_target_schema(
     ))
 }
 
+// TODO(CLAUDE-2): Migrate to use case calls once the identity-linking strategy
+// logic is modelled in zitadel-app:
+//   - find_linked_identity  → repos.identities or a dedicated FindLinkedIdentity use case
+//   - touch_linked_identity → same repo, update path
+//   - match_existing_user   → repos.users.find_by_identifier (already exists)
+//   - create_user           → state.app.create_user.execute()
+//   - create_linked_identity → state.app.link_identity.execute()
 async fn find_or_create_identity(
     db: &zitadel_db::Db,
     instance_id: &str,
@@ -385,7 +438,9 @@ async fn find_or_create_identity(
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
     profile: &HashMap<String, serde_json::Value>,
 ) -> anyhow::Result<String> {
-    if let Some(linked) = find_linked_identity(db, instance_id, &provider.id, &identity.subject).await? {
+    if let Some(linked) =
+        find_linked_identity(db, instance_id, &provider.id, &identity.subject).await?
+    {
         let raw_claims = serde_json::to_string(&identity.claims)?;
         let _ = touch_linked_identity(
             db,
@@ -546,7 +601,9 @@ fn urlencoding_encode(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::DefaultRpService;
+    use zitadel_app::{ApplicationServices, HookPipeline};
     use zitadel_authn::{cookie::CookieConfig, password::Swapper};
+    use zitadel_fga::FgaService;
     use zitadel_storage::StorageRuntime;
 
     async fn test_state() -> LoginState {
@@ -567,6 +624,17 @@ mod tests {
         )
         .await
         .unwrap();
+        let fga = Arc::new(FgaService::new(db.clone()));
+        let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
+            db.clone(),
+            storage.stateful.clone(),
+            storage.transient.clone(),
+            fga,
+        ));
+        let app = Arc::new(ApplicationServices::new(
+            repos,
+            Arc::new(HookPipeline::empty()),
+        ));
 
         LoginState {
             db: db.clone(),
@@ -585,6 +653,7 @@ mod tests {
                 zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
             )),
             pow_secret: "test-pow-secret".into(),
+            app,
         }
     }
 

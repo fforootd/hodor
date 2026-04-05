@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
-use zitadel_db::{first_org_id, upsert_catalog_action};
 use zitadel_db::provider::{
     ProviderCatalogRef, ProviderPayload, insert_provider_for, list_providers_for,
     update_provider_for,
 };
+use zitadel_db::{first_org_id, upsert_catalog_action};
 
 use crate::Catalog;
 
@@ -19,8 +19,8 @@ impl Catalog {
         db: &zitadel_db::Db,
     ) -> anyhow::Result<String> {
         let (entry, payload) = self.resolve_payload(id, variables)?;
-        let instance_id = zitadel_db::current_instance_id_or(zitadel_db::DEFAULT_INSTANCE_ID)
-            .into_owned();
+        let instance_id =
+            zitadel_db::current_instance_id_or(zitadel_db::DEFAULT_INSTANCE_ID).into_owned();
 
         let provider_id = uuid::Uuid::new_v4().to_string();
         let mut provider: ProviderPayload = serde_json::from_value(payload)?;
@@ -63,8 +63,8 @@ impl Catalog {
         db: &zitadel_db::Db,
     ) -> anyhow::Result<String> {
         let (entry, payload) = self.resolve_payload(id, variables)?;
-        let instance_id = zitadel_db::current_instance_id_or(zitadel_db::DEFAULT_INSTANCE_ID)
-            .into_owned();
+        let instance_id =
+            zitadel_db::current_instance_id_or(zitadel_db::DEFAULT_INSTANCE_ID).into_owned();
 
         let action_id = uuid::Uuid::new_v4().to_string();
         let display_name = payload["display_name"].as_str().unwrap_or(&entry.name);

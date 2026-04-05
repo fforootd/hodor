@@ -1,8 +1,8 @@
 use uuid::Uuid;
 use zitadel_config::StatefulStorageConfig;
 use zitadel_db::{
-    CreateManagedInstanceInput, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, bootstrap, create_managed_instance,
-    create_user, migrate,
+    CreateManagedInstanceInput, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, bootstrap,
+    create_managed_instance, create_user, migrate,
 };
 use zitadel_fga::{CheckRequest, Evaluator, FgaService, StoreResolver, TupleKey};
 
@@ -40,7 +40,9 @@ async fn run_hierarchy_smoke(db: Db) -> anyhow::Result<()> {
     )
     .await?;
 
-    service.reconcile_root_hierarchy(DEFAULT_INSTANCE_ID).await?;
+    service
+        .reconcile_root_hierarchy(DEFAULT_INSTANCE_ID)
+        .await?;
     let root_store = service.discover_store(DEFAULT_INSTANCE_ID).await?;
     let allowed = service
         .check(
@@ -82,15 +84,11 @@ async fn hierarchy_smoke_works_on_postgres_when_configured() -> anyhow::Result<(
 #[tokio::test]
 async fn hierarchy_smoke_works_on_spanner_emulator_when_configured() -> anyhow::Result<()> {
     let Some(database) = std::env::var("ZITADEL_TEST_SPANNER_DATABASE").ok() else {
-        eprintln!(
-            "skipping Spanner hierarchy test: ZITADEL_TEST_SPANNER_DATABASE is not set"
-        );
+        eprintln!("skipping Spanner hierarchy test: ZITADEL_TEST_SPANNER_DATABASE is not set");
         return Ok(());
     };
     let Some(emulator_host) = std::env::var("ZITADEL_TEST_SPANNER_EMULATOR_HOST").ok() else {
-        eprintln!(
-            "skipping Spanner hierarchy test: ZITADEL_TEST_SPANNER_EMULATOR_HOST is not set"
-        );
+        eprintln!("skipping Spanner hierarchy test: ZITADEL_TEST_SPANNER_EMULATOR_HOST is not set");
         return Ok(());
     };
 

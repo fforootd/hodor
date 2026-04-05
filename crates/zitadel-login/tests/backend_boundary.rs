@@ -32,7 +32,12 @@ fn assert_source_does_not_contain(path: &Path, forbidden: &str) {
 #[test]
 fn converted_login_runtime_paths_do_not_bypass_db_repositories() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for rel in ["src/legacy.rs", "src/session.rs", "src/sso.rs", "src/steps.rs"] {
+    for rel in [
+        "src/legacy.rs",
+        "src/session.rs",
+        "src/sso.rs",
+        "src/steps.rs",
+    ] {
         assert_no_sql_runtime_calls(&manifest.join(rel));
     }
 }

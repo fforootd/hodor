@@ -14,6 +14,7 @@ use serde_json::Value;
 use tower::util::ServiceExt;
 use uuid::Uuid;
 use zitadel_api::ApiState;
+use zitadel_app::{ApplicationServices, HookPipeline};
 use zitadel_authn::{
     cookie::{CookieConfig, sign},
     password::{Swapper, encode_credential_json},
@@ -186,6 +187,16 @@ impl TestContext {
         let fga = Arc::new(FgaService::new(db.db.clone()));
         fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
 
+        // Build application services (ADR-032).
+        let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
+            db.db.clone(),
+            storage.stateful.clone(),
+            storage.transient.clone(),
+            fga.clone(),
+        ));
+        let hooks = Arc::new(HookPipeline::empty());
+        let app = Arc::new(ApplicationServices::new(repos, hooks));
+
         let api_state = ApiState {
             db: db.db.clone(),
             fga,
@@ -196,6 +207,7 @@ impl TestContext {
             passwords: passwords.clone(),
             cookie_config: cookie_config.clone(),
             is_dev: true,
+            app: app.clone(),
         };
 
         let login_state = LoginState {
@@ -211,6 +223,7 @@ impl TestContext {
                 InMemoryIssuerMetadataCache::default(),
             )),
             pow_secret: config.server.management_secret.clone(),
+            app,
         };
 
         Ok(Self {

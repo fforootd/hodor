@@ -1,14 +1,12 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     response::Response,
     routing::get,
 };
 use serde::Serialize;
-use zitadel_db::{
-    current_instance_id, delete_settings_record, get_settings_record, put_instance_settings,
-};
+use zitadel_app::settings::UpdateSettingsCommand;
 
 pub fn routes() -> Router<ApiState> {
     Router::new().route(
@@ -25,39 +23,54 @@ struct SettingsResponse {
     data: serde_json::Value,
 }
 
-async fn get_settings(State(s): State<ApiState>, Path(type_): Path<String>) -> Response {
-    match get_settings_record(&s.db, current_instance_id().as_ref(), &type_).await {
-        Ok(Some(r)) => response::json_ok(SettingsResponse {
-            type_: r.type_,
-            scope: r.scope,
-            data: serde_json::from_str(&r.data_json).unwrap_or_default(),
+async fn get_settings(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(type_): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.get_settings.execute(&ctx, &type_, None, None).await {
+        Ok(record) => response::json_ok(SettingsResponse {
+            type_: record.settings_type,
+            scope: record.scope,
+            data: record.data,
         }),
-        Ok(None) => response::not_found(format!("settings '{type_}' not found")),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn put_settings(
     State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Path(type_): Path<String>,
     Json(data): Json<serde_json::Value>,
 ) -> Response {
-    let data_str = serde_json::to_string(&data).unwrap_or_else(|_| "{}".into());
-    let id = uuid::Uuid::new_v4().to_string();
-    match put_instance_settings(&s.db, current_instance_id().as_ref(), &id, &type_, &data_str)
-        .await
-    {
-        Ok(_) => response::json_ok(SettingsResponse {
+    let ctx = response::build_actor_context(&identity);
+    let cmd = UpdateSettingsCommand {
+        settings_type: type_.clone(),
+        scope: "instance".to_string(),
+        data: data.clone(),
+    };
+    match s.app.update_settings.execute(&ctx, cmd).await {
+        Ok(()) => response::json_ok(SettingsResponse {
             type_,
             scope: "instance".into(),
             data,
         }),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn delete_settings(State(s): State<ApiState>, Path(type_): Path<String>) -> Response {
-    match delete_settings_record(&s.db, current_instance_id().as_ref(), &type_).await {
+    // No delete_settings use case — keep direct DB call.
+    // TODO(CLAUDE-4): Add DeleteSettings use case.
+    match zitadel_db::delete_settings_record(
+        &s.db,
+        zitadel_db::current_instance_id().as_ref(),
+        &type_,
+    )
+    .await
+    {
         Ok(_) => response::no_content(),
         Err(e) => response::internal_error(format!("{e}")),
     }

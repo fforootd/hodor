@@ -1,6 +1,6 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Router,
+    Extension, Router,
     extract::{Query, State},
     response::Response,
     routing::get,
@@ -36,7 +36,13 @@ struct SearchResponse {
     total: usize,
 }
 
-async fn search(State(s): State<ApiState>, Query(p): Query<SearchParams>) -> Response {
+// TODO(CLAUDE-4): Call search use case when available
+async fn search(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Query(p): Query<SearchParams>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     let q = match p.q {
         Some(q) if !q.is_empty() => q,
         _ => return response::bad_request("q parameter required"),

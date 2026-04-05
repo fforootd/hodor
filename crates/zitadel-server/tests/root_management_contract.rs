@@ -441,15 +441,13 @@ async fn root_instance_access_uses_fga_not_only_session_org_scope() -> anyhow::R
         .execute(scoped.pool())
         .await
         .context("insert org-b")?;
-    sqlx::query(
-        "UPDATE users SET org_id = $1 WHERE instance_id = $2 AND id = $3",
-    )
-    .bind("org-b")
-    .bind(scoped.instance_id())
-    .bind(&root_user.user_id)
-    .execute(scoped.pool())
-    .await
-    .context("move user to org-b")?;
+    sqlx::query("UPDATE users SET org_id = $1 WHERE instance_id = $2 AND id = $3")
+        .bind("org-b")
+        .bind(scoped.instance_id())
+        .bind(&root_user.user_id)
+        .execute(scoped.pool())
+        .await
+        .context("move user to org-b")?;
 
     let after_move = get_on_host(
         &app,

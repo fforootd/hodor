@@ -25,6 +25,8 @@ impl ZitadelOpStore {
 }
 
 impl ClientStore for ZitadelOpStore {
+    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
+    // Currently zitadel-oidc cannot depend on zitadel-app without creating a circular dependency.
     async fn find_client(
         &self,
         instance_id: &str,
@@ -42,6 +44,7 @@ impl ClientStore for ZitadelOpStore {
             }))
     }
 
+    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn authenticate_client_secret(
         &self,
         instance_id: &str,
@@ -57,6 +60,7 @@ impl ClientStore for ZitadelOpStore {
 }
 
 impl AuthRequestStore for ZitadelOpStore {
+    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn create_auth_request(
         &self,
         instance_id: &str,
@@ -84,6 +88,7 @@ impl AuthRequestStore for ZitadelOpStore {
         Ok(auth_request_id)
     }
 
+    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn consume_auth_code(
         &self,
         instance_id: &str,
@@ -105,6 +110,7 @@ impl AuthRequestStore for ZitadelOpStore {
 }
 
 impl ClaimSource for ZitadelOpStore {
+    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn load_user_claims(
         &self,
         instance_id: &str,

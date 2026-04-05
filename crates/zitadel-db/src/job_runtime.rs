@@ -173,8 +173,14 @@ pub async fn due_job_names(
                 bool_true_sql(db.dialect()),
             );
 
-            let rows = sqlx::query(&sql).bind(instance_id).fetch_all(db.pool()).await?;
-            Ok(rows.into_iter().map(|row| row.get::<String, _>(0)).collect())
+            let rows = sqlx::query(&sql)
+                .bind(instance_id)
+                .fetch_all(db.pool())
+                .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| row.get::<String, _>(0))
+                .collect())
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -568,7 +574,7 @@ async fn delete_unscoped_batches(
     Ok(removed)
 }
 
-async fn ensure_event_partitions(db: &Db, premake_days: u32) -> anyhow::Result<()> {
+pub async fn ensure_event_partitions(db: &Db, premake_days: u32) -> anyhow::Result<()> {
     if db.backend() != BackendKind::Postgres {
         return Ok(());
     }
@@ -673,21 +679,21 @@ async fn prune_event_default_partition(
     Ok(removed)
 }
 
-fn bool_true_sql(dialect: Dialect) -> &'static str {
+pub fn bool_true_sql(dialect: Dialect) -> &'static str {
     match dialect {
         Dialect::Postgres | Dialect::Spanner => "TRUE",
         Dialect::Sqlite => "1",
     }
 }
 
-fn current_timestamp_sql(dialect: Dialect) -> &'static str {
+pub fn current_timestamp_sql(dialect: Dialect) -> &'static str {
     match dialect {
         Dialect::Spanner => "CURRENT_TIMESTAMP()",
         Dialect::Postgres | Dialect::Sqlite => "CURRENT_TIMESTAMP",
     }
 }
 
-fn timestamp_plus_expr(dialect: Dialect, secs: u64) -> String {
+pub fn timestamp_plus_expr(dialect: Dialect, secs: u64) -> String {
     match dialect {
         Dialect::Postgres => format!("CURRENT_TIMESTAMP + INTERVAL '{secs} seconds'"),
         Dialect::Spanner => format!("TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL {secs} SECOND)"),

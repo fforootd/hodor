@@ -1,0 +1,29 @@
+[package]
+name = "zitadel-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Async
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging / tracing
+tracing = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# Workspace crates (for shared types)
+zitadel-expr = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

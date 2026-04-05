@@ -1,6 +1,6 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Router,
+    Extension, Router,
     extract::{Path, State},
     response::Response,
     routing::get,
@@ -25,6 +25,7 @@ struct SessionResponse {
     revoked_at: Option<String>,
 }
 
+// TODO(CLAUDE-4): Call session list use case when available
 async fn list_sessions(State(s): State<ApiState>) -> Response {
     let instance_id = current_instance_id();
     match s.transient.list_sessions(&instance_id).await {
@@ -50,6 +51,7 @@ async fn list_sessions(State(s): State<ApiState>) -> Response {
     }
 }
 
+// TODO(CLAUDE-4): Call session get use case when available
 async fn get_session(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
     let instance_id = current_instance_id();
     match s.transient.get_session(&instance_id, &id).await {
@@ -66,11 +68,14 @@ async fn get_session(State(s): State<ApiState>, Path(id): Path<String>) -> Respo
     }
 }
 
-async fn revoke_session(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    let instance_id = current_instance_id();
-    match s.transient.revoke_session(&instance_id, &id).await {
-        Ok(false) => response::not_found("session not found"),
-        Ok(true) => response::no_content(),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn revoke_session(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.revoke_session.execute(&ctx, &id).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }

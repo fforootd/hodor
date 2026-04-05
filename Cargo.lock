@@ -5409,6 +5409,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+ "zitadel-app",
  "zitadel-authn",
  "zitadel-catalog",
  "zitadel-config",
@@ -5417,6 +5418,20 @@ dependencies = [
  "zitadel-fga",
  "zitadel-oidc",
  "zitadel-storage",
+]
+
+[[package]]
+name = "zitadel-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zitadel-expr",
 ]
 
 [[package]]
@@ -5527,7 +5542,9 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "zitadel-app",
  "zitadel-config",
+ "zitadel-crypto",
 ]
 
 [[package]]
@@ -5576,13 +5593,16 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zitadel-app",
  "zitadel-authn",
  "zitadel-botdetect",
  "zitadel-config",
  "zitadel-db",
  "zitadel-expr",
+ "zitadel-fga",
  "zitadel-oidc",
  "zitadel-schema",
+ "zitadel-server",
  "zitadel-storage",
 ]
 
@@ -5682,6 +5702,7 @@ dependencies = [
  "tracing",
  "uuid",
  "zitadel-api",
+ "zitadel-app",
  "zitadel-authn",
  "zitadel-config",
  "zitadel-crypto",
@@ -5724,6 +5745,7 @@ dependencies = [
  "tower 0.5.3",
  "uuid",
  "zitadel-api",
+ "zitadel-app",
  "zitadel-authn",
  "zitadel-config",
  "zitadel-crypto",
@@ -5731,6 +5753,7 @@ dependencies = [
  "zitadel-fga",
  "zitadel-login",
  "zitadel-oidc",
+ "zitadel-server",
  "zitadel-storage",
 ]
 

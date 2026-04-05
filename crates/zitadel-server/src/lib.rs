@@ -2,6 +2,7 @@ pub mod assets;
 pub mod health;
 mod jobs;
 pub mod openapi;
+pub mod repo_bridge;
 pub mod routing;
 
 use axum::Router;
@@ -9,6 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
+use zitadel_app::{ApplicationServices, HookPipeline};
 use zitadel_config::Config;
 use zitadel_db::DEFAULT_INSTANCE_ID;
 use zitadel_fga::{FgaService, StoreResolver};
@@ -94,7 +96,9 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     zitadel_storage::prepare_postgres_role_databases(&config.storage, &db).await?;
 
-    jobs::start(&config, db.clone()).await?;
+    // TODO(CLAUDE-4): Pass Arc<HookPipeline> built from ActionRepository once
+    // repo impls are merged. For now, pass None to disable the event consumer.
+    jobs::start(&config, db.clone(), None).await?;
 
     // Build encryption secret box from config (plaintext passthrough if no keys configured).
     let encryption_keys: std::collections::HashMap<String, String> = config
@@ -161,6 +165,25 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
     fga.reconcile_root_hierarchy(DEFAULT_INSTANCE_ID).await?;
 
+    // ── ADR-032: Build application layer ──
+    // Build repository implementations from existing infrastructure.
+    let repos = Arc::new(repo_bridge::build_repositories(
+        db.clone(),
+        storage.stateful.clone(),
+        storage.transient.clone(),
+        fga.clone(),
+    ));
+
+    // Build hook pipeline (empty for now — CLAUDE-3 will populate from ActionRepository).
+    let hooks = Arc::new(HookPipeline::empty());
+
+    // Build application services (all use cases wired to repos + hooks).
+    let app = Arc::new(ApplicationServices::new(repos, hooks));
+    tracing::info!("application services initialized (ADR-032)");
+
+    let passwords = Arc::new(passwords);
+    let cookie_config = Arc::new(cookie_config);
+
     let api_state = zitadel_api::ApiState {
         db: db.clone(),
         fga,
@@ -168,17 +191,18 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         transient: storage.transient.clone(),
         analytics: storage.analytics.clone(),
         oidc: oidc_state.clone(),
-        passwords: Arc::new(passwords),
-        cookie_config: Arc::new(cookie_config),
+        passwords: passwords.clone(),
+        cookie_config: cookie_config.clone(),
         is_dev: config.is_dev(),
+        app: app.clone(),
     };
 
     let login_state = zitadel_login::LoginState {
         db: db.clone(),
         stateful: storage.stateful.clone(),
         transient: storage.transient.clone(),
-        passwords: api_state.passwords.clone(),
-        cookie_config: api_state.cookie_config.clone(),
+        passwords: passwords.clone(),
+        cookie_config: cookie_config.clone(),
         public_origin: Arc::new(issuer.clone()),
         conformance_login_html: config.dev.conformance_login_html,
         rp: Arc::new(zitadel_oidc::rp::RpService::new(
@@ -186,6 +210,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
             zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
         )),
         pow_secret: config.server.management_secret.clone(),
+        app: app.clone(),
     };
 
     let state = Arc::new(AppState {

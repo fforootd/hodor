@@ -13,9 +13,7 @@ use serde_json::{Map, Value, json};
 use sqlx::Row;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use zitadel_db::{
-    Db, Dialect, list_active_child_instance_ownerships, list_active_org_users,
-};
+use zitadel_db::{Db, Dialect, list_active_child_instance_ownerships, list_active_org_users};
 
 pub const SCHEMA_VERSION_1_1: &str = "1.1";
 pub const CORE_MODEL_VERSION: &str = "core-2026-04-05-root-hierarchy-v1";
@@ -559,7 +557,9 @@ impl FgaService {
             &store.id,
             WriteRequest {
                 writes: TupleKeySet { tuple_keys: writes },
-                deletes: TupleKeySet { tuple_keys: deletes },
+                deletes: TupleKeySet {
+                    tuple_keys: deletes,
+                },
                 authorization_model_id: None,
             },
         )
@@ -882,9 +882,16 @@ impl FgaService {
         {
             return Ok(());
         }
-        if let Some(fragments) = self.load_active_model_fragments(instance_id, store_id).await? {
+        if let Some(fragments) = self
+            .load_active_model_fragments(instance_id, store_id)
+            .await?
+        {
             if fragments.core_model_version == CORE_MODEL_VERSION {
-                if self.cached_active_model(instance_id, store_id).await.is_none() {
+                if self
+                    .cached_active_model(instance_id, store_id)
+                    .await
+                    .is_none()
+                {
                     let cached = self
                         .load_model_row_from_db(instance_id, store_id, None)
                         .await?
@@ -926,13 +933,15 @@ impl FgaService {
                 .fetch_optional(scoped.pool())
                 .await
                 .context("load active fga model fragments")?;
-                Ok(row.map(
-                    |(core_model_version, custom_model, module_fragments)| StoredModelFragments {
-                        core_model_version,
-                        custom_model,
-                        module_fragments,
-                    },
-                ))
+                Ok(
+                    row.map(|(core_model_version, custom_model, module_fragments)| {
+                        StoredModelFragments {
+                            core_model_version,
+                            custom_model,
+                            module_fragments,
+                        }
+                    }),
+                )
             }
             Db::Spanner(_) => {
                 let mut stmt = Statement::new(
@@ -3256,7 +3265,8 @@ fn parse_model_fragment(raw: &str) -> Result<AuthorizationModelWriteRequest, Fga
             conditions: Map::new(),
         });
     }
-    serde_json::from_value(value).context("parse model fragment")
+    serde_json::from_value(value)
+        .context("parse model fragment")
         .map_err(Into::into)
 }
 
@@ -3285,8 +3295,14 @@ fn tuple_identity(tuple: &TupleKey) -> String {
 
 fn is_managed_root_tuple(tuple: &TupleKey) -> bool {
     match tuple.object.split_once(':') {
-        Some(("org", _)) => matches!(tuple.relation.as_str(), "owner" | "admin" | "member" | "viewer"),
-        Some(("instance", _)) => matches!(tuple.relation.as_str(), "parent" | "owner" | "admin" | "viewer"),
+        Some(("org", _)) => matches!(
+            tuple.relation.as_str(),
+            "owner" | "admin" | "member" | "viewer"
+        ),
+        Some(("instance", _)) => matches!(
+            tuple.relation.as_str(),
+            "parent" | "owner" | "admin" | "viewer"
+        ),
         _ => false,
     }
 }
@@ -3774,7 +3790,10 @@ mod tests {
         .unwrap();
 
         let reloaded = FgaService::new(db.clone());
-        reloaded.initialize_instance(DEFAULT_INSTANCE_ID).await.unwrap();
+        reloaded
+            .initialize_instance(DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap();
         let current = reloaded
             .read_model(DEFAULT_INSTANCE_ID, &store.id, None)
             .await

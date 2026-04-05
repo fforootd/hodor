@@ -1,6 +1,10 @@
-use crate::{ApiState, response};
+// Events use analytics storage (columnar SQL queries), not use cases.
+// TODO(ADR-032): list_events should eventually call EventRepository::list() via
+//   ApplicationServices once an events use case is added.  For the POC the
+//   analytics-based query is kept because it is optimised for large result sets.
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Router,
+    Extension, Router,
     extract::{Query, State},
     response::{Response, Sse, sse::Event as SseEvent},
     routing::get,
@@ -58,7 +62,13 @@ pub struct EventResponse {
     pub created_at: String,
 }
 
-async fn list_events(State(s): State<ApiState>, Query(p): Query<EventParams>) -> Response {
+// TODO(ADR-032): Route through use case layer for FGA permission checks
+async fn list_events(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Query(p): Query<EventParams>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     let cursor = decode_cursor(p.cursor.as_deref());
 
     let mut conditions = vec![format!(
@@ -139,9 +149,11 @@ fn decode_cursor(cursor: Option<&str>) -> Option<(String, String)> {
     Some((created_at.to_string(), id.to_string()))
 }
 
-/// SSE event stream — polls for new events every 2 seconds.
+/// SSE event stream -- polls for new events every 2 seconds.
+// TODO(ADR-032): Add Identity extraction + FGA check for stream access
 async fn stream_events(
     State(_s): State<ApiState>,
+    Extension(_identity): Extension<Identity>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
     let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
         std::time::Duration::from_secs(2),
@@ -163,7 +175,10 @@ fn chrono_now() -> String {
     format!("{}", d.as_secs())
 }
 
-fn event_from_analytics_row(result: &AnalyticsQueryResult, row: &[serde_json::Value]) -> EventResponse {
+fn event_from_analytics_row(
+    result: &AnalyticsQueryResult,
+    row: &[serde_json::Value],
+) -> EventResponse {
     EventResponse {
         id: row_string(result, row, "id").unwrap_or_default(),
         event_type: row_string(result, row, "event_type").unwrap_or_default(),
@@ -191,7 +206,10 @@ fn event_from_analytics_row(result: &AnalyticsQueryResult, row: &[serde_json::Va
 }
 
 fn column_index(result: &AnalyticsQueryResult, column: &str) -> Option<usize> {
-    result.columns.iter().position(|candidate| candidate == column)
+    result
+        .columns
+        .iter()
+        .position(|candidate| candidate == column)
 }
 
 fn row_value<'a>(
@@ -224,11 +242,7 @@ fn row_optional_string(
     row_string(result, row, column)
 }
 
-fn row_i64(
-    result: &AnalyticsQueryResult,
-    row: &[serde_json::Value],
-    column: &str,
-) -> Option<i64> {
+fn row_i64(result: &AnalyticsQueryResult, row: &[serde_json::Value], column: &str) -> Option<i64> {
     row_value(result, row, column).and_then(|value| match value {
         serde_json::Value::Number(number) => number.as_i64(),
         serde_json::Value::String(raw) => raw.parse().ok(),
@@ -242,8 +256,9 @@ fn row_json(
     column: &str,
 ) -> serde_json::Value {
     match row_value(result, row, column) {
-        Some(serde_json::Value::String(raw)) => serde_json::from_str(raw)
-            .unwrap_or_else(|_| serde_json::Value::String(raw.clone())),
+        Some(serde_json::Value::String(raw)) => {
+            serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.clone()))
+        }
         Some(other) => other.clone(),
         None => serde_json::Value::Null,
     }
@@ -256,7 +271,9 @@ fn sql_string_literal(value: &str) -> String {
 fn timestamp_literal(dialect: zitadel_db::Dialect, value: &str) -> String {
     match dialect {
         zitadel_db::Dialect::Sqlite => format!("datetime({})", sql_string_literal(value)),
-        zitadel_db::Dialect::Postgres => format!("CAST({} AS TIMESTAMPTZ)", sql_string_literal(value)),
+        zitadel_db::Dialect::Postgres => {
+            format!("CAST({} AS TIMESTAMPTZ)", sql_string_literal(value))
+        }
         zitadel_db::Dialect::Spanner => format!("TIMESTAMP({})", sql_string_literal(value)),
     }
 }

@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Context;
 use google_cloud_spanner::{
-    client::Error as SpannerError,
-    mutation::insert,
-    row::Row,
-    statement::Statement,
+    client::Error as SpannerError, mutation::insert, row::Row, statement::Statement,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -430,14 +427,14 @@ pub async fn load_session_user_profile(
             );
             stmt.add_param("instance_id", &instance_id);
             stmt.add_param("user_id", &user_id);
-            Ok(spanner_query_optional(spanner, stmt)
-                .await?
-                .map(|row| {
-                    (
-                        row.column_by_name::<String>("identifier").unwrap_or_default(),
-                        row.column_by_name::<String>("display_name").unwrap_or_default(),
-                    )
-                }))
+            Ok(spanner_query_optional(spanner, stmt).await?.map(|row| {
+                (
+                    row.column_by_name::<String>("identifier")
+                        .unwrap_or_default(),
+                    row.column_by_name::<String>("display_name")
+                        .unwrap_or_default(),
+                )
+            }))
         }
     }
 }
@@ -521,7 +518,9 @@ pub async fn load_instance_metadata(
             Ok(spanner_query_optional(spanner, stmt)
                 .await?
                 .map(|row| InstanceMetadata {
-                    instance_id: row.column_by_name::<String>("instance_id").unwrap_or_default(),
+                    instance_id: row
+                        .column_by_name::<String>("instance_id")
+                        .unwrap_or_default(),
                     kind: row.column_by_name::<String>("kind").unwrap_or_default(),
                     parent_instance_id: row
                         .column_by_name::<Option<String>>("parent_instance_id")
@@ -669,7 +668,9 @@ pub async fn list_managed_instances(
                 updated_at = updated_at.replace("updated_at", "i.updated_at"),
             );
             let sql = if owner_filter.is_some() {
-                format!("{base} AND i.owner_org_id = $2 AND i.instance_id > $3 ORDER BY i.instance_id LIMIT $4")
+                format!(
+                    "{base} AND i.owner_org_id = $2 AND i.instance_id > $3 ORDER BY i.instance_id LIMIT $4"
+                )
             } else {
                 format!("{base} AND i.instance_id > $2 ORDER BY i.instance_id LIMIT $3")
             };
@@ -825,13 +826,7 @@ pub async fn create_managed_instance(
                 ),
                 insert(
                     "domains",
-                    &[
-                        "domain",
-                        "instance_id",
-                        "is_primary",
-                        "state",
-                        "verified",
-                    ],
+                    &["domain", "instance_id", "is_primary", "state", "verified"],
                     &[
                         &input.primary_domain,
                         &input.instance_id,
@@ -845,9 +840,14 @@ pub async fn create_managed_instance(
         }
     }
 
-    get_managed_instance(db, &input.instance_id, &input.root_instance_id, Some(&input.owner_org_id))
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("created instance but could not reload it"))
+    get_managed_instance(
+        db,
+        &input.instance_id,
+        &input.root_instance_id,
+        Some(&input.owner_org_id),
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("created instance but could not reload it"))
 }
 
 pub async fn update_managed_instance(
@@ -996,9 +996,11 @@ pub async fn instance_visible(
     root_instance_id: &str,
     owner_filter: Option<&str>,
 ) -> anyhow::Result<bool> {
-    Ok(get_managed_instance(db, instance_id, root_instance_id, owner_filter)
-        .await?
-        .is_some())
+    Ok(
+        get_managed_instance(db, instance_id, root_instance_id, owner_filter)
+            .await?
+            .is_some(),
+    )
 }
 
 pub async fn list_instance_domains(
@@ -1048,8 +1050,12 @@ pub async fn list_instance_domains(
                     is_primary: row.column_by_name::<bool>("is_primary").unwrap_or(false),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
                     verified: row.column_by_name::<bool>("verified").unwrap_or(false),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -1084,7 +1090,8 @@ pub async fn add_instance_domain(
     }
 
     let items = list_instance_domains(db, instance_id).await?;
-    items.into_iter()
+    items
+        .into_iter()
         .find(|item| item.domain == domain)
         .ok_or_else(|| anyhow::anyhow!("created domain but could not reload it"))
 }
@@ -1115,14 +1122,12 @@ pub async fn delete_instance_domain(
             );
             stmt.add_param("domain", &domain);
             stmt.add_param("instance_id", &instance_id);
-            spanner_query_optional(spanner, stmt)
-                .await?
-                .map(|row| {
-                    (
-                        row.column_by_name::<bool>("is_primary").unwrap_or(false),
-                        row.column_by_name::<String>("state").unwrap_or_default(),
-                    )
-                })
+            spanner_query_optional(spanner, stmt).await?.map(|row| {
+                (
+                    row.column_by_name::<bool>("is_primary").unwrap_or(false),
+                    row.column_by_name::<String>("state").unwrap_or_default(),
+                )
+            })
         }
     };
 
@@ -1136,11 +1141,13 @@ pub async fn delete_instance_domain(
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
-            sqlx::query("DELETE FROM domains WHERE domain = $1 AND instance_id = $2 AND org_id IS NULL")
-                .bind(domain)
-                .bind(instance_id)
-                .execute(scoped.pool())
-                .await?;
+            sqlx::query(
+                "DELETE FROM domains WHERE domain = $1 AND instance_id = $2 AND org_id IS NULL",
+            )
+            .bind(domain)
+            .bind(instance_id)
+            .execute(scoped.pool())
+            .await?;
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -1203,9 +1210,13 @@ pub async fn list_saved_queries(
                 .map(|row| SavedQueryRecord {
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     name: row.column_by_name::<String>("name").unwrap_or_default(),
-                    description: row.column_by_name::<String>("description").unwrap_or_default(),
+                    description: row
+                        .column_by_name::<String>("description")
+                        .unwrap_or_default(),
                     sql: row.column_by_name::<String>("sql_text").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -1252,21 +1263,19 @@ pub async fn create_saved_query(
         .ok_or_else(|| anyhow::anyhow!("saved query created but could not be reloaded"))
 }
 
-pub async fn delete_saved_query(
-    db: &Db,
-    instance_id: &str,
-    id: &str,
-) -> anyhow::Result<bool> {
+pub async fn delete_saved_query(db: &Db, instance_id: &str, id: &str) -> anyhow::Result<bool> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
-            Ok(sqlx::query("DELETE FROM saved_queries WHERE instance_id = $1 AND id = $2")
-                .bind(instance_id)
-                .bind(id)
-                .execute(scoped.pool())
-                .await?
-                .rows_affected()
-                > 0)
+            Ok(
+                sqlx::query("DELETE FROM saved_queries WHERE instance_id = $1 AND id = $2")
+                    .bind(instance_id)
+                    .bind(id)
+                    .execute(scoped.pool())
+                    .await?
+                    .rows_affected()
+                    > 0,
+            )
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -1321,21 +1330,19 @@ pub async fn first_org_id(db: &Db, instance_id: &str) -> anyhow::Result<Option<S
     }
 }
 
-pub async fn delete_provider(
-    db: &Db,
-    instance_id: &str,
-    id: &str,
-) -> anyhow::Result<bool> {
+pub async fn delete_provider(db: &Db, instance_id: &str, id: &str) -> anyhow::Result<bool> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
-            Ok(sqlx::query("DELETE FROM providers WHERE instance_id = $1 AND id = $2")
-                .bind(instance_id)
-                .bind(id)
-                .execute(scoped.pool())
-                .await?
-                .rows_affected()
-                > 0)
+            Ok(
+                sqlx::query("DELETE FROM providers WHERE instance_id = $1 AND id = $2")
+                    .bind(instance_id)
+                    .bind(id)
+                    .execute(scoped.pool())
+                    .await?
+                    .rows_affected()
+                    > 0,
+            )
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -1376,8 +1383,9 @@ pub async fn create_named_resource(
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
-            let sql =
-                format!("INSERT INTO {table} (id, instance_id, name, state) VALUES ($1, $2, $3, 'active')");
+            let sql = format!(
+                "INSERT INTO {table} (id, instance_id, name, state) VALUES ($1, $2, $3, 'active')"
+            );
             sqlx::query(&sql)
                 .bind(id)
                 .bind(instance_id)
@@ -1425,18 +1433,20 @@ pub async fn get_named_resource(
                 "SELECT id, name, state, {created_at}, {updated_at} \
                  FROM {table} WHERE instance_id = $1 AND id = $2"
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(id)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|row| NamedResourceRecord {
-                    id: row.0,
-                    name: row.1,
-                    state: row.2,
-                    created_at: row.3,
-                    updated_at: row.4,
-                }))
+            Ok(
+                sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
+                    .bind(instance_id)
+                    .bind(id)
+                    .fetch_optional(scoped.pool())
+                    .await?
+                    .map(|row| NamedResourceRecord {
+                        id: row.0,
+                        name: row.1,
+                        state: row.2,
+                        created_at: row.3,
+                        updated_at: row.4,
+                    }),
+            )
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(&format!(
@@ -1452,8 +1462,12 @@ pub async fn get_named_resource(
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     name: row.column_by_name::<String>("name").unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 }))
         }
     }
@@ -1508,8 +1522,12 @@ pub async fn list_named_resources(
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     name: row.column_by_name::<String>("name").unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -1578,11 +1596,15 @@ pub async fn delete_instance_row(
                 > 0)
         }
         Db::Spanner(spanner) => {
-            let mut exists_stmt =
-                Statement::new(&format!("SELECT id FROM {table} WHERE instance_id = @instance_id AND id = @id LIMIT 1"));
+            let mut exists_stmt = Statement::new(&format!(
+                "SELECT id FROM {table} WHERE instance_id = @instance_id AND id = @id LIMIT 1"
+            ));
             exists_stmt.add_param("instance_id", &instance_id);
             exists_stmt.add_param("id", &id);
-            if spanner_query_optional(spanner, exists_stmt).await?.is_none() {
+            if spanner_query_optional(spanner, exists_stmt)
+                .await?
+                .is_none()
+            {
                 return Ok(false);
             }
             let mut delete_stmt = Statement::new(&format!(
@@ -1654,11 +1676,7 @@ pub async fn create_org(
         .ok_or_else(|| anyhow::anyhow!("created org but could not reload it"))
 }
 
-pub async fn get_org(
-    db: &Db,
-    instance_id: &str,
-    id: &str,
-) -> anyhow::Result<Option<OrgRecord>> {
+pub async fn get_org(db: &Db, instance_id: &str, id: &str) -> anyhow::Result<Option<OrgRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -1668,19 +1686,21 @@ pub async fn get_org(
                 "SELECT id, name, state, COALESCE({metadata}, '{{}}'), {created_at}, {updated_at} \
                  FROM orgs WHERE instance_id = $1 AND id = $2"
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(id)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|row| OrgRecord {
-                    id: row.0,
-                    name: row.1,
-                    state: row.2,
-                    metadata_json: row.3,
-                    created_at: row.4,
-                    updated_at: row.5,
-                }))
+            Ok(
+                sqlx::query_as::<_, (String, String, String, String, String, String)>(&sql)
+                    .bind(instance_id)
+                    .bind(id)
+                    .fetch_optional(scoped.pool())
+                    .await?
+                    .map(|row| OrgRecord {
+                        id: row.0,
+                        name: row.1,
+                        state: row.2,
+                        metadata_json: row.3,
+                        created_at: row.4,
+                        updated_at: row.5,
+                    }),
+            )
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -1697,8 +1717,12 @@ pub async fn get_org(
                     name: row.column_by_name::<String>("name").unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
                     metadata_json: row.column_by_name::<String>("metadata").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 }))
         }
     }
@@ -1754,8 +1778,12 @@ pub async fn list_org_records(
                     name: row.column_by_name::<String>("name").unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
                     metadata_json: row.column_by_name::<String>("metadata").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -1904,11 +1932,7 @@ pub async fn create_user(
         .ok_or_else(|| anyhow::anyhow!("created user but could not reload it"))
 }
 
-pub async fn get_user(
-    db: &Db,
-    instance_id: &str,
-    id: &str,
-) -> anyhow::Result<Option<UserRecord>> {
+pub async fn get_user(db: &Db, instance_id: &str, id: &str) -> anyhow::Result<Option<UserRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -1919,23 +1943,37 @@ pub async fn get_user(
                         COALESCE({metadata}, '{{}}'), {created_at}, {updated_at} \
                  FROM users WHERE instance_id = $1 AND id = $2"
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String, String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(id)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|row| UserRecord {
-                    id: row.0,
-                    org_id: row.1,
-                    identifier: row.2,
-                    display_name: row.3,
-                    user_type: row.4,
-                    state: row.5,
-                    schema_id: row.6,
-                    metadata_json: row.7,
-                    created_at: row.8,
-                    updated_at: row.9,
-                }))
+            Ok(sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .bind(id)
+            .fetch_optional(scoped.pool())
+            .await?
+            .map(|row| UserRecord {
+                id: row.0,
+                org_id: row.1,
+                identifier: row.2,
+                display_name: row.3,
+                user_type: row.4,
+                state: row.5,
+                schema_id: row.6,
+                metadata_json: row.7,
+                created_at: row.8,
+                updated_at: row.9,
+            }))
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -1951,14 +1989,26 @@ pub async fn get_user(
                 .map(|row| UserRecord {
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     org_id: row.column_by_name::<String>("org_id").unwrap_or_default(),
-                    identifier: row.column_by_name::<String>("identifier").unwrap_or_default(),
-                    display_name: row.column_by_name::<String>("display_name").unwrap_or_default(),
-                    user_type: row.column_by_name::<String>("user_type").unwrap_or_default(),
+                    identifier: row
+                        .column_by_name::<String>("identifier")
+                        .unwrap_or_default(),
+                    display_name: row
+                        .column_by_name::<String>("display_name")
+                        .unwrap_or_default(),
+                    user_type: row
+                        .column_by_name::<String>("user_type")
+                        .unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
-                    schema_id: row.column_by_name::<String>("schema_id").unwrap_or_default(),
+                    schema_id: row
+                        .column_by_name::<String>("schema_id")
+                        .unwrap_or_default(),
                     metadata_json: row.column_by_name::<String>("metadata").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 }))
         }
     }
@@ -1978,12 +2028,26 @@ pub async fn list_users(
                 "SELECT id, org_id, identifier, display_name, user_type, state, schema_id, '{{}}', {created_at}, {updated_at} \
                  FROM users WHERE instance_id = $1 AND id > $2 ORDER BY id LIMIT $3"
             );
-            let rows = sqlx::query_as::<_, (String, String, String, String, String, String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(after_id)
-                .bind(limit)
-                .fetch_all(scoped.pool())
-                .await?;
+            let rows = sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .bind(after_id)
+            .bind(limit)
+            .fetch_all(scoped.pool())
+            .await?;
             Ok(rows
                 .into_iter()
                 .map(|row| UserRecord {
@@ -2015,14 +2079,26 @@ pub async fn list_users(
                 .map(|row| UserRecord {
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     org_id: row.column_by_name::<String>("org_id").unwrap_or_default(),
-                    identifier: row.column_by_name::<String>("identifier").unwrap_or_default(),
-                    display_name: row.column_by_name::<String>("display_name").unwrap_or_default(),
-                    user_type: row.column_by_name::<String>("user_type").unwrap_or_default(),
+                    identifier: row
+                        .column_by_name::<String>("identifier")
+                        .unwrap_or_default(),
+                    display_name: row
+                        .column_by_name::<String>("display_name")
+                        .unwrap_or_default(),
+                    user_type: row
+                        .column_by_name::<String>("user_type")
+                        .unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
-                    schema_id: row.column_by_name::<String>("schema_id").unwrap_or_default(),
+                    schema_id: row
+                        .column_by_name::<String>("schema_id")
+                        .unwrap_or_default(),
                     metadata_json: "{}".to_string(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -2293,11 +2369,7 @@ pub async fn put_instance_settings(
     Ok(())
 }
 
-pub async fn delete_settings_record(
-    db: &Db,
-    instance_id: &str,
-    type_: &str,
-) -> anyhow::Result<()> {
+pub async fn delete_settings_record(db: &Db, instance_id: &str, type_: &str) -> anyhow::Result<()> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -2381,10 +2453,7 @@ pub async fn create_pat(
     Ok(())
 }
 
-pub async fn list_pats_for_instance(
-    db: &Db,
-    instance_id: &str,
-) -> anyhow::Result<Vec<PatRecord>> {
+pub async fn list_pats_for_instance(db: &Db, instance_id: &str) -> anyhow::Result<Vec<PatRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -2422,18 +2491,16 @@ pub async fn list_pats_for_instance(
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     user_id: row.column_by_name::<String>("user_id").unwrap_or_default(),
                     name: row.column_by_name::<String>("name").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
     }
 }
 
-pub async fn revoke_pat(
-    db: &Db,
-    instance_id: &str,
-    id: &str,
-) -> anyhow::Result<bool> {
+pub async fn revoke_pat(db: &Db, instance_id: &str, id: &str) -> anyhow::Result<bool> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -2466,10 +2533,7 @@ pub async fn revoke_pat(
     }
 }
 
-pub async fn list_actions(
-    db: &Db,
-    instance_id: &str,
-) -> anyhow::Result<Vec<ActionRecord>> {
+pub async fn list_actions(db: &Db, instance_id: &str) -> anyhow::Result<Vec<ActionRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -2484,10 +2548,26 @@ pub async fn list_actions(
                         COALESCE({metadata}, '{{}}'), {created_at} \
                  FROM actions WHERE instance_id = $1 ORDER BY priority, name"
             );
-            let rows = sqlx::query_as::<_, (String, String, String, String, String, String, String, i64, i64, i64, String, String)>(&sql)
-                .bind(instance_id)
-                .fetch_all(scoped.pool())
-                .await?;
+            let rows = sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    i64,
+                    i64,
+                    i64,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .fetch_all(scoped.pool())
+            .await?;
             Ok(rows.into_iter().map(action_from_sql_row).collect())
         }
         Db::Spanner(spanner) => {
@@ -2526,12 +2606,28 @@ pub async fn get_action(
                         COALESCE({metadata}, '{{}}'), {created_at} \
                  FROM actions WHERE instance_id = $1 AND id = $2"
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String, String, String, i64, i64, i64, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(id)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(action_from_sql_row))
+            Ok(sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    i64,
+                    i64,
+                    i64,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .bind(id)
+            .fetch_optional(scoped.pool())
+            .await?
+            .map(action_from_sql_row))
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -2737,7 +2833,9 @@ pub async fn list_fingerprints(
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     type_: row.column_by_name::<String>("type").unwrap_or_default(),
                     raw_data_json: row.column_by_name::<String>("raw_data").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -2773,7 +2871,10 @@ pub async fn upsert_fingerprint(
             let mut exists_stmt =
                 Statement::new("SELECT id FROM fingerprints WHERE id = @id LIMIT 1");
             exists_stmt.add_param("id", &id);
-            if spanner_query_optional(spanner, exists_stmt).await?.is_some() {
+            if spanner_query_optional(spanner, exists_stmt)
+                .await?
+                .is_some()
+            {
                 let mut stmt = Statement::new(
                     "UPDATE fingerprints SET raw_data = @raw_data, type = @type WHERE id = @id",
                 );
@@ -2815,10 +2916,7 @@ pub async fn upsert_fingerprint(
     Ok(())
 }
 
-pub async fn list_jobs_for_instance(
-    db: &Db,
-    instance_id: &str,
-) -> anyhow::Result<Vec<JobRecord>> {
+pub async fn list_jobs_for_instance(db: &Db, instance_id: &str) -> anyhow::Result<Vec<JobRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -2835,10 +2933,29 @@ pub async fn list_jobs_for_instance(
                         {lease_expires_at}, {created_at}, {updated_at} \
                  FROM jobs WHERE instance_id = $1 ORDER BY name ASC"
             );
-            let rows = sqlx::query_as::<_, (String, String, String, String, i64, String, String, i64, i64, String, Option<String>, Option<String>, Option<String>, String, String)>(&sql)
-                .bind(instance_id)
-                .fetch_all(scoped.pool())
-                .await?;
+            let rows = sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    i64,
+                    String,
+                    String,
+                    i64,
+                    i64,
+                    String,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .fetch_all(scoped.pool())
+            .await?;
             Ok(rows
                 .into_iter()
                 .map(|row| JobRecord {
@@ -2890,19 +3007,25 @@ pub async fn list_jobs_for_instance(
                         .column_by_name::<String>("last_error")
                         .unwrap_or_default(),
                     run_count: row.column_by_name::<i64>("run_count").unwrap_or(0),
-                    last_rows_removed: row
-                        .column_by_name::<i64>("last_rows_removed")
-                        .unwrap_or(0),
+                    last_rows_removed: row.column_by_name::<i64>("last_rows_removed").unwrap_or(0),
                     config_json: row
                         .column_by_name::<String>("config_json")
                         .unwrap_or_else(|_| "{}".to_string()),
-                    last_run_at: row.column_by_name::<Option<String>>("last_run_at").unwrap_or(None),
-                    next_run_at: row.column_by_name::<Option<String>>("next_run_at").unwrap_or(None),
+                    last_run_at: row
+                        .column_by_name::<Option<String>>("last_run_at")
+                        .unwrap_or(None),
+                    next_run_at: row
+                        .column_by_name::<Option<String>>("next_run_at")
+                        .unwrap_or(None),
                     lease_expires_at: row
                         .column_by_name::<Option<String>>("lease_expires_at")
                         .unwrap_or(None),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
@@ -2965,8 +3088,12 @@ pub async fn search_records(
             user_stmt.add_param("limit", &limit);
             for row in spanner_query_all(spanner, user_stmt).await? {
                 let id = row.column_by_name::<String>("id").unwrap_or_default();
-                let identifier = row.column_by_name::<String>("identifier").unwrap_or_default();
-                let display_name = row.column_by_name::<String>("display_name").unwrap_or_default();
+                let identifier = row
+                    .column_by_name::<String>("identifier")
+                    .unwrap_or_default();
+                let display_name = row
+                    .column_by_name::<String>("display_name")
+                    .unwrap_or_default();
                 results.push(SearchRecord {
                     resource_type: "user".to_string(),
                     id,
@@ -3074,18 +3201,19 @@ pub async fn list_schema_registry(
                     schema_json: row.column_by_name::<String>("schema").unwrap_or_default(),
                     version: row.column_by_name::<i64>("version").unwrap_or(1),
                     is_default: row.column_by_name::<bool>("is_default").unwrap_or(false),
-                    visibility: row.column_by_name::<String>("visibility").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
+                    visibility: row
+                        .column_by_name::<String>("visibility")
+                        .unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
                 })
                 .collect())
         }
     }
 }
 
-pub async fn get_schema_record(
-    db: &Db,
-    id: &str,
-) -> anyhow::Result<Option<SchemaRegistryRecord>> {
+pub async fn get_schema_record(db: &Db, id: &str) -> anyhow::Result<Option<SchemaRegistryRecord>> {
     let items = list_schema_registry(db, "", None, i64::MAX).await?;
     Ok(items.into_iter().find(|item| item.id == id))
 }
@@ -3135,11 +3263,7 @@ pub async fn create_schema_record(
     Ok(())
 }
 
-pub async fn update_schema_record(
-    db: &Db,
-    id: &str,
-    schema_json: &str,
-) -> anyhow::Result<bool> {
+pub async fn update_schema_record(db: &Db, id: &str, schema_json: &str) -> anyhow::Result<bool> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped_default();
@@ -3184,15 +3308,16 @@ pub async fn promote_schema_record(db: &Db, id: &str) -> anyhow::Result<bool> {
                 .bind(&record.type_)
                 .execute(scoped.pool())
                 .await?;
-            sqlx::query("UPDATE schemas SET is_default = TRUE, visibility = 'public' WHERE id = $1")
-                .bind(id)
-                .execute(scoped.pool())
-                .await?;
+            sqlx::query(
+                "UPDATE schemas SET is_default = TRUE, visibility = 'public' WHERE id = $1",
+            )
+            .bind(id)
+            .execute(scoped.pool())
+            .await?;
         }
         Db::Spanner(spanner) => {
-            let mut reset_stmt = Statement::new(
-                "UPDATE schemas SET is_default = FALSE WHERE type = @type",
-            );
+            let mut reset_stmt =
+                Statement::new("UPDATE schemas SET is_default = FALSE WHERE type = @type");
             reset_stmt.add_param("type", &record.type_);
             let mut promote_stmt = Statement::new(
                 "UPDATE schemas SET is_default = TRUE, visibility = 'public' WHERE id = @id",
@@ -3325,12 +3450,28 @@ pub async fn list_login_flow_records(
                         {created_at}, {updated_at} \
                  FROM login_flows WHERE instance_id = $1 AND id > $2 ORDER BY priority DESC, name LIMIT $3"
             );
-            let rows = sqlx::query_as::<_, (String, String, String, String, i64, i64, i64, String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(after_id)
-                .bind(limit)
-                .fetch_all(scoped.pool())
-                .await?;
+            let rows = sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    i64,
+                    i64,
+                    i64,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .bind(after_id)
+            .bind(limit)
+            .fetch_all(scoped.pool())
+            .await?;
             Ok(rows.into_iter().map(login_flow_from_sql_row).collect())
         }
         Db::Spanner(spanner) => {
@@ -3482,14 +3623,12 @@ pub async fn resolve_login_flow(
                 "SELECT id, name FROM login_flows WHERE instance_id = @instance_id AND enabled = TRUE ORDER BY is_default DESC, priority DESC LIMIT 1",
             );
             stmt.add_param("instance_id", &instance_id);
-            Ok(spanner_query_optional(spanner, stmt)
-                .await?
-                .map(|row| {
-                    (
-                        row.column_by_name::<String>("id").unwrap_or_default(),
-                        row.column_by_name::<String>("name").unwrap_or_default(),
-                    )
-                }))
+            Ok(spanner_query_optional(spanner, stmt).await?.map(|row| {
+                (
+                    row.column_by_name::<String>("id").unwrap_or_default(),
+                    row.column_by_name::<String>("name").unwrap_or_default(),
+                )
+            }))
         }
     }
 }
@@ -3516,11 +3655,7 @@ async fn count_child_instances(db: &Db, instance_id: &str) -> anyhow::Result<i64
     }
 }
 
-async fn list_orgs(
-    db: &Db,
-    instance_id: &str,
-    limit: i64,
-) -> anyhow::Result<Vec<OrgSummary>> {
+async fn list_orgs(db: &Db, instance_id: &str, limit: i64) -> anyhow::Result<Vec<OrgSummary>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -3601,23 +3736,37 @@ pub async fn find_active_user_by_identifier(
                  WHERE instance_id = $1 AND identifier = $2 AND state = 'active' \
                  LIMIT 1"
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String, String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(identifier)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|row| UserRecord {
-                    id: row.0,
-                    org_id: row.1,
-                    identifier: row.2,
-                    display_name: row.3,
-                    user_type: row.4,
-                    state: row.5,
-                    schema_id: row.6,
-                    metadata_json: row.7,
-                    created_at: row.8,
-                    updated_at: row.9,
-                }))
+            Ok(sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(instance_id)
+            .bind(identifier)
+            .fetch_optional(scoped.pool())
+            .await?
+            .map(|row| UserRecord {
+                id: row.0,
+                org_id: row.1,
+                identifier: row.2,
+                display_name: row.3,
+                user_type: row.4,
+                state: row.5,
+                schema_id: row.6,
+                metadata_json: row.7,
+                created_at: row.8,
+                updated_at: row.9,
+            }))
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -3635,14 +3784,26 @@ pub async fn find_active_user_by_identifier(
                 .map(|row| UserRecord {
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     org_id: row.column_by_name::<String>("org_id").unwrap_or_default(),
-                    identifier: row.column_by_name::<String>("identifier").unwrap_or_default(),
-                    display_name: row.column_by_name::<String>("display_name").unwrap_or_default(),
-                    user_type: row.column_by_name::<String>("user_type").unwrap_or_default(),
+                    identifier: row
+                        .column_by_name::<String>("identifier")
+                        .unwrap_or_default(),
+                    display_name: row
+                        .column_by_name::<String>("display_name")
+                        .unwrap_or_default(),
+                    user_type: row
+                        .column_by_name::<String>("user_type")
+                        .unwrap_or_default(),
                     state: row.column_by_name::<String>("state").unwrap_or_default(),
-                    schema_id: row.column_by_name::<String>("schema_id").unwrap_or_default(),
+                    schema_id: row
+                        .column_by_name::<String>("schema_id")
+                        .unwrap_or_default(),
                     metadata_json: row.column_by_name::<String>("metadata").unwrap_or_default(),
-                    created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-                    updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+                    created_at: row
+                        .column_by_name::<String>("created_at")
+                        .unwrap_or_default(),
+                    updated_at: row
+                        .column_by_name::<String>("updated_at")
+                        .unwrap_or_default(),
                 }))
         }
     }
@@ -3665,20 +3826,22 @@ pub async fn find_linked_identity(
                  WHERE instance_id = $1 AND provider_id = $2 AND external_sub = $3 \
                  LIMIT 1"
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(provider_id)
-                .bind(external_sub)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|row| LinkedIdentityRecord {
-                    id: row.0,
-                    user_id: row.1,
-                    provider_id: row.2,
-                    external_sub: row.3,
-                    external_email: row.4,
-                    raw_claims_json: row.5,
-                }))
+            Ok(
+                sqlx::query_as::<_, (String, String, String, String, String, String)>(&sql)
+                    .bind(instance_id)
+                    .bind(provider_id)
+                    .bind(external_sub)
+                    .fetch_optional(scoped.pool())
+                    .await?
+                    .map(|row| LinkedIdentityRecord {
+                        id: row.0,
+                        user_id: row.1,
+                        provider_id: row.2,
+                        external_sub: row.3,
+                        external_email: row.4,
+                        raw_claims_json: row.5,
+                    }),
+            )
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -3696,12 +3859,18 @@ pub async fn find_linked_identity(
                 .map(|row| LinkedIdentityRecord {
                     id: row.column_by_name::<String>("id").unwrap_or_default(),
                     user_id: row.column_by_name::<String>("user_id").unwrap_or_default(),
-                    provider_id: row.column_by_name::<String>("provider_id").unwrap_or_default(),
-                    external_sub: row.column_by_name::<String>("external_sub").unwrap_or_default(),
+                    provider_id: row
+                        .column_by_name::<String>("provider_id")
+                        .unwrap_or_default(),
+                    external_sub: row
+                        .column_by_name::<String>("external_sub")
+                        .unwrap_or_default(),
                     external_email: row
                         .column_by_name::<String>("external_email")
                         .unwrap_or_default(),
-                    raw_claims_json: row.column_by_name::<String>("raw_claims").unwrap_or_default(),
+                    raw_claims_json: row
+                        .column_by_name::<String>("raw_claims")
+                        .unwrap_or_default(),
                 }))
         }
     }
@@ -3955,7 +4124,9 @@ pub async fn resolve_domain_route(
             Ok(spanner_query_optional(spanner, stmt)
                 .await?
                 .map(|row| RouteResolutionRecord {
-                    instance_id: row.column_by_name::<String>("instance_id").unwrap_or_default(),
+                    instance_id: row
+                        .column_by_name::<String>("instance_id")
+                        .unwrap_or_default(),
                     resolved_org_id: row
                         .column_by_name::<Option<String>>("resolved_org_id")
                         .unwrap_or(None),
@@ -4002,7 +4173,9 @@ pub async fn resolve_instance_route(
             Ok(spanner_query_optional(spanner, stmt)
                 .await?
                 .map(|row| RouteResolutionRecord {
-                    instance_id: row.column_by_name::<String>("instance_id").unwrap_or_default(),
+                    instance_id: row
+                        .column_by_name::<String>("instance_id")
+                        .unwrap_or_default(),
                     resolved_org_id: None,
                     placement_mode: row
                         .column_by_name::<String>("placement_mode")
@@ -4032,18 +4205,20 @@ pub async fn get_oidc_client_record(
                 scoped.as_text("grant_types"),
                 scoped.as_text("response_types"),
             );
-            Ok(sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
-                .bind(instance_id)
-                .bind(client_id)
-                .fetch_optional(scoped.pool())
-                .await?
-                .map(|row| OidcClientRecord {
-                    client_secret: row.0,
-                    redirect_uris_json: row.1,
-                    grant_types_json: row.2,
-                    response_types_json: row.3,
-                    state: row.4,
-                }))
+            Ok(
+                sqlx::query_as::<_, (String, String, String, String, String)>(&sql)
+                    .bind(instance_id)
+                    .bind(client_id)
+                    .fetch_optional(scoped.pool())
+                    .await?
+                    .map(|row| OidcClientRecord {
+                        client_secret: row.0,
+                        redirect_uris_json: row.1,
+                        grant_types_json: row.2,
+                        response_types_json: row.3,
+                        state: row.4,
+                    }),
+            )
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
@@ -4059,11 +4234,15 @@ pub async fn get_oidc_client_record(
             Ok(spanner_query_optional(spanner, stmt)
                 .await?
                 .map(|row| OidcClientRecord {
-                    client_secret: row.column_by_name::<String>("client_secret").unwrap_or_default(),
+                    client_secret: row
+                        .column_by_name::<String>("client_secret")
+                        .unwrap_or_default(),
                     redirect_uris_json: row
                         .column_by_name::<String>("redirect_uris")
                         .unwrap_or_default(),
-                    grant_types_json: row.column_by_name::<String>("grant_types").unwrap_or_default(),
+                    grant_types_json: row
+                        .column_by_name::<String>("grant_types")
+                        .unwrap_or_default(),
                     response_types_json: row
                         .column_by_name::<String>("response_types")
                         .unwrap_or_default(),
@@ -4263,8 +4442,12 @@ pub async fn load_user_claims_record(
             Ok(spanner_query_optional(spanner, stmt)
                 .await?
                 .map(|row| UserClaimsRecord {
-                    identifier: row.column_by_name::<String>("identifier").unwrap_or_default(),
-                    display_name: row.column_by_name::<String>("display_name").unwrap_or_default(),
+                    identifier: row
+                        .column_by_name::<String>("identifier")
+                        .unwrap_or_default(),
+                    display_name: row
+                        .column_by_name::<String>("display_name")
+                        .unwrap_or_default(),
                 }))
         }
     }
@@ -4364,19 +4547,29 @@ fn login_flow_from_sql_row(
 
 fn instance_from_spanner_row(row: Row) -> ManagedInstanceRecord {
     ManagedInstanceRecord {
-        instance_id: row.column_by_name::<String>("instance_id").unwrap_or_default(),
+        instance_id: row
+            .column_by_name::<String>("instance_id")
+            .unwrap_or_default(),
         state: row.column_by_name::<String>("state").unwrap_or_default(),
         kind: row.column_by_name::<String>("kind").unwrap_or_default(),
         placement_mode: row
             .column_by_name::<String>("placement_mode")
             .unwrap_or_default(),
-        region_key: row.column_by_name::<Option<String>>("region_key").unwrap_or(None),
-        owner_org_id: row.column_by_name::<String>("owner_org_id").unwrap_or_default(),
+        region_key: row
+            .column_by_name::<Option<String>>("region_key")
+            .unwrap_or(None),
+        owner_org_id: row
+            .column_by_name::<String>("owner_org_id")
+            .unwrap_or_default(),
         feature_overrides_json: row
             .column_by_name::<String>("feature_overrides")
             .unwrap_or_else(|_| "{}".to_string()),
-        created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-        updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+        created_at: row
+            .column_by_name::<String>("created_at")
+            .unwrap_or_default(),
+        updated_at: row
+            .column_by_name::<String>("updated_at")
+            .unwrap_or_default(),
         primary_domain: row
             .column_by_name::<Option<String>>("primary_domain")
             .unwrap_or(None),
@@ -4389,7 +4582,9 @@ fn action_from_spanner_row(row: Row) -> ActionRecord {
         org_id: row.column_by_name::<String>("org_id").unwrap_or_default(),
         name: row.column_by_name::<String>("name").unwrap_or_default(),
         hook: row.column_by_name::<String>("hook").unwrap_or_default(),
-        action_type: row.column_by_name::<String>("action_type").unwrap_or_default(),
+        action_type: row
+            .column_by_name::<String>("action_type")
+            .unwrap_or_default(),
         trigger_expr: row
             .column_by_name::<String>("trigger_expr")
             .unwrap_or_else(|_| "true".to_string()),
@@ -4402,7 +4597,9 @@ fn action_from_spanner_row(row: Row) -> ActionRecord {
         metadata_json: row
             .column_by_name::<String>("metadata")
             .unwrap_or_else(|_| "{}".to_string()),
-        created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
+        created_at: row
+            .column_by_name::<String>("created_at")
+            .unwrap_or_default(),
     }
 }
 
@@ -4424,8 +4621,12 @@ fn login_flow_from_spanner_row(row: Row) -> LoginFlowRecord {
         auth_methods_json: row
             .column_by_name::<String>("auth_methods")
             .unwrap_or_else(|_| "{}".to_string()),
-        created_at: row.column_by_name::<String>("created_at").unwrap_or_default(),
-        updated_at: row.column_by_name::<String>("updated_at").unwrap_or_default(),
+        created_at: row
+            .column_by_name::<String>("created_at")
+            .unwrap_or_default(),
+        updated_at: row
+            .column_by_name::<String>("updated_at")
+            .unwrap_or_default(),
     }
 }
 
@@ -4460,4 +4661,158 @@ async fn spanner_query_scalar_i64(
         .context("spanner scalar query returned no row")?;
     row.column_by_name::<i64>("total")
         .map_err(anyhow::Error::from)
+}
+
+// ─── Event consumption ───────────────────────────────────────
+
+/// Row returned by `fetch_unshipped_events`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnshippedEventRecord {
+    pub id: String,
+    pub instance_id: String,
+    pub event_type: String,
+    pub category: String,
+    pub payload: String,
+    pub metadata: String,
+    pub created_at: String,
+}
+
+/// Fetch up to `limit` events that have not yet been shipped (shipped_at IS NULL),
+/// ordered by created_at ASC, id ASC. Used by the event consumer job.
+pub async fn fetch_unshipped_events(
+    db: &Db,
+    instance_id: &str,
+    limit: u32,
+) -> anyhow::Result<Vec<UnshippedEventRecord>> {
+    match db {
+        Db::Sql(_) => {
+            let scoped = db.scoped(instance_id.to_string());
+            let rows =
+                sqlx::query_as::<_, (String, String, String, String, String, String, String)>(
+                    "SELECT id, instance_id, event_type, category, \
+                        COALESCE(payload, '{}'), COALESCE(metadata, '{}'), created_at \
+                 FROM events \
+                 WHERE instance_id = $1 AND shipped_at IS NULL \
+                 ORDER BY created_at ASC, id ASC \
+                 LIMIT $2",
+                )
+                .bind(instance_id)
+                .bind(limit as i64)
+                .fetch_all(scoped.pool())
+                .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|r| UnshippedEventRecord {
+                    id: r.0,
+                    instance_id: r.1,
+                    event_type: r.2,
+                    category: r.3,
+                    payload: r.4,
+                    metadata: r.5,
+                    created_at: r.6,
+                })
+                .collect())
+        }
+        Db::Spanner(spanner) => {
+            let mut stmt = Statement::new(
+                "SELECT id, instance_id, event_type, category, \
+                        COALESCE(payload, '{}'), COALESCE(metadata, '{}'), \
+                        CAST(created_at AS STRING) AS created_at \
+                 FROM events \
+                 WHERE instance_id = @instance_id AND shipped_at IS NULL \
+                 ORDER BY created_at ASC, id ASC \
+                 LIMIT @limit",
+            );
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("limit", &(limit as i64));
+
+            let mut tx = spanner.client().single().await?;
+            let mut result_set = tx.query(stmt).await?;
+            let mut records = Vec::new();
+            while let Some(row) = result_set.next().await? {
+                records.push(UnshippedEventRecord {
+                    id: row.column_by_name::<String>("id")?,
+                    instance_id: row.column_by_name::<String>("instance_id")?,
+                    event_type: row.column_by_name::<String>("event_type")?,
+                    category: row.column_by_name::<String>("category")?,
+                    payload: row.column_by_name::<String>("payload").unwrap_or_default(),
+                    metadata: row.column_by_name::<String>("metadata").unwrap_or_default(),
+                    created_at: row.column_by_name::<String>("created_at")?,
+                });
+            }
+            Ok(records)
+        }
+    }
+}
+
+/// Mark events as shipped by setting shipped_at to the current timestamp.
+pub async fn mark_events_shipped(
+    db: &Db,
+    instance_id: &str,
+    event_ids: &[String],
+) -> anyhow::Result<u64> {
+    if event_ids.is_empty() {
+        return Ok(0);
+    }
+    match db {
+        Db::Sql(_) => {
+            let scoped = db.scoped(instance_id.to_string());
+            let current_ts = match db.dialect() {
+                crate::Dialect::Sqlite => "datetime('now')",
+                crate::Dialect::Postgres => "NOW()",
+                crate::Dialect::Spanner => unreachable!(),
+            };
+            // Build IN list with numbered params starting at $2
+            let placeholders: Vec<String> = (0..event_ids.len())
+                .map(|i| format!("${}", i + 2))
+                .collect();
+            let sql = format!(
+                "UPDATE events SET shipped_at = {current_ts} \
+                 WHERE instance_id = $1 AND id IN ({}) AND shipped_at IS NULL",
+                placeholders.join(", ")
+            );
+            let mut query = sqlx::query(&sql).bind(instance_id);
+            for eid in event_ids {
+                query = query.bind(eid);
+            }
+            let result = query.execute(scoped.pool()).await?;
+            Ok(result.rows_affected())
+        }
+        Db::Spanner(spanner) => {
+            // Spanner: batch update in a read-write transaction
+            let ids = event_ids.to_vec();
+            let iid = instance_id.to_string();
+            let (_, affected) = spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let ids = ids.clone();
+                    let iid = iid.clone();
+                    Box::pin(async move {
+                        let mut total = 0i64;
+                        for chunk in ids.chunks(100) {
+                            let placeholders: Vec<String> = chunk
+                                .iter()
+                                .enumerate()
+                                .map(|(i, _)| format!("@id{i}"))
+                                .collect();
+                            let sql = format!(
+                                "UPDATE events SET shipped_at = CURRENT_TIMESTAMP() \
+                                 WHERE instance_id = @iid AND id IN ({}) AND shipped_at IS NULL",
+                                placeholders.join(", ")
+                            );
+                            let mut stmt = Statement::new(&sql);
+                            stmt.add_param("iid", &iid);
+                            for (i, id) in chunk.iter().enumerate() {
+                                stmt.add_param(&format!("id{i}"), id);
+                            }
+                            total += tx.update(stmt).await?;
+                        }
+                        Ok::<i64, SpannerError>(total)
+                    })
+                })
+                .await?;
+            Ok(affected as u64)
+        }
+    }
 }

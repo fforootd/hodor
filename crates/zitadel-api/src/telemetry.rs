@@ -7,8 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use zitadel_db::{
-    current_instance_id, list_fingerprints as db_list_fingerprints,
-    upsert_fingerprint,
+    current_instance_id, list_fingerprints as db_list_fingerprints, upsert_fingerprint,
 };
 
 /// Authenticated routes (list fingerprints).

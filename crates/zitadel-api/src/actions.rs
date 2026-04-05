@@ -1,6 +1,6 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Router,
+    Extension, Router,
     extract::{Path, State},
     response::Response,
     routing::get,
@@ -34,7 +34,9 @@ struct ActionResponse {
     created_at: String,
 }
 
-async fn list(State(s): State<ApiState>) -> Response {
+// TODO(CLAUDE-4): Call action list use case when available
+async fn list(State(s): State<ApiState>, Extension(identity): Extension<Identity>) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     match list_actions(&s.db, current_instance_id().as_ref()).await {
         Ok(rows) => {
             let items: Vec<ActionResponse> = rows.into_iter().map(action_from_row).collect();
@@ -44,7 +46,13 @@ async fn list(State(s): State<ApiState>) -> Response {
     }
 }
 
-async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
+// TODO(CLAUDE-4): Call action get use case when available
+async fn get_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     match get_action(&s.db, current_instance_id().as_ref(), &id).await {
         Ok(Some(r)) => response::json_ok(action_from_row(r)),
         Ok(None) => response::not_found("action not found"),
@@ -52,7 +60,13 @@ async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response 
     }
 }
 
-async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
+// TODO(CLAUDE-4): Call action delete use case when available
+async fn delete_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     match delete_instance_row(&s.db, current_instance_id().as_ref(), "actions", &id).await {
         Ok(true) => response::no_content(),
         Ok(false) => response::not_found("action not found"),

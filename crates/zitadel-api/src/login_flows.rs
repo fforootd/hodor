@@ -1,3 +1,4 @@
+// TODO(CLAUDE-2): Migrate login flow management to use cases (CLAUDE-2 handles login execution).
 use crate::{ApiState, response};
 use axum::{
     Json, Router,
@@ -193,7 +194,15 @@ async fn promote(State(s): State<ApiState>, Path(id): Path<String>) -> Response 
 }
 
 async fn archive(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match set_login_flow_state(&s.db, current_instance_id().as_ref(), &id, "archived", false).await {
+    match set_login_flow_state(
+        &s.db,
+        current_instance_id().as_ref(),
+        &id,
+        "archived",
+        false,
+    )
+    .await
+    {
         Ok(true) => response::json_ok(serde_json::json!({"id": id, "state": "archived"})),
         Ok(false) => response::not_found("login flow not found"),
         Err(e) => response::internal_error(format!("{e}")),

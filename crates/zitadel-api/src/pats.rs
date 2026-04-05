@@ -1,13 +1,16 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     response::Response,
     routing::{delete, get},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::{create_pat as db_create_pat, current_instance_id, list_pats_for_instance, revoke_pat as db_revoke_pat};
+use zitadel_db::{
+    create_pat as db_create_pat, current_instance_id, list_pats_for_instance,
+    revoke_pat as db_revoke_pat,
+};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -33,7 +36,13 @@ pub struct PatResponse {
     pub created_at: String,
 }
 
-async fn create_pat(State(s): State<ApiState>, Json(req): Json<CreatePatRequest>) -> Response {
+// TODO(CLAUDE-4): Call PAT create use case when available
+async fn create_pat(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<CreatePatRequest>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     let id = Uuid::new_v4().to_string();
     let token = format!("zit_pat_{}", zitadel_crypto::random_hex(24));
     let token_hash = zitadel_authn::session::hash_token(&token);
@@ -60,7 +69,12 @@ async fn create_pat(State(s): State<ApiState>, Json(req): Json<CreatePatRequest>
     }
 }
 
-async fn list_pats(State(s): State<ApiState>) -> Response {
+// TODO(CLAUDE-4): Call PAT list use case when available
+async fn list_pats(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     match list_pats_for_instance(&s.db, current_instance_id().as_ref()).await {
         Ok(rows) => {
             let items: Vec<serde_json::Value> = rows
@@ -77,7 +91,13 @@ async fn list_pats(State(s): State<ApiState>) -> Response {
     }
 }
 
-async fn revoke_pat(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
+// TODO(CLAUDE-4): Call PAT revoke use case when available
+async fn revoke_pat(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let _ctx = response::build_actor_context(&identity);
     match db_revoke_pat(&s.db, current_instance_id().as_ref(), &id).await {
         Ok(false) => response::not_found("pat not found"),
         Ok(true) => response::no_content(),

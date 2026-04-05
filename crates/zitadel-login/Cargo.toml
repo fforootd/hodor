@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+zitadel-app = { workspace = true }
 zitadel-db = { workspace = true }
 zitadel-storage = { workspace = true }
 zitadel-authn = { workspace = true }
@@ -29,3 +30,5 @@ hex = "0.4"
 [dev-dependencies]
 tokio = { workspace = true }
 zitadel-config = { workspace = true }
+zitadel-fga = { workspace = true }
+zitadel-server = { workspace = true }

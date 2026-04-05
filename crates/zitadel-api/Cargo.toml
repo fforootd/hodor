@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+zitadel-app = { workspace = true }
 zitadel-db = { workspace = true }
 zitadel-fga = { workspace = true }
 zitadel-storage = { workspace = true }

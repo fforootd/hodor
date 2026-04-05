@@ -28,6 +28,7 @@ pub mod users;
 
 use axum::Router;
 use std::sync::Arc;
+use zitadel_app::ApplicationServices;
 use zitadel_authn::cookie::CookieConfig;
 use zitadel_db::Db;
 use zitadel_fga::FgaService;
@@ -38,6 +39,7 @@ use zitadel_storage::{DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTr
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Db,
+    pub app: Arc<ApplicationServices>,
     pub fga: Arc<FgaService>,
     pub stateful: Arc<DefaultStatefulStorage>,
     pub transient: Arc<DefaultTransientStorage>,
@@ -94,8 +96,7 @@ pub fn routes(state: ApiState) -> Router {
             middleware::auth_gate,
         ));
 
-    let public = Router::new()
-        .merge(telemetry::public_routes());
+    let public = Router::new().merge(telemetry::public_routes());
 
     let v1 = authed.merge(public);
 

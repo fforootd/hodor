@@ -1,13 +1,20 @@
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
-use tracing::{info, warn};
+use google_cloud_spanner::client::Error as SpannerError;
+use google_cloud_spanner::statement::Statement;
+use serde_json::json;
+use tracing::{Instrument, warn};
 use uuid::Uuid;
+use zitadel_app::hook::{HookContext, HookPhase, HookPipeline};
+use zitadel_app::usecase::run_effects;
 use zitadel_config::{Config, RetentionConfig, WorkersConfig};
 use zitadel_db::{
-    BackendKind, DEFAULT_INSTANCE_ID, Db, JobBudget, JobReconcileSpec, complete_job_run,
-    delete_sink_inbox_records, delete_terminal_sessions_records, delete_terminal_tokens_records,
-    delete_transient_state_records, due_job_names, event_table_is_partitioned,
-    maintain_event_storage, reconcile_jobs, try_acquire_job_lease,
+    BackendKind, DEFAULT_INSTANCE_ID, Db, Dialect, JobBudget, JobReconcileSpec, bool_true_sql,
+    complete_job_run, current_timestamp_sql, delete_sink_inbox_records,
+    delete_terminal_sessions_records, delete_terminal_tokens_records,
+    delete_transient_state_records, due_job_names, ensure_event_partitions, fetch_unshipped_events,
+    mark_events_shipped, timestamp_plus_expr, try_acquire_job_lease,
 };
 
 #[derive(Clone)]
@@ -27,9 +34,13 @@ struct JobRunResult {
     removed: i64,
 }
 
-pub async fn start(config: &Config, db: Db) -> anyhow::Result<()> {
+pub async fn start(
+    config: &Config,
+    db: Db,
+    hooks: Option<Arc<HookPipeline>>,
+) -> anyhow::Result<()> {
     let jobs = builtins(config, db.backend());
-    reconcile_jobs(
+    zitadel_db::reconcile_jobs(
         &db,
         DEFAULT_INSTANCE_ID,
         &jobs
@@ -43,7 +54,11 @@ pub async fn start(config: &Config, db: Db) -> anyhow::Result<()> {
                     .unwrap_or_else(|| Duration::from_secs(60))
                     .as_secs(),
                 strategy: job.strategy.into(),
-                targets: job.targets.iter().map(|target| (*target).to_string()).collect(),
+                targets: job
+                    .targets
+                    .iter()
+                    .map(|target| (*target).to_string())
+                    .collect(),
                 retention: job.retention.clone(),
             })
             .collect::<Vec<_>>(),
@@ -73,6 +88,25 @@ pub async fn start(config: &Config, db: Db) -> anyhow::Result<()> {
             tokio::time::sleep(poll_interval).await;
         }
     });
+
+    // Start the event consumer worker if hooks are provided.
+    if let Some(hooks) = hooks {
+        let db_for_consumer = db.clone();
+        let config_for_consumer = config.clone();
+        tokio::spawn(async move {
+            let poll_interval =
+                parse_duration_spec(&config_for_consumer.workers.event_consumer_poll_interval)
+                    .unwrap_or_else(|| Duration::from_secs(5));
+            loop {
+                if let Err(error) =
+                    consume_events(&db_for_consumer, &hooks, DEFAULT_INSTANCE_ID).await
+                {
+                    warn!(%error, "event consumer tick failed");
+                }
+                tokio::time::sleep(poll_interval).await;
+            }
+        });
+    }
 
     Ok(())
 }
@@ -347,15 +381,8 @@ async fn execute_job(db: &Db, config: &Config, job: &JobSpec) -> anyhow::Result<
     };
 
     let removed = match job.name {
-        "token_gc" => delete_terminal_tokens(
-            db,
-            &config.storage.retention,
-            &budget,
-        )
-        .await?,
-        "session_gc" => {
-            delete_terminal_sessions(db, &config.storage.retention, &budget).await?
-        }
+        "token_gc" => delete_terminal_tokens(db, &config.storage.retention, &budget).await?,
+        "session_gc" => delete_terminal_sessions(db, &config.storage.retention, &budget).await?,
         "transient_state_gc" => {
             delete_transient_state(db, &config.storage.retention, &budget).await?
         }
@@ -431,7 +458,7 @@ async fn maintain_event_storage(
     config: &Config,
     budget: &JobBudget,
 ) -> anyhow::Result<i64> {
-    maintain_event_storage(
+    zitadel_db::maintain_event_storage(
         db,
         DEFAULT_INSTANCE_ID,
         parse_duration_spec(&config.storage.retention.events.keep_for)
@@ -471,6 +498,63 @@ fn parse_duration_spec(raw: &str) -> Option<Duration> {
             .map(|days| Duration::from_secs(days * 24 * 60 * 60));
     }
     None
+}
+
+// ─── Event consumer ──────────────────────────────────────────
+
+/// Consume unshipped events and run PostEvent effect hooks.
+///
+/// 1. Fetch a batch of unshipped events from the events table
+/// 2. For each event, deserialize the payload and run PostEvent effect hooks
+/// 3. Mark the events as shipped (set shipped_at)
+async fn consume_events(db: &Db, hooks: &HookPipeline, instance_id: &str) -> anyhow::Result<()> {
+    const BATCH_SIZE: u32 = 100;
+
+    let events = fetch_unshipped_events(db, instance_id, BATCH_SIZE).await?;
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    let mut shipped_ids = Vec::with_capacity(events.len());
+
+    for event_record in &events {
+        let span = tracing::info_span!(
+            "event_consumer",
+            event.id = %event_record.id,
+            event.type_ = %event_record.event_type,
+        );
+
+        // Try to deserialize as a DomainEvent for richer hook context
+        let domain_event: Option<zitadel_app::DomainEvent> =
+            serde_json::from_str(&event_record.payload).ok();
+
+        let hook_ctx = HookContext {
+            instance_id: event_record.instance_id.clone(),
+            actor_id: String::new(), // Not available from raw event record
+            org_id: String::new(),
+            operation: event_record.event_type.clone(),
+            metadata: serde_json::from_str(&event_record.metadata).unwrap_or_default(),
+        };
+
+        // Run PostEvent effects
+        run_effects(
+            &hooks.post_event_effects,
+            HookPhase::PostEvent,
+            &hook_ctx,
+            domain_event.as_ref(),
+        )
+        .instrument(span)
+        .await;
+
+        shipped_ids.push(event_record.id.clone());
+    }
+
+    if !shipped_ids.is_empty() {
+        let marked = mark_events_shipped(db, instance_id, &shipped_ids).await?;
+        tracing::debug!(count = marked, "marked events as shipped");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

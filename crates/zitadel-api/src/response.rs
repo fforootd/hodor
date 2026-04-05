@@ -2,6 +2,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use zitadel_app::AppError;
 
 /// Standard list response with cursor pagination.
 #[derive(Serialize)]
@@ -84,4 +85,38 @@ pub fn handle_mutation(
 /// Serialize a serde_json::Value to a JSON string, falling back to "{}".
 pub fn to_json_string(v: &serde_json::Value) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| "{}".into())
+}
+
+/// Map an `AppError` to an HTTP response.
+pub fn app_error(e: AppError) -> Response {
+    let status = StatusCode::from_u16(e.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    error(status, e.to_string())
+}
+
+/// Build an `ActorContext` from middleware-provided identity and the current instance ID.
+pub fn build_actor_context(identity: &crate::middleware::Identity) -> zitadel_app::ActorContext {
+    let instance_id = zitadel_db::current_instance_id();
+    let capabilities = if identity.operator_admin {
+        vec![zitadel_app::Capability::OperatorAdmin]
+    } else {
+        vec![]
+    };
+    zitadel_app::ActorContext {
+        auth: zitadel_app::AuthContext {
+            identity: zitadel_app::Identity {
+                user_id: identity.user_id.clone(),
+                session_id: identity.session_id.clone(),
+                token_type: identity.token_type.clone(),
+                org_id: identity.org_id.clone(),
+            },
+            capabilities,
+        },
+        instance: zitadel_app::InstanceContext {
+            instance_id: instance_id.into_owned(),
+            placement_mode: String::new(),
+            region_key: None,
+            feature_overrides: std::collections::HashMap::new(),
+            host: String::new(),
+        },
+    }
 }

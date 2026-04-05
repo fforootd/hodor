@@ -2,7 +2,7 @@ use crate::{ApiState, response};
 use axum::{Router, extract::State, response::Response, routing::get};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use zitadel_db::{current_instance_id, Dialect};
+use zitadel_db::{Dialect, current_instance_id};
 use zitadel_storage::AnalyticsQuery;
 
 pub fn routes() -> Router<ApiState> {
@@ -243,10 +243,7 @@ async fn analytics_scalar_i64(
     sql: String,
 ) -> anyhow::Result<i64> {
     let map = analytics_row_map(analytics, sql).await?;
-    Ok(map
-        .get("total")
-        .and_then(value_as_i64)
-        .unwrap_or(0))
+    Ok(map.get("total").and_then(value_as_i64).unwrap_or(0))
 }
 
 async fn fetch_timestamps(

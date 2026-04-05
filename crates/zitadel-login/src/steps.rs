@@ -6,9 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::{
-    Db, append_event, current_instance_id, get_settings_record, replace_password_credential,
-};
+use zitadel_db::{Db, append_event, current_instance_id, get_settings_record};
 use zitadel_storage::{LoginFlowRuntimeState, NewLoginFlowState};
 
 use crate::LoginState;
@@ -17,6 +15,34 @@ use crate::session::{extract_session_user, now_epoch_seconds, session_satisfies_
 use crate::ui::{
     UINode, default_branding, identifier_step_nodes, password_step_nodes, session_reuse_nodes,
 };
+
+use zitadel_app::auth::IssueSessionCommand;
+use zitadel_app::credentials::{SetPasswordCommand, VerifyPasswordCommand};
+
+/// Build an ActorContext for unauthenticated login flows.
+/// The user isn't authenticated yet, so we use empty identity fields
+/// with the current instance_id.
+fn login_actor_context() -> zitadel_app::ActorContext {
+    let instance_id = current_instance_id().into_owned();
+    zitadel_app::ActorContext {
+        auth: zitadel_app::context::AuthContext {
+            identity: zitadel_app::context::Identity {
+                user_id: String::new(),
+                session_id: String::new(),
+                token_type: "login_flow".to_string(),
+                org_id: String::new(),
+            },
+            capabilities: vec![],
+        },
+        instance: zitadel_app::context::InstanceContext {
+            instance_id,
+            placement_mode: String::new(),
+            region_key: None,
+            feature_overrides: Default::default(),
+            host: String::new(),
+        },
+    }
+}
 
 /// Bot protection setting loaded from the settings table.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -830,21 +856,27 @@ pub(crate) async fn handle_password_step(
         }
     };
 
-    let hash = match state
-        .stateful
-        .load_password_hash(&instance_id, &user.user_id)
-        .await
-    {
-        Ok(hash) => hash,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load password: {e}")})),
-            )
-                .into_response();
-        }
+    // Use the verify_password use case to load the password hash from the repository.
+    let ctx = login_actor_context();
+    let uc_result = state
+        .app
+        .verify_password
+        .execute(
+            &ctx,
+            VerifyPasswordCommand {
+                user_id: user.user_id.clone(),
+                password: req.password.clone(),
+            },
+        )
+        .await;
+
+    let hash = match uc_result {
+        Ok(result) => result.new_hash,
+        Err(_) => None,
     };
 
+    // The use case returns the stored hash for the transport adapter to verify
+    // via the password Swapper (which handles argon2id, bcrypt, etc).
     let verify_result = match hash.as_deref() {
         Some(h) => state.passwords.verify(h, &req.password).ok(),
         None => None,
@@ -872,19 +904,20 @@ pub(crate) async fn handle_password_step(
     };
 
     // Transparent hash migration: if the stored hash uses an outdated algorithm,
-    // re-hash and persist the updated credential.
+    // re-hash and persist the updated credential via the set_password use case.
     if let zitadel_authn::password::VerifyResult::NeedUpdate(new_hash) = verify_result {
         let cred_json = zitadel_authn::password::encode_credential_json(&new_hash);
-        let instance_id = current_instance_id().into_owned();
-        let credential_id = format!("cred-{}", user.user_id);
-        let _ = replace_password_credential(
-            &state.db,
-            &instance_id,
-            &user.user_id,
-            &credential_id,
-            &cred_json,
-        )
-        .await;
+        let _ = state
+            .app
+            .set_password
+            .execute(
+                &ctx,
+                SetPasswordCommand {
+                    user_id: user.user_id.clone(),
+                    password_hash: cred_json,
+                },
+            )
+            .await;
     }
 
     let auth_request_id = data
@@ -906,20 +939,16 @@ pub(crate) async fn handle_password_step(
         }
     };
 
-    let fingerprint = data
-        .get("fingerprint")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-
+    // Issue a new session via the use case instead of direct transient storage.
     let created_session = match state
-        .transient
-        .create_session(
-            &instance_id,
-            &user.user_id,
-            &user.org_id,
-            "",
-            "",
-            fingerprint,
+        .app
+        .issue_session
+        .execute(
+            &ctx,
+            IssueSessionCommand {
+                user_id: user.user_id.clone(),
+                auth_method: "password".to_string(),
+            },
         )
         .await
     {
@@ -941,15 +970,11 @@ pub(crate) async fn handle_password_step(
 
     if let Some(auth_request) = auth_request {
         let code = Uuid::new_v4().to_string();
+        // The use case's CreatedSession doesn't carry a created_at timestamp,
+        // so we pass None and let the storage layer use the current time.
         if let Err(e) = state
             .transient
-            .complete_auth_request(
-                &instance_id,
-                auth_request_id,
-                &user.user_id,
-                &code,
-                Some(&created_session.created_at),
-            )
+            .complete_auth_request(&instance_id, auth_request_id, &user.user_id, &code, None)
             .await
         {
             return (

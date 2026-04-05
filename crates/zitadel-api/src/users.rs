@@ -1,18 +1,17 @@
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     response::Response,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zitadel_db::{
-    create_user as db_create_user, current_instance_id, delete_instance_row, first_org_id,
-    get_user as db_get_user, list_users as db_list_users,
-    replace_password_credential as db_replace_password_credential, update_user as db_update_user,
+use zitadel_app::{
+    credentials::SetPasswordCommand,
+    repo::{ListParams as AppListParams, UserRecord},
+    users::{CreateUserCommand, UpdateUserCommand},
 };
 
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -55,20 +54,19 @@ pub struct UserResponse {
     pub updated_at: String,
 }
 
-impl From<zitadel_db::UserRecord> for UserResponse {
-    fn from(record: zitadel_db::UserRecord) -> Self {
+impl From<UserRecord> for UserResponse {
+    fn from(r: UserRecord) -> Self {
         Self {
-            id: record.id,
-            org_id: record.org_id,
-            identifier: record.identifier,
-            display_name: record.display_name,
-            user_type: record.user_type,
-            state: record.state,
-            schema_id: record.schema_id,
-            metadata: serde_json::from_str(&record.metadata_json)
-                .unwrap_or(serde_json::Value::Null),
-            created_at: record.created_at,
-            updated_at: record.updated_at,
+            id: r.id,
+            org_id: r.org_id,
+            identifier: r.identifier,
+            display_name: r.display_name,
+            user_type: r.user_type,
+            state: r.state,
+            schema_id: r.schema_id,
+            metadata: r.metadata,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
         }
     }
 }
@@ -76,13 +74,13 @@ impl From<zitadel_db::UserRecord> for UserResponse {
 #[derive(Deserialize)]
 pub struct ListParams {
     #[serde(default = "default_limit")]
-    pub limit: i64,
+    pub limit: u32,
     pub cursor: Option<String>,
     pub org_id: Option<String>,
     pub state: Option<String>,
 }
 
-fn default_limit() -> i64 {
+fn default_limit() -> u32 {
     50
 }
 
@@ -91,140 +89,130 @@ pub struct PasswordRequest {
     pub password: String,
 }
 
-async fn create_user(State(state): State<ApiState>, Json(req): Json<UserRequest>) -> Response {
-    if req.identifier.is_empty() {
-        return response::bad_request("identifier is required");
-    }
-    let id = Uuid::new_v4().to_string();
-
-    let org_id = match first_org_id(&state.db, current_instance_id().as_ref()).await {
-        Ok(Some(id)) => id,
-        Ok(None) => return response::internal_error("no org found"),
-        Err(e) => return response::internal_error(format!("db error: {e}")),
-    };
-
-    let metadata = response::to_json_string(&req.metadata);
+async fn create_user(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<UserRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
     let display = if req.display_name.is_empty() {
         req.identifier.clone()
     } else {
-        req.display_name.clone()
+        req.display_name
     };
-    match db_create_user(
-        &state.db,
-        current_instance_id().as_ref(),
-        &id,
-        &org_id,
-        &req.identifier,
-        &display,
-        &req.schema_id,
-        &metadata,
-    )
-    .await
-    {
-        Ok(record) => response::json_created(UserResponse::from(record)),
-        Err(e) => response::bad_request(format!("create user: {e}")),
+    let cmd = CreateUserCommand {
+        identifier: req.identifier,
+        display_name: display,
+        user_type: "human".to_string(),
+        schema_id: req.schema_id,
+        org_id: None,
+        metadata: req.metadata,
+    };
+    match state.app.create_user.execute(&ctx, cmd).await {
+        Ok(user) => response::json_created(UserResponse::from(user)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn get_user(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
-    match db_get_user(&state.db, current_instance_id().as_ref(), &id).await {
-        Ok(Some(u)) => response::json_ok(UserResponse::from(u)),
-        Ok(None) => response::not_found("user not found"),
-        Err(e) => response::internal_error(format!("load user: {e}")),
+async fn get_user(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match state.app.get_user.execute(&ctx, &id).await {
+        Ok(user) => response::json_ok(UserResponse::from(user)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn list_users(State(state): State<ApiState>, Query(params): Query<ListParams>) -> Response {
-    let limit = params.limit.min(200);
-    let cursor = params.cursor.unwrap_or_default();
-    match db_list_users(
-        &state.db,
-        current_instance_id().as_ref(),
-        &cursor,
-        limit + 1,
-    )
-    .await
+async fn list_users(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Query(params): Query<ListParams>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let app_params = AppListParams {
+        limit: Some(params.limit.min(200)),
+        cursor: params.cursor,
+        search: None,
+    };
+    match state
+        .app
+        .list_users
+        .execute(&ctx, params.org_id.as_deref(), &app_params)
+        .await
     {
-        Ok(rows) => {
-            let has_more = rows.len() as i64 > limit;
-            let items: Vec<UserResponse> = rows
-                .into_iter()
-                .take(limit as usize)
-                .map(UserResponse::from)
-                .collect();
-            let next_cursor = if has_more {
-                items.last().map(|u| u.id.clone())
-            } else {
-                None
-            };
+        Ok(result) => {
+            let items: Vec<UserResponse> =
+                result.items.into_iter().map(UserResponse::from).collect();
             response::json_ok(response::ListResponse {
                 items,
-                next_cursor,
-                total: None,
+                next_cursor: result.next_cursor,
+                total: result.total_count.map(|c| c as i64),
             })
         }
-        Err(e) => response::internal_error(format!("list users: {e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn update_user(
     State(state): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
     Json(req): Json<UserRequest>,
 ) -> Response {
-    if req.display_name.is_empty() && req.state.is_empty() {
-        return response::bad_request("no fields to update");
-    }
-    match db_update_user(
-        &state.db,
-        current_instance_id().as_ref(),
-        &id,
-        (!req.display_name.is_empty()).then_some(req.display_name.as_str()),
-        (!req.state.is_empty()).then_some(req.state.as_str()),
-    )
-    .await
-    {
-        Ok(false) => response::not_found("user not found"),
-        Ok(true) => match db_get_user(&state.db, current_instance_id().as_ref(), &id).await {
-            Ok(Some(u)) => response::json_ok(UserResponse::from(u)),
-            Ok(None) => response::not_found("user not found"),
-            Err(e) => response::internal_error(format!("load user: {e}")),
+    let ctx = response::build_actor_context(&identity);
+    let cmd = UpdateUserCommand {
+        user_id: id,
+        display_name: if req.display_name.is_empty() {
+            None
+        } else {
+            Some(req.display_name)
         },
-        Err(e) => response::internal_error(format!("update user: {e}")),
+        metadata: if req.metadata.is_null() {
+            None
+        } else {
+            Some(req.metadata)
+        },
+    };
+    match state.app.update_user.execute(&ctx, cmd).await {
+        Ok(user) => response::json_ok(UserResponse::from(user)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn delete_user(State(state): State<ApiState>, Path(id): Path<String>) -> Response {
-    match delete_instance_row(&state.db, current_instance_id().as_ref(), "users", &id).await {
-        Ok(true) => response::no_content(),
-        Ok(false) => response::not_found("user not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn delete_user(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match state.app.deactivate_user.execute(&ctx, &id).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn set_password(
     State(state): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
     Json(req): Json<PasswordRequest>,
 ) -> Response {
-    // Hash password.
+    let ctx = response::build_actor_context(&identity);
+    // Hash password in the transport layer (Swapper is transport infrastructure).
     let hash = match state.passwords.hash(&req.password) {
         Ok(h) => h,
         Err(e) => return response::internal_error(format!("hash password: {e}")),
     };
-
     let cred_json = zitadel_authn::password::encode_credential_json(&hash);
-    let cred_id = Uuid::new_v4().to_string();
-    match db_replace_password_credential(
-        &state.db,
-        current_instance_id().as_ref(),
-        &id,
-        &cred_id,
-        &cred_json,
-    )
-    .await
-    {
-        Ok(_) => response::no_content(),
-        Err(e) => response::internal_error(format!("set password: {e}")),
+    let cmd = SetPasswordCommand {
+        user_id: id,
+        password_hash: cred_json,
+    };
+    match state.app.set_password.execute(&ctx, cmd).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }

@@ -1,7 +1,5 @@
 pub mod actions {
-    pub use crate::{
-        ActionRecord, get_action, list_actions, upsert_catalog_action,
-    };
+    pub use crate::{ActionRecord, get_action, list_actions, upsert_catalog_action};
 }
 
 pub mod analytics {
@@ -62,8 +60,8 @@ pub mod login_flows {
 
 pub mod oidc {
     pub use crate::{
-        OidcAuthRequestRecord, OidcClientRecord, create_oidc_auth_request_record,
-        consume_oidc_auth_code_record, get_oidc_client_record,
+        OidcAuthRequestRecord, OidcClientRecord, consume_oidc_auth_code_record,
+        create_oidc_auth_request_record, get_oidc_client_record,
     };
 }
 
@@ -102,7 +100,9 @@ pub mod search {
 }
 
 pub mod settings {
-    pub use crate::{SettingsRecord, delete_settings_record, get_settings_record, put_instance_settings};
+    pub use crate::{
+        SettingsRecord, delete_settings_record, get_settings_record, put_instance_settings,
+    };
 }
 
 pub mod sessions {

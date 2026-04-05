@@ -4,6 +4,7 @@ pub mod features;
 pub mod job_runtime;
 pub mod migrate;
 pub mod provider;
+pub mod repo_impls;
 pub mod repos;
 pub mod retained;
 pub mod scoped;
@@ -12,8 +13,8 @@ pub mod spanner;
 
 use anyhow::Context;
 use sqlx::{AnyPool, any::AnyPoolOptions};
-use std::time::Duration;
 use std::fmt;
+use std::time::Duration;
 
 pub const DEFAULT_INSTANCE_ID: &str = "default";
 pub const DEFAULT_ORG_ID: &str = "1";
@@ -24,39 +25,40 @@ pub use context::{
 pub use features::{
     FeatureMap, feature_enabled, merge_feature_overrides, validate_feature_overrides,
 };
+pub use job_runtime::{
+    JobBudget, JobReconcileSpec, bool_true_sql, complete_job_run, current_timestamp_sql,
+    delete_sink_inbox_records, delete_terminal_sessions_records, delete_terminal_tokens_records,
+    delete_transient_state_records, due_job_names, ensure_event_partitions,
+    event_table_is_partitioned, maintain_event_storage, reconcile_jobs, timestamp_plus_expr,
+    try_acquire_job_lease,
+};
 pub use retained::{
     ActionRecord, ChildInstanceOwnershipRecord, ConsoleBootstrapData, CreateManagedInstanceInput,
     DomainDeleteOutcome, DomainRecord, FingerprintRecord, IdentityMetadata, InstanceMetadata,
-    JobRecord, LinkedIdentityRecord, LoginFlowRecord, ManagedInstancePatch,
-    ManagedInstanceRecord, NamedResourceRecord, OidcAuthRequestRecord, OidcClientRecord,
-    OrgRecord, OrgSummary, OrgUserLinkRecord, PatRecord, RouteResolutionRecord,
-    SavedQueryRecord, SchemaRegistryRecord, SearchRecord, SettingsRecord, UserClaimsRecord,
-    UserRecord, add_instance_domain, append_event,
-    consume_oidc_auth_code_record, count_users_for_schema, create_linked_identity_record,
-    create_login_flow, create_managed_instance, create_named_resource, create_oidc_auth_request_record,
-    create_org, create_pat, create_saved_query, create_schema_record, create_user,
-    delete_instance_domain, delete_instance_row, delete_provider, delete_saved_query,
-    delete_settings_record, deprovision_managed_instance, find_active_user_by_identifier,
-    find_linked_identity, first_org_id, get_action, get_login_flow_record,
-    get_managed_instance, get_named_resource, get_oidc_client_record, get_org, get_schema_record,
-    get_settings_record, get_user, instance_visible, list_actions, list_admin_instances,
-    list_active_child_instance_ownerships, list_active_org_users, list_fingerprints,
-    list_instance_domains, list_jobs_for_instance, list_login_flow_records, list_managed_instances,
-    list_named_resources, list_org_records, list_pats_for_instance, list_saved_queries,
-    list_schema_registry, list_users, load_console_bootstrap_data, load_entity_counts,
-    load_identity_metadata, load_instance_metadata, load_session_user_profile, load_user_claims_record, promote_schema_record, put_instance_settings,
-    replace_password_credential, resolve_domain_route, resolve_instance_route,
-    resolve_login_flow, revoke_pat, search_records, set_login_flow_state,
-    touch_linked_identity, update_login_flow, update_managed_instance,
-    update_named_resource_name, update_org, update_password_hash,
-    update_schema_record, update_session_metadata, update_user, upsert_catalog_action,
-    upsert_fingerprint, user_has_capability,
-};
-pub use job_runtime::{
-    JobBudget, JobReconcileSpec, complete_job_run, delete_sink_inbox_records,
-    delete_terminal_sessions_records, delete_terminal_tokens_records,
-    delete_transient_state_records, due_job_names, event_table_is_partitioned,
-    maintain_event_storage, reconcile_jobs, try_acquire_job_lease,
+    JobRecord, LinkedIdentityRecord, LoginFlowRecord, ManagedInstancePatch, ManagedInstanceRecord,
+    NamedResourceRecord, OidcAuthRequestRecord, OidcClientRecord, OrgRecord, OrgSummary,
+    OrgUserLinkRecord, PatRecord, RouteResolutionRecord, SavedQueryRecord, SchemaRegistryRecord,
+    SearchRecord, SettingsRecord, UnshippedEventRecord, UserClaimsRecord, UserRecord,
+    add_instance_domain, append_event, consume_oidc_auth_code_record, count_users_for_schema,
+    create_linked_identity_record, create_login_flow, create_managed_instance,
+    create_named_resource, create_oidc_auth_request_record, create_org, create_pat,
+    create_saved_query, create_schema_record, create_user, delete_instance_domain,
+    delete_instance_row, delete_provider, delete_saved_query, delete_settings_record,
+    deprovision_managed_instance, fetch_unshipped_events, find_active_user_by_identifier,
+    find_linked_identity, first_org_id, get_action, get_login_flow_record, get_managed_instance,
+    get_named_resource, get_oidc_client_record, get_org, get_schema_record, get_settings_record,
+    get_user, instance_visible, list_actions, list_active_child_instance_ownerships,
+    list_active_org_users, list_admin_instances, list_fingerprints, list_instance_domains,
+    list_jobs_for_instance, list_login_flow_records, list_managed_instances, list_named_resources,
+    list_org_records, list_pats_for_instance, list_saved_queries, list_schema_registry, list_users,
+    load_console_bootstrap_data, load_entity_counts, load_identity_metadata,
+    load_instance_metadata, load_session_user_profile, load_user_claims_record,
+    mark_events_shipped, promote_schema_record, put_instance_settings, replace_password_credential,
+    resolve_domain_route, resolve_instance_route, resolve_login_flow, revoke_pat, search_records,
+    set_login_flow_state, touch_linked_identity, update_login_flow, update_managed_instance,
+    update_named_resource_name, update_org, update_password_hash, update_schema_record,
+    update_session_metadata, update_user, upsert_catalog_action, upsert_fingerprint,
+    user_has_capability,
 };
 pub use spanner::{ParsedDatabaseName, SpannerDb};
 
@@ -296,7 +298,8 @@ async fn open_sql(
         .after_release(move |_conn, _meta| {
             let idle_release_counter = idle_release_counter.clone();
             Box::pin(async move {
-                let previous = idle_release_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let previous =
+                    idle_release_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if previous >= max_idle_conns {
                     idle_release_counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                     return Ok(false);
@@ -516,8 +519,14 @@ mod tests {
 
     #[test]
     fn parses_duration_settings_strictly() {
-        assert_eq!(parse_duration_setting("250ms").unwrap(), Duration::from_millis(250));
-        assert_eq!(parse_duration_setting("15m").unwrap(), Duration::from_secs(900));
+        assert_eq!(
+            parse_duration_setting("250ms").unwrap(),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            parse_duration_setting("15m").unwrap(),
+            Duration::from_secs(900)
+        );
         assert!(parse_duration_setting("bogus").is_err());
     }
 }

@@ -52,8 +52,14 @@ async fn create(State(s): State<ApiState>, Json(req): Json<CreateRequest>) -> Re
         return response::bad_request("name is required");
     }
     let id = Uuid::new_v4().to_string();
-    match create_named_resource(&s.db, current_instance_id().as_ref(), "apps", &id, &req.name)
-        .await
+    match create_named_resource(
+        &s.db,
+        current_instance_id().as_ref(),
+        "apps",
+        &id,
+        &req.name,
+    )
+    .await
     {
         Ok(record) => response::json_created(ItemResponse::from(record)),
         Err(e) => response::bad_request(format!("{e}")),

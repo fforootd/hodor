@@ -8,8 +8,8 @@ use axum::{
 use std::borrow::Cow;
 use tracing::Span;
 use zitadel_db::{
-    current_instance_context, current_instance_id, load_identity_metadata,
-    user_has_capability as db_user_has_capability, DEFAULT_INSTANCE_ID,
+    DEFAULT_INSTANCE_ID, current_instance_context, current_instance_id, load_identity_metadata,
+    user_has_capability as db_user_has_capability,
 };
 
 use crate::ApiState;
@@ -143,10 +143,7 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
                 session_id: String::new(),
                 token_type: "oidc".to_string(),
                 org_id: identity.org_id,
-                operator_admin: metadata_has_capability(
-                    &identity.metadata_json,
-                    "operator_admin",
-                ),
+                operator_admin: metadata_has_capability(&identity.metadata_json, "operator_admin"),
             }));
         }
     }

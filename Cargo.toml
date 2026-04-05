@@ -8,6 +8,7 @@ members = [
     "crates/zitadel-observability",
     "crates/zitadel-server",
     "crates/zitadel-api",
+    "crates/zitadel-app",
     "crates/zitadel-fga",
     "crates/zitadel-storage",
     "crates/zitadel-db",
@@ -86,6 +87,7 @@ lru = "0.12"
 ipnet = "2"
 
 # Workspace crate references
+zitadel-app = { path = "crates/zitadel-app" }
 zitadel-config = { path = "crates/zitadel-config" }
 zitadel-perf = { path = "crates/zitadel-perf" }
 zitadel-testkit = { path = "crates/zitadel-testkit" }

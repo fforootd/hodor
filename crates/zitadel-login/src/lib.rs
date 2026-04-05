@@ -11,6 +11,7 @@ use axum::{
     routing::{get, post},
 };
 use std::sync::Arc;
+use zitadel_app::ApplicationServices;
 use zitadel_authn::password::Swapper;
 use zitadel_db::Db;
 use zitadel_storage::{DefaultStatefulStorage, DefaultTransientStorage};
@@ -32,6 +33,8 @@ pub struct LoginState {
     pub rp: Arc<DefaultRpService>,
     /// Secret key for POW challenge HMAC signatures.
     pub pow_secret: String,
+    /// Application services (ADR-032 use cases).
+    pub app: Arc<ApplicationServices>,
 }
 
 pub fn routes(state: LoginState) -> Router {
@@ -63,11 +66,13 @@ mod tests {
     use steps::{FlowSubmitRequest, handle_identifier_step, handle_password_step};
     use tokio::time::{Duration, sleep};
     use uuid::Uuid;
+    use zitadel_app::{ApplicationServices, HookPipeline};
     use zitadel_authn::{
         cookie::CookieConfig,
         password::{Swapper, encode_credential_json},
     };
     use zitadel_db::DEFAULT_INSTANCE_ID;
+    use zitadel_fga::FgaService;
     use zitadel_storage::NewLoginFlowState;
 
     async fn test_state() -> LoginState {
@@ -84,6 +89,17 @@ mod tests {
         )
         .await
         .unwrap();
+        let fga = Arc::new(FgaService::new(db.clone()));
+        let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
+            db.clone(),
+            storage.stateful.clone(),
+            storage.transient.clone(),
+            fga,
+        ));
+        let app = Arc::new(ApplicationServices::new(
+            repos,
+            Arc::new(HookPipeline::empty()),
+        ));
         LoginState {
             db,
             stateful: storage.stateful.clone(),
@@ -101,6 +117,7 @@ mod tests {
                 zitadel_oidc::rp::InMemoryIssuerMetadataCache::default(),
             )),
             pow_secret: "test-pow-secret".into(),
+            app,
         }
     }
 

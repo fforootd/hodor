@@ -1,94 +1,153 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     response::Response,
     routing::get,
 };
-use uuid::Uuid;
-use zitadel_db::{
-    delete_provider, first_org_id,
-    provider::{self, ProviderPayload, ProviderRecord},
+use serde::{Deserialize, Serialize};
+use zitadel_app::{
+    providers::{CreateProviderCommand, UpdateProviderCommand},
+    repo::{ListParams as AppListParams, ProviderRecord},
 };
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/providers", get(list).post(create))
         .route(
-            "/providers/{id}",
-            get(get_one).patch(update).delete(
-                |state: State<ApiState>, path: Path<String>| async move {
-                    delete_one(state, path).await
-                },
-            ),
-        )
+        "/providers/{id}",
+        get(get_one).patch(update).delete(
+            |state: State<ApiState>, identity: Extension<Identity>, path: Path<String>| async move {
+                delete_one(state, identity, path).await
+            },
+        ),
+    )
 }
 
-async fn create(State(s): State<ApiState>, Json(req): Json<ProviderPayload>) -> Response {
-    let instance_id = zitadel_db::current_instance_id();
-    let id = Uuid::new_v4().to_string();
-    let org_id = match first_org_id(&s.db, instance_id.as_ref()).await {
-        Ok(Some(org_id)) => org_id,
-        Ok(None) => return response::internal_error("no org found"),
-        Err(error) => return response::internal_error(format!("{error}")),
+#[derive(Deserialize)]
+pub struct ProviderRequest {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub protocol: String,
+    #[serde(default)]
+    pub config: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct ProviderResponse {
+    pub id: String,
+    pub name: String,
+    pub protocol: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
+    pub config: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<ProviderRecord> for ProviderResponse {
+    fn from(r: ProviderRecord) -> Self {
+        Self {
+            id: r.id,
+            name: r.name,
+            protocol: r.protocol,
+            state: r.state,
+            config: r.config,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
+async fn create(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<ProviderRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let cmd = CreateProviderCommand {
+        name: req.name,
+        protocol: req.protocol,
+        config: req.config,
     };
-
-    match provider::insert_provider_for(&s.db, instance_id.as_ref(), &id, &org_id, &req).await {
-        Ok(()) => match provider::get_provider_for(&s.db, instance_id.as_ref(), &id).await {
-            Ok(Some(record)) => response::json_created(record),
-            Ok(None) => response::internal_error("provider created but could not be reloaded"),
-            Err(error) => response::internal_error(format!("{error}")),
-        },
-        Err(error) => response::bad_request(format!("{error}")),
+    match s.app.create_provider.execute(&ctx, cmd).await {
+        Ok(provider) => response::json_created(ProviderResponse::from(provider)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn list(State(s): State<ApiState>) -> Response {
-    let instance_id = zitadel_db::current_instance_id();
-    match provider::list_providers_for(&s.db, instance_id.as_ref()).await {
-        Ok(items) => response::json_ok(serde_json::json!({
-            "providers": items,
-            "items": items,
-            "total": items.len(),
-        })),
-        Err(error) => response::internal_error(format!("{error}")),
+async fn list(State(s): State<ApiState>, Extension(identity): Extension<Identity>) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let params = AppListParams {
+        limit: Some(200),
+        cursor: None,
+        search: None,
+    };
+    match s.app.list_providers.execute(&ctx, &params).await {
+        Ok(result) => {
+            let items: Vec<ProviderResponse> = result
+                .items
+                .into_iter()
+                .map(ProviderResponse::from)
+                .collect();
+            let total = items.len();
+            response::json_ok(serde_json::json!({
+                "providers": items,
+                "items": items,
+                "total": total,
+            }))
+        }
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    let instance_id = zitadel_db::current_instance_id();
-    match provider::get_provider_for(&s.db, instance_id.as_ref(), &id).await {
-        Ok(Some(record)) => response::json_ok(record),
-        Ok(None) => response::not_found("provider not found"),
-        Err(error) => response::internal_error(format!("{error}")),
+async fn get_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.get_provider.execute(&ctx, &id).await {
+        Ok(provider) => response::json_ok(ProviderResponse::from(provider)),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn update(
     State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
-    Json(req): Json<ProviderPayload>,
+    Json(req): Json<ProviderRequest>,
 ) -> Response {
-    let instance_id = zitadel_db::current_instance_id();
-    match provider::update_provider_for(&s.db, instance_id.as_ref(), &id, &req).await {
-        Ok(true) => match provider::get_provider_for(&s.db, instance_id.as_ref(), &id).await {
-            Ok(Some(record)) => response::json_ok(record),
-            Ok(None) => response::not_found("provider not found"),
-            Err(error) => response::internal_error(format!("{error}")),
+    let ctx = response::build_actor_context(&identity);
+    let cmd = UpdateProviderCommand {
+        provider_id: id,
+        name: if req.name.is_empty() {
+            None
+        } else {
+            Some(req.name)
         },
-        Ok(false) => response::not_found("provider not found"),
-        Err(error) => response::internal_error(format!("{error}")),
+        config: if req.config.is_null() {
+            None
+        } else {
+            Some(req.config)
+        },
+    };
+    match s.app.update_provider.execute(&ctx, cmd).await {
+        Ok(provider) => response::json_ok(ProviderResponse::from(provider)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    let instance_id = zitadel_db::current_instance_id();
-    match delete_provider(&s.db, instance_id.as_ref(), &id).await {
-        Ok(false) => response::not_found("provider not found"),
-        Ok(true) => response::no_content(),
-        Err(error) => response::internal_error(format!("{error}")),
+async fn delete_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.delete_provider.execute(&ctx, &id).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }
-
-#[allow(dead_code)]
-fn _assert_provider_record_send_sync(_: &ProviderRecord) {}

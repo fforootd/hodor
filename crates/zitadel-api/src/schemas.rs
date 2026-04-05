@@ -1,15 +1,14 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     response::Response,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zitadel_db::{
-    count_users_for_schema, create_schema_record, get_schema_record, list_schema_registry,
-    promote_schema_record, update_schema_record,
+use zitadel_app::{
+    repo::{ListParams as AppListParams, SchemaRecord},
+    schemas::RegisterSchemaCommand,
 };
 
 /// Embedded meta-schema JSON (the console's source of truth for navigation + types).
@@ -24,10 +23,8 @@ pub fn routes() -> Router<ApiState> {
         .route("/schemas/{id}/identity-count", get(schema_identity_count))
 }
 
-/// GET /v1/schemas/$meta — returns the full meta-schema catalog.
-/// This is the FIRST call the console makes to build its sidebar.
+/// GET /v1/schemas/$meta -- returns the full meta-schema catalog.
 async fn get_meta_schema() -> Response {
-    // Parse and return the embedded meta-schema.
     match serde_json::from_str::<serde_json::Value>(META_SCHEMA) {
         Ok(v) => response::json_ok(v),
         Err(e) => response::internal_error(format!("parse meta-schema: {e}")),
@@ -37,12 +34,12 @@ async fn get_meta_schema() -> Response {
 #[derive(Deserialize)]
 pub struct SchemaListParams {
     #[serde(default = "default_limit")]
-    pub limit: i64,
+    pub limit: u32,
     pub cursor: Option<String>,
     #[serde(rename = "type")]
     pub type_filter: Option<String>,
 }
-fn default_limit() -> i64 {
+fn default_limit() -> u32 {
     50
 }
 
@@ -59,52 +56,61 @@ pub struct SchemaResponse {
     pub schema: Option<serde_json::Value>,
 }
 
-impl From<zitadel_db::SchemaRegistryRecord> for SchemaResponse {
-    fn from(record: zitadel_db::SchemaRegistryRecord) -> Self {
+impl SchemaResponse {
+    fn from_record(r: SchemaRecord, include_schema: bool) -> Self {
         Self {
-            id: record.id,
-            type_: record.type_,
-            version: record.version,
-            is_default: record.is_default,
-            visibility: record.visibility,
-            created_at: record.created_at,
-            schema: None,
+            id: r.id,
+            type_: r.schema_type,
+            version: r.version,
+            is_default: r.is_default,
+            visibility: r.visibility,
+            created_at: r.created_at,
+            schema: if include_schema {
+                Some(r.schema_json)
+            } else {
+                None
+            },
         }
     }
 }
 
-async fn list_schemas(State(s): State<ApiState>, Query(p): Query<SchemaListParams>) -> Response {
-    let cursor = p.cursor.unwrap_or_default();
-    match list_schema_registry(&s.db, &cursor, p.type_filter.as_deref(), p.limit.min(200)).await {
-        Ok(rows) => {
-            let items: Vec<SchemaResponse> = rows.into_iter().map(SchemaResponse::from).collect();
+async fn list_schemas(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Query(p): Query<SchemaListParams>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let params = AppListParams {
+        limit: Some(p.limit.min(200)),
+        cursor: p.cursor,
+        search: p.type_filter,
+    };
+    match s.app.list_schemas.execute(&ctx, &params).await {
+        Ok(result) => {
+            let items: Vec<SchemaResponse> = result
+                .items
+                .into_iter()
+                .map(|r| SchemaResponse::from_record(r, false))
+                .collect();
             response::json_ok(response::ListResponse {
                 items,
-                next_cursor: None,
-                total: None,
+                next_cursor: result.next_cursor,
+                total: result.total_count.map(|c| c as i64),
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn get_schema(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match get_schema_record(&s.db, &id).await {
-        Ok(Some(r)) => {
-            let schema_val =
-                serde_json::from_str(&r.schema_json).unwrap_or(serde_json::Value::Null);
-            response::json_ok(SchemaResponse {
-                id: r.id,
-                type_: r.type_,
-                version: r.version,
-                is_default: r.is_default,
-                visibility: r.visibility,
-                created_at: r.created_at,
-                schema: Some(schema_val),
-            })
-        }
-        Ok(None) => response::not_found("schema not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn get_schema(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.get_schema.execute(&ctx, &id).await {
+        Ok(schema) => response::json_ok(SchemaResponse::from_record(schema, true)),
+        Err(e) => response::app_error(e),
     }
 }
 
@@ -119,26 +125,23 @@ pub struct CreateSchemaRequest {
 
 async fn create_schema(
     State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Json(req): Json<CreateSchemaRequest>,
 ) -> Response {
-    let id = Uuid::new_v4().to_string();
-    let schema_str = response::to_json_string(&req.schema);
+    let ctx = response::build_actor_context(&identity);
     let vis = if req.visibility.is_empty() {
-        "private"
+        "private".to_string()
     } else {
-        &req.visibility
+        req.visibility
     };
-    match create_schema_record(&s.db, &id, &req.type_, &schema_str, vis).await {
-        Ok(_) => response::json_created(SchemaResponse {
-            id,
-            type_: req.type_,
-            version: 1,
-            is_default: false,
-            visibility: vis.to_string(),
-            created_at: String::new(),
-            schema: Some(req.schema),
-        }),
-        Err(e) => response::bad_request(format!("{e}")),
+    let cmd = RegisterSchemaCommand {
+        schema_type: req.type_,
+        schema_json: req.schema,
+        visibility: vis,
+    };
+    match s.app.register_schema.execute(&ctx, cmd).await {
+        Ok(schema) => response::json_created(SchemaResponse::from_record(schema, true)),
+        Err(e) => response::app_error(e),
     }
 }
 
@@ -147,8 +150,10 @@ async fn update_schema(
     Path(id): Path<String>,
     Json(req): Json<CreateSchemaRequest>,
 ) -> Response {
+    // No update_schema use case — keep direct DB call.
+    // TODO(CLAUDE-4): Add UpdateSchema use case.
     let schema_str = response::to_json_string(&req.schema);
-    match update_schema_record(&s.db, &id, &schema_str).await {
+    match zitadel_db::update_schema_record(&s.db, &id, &schema_str).await {
         Ok(false) => response::not_found("schema not found"),
         Ok(_) => response::json_ok(serde_json::json!({"id": id, "updated": true})),
         Err(e) => response::internal_error(format!("{e}")),
@@ -156,7 +161,9 @@ async fn update_schema(
 }
 
 async fn promote_schema(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match promote_schema_record(&s.db, &id).await {
+    // No promote_schema use case — keep direct DB call.
+    // TODO(CLAUDE-4): Add PromoteSchema use case.
+    match zitadel_db::promote_schema_record(&s.db, &id).await {
         Ok(true) => response::json_ok(serde_json::json!({"id": id, "promoted": true})),
         Ok(false) => response::not_found("schema not found"),
         Err(e) => response::internal_error(format!("{e}")),
@@ -164,7 +171,11 @@ async fn promote_schema(State(s): State<ApiState>, Path(id): Path<String>) -> Re
 }
 
 async fn schema_identity_count(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match count_users_for_schema(&s.db, zitadel_db::current_instance_id().as_ref(), &id).await {
+    // No identity_count use case — keep direct DB call.
+    // TODO(CLAUDE-4): Add SchemaIdentityCount query.
+    match zitadel_db::count_users_for_schema(&s.db, zitadel_db::current_instance_id().as_ref(), &id)
+        .await
+    {
         Ok(count) => response::json_ok(serde_json::json!({"count": count})),
         Err(e) => response::internal_error(format!("{e}")),
     }

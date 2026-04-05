@@ -1,14 +1,14 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     response::Response,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zitadel_db::{
-    create_org, current_instance_id, delete_instance_row, get_org, list_org_records, update_org,
+use zitadel_app::{
+    orgs::{CreateOrgCommand, UpdateOrgCommand},
+    repo::{ListParams as AppListParams, OrgRecord},
 };
 
 pub fn routes() -> Router<ApiState> {
@@ -38,97 +38,114 @@ pub struct OrgResponse {
     pub updated_at: String,
 }
 
-impl From<zitadel_db::OrgRecord> for OrgResponse {
-    fn from(record: zitadel_db::OrgRecord) -> Self {
+impl From<OrgRecord> for OrgResponse {
+    fn from(r: OrgRecord) -> Self {
         Self {
-            id: record.id,
-            name: record.name,
-            state: record.state,
-            metadata: serde_json::from_str(&record.metadata_json).unwrap_or_default(),
-            created_at: record.created_at,
-            updated_at: record.updated_at,
+            id: r.id,
+            name: r.name,
+            state: r.state,
+            metadata: r.metadata,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
         }
     }
 }
 
-async fn create(State(s): State<ApiState>, Json(req): Json<OrgRequest>) -> Response {
-    if req.name.is_empty() {
-        return response::bad_request("name is required");
-    }
-    let id = Uuid::new_v4().to_string();
-    let meta = response::to_json_string(&req.metadata);
-    match create_org(&s.db, current_instance_id().as_ref(), &id, &req.name, &meta).await {
-        Ok(record) => response::json_created(OrgResponse::from(record)),
-        Err(e) => response::bad_request(format!("{e}")),
-    }
-}
-
-async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match get_org(&s.db, current_instance_id().as_ref(), &id).await {
-        Ok(Some(o)) => response::json_ok(OrgResponse::from(o)),
-        Ok(None) => response::not_found("org not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn create(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<OrgRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let cmd = CreateOrgCommand {
+        name: req.name,
+        metadata: req.metadata,
+    };
+    match s.app.create_org.execute(&ctx, cmd).await {
+        Ok(org) => response::json_created(OrgResponse::from(org)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn list(State(s): State<ApiState>, Query(p): Query<response::PaginationParams>) -> Response {
-    let cursor = p.cursor.unwrap_or_default();
-    match list_org_records(
-        &s.db,
-        current_instance_id().as_ref(),
-        &cursor,
-        p.limit.min(200) + 1,
-    )
-    .await
-    {
-        Ok(rows) => {
-            let limit = p.limit.min(200);
-            let has_more = rows.len() as i64 > limit;
-            let items: Vec<OrgResponse> = rows
-                .into_iter()
-                .take(limit as usize)
-                .map(OrgResponse::from)
-                .collect();
-            let next_cursor = if has_more {
-                items.last().map(|o| o.id.clone())
-            } else {
-                None
-            };
+async fn get_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.get_org.execute(&ctx, &id).await {
+        Ok(org) => response::json_ok(OrgResponse::from(org)),
+        Err(e) => response::app_error(e),
+    }
+}
+
+async fn list(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Query(p): Query<response::PaginationParams>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let params = AppListParams {
+        limit: Some((p.limit.min(200)) as u32),
+        cursor: p.cursor,
+        search: None,
+    };
+    match s.app.list_orgs.execute(&ctx, &params).await {
+        Ok(result) => {
+            let items: Vec<OrgResponse> = result.items.into_iter().map(OrgResponse::from).collect();
             response::json_ok(response::ListResponse {
                 items,
-                next_cursor,
-                total: None,
+                next_cursor: result.next_cursor,
+                total: result.total_count.map(|c| c as i64),
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn update(
     State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
     Json(req): Json<OrgRequest>,
 ) -> Response {
-    match update_org(
-        &s.db,
-        current_instance_id().as_ref(),
-        &id,
-        (!req.name.is_empty()).then_some(req.name.as_str()),
-        (!req.state.is_empty()).then_some(req.state.as_str()),
-    )
-    .await
-    {
-        Ok(false) => response::not_found("org not found"),
-        Ok(true) => match get_org(&s.db, current_instance_id().as_ref(), &id).await {
-            Ok(Some(o)) => response::json_ok(OrgResponse::from(o)),
-            _ => response::not_found("org not found"),
+    let ctx = response::build_actor_context(&identity);
+    let cmd = UpdateOrgCommand {
+        org_id: id,
+        name: if req.name.is_empty() {
+            None
+        } else {
+            Some(req.name)
         },
-        Err(e) => response::internal_error(format!("{e}")),
+        metadata: if req.metadata.is_null() {
+            None
+        } else {
+            Some(req.metadata)
+        },
+    };
+    match s.app.update_org.execute(&ctx, cmd).await {
+        Ok(org) => response::json_ok(OrgResponse::from(org)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match delete_instance_row(&s.db, current_instance_id().as_ref(), "orgs", &id).await {
+async fn delete_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    // No delete_org use case exists yet — keep direct DB call for now.
+    // TODO(CLAUDE-4): Add DeleteOrg use case.
+    let ctx = response::build_actor_context(&identity);
+    let _ = ctx;
+    match zitadel_db::delete_instance_row(
+        &s.db,
+        zitadel_db::current_instance_id().as_ref(),
+        "orgs",
+        &id,
+    )
+    .await
+    {
         Ok(true) => response::no_content(),
         Ok(false) => response::not_found("org not found"),
         Err(e) => response::internal_error(format!("{e}")),

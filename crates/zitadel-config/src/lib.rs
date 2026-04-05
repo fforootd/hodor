@@ -143,6 +143,7 @@ pub struct WorkersConfig {
     pub cleanup_max_rows_per_run: u32,
     pub cleanup_max_run_duration: String,
     pub event_partition_premake_days: u32,
+    pub event_consumer_poll_interval: String,
 }
 
 impl Default for WorkersConfig {
@@ -159,6 +160,7 @@ impl Default for WorkersConfig {
             cleanup_max_rows_per_run: 2000,
             cleanup_max_run_duration: "2s".into(),
             event_partition_premake_days: 3,
+            event_consumer_poll_interval: "5s".into(),
         }
     }
 }

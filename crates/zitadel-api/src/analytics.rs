@@ -17,11 +17,9 @@ pub fn routes() -> Router<ApiState> {
         .route("/analytics/queries", get(list_queries).post(create_query))
         .route(
             "/analytics/queries/{id}",
-            axum::routing::delete(
-                |state: State<ApiState>, path: Path<String>| async move {
-                    delete_query(state, path).await
-                },
-            ),
+            axum::routing::delete(|state: State<ApiState>, path: Path<String>| async move {
+                delete_query(state, path).await
+            }),
         )
 }
 
