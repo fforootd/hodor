@@ -107,6 +107,7 @@ graph TD
     A006 --> A020
     A020 --> A021[021 Multi-Tenancy]
     A005 --> A021
+<<<<<<< Updated upstream
     A021 --> A026[026 Cloud Deployment]
     A021 --> A029[029 Control/Auth Planes]
     A026 --> A030[030 Customer Portal]
@@ -115,6 +116,10 @@ graph TD
     A021 --> A031
     A026 --> A031
     A029 --> A031
+=======
+    A026 --> A030[030 Customer Portal]
+    A029 --> A030
+>>>>>>> Stashed changes
 ```
 
 Historical note: the repo currently contains legacy duplicate ADR numbers for `021` and `022`. The index disambiguates them by link label until the file layout is normalized.
@@ -125,4 +130,8 @@ Historical note: the repo currently contains legacy duplicate ADR numbers for `0
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
+<<<<<<< Updated upstream
 - **Next ADR number**: 032
+=======
+- **Next ADR number**: 031
+>>>>>>> Stashed changes
