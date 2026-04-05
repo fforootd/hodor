@@ -2,9 +2,39 @@
 import { toast } from 'vue-sonner'
 import { getDeviceFingerprint } from '../lib/telemetry'
 
-// Runtime base path: injected by the Go server via <script>window.__ZITADEL_BASE_PATH__="..."</script>
-// This allows the same build to work at any sub-path (e.g., /auth, /zitadel).
-const BASE_URL = (window as any).__ZITADEL_BASE_PATH__ || ''
+// ─── Configurable API Client ──────��───────────────────────
+// Call configureApi() at app startup to set the base URL,
+// org/instance header providers, and 401 handling.
+// This allows the same client code to work in both the
+// standalone console and the cloud portal.
+
+let _getBaseUrl: () => string = () => ''
+let _getOrgId: () => string | null = () => null
+let _getInstanceId: () => string | null = () => null
+let _onUnauthorized: (() => void) | null = null
+
+export interface ApiClientConfig {
+  /** Static base URL string, or a function for dynamic resolution.
+   *  Use a function when the base URL changes at runtime (e.g., the portal
+   *  switches between the central portal API and regional instance APIs
+   *  per ADR-030 — regional admin traffic goes direct to the region). */
+  baseUrl: string | (() => string)
+  getOrgId?: () => string | null
+  /** Instance ID header for cloud portal routing. When the portal
+   *  talks directly to a regional Zitadel API, this header may not
+   *  be needed (the region already knows the instance). It is still
+   *  useful when routing through a shared regional endpoint. */
+  getInstanceId?: () => string | null
+  onUnauthorized?: () => void
+}
+
+export function configureApi(config: ApiClientConfig) {
+  const bu = config.baseUrl
+  _getBaseUrl = typeof bu === 'function' ? bu : () => bu
+  if (config.getOrgId) _getOrgId = config.getOrgId
+  if (config.getInstanceId) _getInstanceId = config.getInstanceId
+  if (config.onUnauthorized) _onUnauthorized = config.onUnauthorized
+}
 
 export type ApiErrorKind = 'startup' | 'transport' | 'configuration' | 'flow' | 'internal'
 
@@ -103,24 +133,29 @@ function handleUnauthorized() {
   if (is401Redirecting) return
   is401Redirecting = true
 
+  if (_onUnauthorized) {
+    _onUnauthorized()
+    return
+  }
+
+  // Default behavior: toast + redirect to login.
   toast.error('Session expired', {
     description: 'Your session has expired or is invalid. Redirecting to login…',
     duration: 4000,
   })
 
-  // Redirect after a brief delay so the user sees the toast.
   setTimeout(() => {
-    const loginUrl = `${BASE_URL}/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
+    const loginUrl = `${_getBaseUrl()}/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
     window.location.href = loginUrl
   }, 1500)
 }
 
 // Dynamic credentials mode: 'include' for cross-origin (WC embedding), 'same-origin' for same-origin.
 export function getApiBaseUrl(): string {
-  return BASE_URL
+  return _getBaseUrl()
 }
 
-export function credentialsMode(baseUrl = BASE_URL): RequestCredentials {
+export function credentialsMode(baseUrl = _getBaseUrl()): RequestCredentials {
   if (!baseUrl) return 'same-origin'
   try {
     const apiOrigin = new URL(baseUrl, window.location.origin).origin
@@ -132,8 +167,17 @@ export function credentialsMode(baseUrl = BASE_URL): RequestCredentials {
 
 export function getCurrentOrgHeader(): string | null {
   try {
-    const orgId = localStorage.getItem('zitadel_org')
+    const orgId = _getOrgId()
     return orgId && orgId.trim() ? orgId.trim() : null
+  } catch {
+    return null
+  }
+}
+
+export function getCurrentInstanceHeader(): string | null {
+  try {
+    const instanceId = _getInstanceId()
+    return instanceId && instanceId.trim() ? instanceId.trim() : null
   } catch {
     return null
   }
@@ -163,7 +207,7 @@ function generateHex(length: number): string {
 async function fetchWithContext(
   path: string,
   opts: RequestInit = {},
-  baseUrl = BASE_URL,
+  baseUrl = _getBaseUrl(),
 ): Promise<Response> {
   // Generate a unique span_id for this request.
   const spanId = generateHex(16)
@@ -180,6 +224,12 @@ async function fetchWithContext(
     const orgId = getCurrentOrgHeader()
     if (orgId) {
       headers.set('X-Org-Id', orgId)
+    }
+  }
+  if (!headers.has('X-Zitadel-Instance')) {
+    const instanceId = getCurrentInstanceHeader()
+    if (instanceId) {
+      headers.set('X-Zitadel-Instance', instanceId)
     }
   }
 
@@ -207,7 +257,7 @@ async function fetchWithContext(
 export async function requestJSON<T>(
   path: string,
   opts: RequestInit = {},
-  baseUrl = BASE_URL,
+  baseUrl = _getBaseUrl(),
 ): Promise<T> {
   const resp = await fetchWithContext(path, opts, baseUrl)
 
@@ -232,7 +282,7 @@ export async function requestJSON<T>(
 export async function requestText(
   path: string,
   opts: RequestInit = {},
-  baseUrl = BASE_URL,
+  baseUrl = _getBaseUrl(),
 ): Promise<string> {
   const resp = await fetchWithContext(path, opts, baseUrl)
 

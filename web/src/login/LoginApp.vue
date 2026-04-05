@@ -99,8 +99,8 @@
   import { toLoginErrorDetail, type LoginErrorDetail } from './init-state'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
   import { Button } from '@/components/ui/button'
-  import LoginShell from './components/LoginShell.vue'
-  import LoginNodeRenderer from './components/LoginNodeRenderer.vue'
+  import LoginShell from '@/login/components/LoginShell.vue'
+  import LoginNodeRenderer from '@/login/components/LoginNodeRenderer.vue'
   import { CircleCheckBig } from 'lucide-vue-next'
 
   const props = withDefaults(

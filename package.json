@@ -4,7 +4,8 @@
   "workspaces": [
     "web",
     "e2e",
-    "packages/client-js"
+    "packages/client-js",
+    "packages/console-kit"
   ],
   "scripts": {
     "build": "npm run build -w web",

@@ -40,6 +40,8 @@
 | [027](adr/027-fips-compliance.md) | FIPS Compliance — Opt-in Compile Target | Proposed | 2026-04-02 |
 | [028](adr/028-secrets-hashers-key-lifecycle.md) | Configurable Secrets, Hashers & Key Lifecycle | Proposed | 2026-04-02 |
 | [029](adr/029-control-plane-auth-data-plane.md) | Control Plane, Auth Data Plane, and Bounded Eventual Consistency | Accepted | 2026-04-04 |
+| [030](adr/030-customer-portal-regional-projections-integrations.md) | Customer Portal, Regional Projections, and Control-Plane Integrations | Proposed | 2026-04-04 |
+| [031](adr/031-instance-hierarchy-spanner-geo-placement.md) | Instance Hierarchy with Geo-Partitioned Placement | Proposed | 2026-04-04 |
 
 ## Architecture
 
@@ -105,6 +107,14 @@ graph TD
     A006 --> A020
     A020 --> A021[021 Multi-Tenancy]
     A005 --> A021
+    A021 --> A026[026 Cloud Deployment]
+    A021 --> A029[029 Control/Auth Planes]
+    A026 --> A030[030 Customer Portal]
+    A029 --> A030
+    A030 --> A031[031 Instance Hierarchy]
+    A021 --> A031
+    A026 --> A031
+    A029 --> A031
 ```
 
 Historical note: the repo currently contains legacy duplicate ADR numbers for `021` and `022`. The index disambiguates them by link label until the file layout is normalized.
@@ -115,4 +125,4 @@ Historical note: the repo currently contains legacy duplicate ADR numbers for `0
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 030
+- **Next ADR number**: 032

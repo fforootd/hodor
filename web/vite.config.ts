@@ -3,6 +3,31 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
+const consoleKitSrc = resolve(__dirname, '../packages/console-kit/src')
+const webSrc = resolve(__dirname, 'src')
+
+// Resolves @/ imports per-package: files inside console-kit resolve @/ to
+// console-kit/src, while files inside web/ try web/src first, then fall back
+// to console-kit/src. This lets us move code to console-kit without changing
+// any import paths — login/account SPAs transparently find moved files.
+function perPackageAlias(): Plugin {
+  return {
+    name: 'per-package-alias',
+    enforce: 'pre',
+    async resolveId(source, importer) {
+      if (!source.startsWith('@/') || !importer) return null
+      const suffix = source.slice(2)
+      if (importer.includes('packages/console-kit/')) {
+        return this.resolve(resolve(consoleKitSrc, suffix), importer, { skipSelf: true })
+      }
+      // For web files: try web/src/ first, then fall back to console-kit/src/
+      const webResult = await this.resolve(resolve(webSrc, suffix), importer, { skipSelf: true })
+      if (webResult) return webResult
+      return this.resolve(resolve(consoleKitSrc, suffix), importer, { skipSelf: true })
+    },
+  }
+}
+
 // SPA history fallback: rewrite /console/*, /login/*, /account/* to
 // their respective HTML entry points so Vue Router handles routing.
 function spaFallback(): Plugin {
@@ -28,11 +53,10 @@ export default defineConfig(() => {
   const apiBase = process.env.ZITADEL_API_BASE || 'http://localhost:8080'
 
   return {
-    plugins: [vue(), tailwindcss(), spaFallback()],
+    plugins: [perPackageAlias(), vue(), tailwindcss(), spaFallback()],
     resolve: {
       alias: {
-        '@': resolve(__dirname, 'src'),
-        '@zitadel/client-js': resolve(__dirname, 'src/lib/zitadel-client-stub.ts'),
+        '@zitadel/client-js': resolve(consoleKitSrc, 'lib/zitadel-client-stub.ts'),
       },
     },
     build: {

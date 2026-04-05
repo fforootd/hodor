@@ -13,12 +13,11 @@
     "isolatedModules": true,
     "declaration": true,
     "outDir": "./dist",
-    "rootDir": "./src",
     "paths": {
-      "@/*": ["./src/*"],
-      "@zitadel/client-js": ["./src/lib/zitadel-client-stub.ts"]
+      "@/*": ["./src/*", "../packages/console-kit/src/*"],
+      "@zitadel/client-js": ["../packages/console-kit/src/lib/zitadel-client-stub.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue"],
+  "include": ["src/**/*.ts", "src/**/*.vue", "../packages/console-kit/src/**/*.ts", "../packages/console-kit/src/**/*.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
