@@ -180,12 +180,13 @@ impl CredentialRepository for DbCredentialRepository {
         let user_id = user_id.to_string();
         let password_hash = password_hash.to_string();
         Box::pin(async move {
+            // password_hash is already a credential JSON string, e.g. {"hash":"$argon2id$..."}
             replace_password_credential(
                 &db,
                 &instance_id,
                 &user_id,
                 &Uuid::now_v7().to_string(),
-                &serde_json::json!({ "hash": password_hash }).to_string(),
+                &password_hash,
             )
             .await
         })
@@ -365,12 +366,18 @@ impl SessionRepository for DbSessionRepository {
         user_id: &str,
         org_id: &str,
         auth_method: &str,
+        user_agent: &str,
+        ip_address: &str,
+        fingerprint: &str,
     ) -> BoxFuture<'_, anyhow::Result<CreatedSession>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
         let user_id = user_id.to_string();
         let org_id = org_id.to_string();
         let auth_method = auth_method.to_string();
+        let user_agent = user_agent.to_string();
+        let ip_address = ip_address.to_string();
+        let fingerprint = fingerprint.to_string();
         let session_max_age_secs = self.session_max_age_secs;
         Box::pin(async move {
             create_session_record(
@@ -379,6 +386,9 @@ impl SessionRepository for DbSessionRepository {
                 &user_id,
                 &org_id,
                 &auth_method,
+                &user_agent,
+                &ip_address,
+                &fingerprint,
                 session_max_age_secs,
             )
             .await
@@ -1178,6 +1188,9 @@ async fn create_session_record(
     user_id: &str,
     org_id: &str,
     auth_method: &str,
+    user_agent: &str,
+    ip_address: &str,
+    fingerprint: &str,
     session_max_age_secs: u64,
 ) -> anyhow::Result<CreatedSession> {
     let session_id = Uuid::new_v4().to_string();
@@ -1205,8 +1218,8 @@ async fn create_session_record(
             };
             let sql = format!(
                 "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, fingerprint, metadata, created_at, expires_at) \
-                 VALUES ($1, $2, $3, $4, $5, '', '', '', {}, {}, {})",
-                scoped.json_bind(6),
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, {}, {}, {})",
+                scoped.json_bind(9),
                 scoped.timestamp_now(),
                 expires_expr,
             );
@@ -1216,6 +1229,9 @@ async fn create_session_record(
                 .bind(user_id)
                 .bind(org_id)
                 .bind(&hashed_token)
+                .bind(user_agent)
+                .bind(ip_address)
+                .bind(fingerprint)
                 .bind(serde_json::json!({ "auth_method": auth_method }).to_string())
                 .execute(scoped.pool())
                 .await?;
@@ -1227,13 +1243,16 @@ async fn create_session_record(
                 "INSERT INTO sessions \
                  (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, fingerprint, metadata, created_at, expires_at) \
                  VALUES \
-                 (@id, @instance_id, @user_id, @org_id, @token_hash, '', '', '', @metadata, CURRENT_TIMESTAMP(), TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL @max_age SECOND))",
+                 (@id, @instance_id, @user_id, @org_id, @token_hash, @user_agent, @ip_address, @fingerprint, @metadata, CURRENT_TIMESTAMP(), TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL @max_age SECOND))",
             );
             stmt.add_param("id", &session_id);
             stmt.add_param("instance_id", &instance_id);
             stmt.add_param("user_id", &user_id);
             stmt.add_param("org_id", &org_id);
             stmt.add_param("token_hash", &hashed_token);
+            stmt.add_param("user_agent", &user_agent);
+            stmt.add_param("ip_address", &ip_address);
+            stmt.add_param("fingerprint", &fingerprint);
             stmt.add_param("metadata", &metadata_json);
             stmt.add_param("max_age", &max_age);
             let _ = spanner

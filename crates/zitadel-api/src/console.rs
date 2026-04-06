@@ -33,7 +33,7 @@ async fn bootstrap(
     let bootstrap = match s
         .app
         .runner
-        .run_fn(&ctx, "console.bootstrap", || {
+        .run(&ctx, "console.bootstrap", || {
             s.app.load_console_bootstrap.execute(&ctx)
         })
         .await
@@ -97,7 +97,10 @@ async fn bootstrap(
         "instance_management",
     )
     .unwrap_or(is_root)
-        && is_root;
+        || feature_overrides
+            .get("instance_management")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
     let billing = feature_enabled(
         &default_features,
         &feature_overrides,
@@ -105,7 +108,10 @@ async fn bootstrap(
         "billing",
     )
     .unwrap_or(is_root)
-        && is_root;
+        || feature_overrides
+            .get("billing")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
     let capabilities = serde_json::json!({
         "instance_management": instance_management,
         "operator_admin": is_root && identity.operator_admin,
@@ -138,7 +144,7 @@ async fn entity_counts(
     match s
         .app
         .runner
-        .run_fn(&ctx, "console.entity_counts", || {
+        .run(&ctx, "console.entity_counts", || {
             s.app.load_entity_counts.execute(&ctx)
         })
         .await

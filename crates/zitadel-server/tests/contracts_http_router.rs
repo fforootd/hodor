@@ -31,6 +31,12 @@ async fn build_dynamic_origin_test_app() -> anyhow::Result<TestApp> {
 }
 
 async fn build_test_app_from_context(ctx: TestContext) -> anyhow::Result<TestApp> {
+    // Reconcile FGA tuples so the bootstrapped admin has proper permissions
+    ctx.api_state
+        .fga
+        .reconcile_root_hierarchy(zitadel_db::DEFAULT_INSTANCE_ID)
+        .await?;
+
     let app_state = Arc::new(AppState {
         config: ctx.config.clone(),
         db: ctx.db.db.clone(),
@@ -196,6 +202,10 @@ async fn public_surfaces_remain_unauthenticated_and_readyz_reflects_state() -> a
         paths.contains_key("/v1/fga/stores/{store_id}/authorization-models"),
         "runtime openapi should expose canonical FGA authorization-model routes",
     );
+    assert!(
+        paths.contains_key("/v1/internal/fga/platform/store"),
+        "runtime openapi should expose the internal platform FGA inspection routes",
+    );
 
     Ok(())
 }
@@ -249,6 +259,9 @@ async fn protected_routes_enforce_actor_contracts() -> anyhow::Result<()> {
         .ctx
         .create_user("route-user@example.com", "password123")
         .await?;
+    // Grant viewer role so FGA checks pass for read endpoints
+    support::grant_org_role(&app, &user.org_id, &user.user_id, "viewer").await?;
+    app.ctx.api_state.fga.reconcile_root_hierarchy(zitadel_db::DEFAULT_INSTANCE_ID).await?;
     let user_session = app.ctx.create_session(&user).await?;
     let user_pat = app.ctx.create_pat(&user, "route-user").await?;
     let admin_user = app.ctx.admin_user().await?;
@@ -306,10 +319,28 @@ async fn protected_routes_enforce_actor_contracts() -> anyhow::Result<()> {
         );
 
         let user_response = app.get(path, user_session.bearer_actor()).await?;
+        assert_eq!(user_response.status, axum::http::StatusCode::OK, "{path}");
+
+        let user_pat_response = app.get(path, user_pat.actor()).await?;
+        assert_eq!(user_pat_response.status, axum::http::StatusCode::OK, "{path}");
+
+        let admin_response = app.get(path, admin_pat.actor()).await?;
+        assert_eq!(admin_response.status, axum::http::StatusCode::OK, "{path}");
+    }
+
+    for path in ["/v1/internal/fga/platform/store"] {
+        let unauth = app.get(path, AuthActor::Anonymous).await?;
+        assert_eq!(
+            unauth.status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+
+        let user_response = app.get(path, user_session.bearer_actor()).await?;
         assert_eq!(
             user_response.status,
             axum::http::StatusCode::FORBIDDEN,
-            "{path} should be PAT-only",
+            "{path} should remain PAT-only",
         );
         assert_eq!(
             user_response.json_value(),
@@ -541,6 +572,21 @@ async fn canonical_fga_store_routes_support_model_tuple_and_change_queries() -> 
             .as_array()
             .is_some_and(|items| !items.is_empty())
     );
+
+    let platform_rejected = app
+        .post_json(
+            "/v1/fga/stores/platform/check",
+            admin_pat.actor(),
+            &json!({
+                "tuple_key": {
+                    "user": format!("user:{}", admin_user.user_id),
+                    "relation": "viewer",
+                    "object": "document:architecture"
+                }
+            }),
+        )
+        .await?;
+    assert_eq!(platform_rejected.status, axum::http::StatusCode::FORBIDDEN);
 
     Ok(())
 }

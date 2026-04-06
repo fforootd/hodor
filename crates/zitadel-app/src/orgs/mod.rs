@@ -32,8 +32,8 @@ impl CreateOrg {
             return Err(AppError::validation("name is required"));
         }
 
-        // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        // Authz: caller must be admin on their own org
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
@@ -85,12 +85,25 @@ impl GetOrg {
 
     #[tracing::instrument(name = "use_case.get_org", skip_all)]
     pub async fn execute(&self, ctx: &ActorContext, org_id: &str) -> Result<OrgRecord, AppError> {
-        self.repos
+        // Fetch first (instance-scoped: returns 404 for cross-instance)
+        let org = self
+            .repos
             .orgs
             .get(ctx.instance_id(), org_id)
             .await
             .map_err(AppError::Internal)?
-            .ok_or_else(|| AppError::not_found("org", org_id))
+            .ok_or_else(|| AppError::not_found("org", org_id))?;
+
+        // Authz: caller must be viewer on the org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", org_id),
+        )
+        .await?;
+
+        Ok(org)
     }
 }
 
@@ -109,6 +122,15 @@ impl ListOrgs {
         ctx: &ActorContext,
         params: &ListParams,
     ) -> Result<ListResult<OrgRecord>, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .orgs
             .list(ctx.instance_id(), params)
@@ -194,9 +216,6 @@ impl UpdateOrg {
         ctx: &ActorContext,
         cmd: UpdateOrgCommand,
     ) -> Result<OrgRecord, AppError> {
-        // Authz: caller must be admin on the target org
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id)).await?;
-
         let mut org = self
             .repos
             .orgs
@@ -204,6 +223,9 @@ impl UpdateOrg {
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("org", &cmd.org_id))?;
+
+        // Authz: caller must be admin on the target org
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id)).await?;
 
         let mut fields_changed = Vec::new();
         if let Some(name) = cmd.name {

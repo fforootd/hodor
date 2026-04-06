@@ -181,7 +181,16 @@ impl TestContext {
         )
         .await?;
         let fga = Arc::new(FgaService::new(db.db.clone()));
+        zitadel_db::seed_builtin_role_definitions(&db.db)
+            .await
+            .context("seed builtin role definitions")?;
+        fga.initialize_platform_store()
+            .await
+            .context("initialize platform fga store")?;
         fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
+        fga.rebuild_platform_store()
+            .await
+            .context("rebuild platform fga tuples")?;
 
         // Build application services (ADR-032).
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
@@ -214,6 +223,15 @@ impl TestContext {
             oidc: oidc_state.clone(),
             passwords: passwords.clone(),
             cookie_config: cookie_config.clone(),
+            support_grant_secret: Arc::new(if config.server.management_secret.is_empty() {
+                cookie_config
+                    .secrets
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "test-support-grant-secret".to_string())
+            } else {
+                config.server.management_secret.clone()
+            }),
             is_dev: true,
             app: app.clone(),
         };

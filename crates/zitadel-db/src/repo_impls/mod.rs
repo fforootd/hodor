@@ -1,4 +1,6 @@
 pub mod auth;
+mod authorization;
+mod auxiliary;
 pub mod entities;
 mod instances;
 mod orgs_groups;
@@ -10,6 +12,11 @@ pub use auth::{
     DbActionRepository, DbCredentialRepository, DbEventRepository, DbFgaRepository,
     DbLoginFlowRepository, DbOidcRepository, DbPatRepository, DbSessionRepository,
     SqlUnitOfWorkFactory,
+};
+pub use authorization::DbAuthorizationRepository;
+pub use auxiliary::{
+    DbAppRepository, DbConsoleQueryRepository, DbJobRepository, DbMembershipRepository,
+    DbProjectRepository, DbSavedQueryRepository, DbTelemetryRepository,
 };
 pub use entities::{
     SqlGroupRepository, SqlInstanceRepository, SqlOrgRepository, SqlProviderRepository,

@@ -15,7 +15,8 @@ pub use core_model::core_authorization_model;
 
 // Constants
 pub const SCHEMA_VERSION_1_1: &str = "1.1";
-pub const CORE_MODEL_VERSION: &str = "core-2026-04-05-root-hierarchy-v1";
+pub const CORE_MODEL_VERSION: &str = "core-2026-04-06-role-catalog-parent-hierarchy-v2";
+pub const PLATFORM_STORE_ID: &str = "platform";
 pub(crate) const LIST_SCAN_FALLBACK_LIMIT: usize = 10_000;
 
 #[cfg(test)]
@@ -25,6 +26,7 @@ mod tests {
     use crate::traits::Evaluator;
 
     use serde_json::{Map, json};
+    use zitadel_authz::builtin_role_definitions;
     use zitadel_db::{
         CreateManagedInstanceInput, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, add_membership,
         create_user, migrate,
@@ -64,6 +66,25 @@ mod tests {
                 .iter()
                 .any(|type_def| type_def.type_name == "org")
         );
+    }
+
+    #[test]
+    fn core_model_contains_all_builtin_role_relations() {
+        let model = core_authorization_model();
+        for definition in builtin_role_definitions() {
+            let type_name = definition.scope_kind.as_str();
+            let type_def = model
+                .type_definitions
+                .iter()
+                .find(|type_def| type_def.type_name == type_name)
+                .unwrap_or_else(|| panic!("missing core type for scope '{type_name}'"));
+            assert!(
+                type_def.relations.contains_key(&definition.relation_name),
+                "missing relation '{}' on type '{}'",
+                definition.relation_name,
+                type_name
+            );
+        }
     }
 
     #[tokio::test]
@@ -1079,7 +1100,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconcile_root_hierarchy_materializes_root_store_only() {
+    async fn reconcile_root_hierarchy_materializes_platform_store_only() {
         let (db, service) = test_service_with_db().await;
         let root_user_id = "root-user";
         create_user(
@@ -1124,11 +1145,11 @@ mod tests {
             .await
             .unwrap();
 
-        let root_store = service.discover_store(DEFAULT_INSTANCE_ID).await.unwrap();
-        let root_allowed = service
+        let platform_store = service.discover_platform_store().await.unwrap();
+        let platform_allowed = service
             .check(
-                DEFAULT_INSTANCE_ID,
-                &root_store.id,
+                PLATFORM_STORE_ID,
+                &platform_store.id,
                 CheckRequest {
                     tuple_key: TupleKey {
                         user: format!("user:{root_user_id}"),
@@ -1143,7 +1164,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(root_allowed.allowed);
+        assert!(platform_allowed.allowed);
 
         let child_store = service.discover_store("child-a").await.unwrap();
         let child_allowed = service

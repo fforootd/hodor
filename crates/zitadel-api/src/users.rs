@@ -108,7 +108,7 @@ async fn create_user(
         org_id: None,
         metadata: req.metadata,
     };
-    match state.app.runner.run_fn(&ctx, "user.create", || state.app.create_user.execute(&ctx, cmd)).await {
+    match state.app.runner.run(&ctx, "user.create", || state.app.create_user.execute(&ctx, cmd)).await {
         Ok(user) => response::json_created(UserResponse::from(user)),
         Err(e) => response::app_error(e),
     }
@@ -120,7 +120,7 @@ async fn get_user(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match state.app.runner.run_fn(&ctx, "user.get", || state.app.get_user.execute(&ctx, &id)).await {
+    match state.app.runner.run(&ctx, "user.get", || state.app.get_user.execute(&ctx, &id)).await {
         Ok(user) => response::json_ok(UserResponse::from(user)),
         Err(e) => response::app_error(e),
     }
@@ -137,7 +137,7 @@ async fn list_users(
         cursor: params.cursor,
         search: None,
     };
-    match state.app.runner.run_fn(&ctx, "user.list", || {
+    match state.app.runner.run(&ctx, "user.list", || {
         state.app.list_users.execute(&ctx, params.org_id.as_deref(), &app_params)
     }).await
     {
@@ -174,7 +174,7 @@ async fn update_user(
             Some(req.metadata)
         },
     };
-    match state.app.runner.run_fn(&ctx, "user.update", || state.app.update_user.execute(&ctx, cmd)).await {
+    match state.app.runner.run(&ctx, "user.update", || state.app.update_user.execute(&ctx, cmd)).await {
         Ok(user) => response::json_ok(UserResponse::from(user)),
         Err(e) => response::app_error(e),
     }
@@ -186,7 +186,7 @@ async fn delete_user(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match state.app.runner.run_fn(&ctx, "user.delete", || state.app.delete_user.execute(&ctx, &id)).await {
+    match state.app.runner.run(&ctx, "user.delete", || state.app.delete_user.execute(&ctx, &id)).await {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }
@@ -209,7 +209,7 @@ async fn set_password(
         user_id: id,
         password_hash: cred_json,
     };
-    match state.app.runner.run_fn(&ctx, "user.set_password", || state.app.set_password.execute(&ctx, cmd)).await {
+    match state.app.runner.run(&ctx, "user.set_password", || state.app.set_password.execute(&ctx, cmd)).await {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

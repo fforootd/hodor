@@ -1,13 +1,12 @@
 //! Authorization helpers for use cases (ADR-032 §7).
 //!
-//! Provides a standard pattern for FGA permission checks with
-//! `operator_admin` bypass. Use cases call these helpers before
-//! performing mutations.
-//!
-//! **Current mode: audit (log-only).** FGA denials are logged as warnings
-//! but do not block operations. Switch to `enforce` mode by changing
-//! `ENFORCE_FGA` to `true` once FGA tuple seeding is complete for all
-//! instance lifecycle paths.
+//! The app layer resolves product permissions from the vendored
+//! role-permission catalog and uses embedded FGA as the relationship engine.
+//! `operator_admin` remains the break-glass bypass.
+
+use std::collections::BTreeSet;
+
+use zitadel_authz::{grants_for_permission, role_grants_permission};
 
 use crate::context::ActorContext;
 use crate::error::AppError;
@@ -15,39 +14,123 @@ use crate::repo::Repositories;
 
 /// Set to `true` to enforce FGA denials (returns 403).
 /// Set to `false` for audit mode (logs denials but allows operations).
-const ENFORCE_FGA: bool = false;
+const ENFORCE_FGA: bool = true;
 
-/// Check that the actor has `relation` on `object` in the current instance's
-/// FGA store. Returns `Ok(())` if allowed, `Err(PermissionDenied)` if denied.
-///
-/// Operator admins bypass FGA entirely (per ADR-032 §1).
-///
-/// In audit mode (`ENFORCE_FGA = false`), FGA denials are logged but the
-/// operation proceeds. This allows incremental rollout of FGA enforcement.
-///
-/// # Example
-///
-/// ```ignore
-/// authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", org_id)).await?;
-/// ```
+#[derive(Clone, Copy)]
+struct PermissionAlias {
+    permissions: &'static [&'static str],
+}
+
+pub async fn require_scoped_permission(
+    repos: &Repositories,
+    ctx: &ActorContext,
+    permission_key: &str,
+    scope_refs: &[String],
+) -> Result<(), AppError> {
+    if ctx.is_operator_admin() {
+        return Ok(());
+    }
+
+    let Some(alias) = alias(permission_key) else {
+        return Err(AppError::PermissionDenied {
+            reason: format!("unknown permission alias '{permission_key}'"),
+        });
+    };
+
+    if let Some(grant) = ctx.support_grant_for_instance(ctx.instance_id())
+        && scope_refs
+            .iter()
+            .any(|scope| scope == &format!("instance:{}", grant.target_instance_id))
+        && alias
+            .permissions
+            .iter()
+            .any(|permission| role_grants_permission(&grant.role_key, permission))
+    {
+        return Ok(());
+    }
+
+    for scope in scope_refs {
+        let Some((scope_kind, _)) = scope.split_once(':') else {
+            continue;
+        };
+        let mut candidates = Vec::new();
+        let mut seen = BTreeSet::new();
+        for permission in alias.permissions {
+            for grant in grants_for_permission(scope_kind, permission) {
+                if seen.insert(grant.relation_name.clone()) {
+                    candidates.push(grant);
+                }
+            }
+        }
+
+        for candidate in candidates {
+            match repos
+                .fga
+                .check(
+                    ctx.instance_id(),
+                    ctx.principal_ref(),
+                    &candidate.relation_name,
+                    scope.as_str(),
+                )
+                .await
+            {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        instance_id = ctx.instance_id(),
+                        principal = ctx.principal_ref(),
+                        permission_key,
+                scope,
+                        role = candidate.role_key,
+                        error = %error,
+                        "permission check error (fail-open; allowing)"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    if ENFORCE_FGA {
+        Err(AppError::PermissionDenied {
+            reason: format!(
+                "principal {} lacks '{}' on {:?}",
+                ctx.principal_ref(),
+                permission_key,
+                scope_refs
+            ),
+        })
+    } else {
+        tracing::debug!(
+            instance_id = ctx.instance_id(),
+            principal = ctx.principal_ref(),
+            permission_key,
+            ?scope_refs,
+            "permission denied (audit mode; allowing)"
+        );
+        Ok(())
+    }
+}
+
+/// Compatibility wrapper for legacy relation checks.
 pub async fn require_permission(
     repos: &Repositories,
     ctx: &ActorContext,
     relation: &str,
     object: &str,
 ) -> Result<(), AppError> {
+    if let Some((permission_key, scopes)) = relation_alias(ctx, relation, object) {
+        return require_scoped_permission(repos, ctx, permission_key, &scopes).await;
+    }
+
     if ctx.is_operator_admin() {
         return Ok(());
     }
 
     let check_result = repos
         .fga
-        .check(
-            ctx.instance_id(),
-            &format!("user:{}", ctx.user_id()),
-            relation,
-            object,
-        )
+        .check(ctx.instance_id(), ctx.principal_ref(), relation, object)
         .await;
 
     match check_result {
@@ -56,8 +139,8 @@ pub async fn require_permission(
             if ENFORCE_FGA {
                 Err(AppError::PermissionDenied {
                     reason: format!(
-                        "user {} lacks '{}' on '{}'",
-                        ctx.user_id(),
+                        "principal {} lacks '{}' on '{}'",
+                        ctx.principal_ref(),
                         relation,
                         object
                     ),
@@ -65,7 +148,7 @@ pub async fn require_permission(
             } else {
                 tracing::debug!(
                     instance_id = ctx.instance_id(),
-                    user_id = ctx.user_id(),
+                    principal = ctx.principal_ref(),
                     relation,
                     object,
                     "FGA check denied (audit mode; allowing)"
@@ -73,14 +156,13 @@ pub async fn require_permission(
                 Ok(())
             }
         }
-        Err(e) => {
-            // FGA infrastructure unavailable — fail-open with warning.
+        Err(error) => {
             tracing::warn!(
                 instance_id = ctx.instance_id(),
-                user_id = ctx.user_id(),
+                principal = ctx.principal_ref(),
                 relation,
                 object,
-                error = %e,
+                error = %error,
                 "FGA check error (fail-open; allowing)"
             );
             Ok(())
@@ -88,9 +170,6 @@ pub async fn require_permission(
     }
 }
 
-/// Check that the actor has `relation` on `object`, OR that the actor is
-/// the resource owner (identified by `owner_user_id`). Useful for
-/// self-service operations like password changes.
 pub async fn require_permission_or_self(
     repos: &Repositories,
     ctx: &ActorContext,
@@ -105,11 +184,96 @@ pub async fn require_permission_or_self(
 }
 
 /// Require that the actor has the `operator_admin` capability.
-/// Returns `Err(OperatorAdminRequired)` if not.
 pub fn require_operator_admin(ctx: &ActorContext) -> Result<(), AppError> {
     if ctx.is_operator_admin() {
         Ok(())
     } else {
         Err(AppError::OperatorAdminRequired)
     }
+}
+
+fn relation_alias<'a>(
+    ctx: &'a ActorContext,
+    relation: &str,
+    object: &'a str,
+) -> Option<(&'static str, Vec<String>)> {
+    match (relation, object.split_once(':')?) {
+        ("viewer", ("instance", _)) => Some(("instance.read", vec![object.to_string()])),
+        ("admin", ("instance", _)) => Some(("instance.write", vec![object.to_string()])),
+        ("viewer", ("org", _)) => Some((
+            "org.read",
+            vec![object.to_string(), format!("instance:{}", ctx.instance_id())],
+        )),
+        ("admin", ("org", _)) => Some((
+            "org.write",
+            vec![object.to_string(), format!("instance:{}", ctx.instance_id())],
+        )),
+        ("viewer", ("user", _)) => Some(("org.user.read", vec![format!("instance:{}", ctx.instance_id())])),
+        ("admin", ("user", _)) => Some(("org.user.write", vec![format!("instance:{}", ctx.instance_id())])),
+        _ => None,
+    }
+}
+
+fn alias(permission_key: &str) -> Option<PermissionAlias> {
+    let alias = match permission_key {
+        "instance.read" => &["iam.read", "system.instance.read", "support.read"][..],
+        "instance.write" => &["iam.write", "system.instance.write", "support.write"][..],
+        "org.read" => &["org.read", "support.read"][..],
+        "org.write" => &["org.write", "support.config"][..],
+        "org.user.read" => &["user.read", "user.global.read", "support.read"][..],
+        "org.user.write" => &["user.write", "support.write"][..],
+        "group.read" => &["group.read", "support.read"][..],
+        "group.write" => &["group.write", "group.delete", "support.write"][..],
+        "session.read" => &["session.read", "support.read"][..],
+        "session.write" => &["session.write", "session.delete", "support.write"][..],
+        "provider.read" => &["iam.idp.read", "org.idp.read", "support.read"][..],
+        "provider.write" => &[
+            "iam.idp.write",
+            "iam.idp.delete",
+            "org.idp.write",
+            "org.idp.delete",
+            "support.config",
+        ][..],
+        "login_flow.read" => &["iam.flow.read", "org.flow.read", "support.read"][..],
+        "login_flow.write" => &[
+            "iam.flow.write",
+            "iam.flow.delete",
+            "org.flow.write",
+            "org.flow.delete",
+            "support.config",
+        ][..],
+        "settings.read" => &[
+            "policy.read",
+            "iam.feature.read",
+            "org.feature.read",
+            "iam.restrictions.read",
+            "support.read",
+        ][..],
+        "settings.write" => &[
+            "policy.write",
+            "policy.delete",
+            "iam.feature.write",
+            "iam.feature.delete",
+            "org.feature.write",
+            "org.feature.delete",
+            "iam.restrictions.write",
+            "support.config",
+        ][..],
+        "schema.read" => &["userschema.read", "support.read"][..],
+        "schema.write" => &["userschema.write", "userschema.delete", "support.config"][..],
+        "support.grant.read" => &[
+            "support.grant.read",
+            "iam.read",
+            "system.instance.read",
+        ][..],
+        "support.grant.write" => &[
+            "support.grant.write",
+            "support.grant.delete",
+            "support.admin",
+            "iam.write",
+            "system.instance.write",
+        ][..],
+        _ => return None,
+    };
+    Some(PermissionAlias { permissions: alias })
 }

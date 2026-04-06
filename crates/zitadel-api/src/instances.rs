@@ -7,6 +7,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use zitadel_db::{FeatureMap, feature_enabled};
 use zitadel_app::{
     instances::{CreateInstanceCommand, UpdateInstanceCommand},
     repo::{InstanceRecord, ListParams as AppListParams},
@@ -105,10 +106,10 @@ struct AddDomainRequest {
     domain: String,
 }
 
-struct ManagementAccess {
-    root_instance_id: String,
-    owner_org_id: String,
-    operator_admin: bool,
+pub(crate) struct ManagementAccess {
+    pub(crate) parent_instance_id: String,
+    pub(crate) owner_org_id: String,
+    pub(crate) operator_admin: bool,
 }
 
 // owner_filter() removed — FGA checks via require_instance_relation handle authorization now.
@@ -119,7 +120,7 @@ async fn create(
     Extension(identity): Extension<Identity>,
     Json(req): Json<CreateRequest>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
@@ -136,14 +137,14 @@ async fn create(
     if !access.operator_admin && owner_org_id != access.owner_org_id {
         return response::error(
             StatusCode::FORBIDDEN,
-            "cannot create instances for another root org",
+            "cannot create instances for another parent org",
         );
     }
     if !access.operator_admin {
-        match root_relation_allowed(
+        match parent_relation_allowed(
             &s,
-            &access.root_instance_id,
-            &identity.user_id,
+            &access.parent_instance_id,
+            &identity.principal_ref,
             "admin",
             &format!("org:{owner_org_id}"),
         )
@@ -192,9 +193,9 @@ async fn create(
         primary_domain: Some(req.domain),
     };
 
-    match s.app.runner.run_fn(&ctx, "instance.create", || s.app.create_instance.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "instance.create", || s.app.create_instance.execute(&ctx, cmd)).await {
         Ok(instance) => {
-            if let Err(resp) = reconcile_after_mutation(&s, &access.root_instance_id).await {
+            if let Err(resp) = reconcile_after_mutation(&s, &access.parent_instance_id).await {
                 return resp;
             }
             response::json_created(InstanceResponse::from(instance))
@@ -208,17 +209,17 @@ async fn get_one(
     Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
-    match require_instance_relation(&s, &access, &identity.user_id, "viewer", &id).await {
+    match require_instance_relation(&s, &access, &identity.principal_ref, "viewer", &id).await {
         Ok(false) => return response::not_found("instance not found"),
         Ok(true) => {}
         Err(response) => return response,
     }
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run_fn(&ctx, "instance.get", || s.app.get_instance.execute(&ctx, &id)).await {
+    match s.app.runner.run(&ctx, "instance.get", || s.app.get_instance.execute(&ctx, &id)).await {
         Ok(instance) => response::json_ok(InstanceResponse::from(instance)),
         Err(e) => response::app_error(e),
     }
@@ -229,7 +230,7 @@ async fn list(
     Extension(identity): Extension<Identity>,
     Query(p): Query<response::PaginationParams>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
@@ -289,9 +290,9 @@ async fn list(
 
         let visible_ids = match s
             .fga
-            .root_batch_filter(
-                &access.root_instance_id,
-                &identity.user_id,
+            .parent_batch_filter(
+                &access.parent_instance_id,
+                &identity.principal_ref,
                 "viewer",
                 "instance",
                 &instance_ids,
@@ -335,11 +336,11 @@ async fn update(
     Path(id): Path<String>,
     Json(req): Json<UpdateRequest>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
-    match require_instance_relation(&s, &access, &identity.user_id, "admin", &id).await {
+    match require_instance_relation(&s, &access, &identity.principal_ref, "admin", &id).await {
         Ok(false) => return response::not_found("instance not found"),
         Ok(true) => {}
         Err(response) => return response,
@@ -360,9 +361,9 @@ async fn update(
         },
         feature_overrides: req.feature_overrides,
     };
-    match s.app.runner.run_fn(&ctx, "instance.update", || s.app.update_instance.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "instance.update", || s.app.update_instance.execute(&ctx, cmd)).await {
         Ok(instance) => {
-            if let Err(resp) = reconcile_after_mutation(&s, &access.root_instance_id).await {
+            if let Err(resp) = reconcile_after_mutation(&s, &access.parent_instance_id).await {
                 return resp;
             }
             response::json_ok(InstanceResponse::from(instance))
@@ -376,19 +377,19 @@ async fn delete_one(
     Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
-    match require_instance_relation(&s, &access, &identity.user_id, "admin", &id).await {
+    match require_instance_relation(&s, &access, &identity.principal_ref, "admin", &id).await {
         Ok(false) => return response::not_found("instance not found"),
         Ok(true) => {}
         Err(response) => return response,
     }
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run_fn(&ctx, "instance.deprovision", || s.app.deprovision_instance.execute(&ctx, &id)).await {
+    match s.app.runner.run(&ctx, "instance.deprovision", || s.app.deprovision_instance.execute(&ctx, &id)).await {
         Ok(()) => {
-            if let Err(resp) = reconcile_after_mutation(&s, &access.root_instance_id).await {
+            if let Err(resp) = reconcile_after_mutation(&s, &access.parent_instance_id).await {
                 return resp;
             }
             response::no_content()
@@ -404,15 +405,15 @@ async fn list_domains(
     Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
-    match require_instance_relation(&s, &access, &identity.user_id, "viewer", &id).await {
+    match require_instance_relation(&s, &access, &identity.principal_ref, "viewer", &id).await {
         Ok(false) => response::not_found("instance not found"),
         Ok(true) => {
             let ctx = response::build_actor_context(&identity);
-            match s.app.runner.run_fn(&ctx, "instance.list_domains", || s.app.list_domains.execute(&ctx, &id)).await {
+            match s.app.runner.run(&ctx, "instance.list_domains", || s.app.list_domains.execute(&ctx, &id)).await {
                 Ok(items) => response::json_ok(serde_json::json!({ "items": items })),
                 Err(e) => response::app_error(e),
             }
@@ -427,11 +428,11 @@ async fn add_domain(
     Path(id): Path<String>,
     Json(req): Json<AddDomainRequest>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
-    match require_instance_relation(&s, &access, &identity.user_id, "admin", &id).await {
+    match require_instance_relation(&s, &access, &identity.principal_ref, "admin", &id).await {
         Ok(false) => response::not_found("instance not found"),
         Ok(true) => {
             let ctx = response::build_actor_context(&identity);
@@ -439,7 +440,7 @@ async fn add_domain(
                 instance_id: id,
                 domain: req.domain,
             };
-            match s.app.runner.run_fn(&ctx, "instance.add_domain", || s.app.add_domain.execute(&ctx, cmd)).await {
+            match s.app.runner.run(&ctx, "instance.add_domain", || s.app.add_domain.execute(&ctx, cmd)).await {
                 Ok(domain) => response::json_created(domain),
                 Err(e) => response::app_error(e),
             }
@@ -453,15 +454,15 @@ async fn remove_domain(
     Extension(identity): Extension<Identity>,
     Path((id, domain)): Path<(String, String)>,
 ) -> Response {
-    let access = match require_root_management(&s, &identity).await {
+    let access = match require_parent_management(&s, &identity).await {
         Ok(access) => access,
         Err(response) => return response,
     };
-    match require_instance_relation(&s, &access, &identity.user_id, "admin", &id).await {
+    match require_instance_relation(&s, &access, &identity.principal_ref, "admin", &id).await {
         Ok(false) => response::not_found("instance not found"),
         Ok(true) => {
             let ctx = response::build_actor_context(&identity);
-            match s.app.runner.run_fn(&ctx, "instance.remove_domain", || s.app.remove_domain.execute(&ctx, &id, &domain)).await {
+            match s.app.runner.run(&ctx, "instance.remove_domain", || s.app.remove_domain.execute(&ctx, &id, &domain)).await {
                 Ok(zitadel_app::repo::DomainRemoveResult::Deleted) => response::no_content(),
                 Ok(zitadel_app::repo::DomainRemoveResult::NotFound) => {
                     response::not_found("domain not found")
@@ -476,12 +477,11 @@ async fn remove_domain(
     }
 }
 
-// ── Root management helpers (transport-level authorization) ──
+// ── Parent management helpers (transport-level authorization) ──
 
-/// Verify that the current request targets the root instance and build
-/// a `ManagementAccess` token. Reconciles FGA hierarchy for non-operator
-/// users so that authorization checks have up-to-date data.
-async fn require_root_management(
+/// Verify that the current request targets a parent-capable instance and build
+/// a `ManagementAccess` token.
+pub(crate) async fn require_parent_management(
     state: &ApiState,
     identity: &Identity,
 ) -> Result<ManagementAccess, Response> {
@@ -494,71 +494,80 @@ async fn require_root_management(
         .await
         .map_err(|e| response::app_error(e))?;
 
-    if instance.kind != "root" {
+    let default_features = FeatureMap::from([(
+        "instance_management".into(),
+        instance.kind == "root",
+    )]);
+    let parent_management_enabled = feature_enabled(
+        &default_features,
+        &instance.feature_overrides,
+        &["instance_management"],
+        "instance_management",
+    )
+    .unwrap_or(instance.kind == "root")
+        || instance
+            .feature_overrides
+            .get("instance_management")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+
+    if !parent_management_enabled {
         return Err(response::error(
             StatusCode::FORBIDDEN,
-            "instance management is only available from the root instance",
+            "instance management is only available from a parent instance",
         ));
     }
 
-    // Operator admins bypass FGA entirely, so skip reconcile for them.
-    if !identity.operator_admin {
-        state
-            .fga
-            .reconcile_root_hierarchy(&instance.instance_id)
-            .await
-            .map_err(|error| response::internal(error))?;
-    }
-
     Ok(ManagementAccess {
-        root_instance_id: instance.instance_id,
+        parent_instance_id: instance.instance_id,
         owner_org_id: identity.org_id.clone(),
         operator_admin: identity.operator_admin,
     })
 }
 
 /// Reconcile the FGA hierarchy after a write operation.
-async fn reconcile_after_mutation(
+pub(crate) async fn reconcile_after_mutation(
     state: &ApiState,
-    root_instance_id: &str,
+    parent_instance_id: &str,
 ) -> Result<(), Response> {
+    let _ = parent_instance_id;
     state
         .fga
-        .reconcile_root_hierarchy(root_instance_id)
+        .rebuild_platform_store()
         .await
         .map_err(|error| response::internal(error))
 }
 
-async fn require_instance_relation(
+pub(crate) async fn require_instance_relation(
     state: &ApiState,
     access: &ManagementAccess,
-    user_id: &str,
+    principal_ref: &str,
     relation: &str,
     instance_id: &str,
 ) -> Result<bool, Response> {
     if access.operator_admin {
         return Ok(true);
     }
-    root_relation_allowed(
+    parent_relation_allowed(
         state,
-        &access.root_instance_id,
-        user_id,
+        &access.parent_instance_id,
+        principal_ref,
         relation,
         &format!("instance:{instance_id}"),
     )
     .await
 }
 
-async fn root_relation_allowed(
+async fn parent_relation_allowed(
     state: &ApiState,
-    root_instance_id: &str,
-    user_id: &str,
+    parent_instance_id: &str,
+    principal_ref: &str,
     relation: &str,
     object: &str,
 ) -> Result<bool, Response> {
     state
         .fga
-        .root_relation_allowed(root_instance_id, user_id, relation, object)
+        .parent_relation_allowed(parent_instance_id, principal_ref, relation, object)
         .await
         .map_err(|error| response::internal(error))
 }

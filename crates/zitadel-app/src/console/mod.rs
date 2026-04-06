@@ -18,7 +18,7 @@ impl LoadConsoleBootstrap {
         ctx: &ActorContext,
     ) -> Result<ConsoleBootstrapData, AppError> {
         self.repos
-            .raw
+            .console_queries
             .load_console_bootstrap(ctx.instance_id())
             .await
             .map_err(AppError::Internal)
@@ -40,7 +40,7 @@ impl LoadEntityCounts {
         ctx: &ActorContext,
     ) -> Result<Vec<(String, i64)>, AppError> {
         self.repos
-            .raw
+            .console_queries
             .load_entity_counts(ctx.instance_id())
             .await
             .map_err(AppError::Internal)

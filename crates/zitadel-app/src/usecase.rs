@@ -50,7 +50,7 @@ impl UseCaseRunner {
     /// 1. Pre-validate interceptors
     /// 2. Use case execution (includes domain validation + repository calls + event append)
     /// 3. Post-commit effect hooks
-    pub async fn run<U: UseCase>(
+    pub async fn run_usecase<U: UseCase>(
         &self,
         usecase: &U,
         ctx: &ActorContext,
@@ -88,11 +88,11 @@ impl UseCaseRunner {
     /// # Example
     ///
     /// ```ignore
-    /// state.app.runner.run_fn(&ctx, "user.create", || {
+    /// state.app.runner.run(&ctx, "user.create", || {
     ///     state.app.create_user.execute(&ctx, cmd)
     /// }).await
     /// ```
-    pub async fn run_fn<F, Fut, R>(
+    pub async fn run<F, Fut, R>(
         &self,
         ctx: &ActorContext,
         operation: &str,

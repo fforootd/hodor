@@ -5,8 +5,10 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use std::collections::BTreeSet;
 use std::borrow::Cow;
 use tracing::Span;
+use zitadel_authz::{grants_for_permission, role_grants_permission};
 use zitadel_db::{
     DEFAULT_INSTANCE_ID, current_instance_context, current_instance_id, load_instance_metadata,
     user_has_capability as db_user_has_capability,
@@ -19,9 +21,12 @@ use crate::response;
 #[derive(Clone, Debug)]
 pub struct Identity {
     pub user_id: String,
+    pub principal_ref: String,
     pub session_id: String,
     pub token_type: String,
     pub org_id: String,
+    pub issuer_instance_id: Option<String>,
+    pub support_grant: Option<zitadel_app::context::SupportGrantContext>,
     pub operator_admin: bool,
 }
 
@@ -98,28 +103,59 @@ pub async fn require_scoped_instance_access(
         }
     };
 
-    let Some(root_instance_id) = metadata.parent_instance_id else {
+    let Some(_parent_instance_id) = metadata.parent_instance_id else {
         return next.run(req).await;
     };
 
     // Reconcile is now only called after write operations in instance handlers.
     // Read-path middleware skips it to avoid latency on every request.
 
-    let relation = scoped_instance_relation(req.method());
-    match state
-        .fga
-        .root_relation_allowed(
-            &root_instance_id,
-            &identity.user_id,
-            relation,
-            &format!("instance:{target_instance_id}"),
-        )
-        .await
+    let permission = scoped_instance_permission(req.method());
+    let permissions = scoped_instance_permissions(permission);
+    if let Some(grant) = &identity.support_grant
+        && grant.target_instance_id == target_instance_id
+        && permissions
+            .iter()
+            .any(|permission| role_grants_permission(&grant.role_key, permission))
     {
-        Ok(true) => next.run(req).await,
-        Ok(false) => response::not_found("instance not found"),
-        Err(error) => response::internal(error),
+        return next.run(req).await;
     }
+
+    let mut seen = BTreeSet::new();
+    for permission in permissions {
+        for candidate in grants_for_permission("instance", permission) {
+            if !seen.insert(candidate.relation_name.clone()) {
+                continue;
+            }
+            match state
+                .app
+                .repos
+                .fga
+                .check(
+                    &target_instance_id,
+                    &identity.principal_ref,
+                    &candidate.relation_name,
+                    &format!("instance:{target_instance_id}"),
+                )
+                .await
+            {
+                Ok(true) => return next.run(req).await,
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        instance_id = %target_instance_id,
+                        principal = %identity.principal_ref,
+                        permission,
+                        role = %candidate.role_key,
+                        error = %error,
+                        "scoped instance permission check failed"
+                    );
+                    return response::internal(error);
+                }
+            }
+        }
+    }
+    response::not_found("instance not found")
 }
 
 fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
@@ -155,20 +191,21 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
 /// Auth must resolve against the root; only data queries use the child.
 async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Option<Identity>> {
     let ctx = current_instance_context();
-    let instance_id: Cow<'_, str> = match &ctx {
+    let scoped_instance_id = current_instance_id();
+    let auth_instance_id: Cow<'_, str> = match &ctx {
         Some(c) if c.source == "path_param" => Cow::Borrowed(DEFAULT_INSTANCE_ID),
-        _ => current_instance_id(),
+        _ => scoped_instance_id.clone(),
     };
 
     if let Some(identity) = state
         .stateful
-        .resolve_pat_token(&instance_id, raw_token)
+        .resolve_pat_token(&auth_instance_id, raw_token)
         .await?
     {
         return Ok(Some(
             build_identity(
                 state,
-                &instance_id,
+                &auth_instance_id,
                 identity.user_id,
                 identity.session_id,
                 identity.token_type,
@@ -180,13 +217,13 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
 
     if let Some(session) = state
         .transient
-        .find_session_by_token(&instance_id, raw_token)
+        .find_session_by_token(&auth_instance_id, raw_token)
         .await?
     {
         return Ok(Some(
             build_identity(
                 state,
-                &instance_id,
+                &auth_instance_id,
                 session.user_id,
                 session.id,
                 "session".to_string(),
@@ -194,6 +231,12 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
             )
             .await?,
         ));
+    }
+
+    if let Some(identity) =
+        resolve_support_grant_token(state, scoped_instance_id.as_ref(), raw_token).await?
+    {
+        return Ok(Some(identity));
     }
 
     Ok(None)
@@ -209,11 +252,15 @@ async fn build_identity(
 ) -> anyhow::Result<Identity> {
     let operator_admin =
         user_has_capability(state, instance_id, &user_id, "operator_admin").await?;
+    let principal_ref = format!("user:{user_id}");
     Ok(Identity {
         user_id,
+        principal_ref,
         session_id,
         token_type,
         org_id,
+        issuer_instance_id: None,
+        support_grant: None,
         operator_admin,
     })
 }
@@ -227,15 +274,102 @@ async fn user_has_capability(
     db_user_has_capability(&state.db, instance_id, user_id, capability).await
 }
 
+async fn resolve_support_grant_token(
+    state: &ApiState,
+    instance_id: &str,
+    raw_token: &str,
+) -> anyhow::Result<Option<Identity>> {
+    let claims = match crate::support::decode_support_grant_token(state, raw_token) {
+        Ok(claims) => claims,
+        Err(_) => return Ok(None),
+    };
+    if claims.target_instance_id != instance_id
+        || claims.aud != crate::support::support_grant_audience(instance_id)
+    {
+        return Ok(None);
+    }
+
+    let Some(trust_link) = state
+        .app
+        .repos
+        .authorization
+        .get_instance_trust_link(instance_id, &claims.iss, &claims.aud)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if trust_link.state != "active" {
+        return Ok(None);
+    }
+    if !trust_link.allowed_scopes.is_empty()
+        && !trust_link.allowed_scopes.iter().any(|scope| {
+            matches!(scope.as_str(), "support" | "support_grant" | "support_grants")
+        })
+    {
+        return Ok(None);
+    }
+
+    let Some(grant) = state
+        .app
+        .repos
+        .authorization
+        .get_role_assignment(&claims.grant_id)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if grant.scope_id != instance_id
+        || grant.scope_kind != "instance"
+        || grant.source_kind != "support_grant_federated"
+        || grant.role_key != claims.role_key
+        || grant.principal_ref != claims.principal_ref
+        || grant.revoked_at.is_some()
+    {
+        return Ok(None);
+    }
+    if let Some(expires_at) = grant.expires_at.as_deref()
+        && crate::support::parse_rfc3339_timestamp(expires_at)
+            .is_some_and(|expiry| expiry <= time::OffsetDateTime::now_utc())
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(Identity {
+        user_id: claims.sub.clone(),
+        principal_ref: claims.principal_ref.clone(),
+        session_id: claims.grant_id.clone(),
+        token_type: "support_grant".to_string(),
+        org_id: String::new(),
+        issuer_instance_id: Some(claims.issuer_instance_id.clone()),
+        support_grant: Some(zitadel_app::context::SupportGrantContext {
+            assignment_id: grant.assignment_id,
+            role_key: grant.role_key,
+            target_instance_id: grant.scope_id,
+            issuer_instance_id: claims.issuer_instance_id,
+            reason: grant.reason,
+            expires_at: grant.expires_at.unwrap_or_default(),
+        }),
+        operator_admin: false,
+    }))
+}
+
 /// Extract the Identity from request extensions (set by auth_gate).
 pub fn identity_from_request(req: &Request<Body>) -> Option<&Identity> {
     req.extensions().get::<Identity>()
 }
 
-fn scoped_instance_relation(method: &Method) -> &'static str {
+fn scoped_instance_permission(method: &Method) -> &'static str {
     match *method {
-        Method::GET | Method::HEAD | Method::OPTIONS => "viewer",
-        _ => "admin",
+        Method::GET | Method::HEAD | Method::OPTIONS => "instance.read",
+        _ => "instance.write",
+    }
+}
+
+fn scoped_instance_permissions(permission: &str) -> &'static [&'static str] {
+    match permission {
+        "instance.read" => &["iam.read", "system.instance.read", "support.read"],
+        "instance.write" => &["iam.write", "system.instance.write", "support.write"],
+        _ => &[],
     }
 }
 
@@ -304,6 +438,7 @@ mod tests {
             oidc,
             passwords: Arc::new(Swapper::from_config(&config.password_hasher)),
             cookie_config,
+            support_grant_secret: Arc::new("test-support-grant-secret".to_string()),
             is_dev: true,
         }
     }

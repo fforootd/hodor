@@ -34,7 +34,7 @@ impl CreateLoginFlow {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
@@ -98,6 +98,15 @@ impl GetLoginFlow {
         ctx: &ActorContext,
         flow_id: &str,
     ) -> Result<LoginFlowRecord, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .login_flows
             .get_flow(ctx.instance_id(), flow_id)
@@ -121,6 +130,15 @@ impl ListLoginFlows {
         &self,
         ctx: &ActorContext,
     ) -> Result<Vec<LoginFlowRecord>, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .login_flows
             .list_flows(ctx.instance_id())
@@ -159,7 +177,7 @@ impl UpdateLoginFlow {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
@@ -231,7 +249,7 @@ impl DeleteLoginFlow {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
@@ -266,7 +284,7 @@ impl PromoteLoginFlow {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
@@ -301,7 +319,7 @@ impl ArchiveLoginFlow {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 

@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 zitadel-db = { workspace = true }
+zitadel-app = { workspace = true }
+zitadel-authz = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -12,6 +14,7 @@ sqlx = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
+time = { version = "0.3", features = ["formatting"] }
 async-trait = "0.1"
 async-recursion = "1"
 google-cloud-spanner = { workspace = true }

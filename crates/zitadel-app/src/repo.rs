@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use zitadel_authz::RoleDefinition;
 
 /// Type alias for boxed futures (object-safe async return type).
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -17,6 +18,8 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub struct Repositories {
     pub users: Arc<dyn UserRepository>,
     pub orgs: Arc<dyn OrgRepository>,
+    pub apps: Arc<dyn AppRepository>,
+    pub projects: Arc<dyn ProjectRepository>,
     pub credentials: Arc<dyn CredentialRepository>,
     pub sessions: Arc<dyn SessionRepository>,
     pub instances: Arc<dyn InstanceRepository>,
@@ -31,7 +34,12 @@ pub struct Repositories {
     pub pats: Arc<dyn PatRepository>,
     pub search: Arc<dyn SearchRepository>,
     pub actions: Arc<dyn ActionRepository>,
-    pub raw: Arc<dyn RawQueryRepository>,
+    pub memberships: Arc<dyn MembershipRepository>,
+    pub console_queries: Arc<dyn ConsoleQueryRepository>,
+    pub telemetry: Arc<dyn TelemetryRepository>,
+    pub jobs: Arc<dyn JobRepository>,
+    pub saved_queries: Arc<dyn SavedQueryRepository>,
+    pub authorization: Arc<dyn AuthorizationRepository>,
     pub uow: Arc<dyn UnitOfWorkFactory>,
 }
 
@@ -153,6 +161,159 @@ pub struct ProviderRecord {
     pub config: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProviderConnection {
+    #[serde(default)]
+    pub issuer: String,
+    #[serde(default)]
+    pub authorization_url: String,
+    #[serde(default)]
+    pub token_url: String,
+    #[serde(default)]
+    pub userinfo_url: String,
+    #[serde(default)]
+    pub jwks_uri: String,
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default = "default_token_endpoint_auth_method")]
+    pub token_endpoint_auth_method: String,
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, serde_json::Value>,
+}
+
+fn default_token_endpoint_auth_method() -> String {
+    "client_secret_post".to_string()
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderMapping {
+    #[serde(default)]
+    pub claims: std::collections::HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderTarget {
+    #[serde(default)]
+    pub schema_type: String,
+    #[serde(default)]
+    pub schema_id: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderLinkingMode {
+    #[default]
+    CreateOrLink,
+    LinkOnly,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderMatchBy {
+    #[default]
+    VerifiedEmail,
+    Identifier,
+    None,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderLinking {
+    #[serde(default)]
+    pub mode: ProviderLinkingMode,
+    #[serde(default)]
+    pub match_by: ProviderMatchBy,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderUi {
+    #[serde(default)]
+    pub display_order: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProviderCatalogRef {
+    #[serde(default)]
+    pub template_id: String,
+    #[serde(default)]
+    pub template_version: String,
+    #[serde(default)]
+    pub official: bool,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub logo_url: String,
+    #[serde(default)]
+    pub docs_url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ProviderPayload {
+    pub display_name: String,
+    #[serde(default = "default_provider_kind")]
+    pub kind: String,
+    pub protocol: String,
+    #[serde(default)]
+    pub connection: ProviderConnection,
+    #[serde(default)]
+    pub mapping: ProviderMapping,
+    #[serde(default)]
+    pub target: ProviderTarget,
+    #[serde(default)]
+    pub linking: ProviderLinking,
+    #[serde(default = "default_json_object")]
+    pub session: serde_json::Value,
+    #[serde(default)]
+    pub ui: ProviderUi,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub catalog_ref: ProviderCatalogRef,
+}
+
+fn default_provider_kind() -> String {
+    "custom".to_string()
+}
+
+fn default_json_object() -> serde_json::Value {
+    serde_json::Value::Object(Default::default())
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl Default for ProviderPayload {
+    fn default() -> Self {
+        Self {
+            display_name: String::new(),
+            kind: default_provider_kind(),
+            protocol: "oidc".to_string(),
+            connection: ProviderConnection::default(),
+            mapping: ProviderMapping::default(),
+            target: ProviderTarget::default(),
+            linking: ProviderLinking::default(),
+            session: default_json_object(),
+            ui: ProviderUi::default(),
+            enabled: true,
+            catalog_ref: ProviderCatalogRef::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ProviderDefinitionRecord {
+    pub id: String,
+    pub org_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(flatten)]
+    pub payload: ProviderPayload,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -384,6 +545,70 @@ pub trait CredentialRepository: Send + Sync {
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
+pub trait AppRepository: Send + Sync {
+    fn create(
+        &self,
+        instance_id: &str,
+        app: &AppRecord,
+    ) -> BoxFuture<'_, anyhow::Result<AppRecord>>;
+
+    fn get(
+        &self,
+        instance_id: &str,
+        app_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<AppRecord>>>;
+
+    fn list(
+        &self,
+        instance_id: &str,
+        group_id: Option<&str>,
+        params: &ListParams,
+    ) -> BoxFuture<'_, anyhow::Result<ListResult<AppRecord>>>;
+
+    fn update_name(
+        &self,
+        instance_id: &str,
+        app_id: &str,
+        name: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    fn delete(&self, instance_id: &str, app_id: &str) -> BoxFuture<'_, anyhow::Result<bool>>;
+}
+
+pub trait ProjectRepository: Send + Sync {
+    fn create(
+        &self,
+        instance_id: &str,
+        project: &NamedResourceRecord,
+        org_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>>;
+
+    fn get(
+        &self,
+        instance_id: &str,
+        project_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>>;
+
+    fn list(
+        &self,
+        instance_id: &str,
+        params: &ListParams,
+    ) -> BoxFuture<'_, anyhow::Result<ListResult<NamedResourceRecord>>>;
+
+    fn update_name(
+        &self,
+        instance_id: &str,
+        project_id: &str,
+        name: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    fn delete(
+        &self,
+        instance_id: &str,
+        project_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+}
+
 pub trait SessionRepository: Send + Sync {
     fn create(
         &self,
@@ -391,6 +616,9 @@ pub trait SessionRepository: Send + Sync {
         user_id: &str,
         org_id: &str,
         auth_method: &str,
+        user_agent: &str,
+        ip_address: &str,
+        fingerprint: &str,
     ) -> BoxFuture<'_, anyhow::Result<CreatedSession>>;
 
     fn find_by_token(
@@ -513,6 +741,12 @@ pub trait ProviderRepository: Send + Sync {
         instance_id: &str,
         provider_id: &str,
     ) -> BoxFuture<'_, anyhow::Result<Option<ProviderRecord>>>;
+
+    fn get_definition(
+        &self,
+        instance_id: &str,
+        provider_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<ProviderDefinitionRecord>>>;
 
     fn list(
         &self,
@@ -681,6 +915,7 @@ pub trait SettingsRepository: Send + Sync {
 }
 
 pub trait FgaRepository: Send + Sync {
+    /// Check a relationship in the internal platform FGA store.
     fn check(
         &self,
         instance_id: &str,
@@ -689,22 +924,21 @@ pub trait FgaRepository: Send + Sync {
         object: &str,
     ) -> BoxFuture<'_, anyhow::Result<bool>>;
 
-    /// Write relationship tuples (batch).
+    /// Write relationship tuples (batch) in the internal platform FGA store.
     fn write(
         &self,
         instance_id: &str,
         writes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
-    /// Delete relationship tuples (batch).
+    /// Delete relationship tuples (batch) in the internal platform FGA store.
     fn delete(
         &self,
         instance_id: &str,
         deletes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
-    /// Read tuples matching an optional filter (user, relation, object).
-    /// Empty strings in the filter tuple mean "any".
+    /// Read tuples in the internal platform FGA store matching an optional filter.
     fn read(
         &self,
         instance_id: &str,
@@ -717,6 +951,78 @@ pub struct FgaRelation {
     pub user: String,
     pub relation: String,
     pub object: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoleAssignmentRecord {
+    pub assignment_id: String,
+    pub enforcement_instance_id: String,
+    pub scope_kind: String,
+    pub scope_id: String,
+    pub principal_ref: String,
+    pub role_key: String,
+    pub source_kind: String,
+    pub origin_instance_id: Option<String>,
+    pub approved_by: Option<String>,
+    pub reason: Option<String>,
+    pub expires_at: Option<String>,
+    pub revoked_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoleAssignmentFilter {
+    pub enforcement_instance_id: Option<String>,
+    pub scope_kind: Option<String>,
+    pub scope_id: Option<String>,
+    pub principal_ref: Option<String>,
+    pub role_key: Option<String>,
+    pub source_kind: Option<String>,
+    pub include_revoked: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstanceTrustLinkRecord {
+    pub child_instance_id: String,
+    pub issuer: String,
+    pub audience: String,
+    pub allowed_scopes: Vec<String>,
+    pub state: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub trait AuthorizationRepository: Send + Sync {
+    fn list_role_definitions(&self) -> BoxFuture<'_, anyhow::Result<Vec<RoleDefinition>>>;
+
+    fn create_role_assignment(
+        &self,
+        assignment: &RoleAssignmentRecord,
+    ) -> BoxFuture<'_, anyhow::Result<RoleAssignmentRecord>>;
+
+    fn get_role_assignment(
+        &self,
+        assignment_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<RoleAssignmentRecord>>>;
+
+    fn list_role_assignments(
+        &self,
+        filter: &RoleAssignmentFilter,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<RoleAssignmentRecord>>>;
+
+    fn revoke_role_assignment(
+        &self,
+        assignment_id: &str,
+        revoked_at: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    fn get_instance_trust_link(
+        &self,
+        child_instance_id: &str,
+        issuer: &str,
+        audience: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<InstanceTrustLinkRecord>>>;
 }
 
 pub trait SchemaRepository: Send + Sync {
@@ -883,7 +1189,39 @@ pub trait ActionRepository: Send + Sync {
     fn delete(&self, instance_id: &str, action_id: &str) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
-// ─── Raw query repository ───
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MembershipRecord {
+    pub user_id: String,
+    pub display_name: Option<String>,
+    pub role: String,
+    pub added_at: String,
+}
+
+pub trait MembershipRepository: Send + Sync {
+    fn list(
+        &self,
+        instance_id: &str,
+        entity_type: &str,
+        entity_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<MembershipRecord>>>;
+
+    fn add(
+        &self,
+        instance_id: &str,
+        entity_type: &str,
+        entity_id: &str,
+        user_id: &str,
+        role: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn remove(
+        &self,
+        instance_id: &str,
+        entity_type: &str,
+        entity_id: &str,
+        user_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NamedResourceRecord {
@@ -952,46 +1290,7 @@ pub struct SavedQueryRecord {
     pub created_at: String,
 }
 
-pub trait RawQueryRepository: Send + Sync {
-    fn create_named_resource(
-        &self,
-        instance_id: &str,
-        table: &str,
-        id: &str,
-        name: &str,
-        org_id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>>;
-
-    fn get_named_resource(
-        &self,
-        instance_id: &str,
-        table: &str,
-        id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>>;
-
-    fn list_named_resources(
-        &self,
-        instance_id: &str,
-        table: &str,
-        cursor: &str,
-        limit: i64,
-    ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>>;
-
-    fn update_named_resource_name(
-        &self,
-        instance_id: &str,
-        table: &str,
-        id: &str,
-        name: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>>;
-
-    fn delete_named_resource(
-        &self,
-        instance_id: &str,
-        table: &str,
-        id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>>;
-
+pub trait ConsoleQueryRepository: Send + Sync {
     fn load_console_bootstrap(
         &self,
         instance_id: &str,
@@ -1001,7 +1300,9 @@ pub trait RawQueryRepository: Send + Sync {
         &self,
         instance_id: &str,
     ) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>>;
+}
 
+pub trait TelemetryRepository: Send + Sync {
     fn list_fingerprints(
         &self,
         instance_id: &str,
@@ -1016,9 +1317,13 @@ pub trait RawQueryRepository: Send + Sync {
         type_: &str,
         raw_data: &str,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
+}
 
+pub trait JobRepository: Send + Sync {
     fn list_jobs(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<JobRecord>>>;
+}
 
+pub trait SavedQueryRepository: Send + Sync {
     fn list_saved_queries(
         &self,
         instance_id: &str,

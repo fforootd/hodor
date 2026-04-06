@@ -19,6 +19,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "00012_org_fk_set_null",
         include_str!("../../../migrations/sqlite/00012_org_fk_set_null.sql"),
     ),
+    (
+        "00013_role_catalog",
+        include_str!("../../../migrations/sqlite/00013_role_catalog.sql"),
+    ),
 ];
 
 const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
@@ -38,6 +42,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "00012_org_fk_set_null",
         include_str!("../../../migrations/postgres/00012_org_fk_set_null.sql"),
     ),
+    (
+        "00013_role_catalog",
+        include_str!("../../../migrations/postgres/00013_role_catalog.sql"),
+    ),
 ];
 
 const SPANNER_MIGRATIONS: &[(&str, &str)] = &[
@@ -56,6 +64,10 @@ const SPANNER_MIGRATIONS: &[(&str, &str)] = &[
     (
         "00004_org_fk_set_null",
         include_str!("../../../migrations/spanner/00004_org_fk_set_null.sql"),
+    ),
+    (
+        "00005_role_catalog",
+        include_str!("../../../migrations/spanner/00005_role_catalog.sql"),
     ),
 ];
 

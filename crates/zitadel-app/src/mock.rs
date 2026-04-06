@@ -7,6 +7,7 @@ use crate::event::DomainEvent;
 use crate::repo::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use zitadel_authz::builtin_role_definitions;
 
 // ─── MockUserRepository ──────────────────────────────────
 
@@ -372,6 +373,9 @@ impl SessionRepository for MockSessionRepository {
         _user_id: &str,
         _org_id: &str,
         _auth_method: &str,
+        _user_agent: &str,
+        _ip_address: &str,
+        _fingerprint: &str,
     ) -> BoxFuture<'_, anyhow::Result<CreatedSession>> {
         Box::pin(async {
             Ok(CreatedSession {
@@ -510,6 +514,13 @@ impl ProviderRepository for NoopProviderRepository {
         Box::pin(async { anyhow::bail!("noop") })
     }
     fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<ProviderRecord>>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn get_definition(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<ProviderDefinitionRecord>>> {
         Box::pin(async { Ok(None) })
     }
     fn list(
@@ -791,61 +802,113 @@ impl UnitOfWork for MockUnitOfWork {
     }
 }
 
-pub struct NoopRawQueryRepository;
-impl RawQueryRepository for NoopRawQueryRepository {
-    fn create_named_resource(
+pub struct NoopAppRepository;
+impl AppRepository for NoopAppRepository {
+    fn create(&self, _: &str, _: &AppRecord) -> BoxFuture<'_, anyhow::Result<AppRecord>> {
+        Box::pin(async { anyhow::bail!("noop") })
+    }
+    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<AppRecord>>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn list(
         &self,
         _: &str,
+        _: Option<&str>,
+        _: &ListParams,
+    ) -> BoxFuture<'_, anyhow::Result<ListResult<AppRecord>>> {
+        Box::pin(async {
+            Ok(ListResult {
+                items: vec![],
+                next_cursor: None,
+                total_count: None,
+            })
+        })
+    }
+    fn update_name(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn delete(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+}
+
+pub struct NoopProjectRepository;
+impl ProjectRepository for NoopProjectRepository {
+    fn create(
+        &self,
         _: &str,
-        _: &str,
-        _: &str,
+        _: &NamedResourceRecord,
         _: &str,
     ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>> {
         Box::pin(async { anyhow::bail!("noop") })
     }
-    fn get_named_resource(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
+    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
         Box::pin(async { Ok(None) })
     }
-    fn list_named_resources(
+    fn list(
+        &self,
+        _: &str,
+        _: &ListParams,
+    ) -> BoxFuture<'_, anyhow::Result<ListResult<NamedResourceRecord>>> {
+        Box::pin(async {
+            Ok(ListResult {
+                items: vec![],
+                next_cursor: None,
+                total_count: None,
+            })
+        })
+    }
+    fn update_name(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn delete(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+}
+
+pub struct NoopMembershipRepository;
+impl MembershipRepository for NoopMembershipRepository {
+    fn list(
         &self,
         _: &str,
         _: &str,
         _: &str,
-        _: i64,
-    ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>> {
+    ) -> BoxFuture<'_, anyhow::Result<Vec<MembershipRecord>>> {
         Box::pin(async { Ok(vec![]) })
     }
-    fn update_named_resource_name(
+    fn add(
         &self,
         _: &str,
         _: &str,
         _: &str,
         _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>> {
-        Box::pin(async { Ok(false) })
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
     }
-    fn delete_named_resource(
+    fn remove(
         &self,
         _: &str,
         _: &str,
         _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>> {
-        Box::pin(async { Ok(false) })
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
     }
-    fn load_console_bootstrap(
-        &self,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<ConsoleBootstrapData>> {
+}
+
+pub struct NoopConsoleQueryRepository;
+impl ConsoleQueryRepository for NoopConsoleQueryRepository {
+    fn load_console_bootstrap(&self, _: &str) -> BoxFuture<'_, anyhow::Result<ConsoleBootstrapData>> {
         Box::pin(async { anyhow::bail!("noop") })
     }
     fn load_entity_counts(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>> {
         Box::pin(async { Ok(vec![]) })
     }
+}
+
+pub struct NoopTelemetryRepository;
+impl TelemetryRepository for NoopTelemetryRepository {
     fn list_fingerprints(
         &self,
         _: &str,
@@ -863,9 +926,17 @@ impl RawQueryRepository for NoopRawQueryRepository {
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
+}
+
+pub struct NoopJobRepository;
+impl JobRepository for NoopJobRepository {
     fn list_jobs(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<JobRecord>>> {
         Box::pin(async { Ok(vec![]) })
     }
+}
+
+pub struct NoopSavedQueryRepository;
+impl SavedQueryRepository for NoopSavedQueryRepository {
     fn list_saved_queries(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<SavedQueryRecord>>> {
         Box::pin(async { Ok(vec![]) })
     }
@@ -890,6 +961,8 @@ pub fn mock_repositories() -> Repositories {
     Repositories {
         users: std::sync::Arc::new(MockUserRepository::new()),
         orgs: std::sync::Arc::new(MockOrgRepository::new()),
+        apps: std::sync::Arc::new(NoopAppRepository),
+        projects: std::sync::Arc::new(NoopProjectRepository),
         credentials: std::sync::Arc::new(MockCredentialRepository::new()),
         sessions: std::sync::Arc::new(MockSessionRepository),
         instances: std::sync::Arc::new(NoopInstanceRepository),
@@ -904,7 +977,67 @@ pub fn mock_repositories() -> Repositories {
         pats: std::sync::Arc::new(NoopPatRepository),
         search: std::sync::Arc::new(NoopSearchRepository),
         actions: std::sync::Arc::new(NoopActionRepository),
-        raw: std::sync::Arc::new(NoopRawQueryRepository),
+        memberships: std::sync::Arc::new(NoopMembershipRepository),
+        console_queries: std::sync::Arc::new(NoopConsoleQueryRepository),
+        telemetry: std::sync::Arc::new(NoopTelemetryRepository),
+        jobs: std::sync::Arc::new(NoopJobRepository),
+        saved_queries: std::sync::Arc::new(NoopSavedQueryRepository),
+        authorization: std::sync::Arc::new(NoopAuthorizationRepository),
         uow: std::sync::Arc::new(MockUnitOfWorkFactory),
+    }
+}
+
+// ─── Noop Authorization Repository ────────────────────────
+
+pub struct NoopAuthorizationRepository;
+
+impl crate::repo::AuthorizationRepository for NoopAuthorizationRepository {
+    fn list_role_definitions(
+        &self,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<zitadel_authz::RoleDefinition>>> {
+        Box::pin(async { Ok(builtin_role_definitions().to_vec()) })
+    }
+
+    fn create_role_assignment(
+        &self,
+        _assignment: &crate::repo::RoleAssignmentRecord,
+    ) -> BoxFuture<'_, anyhow::Result<crate::repo::RoleAssignmentRecord>> {
+        Box::pin(async { Err(anyhow::anyhow!("noop")) })
+    }
+
+    fn get_role_assignment(
+        &self,
+        _assignment_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<crate::repo::RoleAssignmentRecord>>>
+    {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn list_role_assignments(
+        &self,
+        _filter: &crate::repo::RoleAssignmentFilter,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<crate::repo::RoleAssignmentRecord>>>
+    {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn revoke_role_assignment(
+        &self,
+        _assignment_id: &str,
+        _revoked_at: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+
+    fn get_instance_trust_link(
+        &self,
+        _child_instance_id: &str,
+        _issuer: &str,
+        _audience: &str,
+    ) -> BoxFuture<
+        '_,
+        anyhow::Result<Option<crate::repo::InstanceTrustLinkRecord>>,
+    > {
+        Box::pin(async { Ok(None) })
     }
 }

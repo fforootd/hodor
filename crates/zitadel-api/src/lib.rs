@@ -25,6 +25,7 @@ pub mod schemas;
 pub mod search;
 pub mod sessions;
 pub mod settings;
+pub mod support;
 pub mod telemetry;
 pub mod users;
 
@@ -49,6 +50,7 @@ pub struct ApiState {
     pub oidc: OidcState,
     pub passwords: Arc<zitadel_authn::password::Swapper>,
     pub cookie_config: Arc<CookieConfig>,
+    pub support_grant_secret: Arc<String>,
     pub is_dev: bool,
 }
 
@@ -85,7 +87,7 @@ pub fn routes(state: ApiState) -> Router {
         .merge(console::routes())
         .merge(schemas::routes())
         .merge(login_flows::routes())
-        .merge(fga::routes())
+        .merge(fga::customer_routes())
         .merge(observability::routes())
         .merge(actions::routes())
         .merge(telemetry::routes())
@@ -108,6 +110,8 @@ pub fn routes(state: ApiState) -> Router {
         .merge(pats::routes())
         .merge(jobs::routes())
         .merge(settings::routes())
+        .merge(support::routes())
+        .merge(fga::internal_platform_routes())
         .merge(analytics::routes())
         // Flat product routes (root / self-hosted single-instance)
         .merge(product_handlers)

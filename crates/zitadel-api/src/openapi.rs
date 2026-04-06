@@ -1011,38 +1011,38 @@ fn auth_paths() -> Value {
 fn fga_paths() -> Value {
     json!({
         "/v1/fga/store": {
-            "get": operation("authorization", "fgaDiscoverStore", "Discover the singleton OpenFGA store for this instance", json_response("FGAStoreResponse"))
+            "get": operation("authorization", "fgaDiscoverStore", "Discover the customer FGA store for the resolved instance", json_response("FGAStoreResponse"))
         },
         "/v1/fga/check": {
-            "post": operation_with_body("authorization", "fgaCheck", "Check authorization using the legacy alias", "FGACheckRequest", json_response("FGACheckResponse"))
+            "post": operation_with_body("authorization", "fgaCheck", "Check authorization in the resolved instance customer store", "FGACheckRequest", json_response("FGACheckResponse"))
         },
         "/v1/fga/tuples": {
-            "get": operation_with_params("authorization", "fgaReadTuples", "Read relationship tuples using the legacy alias", json_response("FGAReadTuplesResponse"), vec![
+            "get": operation_with_params("authorization", "fgaReadTuples", "Read relationship tuples from the resolved instance customer store", json_response("FGAReadTuplesResponse"), vec![
                 query_parameter("user", false, json!({"type": "string"})),
                 query_parameter("relation", false, json!({"type": "string"})),
                 query_parameter("object", false, json!({"type": "string"})),
             ]),
-            "post": operation_with_body("authorization", "fgaWriteTuples", "Write relationship tuples using the legacy alias", "FGAWriteTuplesRequest", json_response("FGAWriteTuplesResponse")),
-            "delete": operation_with_body("authorization", "fgaDeleteTuples", "Delete relationship tuples using the legacy alias", "FGAWriteTuplesRequest", json_response("FGADeleteTuplesResponse"))
+            "post": operation_with_body("authorization", "fgaWriteTuples", "Write relationship tuples to the resolved instance customer store", "FGAWriteTuplesRequest", json_response("FGAWriteTuplesResponse")),
+            "delete": operation_with_body("authorization", "fgaDeleteTuples", "Delete relationship tuples from the resolved instance customer store", "FGAWriteTuplesRequest", json_response("FGADeleteTuplesResponse"))
         },
         "/v1/fga/list-objects": {
-            "post": operation_with_body("authorization", "fgaListObjects", "List authorized objects using the legacy alias", "FGAListObjectsRequest", json_response("FGAListObjectsResponse"))
+            "post": operation_with_body("authorization", "fgaListObjects", "List authorized objects from the resolved instance customer store", "FGAListObjectsRequest", json_response("FGAListObjectsResponse"))
         },
         "/v1/fga/model": {
-            "get": operation("authorization", "fgaGetModel", "Read the authorization model using the legacy alias", json_response("FGAModelResponse")),
-            "post": operation_with_body("authorization", "fgaWriteModel", "Write the authorization model using the legacy alias", "FGAAuthorizationModelWriteRequest", json_response("FGAAuthorizationModelWriteResponse"))
+            "get": operation("authorization", "fgaGetModel", "Read the authorization model for the resolved instance customer store", json_response("FGAModelResponse")),
+            "post": operation_with_body("authorization", "fgaWriteModel", "Write the authorization model for the resolved instance customer store", "FGAAuthorizationModelWriteRequest", json_response("FGAAuthorizationModelWriteResponse"))
         },
         "/v1/fga/model/graph": {
-            "get": operation("authorization", "fgaModelGraph", "Read the authorization model graph using the legacy alias", json_response("FGAModelGraphResponse"))
+            "get": operation("authorization", "fgaModelGraph", "Read the authorization model graph for the resolved instance customer store", json_response("FGAModelGraphResponse"))
         },
         "/v1/fga/expand": {
-            "post": operation_with_body("authorization", "fgaExpand", "Expand the authorization tree using the legacy alias", "FGAExpandRequest", json_response("FGAExpandResponse"))
+            "post": operation_with_body("authorization", "fgaExpand", "Expand the authorization tree for the resolved instance customer store", "FGAExpandRequest", json_response("FGAExpandResponse"))
         },
         "/v1/fga/test": {
-            "post": operation_with_body("authorization", "fgaBatchTest", "Batch test authorization assertions using the legacy alias", "FGABatchTestRequest", json_response("FGABatchTestResponse"))
+            "post": operation_with_body("authorization", "fgaBatchTest", "Batch test authorization assertions against the resolved instance customer store", "FGABatchTestRequest", json_response("FGABatchTestResponse"))
         },
         "/v1/fga/stores/{store_id}/check": {
-            "post": operation_with_body_and_params("authorization", "fgaStoreCheck", "Check authorization in the canonical store-scoped API", "FGAStoreCheckRequest", json_response("FGAStoreCheckResponse"), vec![
+            "post": operation_with_body_and_params("authorization", "fgaStoreCheck", "Check authorization in the compatibility store-scoped customer API", "FGAStoreCheckRequest", json_response("FGAStoreCheckResponse"), vec![
                 path_parameter("store_id", json!({"type": "string"})),
             ])
         },
@@ -1095,6 +1095,30 @@ fn fga_paths() -> Value {
         "/v1/fga/stores/{store_id}/authorization-models/{model_id}": {
             "get": operation_with_params("authorization", "fgaStoreGetAuthorizationModel", "Fetch an authorization model in the canonical store-scoped API", json_response("FGAAuthorizationModelMetadata"), vec![
                 path_parameter("store_id", json!({"type": "string"})),
+                path_parameter("model_id", json!({"type": "string"})),
+            ])
+        },
+        "/v1/internal/fga/platform/store": {
+            "get": operation("authorization", "platformFgaDiscoverStore", "Discover the internal platform FGA store", json_response("FGAStoreResponse"))
+        },
+        "/v1/internal/fga/platform/check": {
+            "post": operation_with_body("authorization", "platformFgaCheck", "Check authorization in the internal platform FGA store", "FGAStoreCheckRequest", json_response("FGAStoreCheckResponse"))
+        },
+        "/v1/internal/fga/platform/read": {
+            "post": operation_with_body("authorization", "platformFgaRead", "Read tuples from the internal platform FGA store", "FGAStoreReadRequest", json_response("FGAStoreReadResponse"))
+        },
+        "/v1/internal/fga/platform/changes": {
+            "get": operation_with_params("authorization", "platformFgaReadChanges", "Read tuple changes from the internal platform FGA store", json_response("FGAStoreReadChangesResponse"), vec![
+                query_parameter("type", false, json!({"type": "string"})),
+                query_parameter("page_size", false, json!({"type": "integer"})),
+                query_parameter("continuation_token", false, json!({"type": "string"})),
+            ])
+        },
+        "/v1/internal/fga/platform/authorization-models": {
+            "get": operation("authorization", "platformFgaListAuthorizationModels", "List authorization models for the internal platform FGA store", json_response("FGAAuthorizationModelsListResponse"))
+        },
+        "/v1/internal/fga/platform/authorization-models/{model_id}": {
+            "get": operation_with_params("authorization", "platformFgaGetAuthorizationModel", "Fetch an authorization model from the internal platform FGA store", json_response("FGAAuthorizationModelMetadata"), vec![
                 path_parameter("model_id", json!({"type": "string"})),
             ])
         }

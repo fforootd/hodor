@@ -10,8 +10,9 @@ use crate::{
     list_instance_domains, list_schema_registry, provider, resolve_domain_route,
 };
 use zitadel_app::repo::{
-    DomainRecord, GroupRecord, InstanceRecord, ListParams, OrgRecord, ProviderRecord,
-    SchemaRecord, SettingsRecord, UserRecord,
+    DomainRecord, GroupRecord, InstanceRecord, ListParams, OrgRecord, ProviderDefinitionRecord,
+    ProviderPayload as AppProviderPayload, ProviderRecord, SchemaRecord, SettingsRecord,
+    UserRecord,
 };
 
 pub(super) const DEFAULT_LIST_LIMIT: i64 = 50;
@@ -290,6 +291,18 @@ pub(super) fn provider_from_storage(record: provider::ProviderRecord) -> anyhow:
         config,
         created_at: record.created_at,
         updated_at: record.updated_at,
+    })
+}
+
+pub(super) fn provider_definition_from_storage(
+    record: provider::ProviderRecord,
+) -> anyhow::Result<ProviderDefinitionRecord> {
+    Ok(ProviderDefinitionRecord {
+        id: record.id,
+        org_id: record.org_id,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        payload: serde_json::from_value::<AppProviderPayload>(serde_json::to_value(record.payload)?)?,
     })
 }
 

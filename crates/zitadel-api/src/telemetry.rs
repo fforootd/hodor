@@ -46,7 +46,7 @@ async fn list_fingerprints(
     let ctx = response::build_actor_context(&identity);
     let cursor = p.cursor.unwrap_or_default();
     let limit = p.limit.min(200);
-    match s.app.runner.run_fn(&ctx, "telemetry.list_fingerprints", || {
+    match s.app.runner.run(&ctx, "telemetry.list_fingerprints", || {
         s.app.list_fingerprints.execute(&ctx, &cursor, limit + 1)
     }).await {
         Ok(rows) => {
@@ -87,9 +87,12 @@ async fn ingest_fingerprint(
         auth: zitadel_app::AuthContext {
             identity: zitadel_app::Identity {
                 user_id: String::new(),
+                principal_ref: String::new(),
                 session_id: String::new(),
                 token_type: "anonymous".to_string(),
                 org_id: String::new(),
+                issuer_instance_id: None,
+                support_grant: None,
             },
             capabilities: vec![],
         },
@@ -117,7 +120,7 @@ async fn ingest_fingerprint(
         type_,
         raw_data,
     };
-    match s.app.runner.run_fn(&ctx, "telemetry.upsert_fingerprint", || {
+    match s.app.runner.run(&ctx, "telemetry.upsert_fingerprint", || {
         s.app.upsert_fingerprint.execute(&ctx, cmd)
     }).await {
         Ok(()) => response::json_created(serde_json::json!({"id": id})),

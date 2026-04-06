@@ -9,61 +9,19 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use zitadel_app::credentials::LinkIdentityCommand;
-use zitadel_app::users::CreateUserCommand;
-use zitadel_db::{
-    current_instance_id,
-    provider::{ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
+use zitadel_app::repo::{
+    ProviderDefinitionRecord, ProviderLinkingMode, ProviderMatchBy, ProviderPayload,
 };
+use zitadel_app::users::CreateUserCommand;
+use zitadel_db::current_instance_id;
 
-/// Load a provider via repos and reconstruct the DB-typed ProviderRecord
-/// with its full ProviderPayload. This bridges the app repo's simplified
-/// `config: Value` back into the structured type the SSO flow requires.
+/// Load a provider via repos as an app-owned typed definition.
 async fn load_provider_via_repos(
     repos: &zitadel_app::repo::Repositories,
     instance_id: &str,
     provider_id: &str,
-) -> anyhow::Result<Option<ProviderRecord>> {
-    let record = repos.providers.get(instance_id, provider_id).await?;
-    record
-        .map(|r| {
-            let mut payload: ProviderPayload = if r
-                .config
-                .as_object()
-                .is_some_and(|map| map.contains_key("connection") || map.contains_key("mapping"))
-            {
-                let mut raw = r.config.clone();
-                if let serde_json::Value::Object(map) = &mut raw {
-                    map.entry("display_name".to_string())
-                        .or_insert_with(|| serde_json::Value::String(r.name.clone()));
-                    map.entry("protocol".to_string())
-                        .or_insert_with(|| serde_json::Value::String(r.protocol.clone()));
-                }
-                serde_json::from_value(raw).unwrap_or_default()
-            } else {
-                let connection = serde_json::from_value(r.config.clone()).unwrap_or_default();
-                ProviderPayload {
-                    connection,
-                    ..ProviderPayload::default()
-                }
-            };
-            payload.display_name = r.name.clone();
-            payload.protocol = r.protocol.clone();
-            payload.enabled = r.state == "active";
-            let org_id = r
-                .config
-                .get("org_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            Ok(ProviderRecord {
-                id: r.id,
-                org_id,
-                payload,
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-            })
-        })
-        .transpose()
+) -> anyhow::Result<Option<ProviderDefinitionRecord>> {
+    repos.providers.get_definition(instance_id, provider_id).await
 }
 use zitadel_oidc::rp::{
     RpAuthState, RpCallbackRequest, RpProviderSpec, RpStartRequest, StateStore,
@@ -316,7 +274,7 @@ async fn sso_callback(
     }
 }
 
-fn provider_to_rp_spec(provider: &ProviderRecord) -> anyhow::Result<RpProviderSpec> {
+fn provider_to_rp_spec(provider: &ProviderDefinitionRecord) -> anyhow::Result<RpProviderSpec> {
     let connection = &provider.payload.connection;
     if connection.issuer.is_empty() || connection.client_id.is_empty() {
         anyhow::bail!("provider missing issuer or client_id");
@@ -343,9 +301,12 @@ fn login_actor_context() -> zitadel_app::ActorContext {
         auth: zitadel_app::context::AuthContext {
             identity: zitadel_app::context::Identity {
                 user_id: String::new(),
+                principal_ref: String::new(),
                 session_id: String::new(),
                 token_type: "login_flow".to_string(),
                 org_id: String::new(),
+                issuer_instance_id: None,
+                support_grant: None,
             },
             capabilities: vec![],
         },
@@ -361,7 +322,7 @@ fn login_actor_context() -> zitadel_app::ActorContext {
 
 async fn complete_federated_login(
     state: &LoginState,
-    provider: &ProviderRecord,
+    provider: &ProviderDefinitionRecord,
     stored_state: &RpAuthState,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<Response> {
@@ -396,6 +357,9 @@ async fn complete_federated_login(
             zitadel_app::auth::IssueSessionCommand {
                 user_id: user_id.clone(),
                 auth_method: "sso".to_string(),
+                user_agent: String::new(),
+                ip_address: String::new(),
+                fingerprint: String::new(),
             },
         )
         .await
@@ -475,7 +439,7 @@ async fn load_target_schema(
 async fn find_or_create_identity(
     app: &zitadel_app::ApplicationServices,
     instance_id: &str,
-    provider: &ProviderRecord,
+    provider: &ProviderDefinitionRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
     profile: &HashMap<String, serde_json::Value>,
 ) -> anyhow::Result<String> {
@@ -551,7 +515,7 @@ async fn find_or_create_identity(
 async fn match_existing_user(
     repos: &zitadel_app::repo::Repositories,
     instance_id: &str,
-    provider: &ProviderRecord,
+    provider: &ProviderDefinitionRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
     profile: &HashMap<String, serde_json::Value>,
 ) -> anyhow::Result<Option<String>> {
@@ -590,7 +554,7 @@ async fn create_linked_identity(
     app: &zitadel_app::ApplicationServices,
     _instance_id: &str,
     user_id: &str,
-    provider: &ProviderRecord,
+    provider: &ProviderDefinitionRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<()> {
     let raw_claims: serde_json::Value =
@@ -659,7 +623,7 @@ mod tests {
     use crate::DefaultRpService;
     use zitadel_app::{ApplicationServices, HookPipeline};
     use zitadel_authn::{cookie::CookieConfig, password::Swapper};
-    use zitadel_db::{DEFAULT_INSTANCE_ID, InstanceContext, provider, with_instance_context};
+    use zitadel_db::{DEFAULT_INSTANCE_ID, InstanceContext, with_instance_context};
     use zitadel_fga::FgaService;
     use zitadel_storage::StorageRuntime;
 
@@ -718,24 +682,24 @@ mod tests {
             display_name: "Mock OIDC".into(),
             kind: "custom".into(),
             protocol: "oidc".into(),
-            connection: zitadel_db::provider::ProviderConnection {
+            connection: zitadel_app::repo::ProviderConnection {
                 issuer: "https://issuer.example".into(),
                 client_id: "client-1".into(),
                 client_secret: "secret-1".into(),
                 scopes: vec!["openid".into(), "profile".into(), "email".into()],
-                ..zitadel_db::provider::ProviderConnection::default()
+                ..zitadel_app::repo::ProviderConnection::default()
             },
-            mapping: zitadel_db::provider::ProviderMapping {
+            mapping: zitadel_app::repo::ProviderMapping {
                 claims: HashMap::from([
                     ("email".into(), "claims.email".into()),
                     ("display_name".into(), "claims.name".into()),
                 ]),
             },
-            target: zitadel_db::provider::ProviderTarget {
+            target: zitadel_app::repo::ProviderTarget {
                 schema_type: "human_user".into(),
                 schema_id: String::new(),
             },
-            linking: zitadel_db::provider::ProviderLinking {
+            linking: zitadel_app::repo::ProviderLinking {
                 mode,
                 match_by: ProviderMatchBy::VerifiedEmail,
             },
@@ -768,19 +732,13 @@ mod tests {
     #[tokio::test]
     async fn link_only_rejects_unknown_user() {
         let state = test_state().await;
-        let scoped = state.stateful.db().scoped_default();
-        provider::insert_provider(
-            &scoped,
-            "provider-1",
-            "org-1",
-            &provider_payload(ProviderLinkingMode::LinkOnly),
-        )
-        .await
-        .unwrap();
-        let provider = provider::get_provider(&scoped, "provider-1")
-            .await
-            .unwrap()
-            .unwrap();
+        let provider = ProviderDefinitionRecord {
+            id: "provider-1".into(),
+            org_id: "org-1".into(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            payload: provider_payload(ProviderLinkingMode::LinkOnly),
+        };
         let identity = zitadel_oidc::rp::VerifiedExternalIdentity {
             issuer: "https://issuer.example".into(),
             subject: "ext-1".into(),

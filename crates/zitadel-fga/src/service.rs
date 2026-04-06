@@ -7,18 +7,22 @@ use google_cloud_spanner::{
     client::Error as SpannerError, row::Row as SpannerRow, statement::Statement,
 };
 use sqlx::Row;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use zitadel_db::{
-    Db, Dialect, list_active_child_instance_ownerships, list_active_org_role_memberships,
+    Db, Dialect, DEFAULT_INSTANCE_ID, list_active_child_instance_ownerships,
+    list_active_org_role_memberships, list_active_role_bindings_for_scope, list_role_assignments,
 };
+use zitadel_app::repo::RoleAssignmentFilter;
+use zitadel_authz::relation_name_for_role;
 
 use crate::core_model::*;
 use crate::dto::*;
 use crate::error::FgaError;
 use crate::evaluation::*;
 use crate::traits::*;
-use crate::{CORE_MODEL_VERSION, LIST_SCAN_FALLBACK_LIMIT};
+use crate::{CORE_MODEL_VERSION, LIST_SCAN_FALLBACK_LIMIT, PLATFORM_STORE_ID};
 
 #[derive(Clone)]
 pub struct FgaService {
@@ -76,57 +80,36 @@ impl FgaService {
         Ok(out)
     }
 
-    pub async fn reconcile_root_hierarchy(&self, root_instance_id: &str) -> Result<(), FgaError> {
-        let store = self.initialize_instance(root_instance_id).await?;
-        for child in list_active_child_instance_ownerships(&self.db, root_instance_id)
-            .await
-            .map_err(FgaError::Internal)?
-        {
-            self.initialize_instance(&child.instance_id).await?;
-        }
+    pub async fn initialize_platform_store(&self) -> Result<StoreInfo, FgaError> {
+        self.initialize_instance(PLATFORM_STORE_ID).await
+    }
 
+    pub async fn discover_platform_store(&self) -> Result<StoreInfo, FgaError> {
+        self.discover_store(PLATFORM_STORE_ID).await
+    }
+
+    pub async fn rebuild_platform_store(&self) -> Result<(), FgaError> {
+        let store = self.initialize_platform_store().await?;
         let desired = self
-            .desired_root_hierarchy_tuples(root_instance_id)
+            .desired_platform_tuples(DEFAULT_INSTANCE_ID)
             .await
             .map_err(FgaError::Internal)?;
-        let current = self
-            .read_all_managed_root_tuples(root_instance_id, &store.id)
-            .await?;
+        let current = self.read_all_store_tuples(PLATFORM_STORE_ID, &store.id).await?;
+        self.reconcile_managed_tuple_set(PLATFORM_STORE_ID, &store.id, desired, current)
+            .await
+    }
 
-        let desired_set = desired
-            .iter()
-            .map(tuple_identity)
-            .collect::<BTreeSet<String>>();
-        let current_set = current
-            .iter()
-            .map(tuple_identity)
-            .collect::<BTreeSet<String>>();
+    pub async fn reconcile_root_hierarchy(&self, root_instance_id: &str) -> Result<(), FgaError> {
+        let _ = root_instance_id;
+        self.rebuild_platform_store().await
+    }
 
-        let writes = desired
-            .into_iter()
-            .filter(|tuple| !current_set.contains(&tuple_identity(tuple)))
-            .collect::<Vec<_>>();
-        let deletes = current
-            .into_iter()
-            .filter(|tuple| !desired_set.contains(&tuple_identity(tuple)))
-            .collect::<Vec<_>>();
-
-        if writes.is_empty() && deletes.is_empty() {
-            return Ok(());
-        }
-
-        self.write_tuples(
-            root_instance_id,
-            &store.id,
-            WriteRequest {
-                writes: TupleKeySet { tuple_keys: writes },
-                deletes: TupleKeySet {
-                    tuple_keys: deletes,
-                },
-                authorization_model_id: None,
-            },
-        )
-        .await
+    pub async fn reconcile_parent_hierarchy(
+        &self,
+        parent_instance_id: &str,
+    ) -> Result<(), FgaError> {
+        let _ = parent_instance_id;
+        self.rebuild_platform_store().await
     }
 
     pub async fn root_relation_allowed(
@@ -136,14 +119,26 @@ impl FgaService {
         relation: &str,
         object: &str,
     ) -> Result<bool, FgaError> {
-        let store = self.discover_store(root_instance_id).await?;
+        self.parent_relation_allowed(root_instance_id, &format!("user:{user_id}"), relation, object)
+            .await
+    }
+
+    pub async fn parent_relation_allowed(
+        &self,
+        parent_instance_id: &str,
+        principal_ref: &str,
+        relation: &str,
+        object: &str,
+    ) -> Result<bool, FgaError> {
+        let _ = parent_instance_id;
+        let store = self.discover_platform_store().await?;
         Ok(self
             .check(
-                root_instance_id,
+                PLATFORM_STORE_ID,
                 &store.id,
                 CheckRequest {
                     tuple_key: TupleKey {
-                        user: format!("user:{user_id}"),
+                        user: principal_ref.to_string(),
                         relation: relation.to_string(),
                         object: object.to_string(),
                         condition: None,
@@ -167,16 +162,35 @@ impl FgaService {
         object_type: &str,
         object_ids: &[String],
     ) -> Result<Vec<String>, FgaError> {
+        self.parent_batch_filter(
+            root_instance_id,
+            &format!("user:{user_id}"),
+            relation,
+            object_type,
+            object_ids,
+        )
+        .await
+    }
+
+    pub async fn parent_batch_filter(
+        &self,
+        parent_instance_id: &str,
+        principal_ref: &str,
+        relation: &str,
+        object_type: &str,
+        object_ids: &[String],
+    ) -> Result<Vec<String>, FgaError> {
         if object_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let store = self.discover_store(root_instance_id).await?;
+        let _ = parent_instance_id;
+        let store = self.discover_platform_store().await?;
         let checks: Vec<BatchCheckItem> = object_ids
             .iter()
             .enumerate()
             .map(|(i, id)| BatchCheckItem {
                 tuple_key: TupleKey {
-                    user: format!("user:{user_id}"),
+                    user: principal_ref.to_string(),
                     relation: relation.to_string(),
                     object: format!("{object_type}:{id}"),
                     condition: None,
@@ -187,7 +201,7 @@ impl FgaService {
 
         let result = self
             .batch_check(
-                root_instance_id,
+                PLATFORM_STORE_ID,
                 &store.id,
                 BatchCheckRequest {
                     checks,
@@ -213,60 +227,148 @@ impl FgaService {
         Ok(allowed)
     }
 
-    async fn desired_root_hierarchy_tuples(
-        &self,
-        root_instance_id: &str,
-    ) -> anyhow::Result<Vec<TupleKey>> {
+    async fn desired_platform_tuples(&self, root_instance_id: &str) -> anyhow::Result<Vec<TupleKey>> {
         let mut tuples = Vec::new();
-        for membership in list_active_org_role_memberships(&self.db, root_instance_id).await? {
-            if !matches!(
-                membership.role.as_str(),
-                "owner" | "admin" | "member" | "viewer"
-            ) {
+        let mut visited = HashSet::new();
+        let mut parents = vec![root_instance_id.to_string()];
+        let mut child_ownerships = Vec::new();
+
+        while let Some(parent_instance_id) = parents.pop() {
+            if !visited.insert(parent_instance_id.clone()) {
+                continue;
+            }
+            let children =
+                list_active_child_instance_ownerships(&self.db, &parent_instance_id).await?;
+
+            for membership in list_active_org_role_memberships(&self.db, &parent_instance_id).await?
+            {
+                if !matches!(
+                    membership.role.as_str(),
+                    "owner" | "admin" | "member" | "viewer"
+                ) {
+                    continue;
+                }
+                let legacy_role = membership.role.clone();
+                tuples.push(TupleKey {
+                    user: format!("user:{}", membership.user_id),
+                    relation: legacy_role.clone(),
+                    object: format!("org:{}", membership.org_id),
+                    condition: None,
+                });
+                if let Some(relation) = legacy_org_catalog_relation(&legacy_role) {
+                    tuples.push(TupleKey {
+                        user: format!("user:{}", membership.user_id),
+                        relation: relation.to_string(),
+                        object: format!("org:{}", membership.org_id),
+                        condition: None,
+                    });
+                }
+                if let Some(relation) = legacy_parent_instance_catalog_relation(&legacy_role) {
+                    tuples.push(TupleKey {
+                        user: format!("user:{}", membership.user_id),
+                        relation: relation.to_string(),
+                        object: format!("instance:{parent_instance_id}"),
+                        condition: None,
+                    });
+                    for child in &children {
+                        if child.owner_org_id != membership.org_id {
+                            continue;
+                        }
+                        tuples.push(TupleKey {
+                            user: format!("user:{}", membership.user_id),
+                            relation: relation.to_string(),
+                            object: format!("instance:{}", child.instance_id),
+                            condition: None,
+                        });
+                    }
+                }
+            }
+
+            for child in children {
+                let object = format!("instance:{}", child.instance_id);
+                tuples.push(TupleKey {
+                    user: format!("instance:{parent_instance_id}"),
+                    relation: "parent".to_string(),
+                    object: object.clone(),
+                    condition: None,
+                });
+                tuples.push(TupleKey {
+                    user: format!("org:{}#owner", child.owner_org_id),
+                    relation: "owner".to_string(),
+                    object: object.clone(),
+                    condition: None,
+                });
+                tuples.push(TupleKey {
+                    user: format!("org:{}#admin", child.owner_org_id),
+                    relation: "admin".to_string(),
+                    object: object.clone(),
+                    condition: None,
+                });
+                tuples.push(TupleKey {
+                    user: format!("org:{}#viewer", child.owner_org_id),
+                    relation: "viewer".to_string(),
+                    object,
+                    condition: None,
+                });
+                child_ownerships.push((
+                    parent_instance_id.clone(),
+                    child.instance_id.clone(),
+                    child.owner_org_id.clone(),
+                ));
+                parents.push(child.instance_id);
+            }
+        }
+
+        let now = role_assignment_cutoff();
+        for assignment in list_role_assignments(
+            &self.db,
+            &RoleAssignmentFilter {
+                include_revoked: false,
+                ..Default::default()
+            },
+        )
+        .await? {
+            if assignment
+                .expires_at
+                .as_deref()
+                .is_some_and(|expires_at| expires_at <= now.as_str())
+            {
                 continue;
             }
             tuples.push(TupleKey {
-                user: format!("user:{}", membership.user_id),
-                relation: membership.role,
-                object: format!("org:{}", membership.org_id),
+                user: assignment.principal_ref,
+                relation: relation_name_for_role(&assignment.role_key),
+                object: format!("{}:{}", assignment.scope_kind, assignment.scope_id),
                 condition: None,
             });
         }
 
-        for child in list_active_child_instance_ownerships(&self.db, root_instance_id).await? {
-            let object = format!("instance:{}", child.instance_id);
-            tuples.push(TupleKey {
-                user: format!("instance:{root_instance_id}"),
-                relation: "parent".to_string(),
-                object: object.clone(),
-                condition: None,
-            });
-            tuples.push(TupleKey {
-                user: format!("org:{}#owner", child.owner_org_id),
-                relation: "owner".to_string(),
-                object: object.clone(),
-                condition: None,
-            });
-            tuples.push(TupleKey {
-                user: format!("org:{}#admin", child.owner_org_id),
-                relation: "admin".to_string(),
-                object: object.clone(),
-                condition: None,
-            });
-            tuples.push(TupleKey {
-                user: format!("org:{}#viewer", child.owner_org_id),
-                relation: "viewer".to_string(),
-                object,
-                condition: None,
-            });
+        for (parent_instance_id, child_instance_id, owner_org_id) in child_ownerships {
+            for binding in list_active_role_bindings_for_scope(
+                &self.db,
+                &parent_instance_id,
+                "org",
+                &owner_org_id,
+                None,
+            )
+            .await? {
+                if let Some(relation) = projected_child_relation(&binding.role_key) {
+                    tuples.push(TupleKey {
+                        user: binding.principal_ref,
+                        relation: relation.to_string(),
+                        object: format!("instance:{child_instance_id}"),
+                        condition: None,
+                    });
+                }
+            }
         }
 
         Ok(tuples)
     }
 
-    async fn read_all_managed_root_tuples(
+    async fn read_all_store_tuples(
         &self,
-        root_instance_id: &str,
+        instance_id: &str,
         store_id: &str,
     ) -> Result<Vec<TupleKey>, FgaError> {
         let mut continuation = None;
@@ -274,7 +376,7 @@ impl FgaService {
         loop {
             let response = self
                 .read_tuples(
-                    root_instance_id,
+                    instance_id,
                     store_id,
                     ReadRequest {
                         tuple_key: None,
@@ -283,19 +385,48 @@ impl FgaService {
                     },
                 )
                 .await?;
-            tuples.extend(
-                response
-                    .tuples
-                    .into_iter()
-                    .map(|record| record.key)
-                    .filter(is_managed_root_tuple),
-            );
+            tuples.extend(response.tuples.into_iter().map(|record| record.key));
             if response.continuation_token.is_none() {
                 break;
             }
             continuation = response.continuation_token;
         }
         Ok(tuples)
+    }
+
+    async fn reconcile_managed_tuple_set(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        desired: Vec<TupleKey>,
+        current: Vec<TupleKey>,
+    ) -> Result<(), FgaError> {
+        let desired_set = desired.iter().map(tuple_identity).collect::<BTreeSet<String>>();
+        let current_set = current.iter().map(tuple_identity).collect::<BTreeSet<String>>();
+
+        let writes = desired
+            .into_iter()
+            .filter(|tuple| !current_set.contains(&tuple_identity(tuple)))
+            .collect::<Vec<_>>();
+        let deletes = current
+            .into_iter()
+            .filter(|tuple| !desired_set.contains(&tuple_identity(tuple)))
+            .collect::<Vec<_>>();
+
+        if writes.is_empty() && deletes.is_empty() {
+            return Ok(());
+        }
+
+        self.write_tuples(
+            instance_id,
+            store_id,
+            WriteRequest {
+                writes: TupleKeySet { tuple_keys: writes },
+                deletes: TupleKeySet { tuple_keys: deletes },
+                authorization_model_id: None,
+            },
+        )
+        .await
     }
 
     pub(crate) async fn cached_store(&self, instance_id: &str) -> Option<StoreInfo> {
@@ -496,6 +627,37 @@ impl FgaService {
         instance_id: &str,
         store_id: &str,
     ) -> Result<(), FgaError> {
+        if is_platform_store(store_id) {
+            if let Some(fragments) = self
+                .load_active_model_fragments(instance_id, store_id)
+                .await?
+            {
+                if fragments.core_model_version == CORE_MODEL_VERSION
+                    && fragments.custom_model == "{}"
+                    && fragments.module_fragments == "[]"
+                {
+                    if self
+                        .cached_active_model(instance_id, store_id)
+                        .await
+                        .is_none()
+                    {
+                        let cached = self
+                            .load_model_row_from_db(instance_id, store_id, None)
+                            .await?
+                            .ok_or_else(|| {
+                                FgaError::NotFound("authorization model not found".into())
+                            })?;
+                        self.cache_model(instance_id, store_id, &cached, true).await;
+                    }
+                    return Ok(());
+                }
+            }
+
+            self.persist_model(instance_id, store_id, core_authorization_model())
+                .await?;
+            return Ok(());
+        }
+
         if self
             .cached_active_model(instance_id, store_id)
             .await
@@ -607,9 +769,19 @@ impl FgaService {
 
         let compiled = CompiledModel::from_request(&request)?;
         validate_sealed_core(&compiled)?;
+        let custom = extract_custom_fragment(&request);
+        if is_platform_store(store_id)
+            && custom
+                .get("type_definitions")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|types| !types.is_empty())
+        {
+            return Err(FgaError::Forbidden(
+                "platform authorization model is sealed and cannot be customized".into(),
+            ));
+        }
         let model_id = Uuid::now_v7().to_string();
         let raw = serde_json::to_string(&request).context("serialize authorization model")?;
-        let custom = extract_custom_fragment(&request);
 
         match &self.db {
             Db::Sql(_) => {
@@ -1645,4 +1817,41 @@ impl FgaService {
             request_issue: None,
         }
     }
+}
+
+fn legacy_org_catalog_relation(role: &str) -> Option<&'static str> {
+    match role {
+        "owner" | "admin" => Some("org_owner"),
+        "viewer" => Some("org_owner_viewer"),
+        _ => None,
+    }
+}
+
+fn legacy_parent_instance_catalog_relation(role: &str) -> Option<&'static str> {
+    match role {
+        "owner" | "admin" => Some("iam_owner"),
+        "viewer" => Some("iam_owner_viewer"),
+        _ => None,
+    }
+}
+
+fn projected_child_relation(role_key: &str) -> Option<&'static str> {
+    match role_key {
+        "ORG_OWNER" => Some("iam_owner"),
+        "ORG_OWNER_VIEWER" => Some("iam_owner_viewer"),
+        "ORG_USER_MANAGER" => Some("iam_user_manager"),
+        "ORG_ADMIN_IMPERSONATOR" => Some("iam_admin_impersonator"),
+        "ORG_END_USER_IMPERSONATOR" => Some("iam_end_user_impersonator"),
+        _ => None,
+    }
+}
+
+fn is_platform_store(store_id: &str) -> bool {
+    store_id == PLATFORM_STORE_ID
+}
+
+fn role_assignment_cutoff() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }

@@ -5,9 +5,22 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Identity {
     pub user_id: String,
+    pub principal_ref: String,
     pub session_id: String,
     pub token_type: String,
     pub org_id: String,
+    pub issuer_instance_id: Option<String>,
+    pub support_grant: Option<SupportGrantContext>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SupportGrantContext {
+    pub assignment_id: String,
+    pub role_key: String,
+    pub target_instance_id: String,
+    pub issuer_instance_id: String,
+    pub reason: Option<String>,
+    pub expires_at: String,
 }
 
 /// Capability granted outside normal FGA relations (e.g., operator_admin).
@@ -67,6 +80,10 @@ impl ActorContext {
         &self.instance.instance_id
     }
 
+    pub fn principal_ref(&self) -> &str {
+        &self.auth.identity.principal_ref
+    }
+
     pub fn user_id(&self) -> &str {
         &self.auth.identity.user_id
     }
@@ -77,6 +94,14 @@ impl ActorContext {
 
     pub fn is_operator_admin(&self) -> bool {
         self.auth.is_operator_admin()
+    }
+
+    pub fn support_grant_for_instance(&self, instance_id: &str) -> Option<&SupportGrantContext> {
+        self.auth
+            .identity
+            .support_grant
+            .as_ref()
+            .filter(|grant| grant.target_instance_id == instance_id)
     }
 }
 

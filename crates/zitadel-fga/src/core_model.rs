@@ -139,6 +139,11 @@ pub fn core_authorization_model() -> AuthorizationModelWriteRequest {
                 metadata: Some(json!({ "relations": {} })),
             },
             TypeDefinition {
+                type_name: "principal".into(),
+                relations: Map::new(),
+                metadata: Some(json!({ "relations": {} })),
+            },
+            TypeDefinition {
                 type_name: "instance".into(),
                 relations: Map::from_iter([
                     ("owner".into(), json!({ "this": {} })),
@@ -165,24 +170,41 @@ pub fn core_authorization_model() -> AuthorizationModelWriteRequest {
                         }),
                     ),
                     ("parent".into(), json!({ "this": {} })),
+                    ("system_owner".into(), json!({ "this": {} })),
+                    ("system_owner_viewer".into(), json!({ "this": {} })),
+                    ("iam_owner".into(), json!({ "this": {} })),
+                    ("iam_owner_viewer".into(), json!({ "this": {} })),
+                    ("iam_org_manager".into(), json!({ "this": {} })),
+                    ("iam_user_manager".into(), json!({ "this": {} })),
+                    ("iam_admin_impersonator".into(), json!({ "this": {} })),
+                    ("iam_end_user_impersonator".into(), json!({ "this": {} })),
+                    ("iam_login_client".into(), json!({ "this": {} })),
+                    ("self_management_global".into(), json!({ "this": {} })),
+                    ("support_read".into(), json!({ "this": {} })),
+                    ("support_write".into(), json!({ "this": {} })),
+                    ("support_config".into(), json!({ "this": {} })),
+                    ("support_admin".into(), json!({ "this": {} })),
                 ]),
                 metadata: Some(json!({
                     "relations": {
                         "owner": {
                             "directly_related_user_types": [
                                 { "type": "user" },
+                                { "type": "principal" },
                                 { "type": "org", "relation": "owner" }
                             ]
                         },
                         "admin": {
                             "directly_related_user_types": [
                                 { "type": "user" },
+                                { "type": "principal" },
                                 { "type": "org", "relation": "admin" }
                             ]
                         },
                         "viewer": {
                             "directly_related_user_types": [
                                 { "type": "user" },
+                                { "type": "principal" },
                                 { "type": "org", "relation": "viewer" }
                             ]
                         },
@@ -190,7 +212,21 @@ pub fn core_authorization_model() -> AuthorizationModelWriteRequest {
                             "directly_related_user_types": [
                                 { "type": "instance" }
                             ]
-                        }
+                        },
+                        "system_owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "system_owner_viewer": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_owner_viewer": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_org_manager": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_user_manager": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_admin_impersonator": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_end_user_impersonator": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "iam_login_client": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "self_management_global": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "support_read": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "support_write": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "support_config": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "support_admin": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] }
                     }
                 })),
             },
@@ -231,18 +267,53 @@ pub fn core_authorization_model() -> AuthorizationModelWriteRequest {
                             }
                         }),
                     ),
+                    ("org_owner".into(), json!({ "this": {} })),
+                    ("org_owner_viewer".into(), json!({ "this": {} })),
+                    ("org_user_manager".into(), json!({ "this": {} })),
+                    ("org_settings_manager".into(), json!({ "this": {} })),
+                    ("org_user_permission_editor".into(), json!({ "this": {} })),
+                    ("org_project_permission_editor".into(), json!({ "this": {} })),
+                    ("org_project_creator".into(), json!({ "this": {} })),
+                    ("org_admin_impersonator".into(), json!({ "this": {} })),
+                    ("org_end_user_impersonator".into(), json!({ "this": {} })),
+                    ("org_user_self_manager".into(), json!({ "this": {} })),
                 ]),
                 metadata: Some(json!({
                     "relations": {
-                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
-                        "member": { "directly_related_user_types": [{ "type": "user" }] },
-                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                        "owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "admin": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "member": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "viewer": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_owner_viewer": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_user_manager": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_settings_manager": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_user_permission_editor": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_project_permission_editor": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_project_creator": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_admin_impersonator": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_end_user_impersonator": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] },
+                        "org_user_self_manager": { "directly_related_user_types": [{ "type": "user" }, { "type": "principal" }] }
                     }
                 })),
             },
             simple_direct_type("group", &["member", "admin"]),
-            simple_direct_type("project", &["owner", "admin", "member"]),
+            simple_direct_type(
+                "project",
+                &[
+                    "owner",
+                    "admin",
+                    "member",
+                    "project_owner",
+                    "project_owner_viewer",
+                    "project_owner_global",
+                    "project_owner_viewer_global",
+                ],
+            ),
+            simple_direct_type(
+                "project_grant",
+                &["project_grant_owner", "project_grant_owner_viewer"],
+            ),
             simple_direct_type("app", &["admin", "viewer"]),
             simple_direct_type("settings", &["admin", "viewer"]),
             simple_direct_type("session", &["owner"]),
@@ -263,7 +334,8 @@ fn simple_direct_type(type_name: &str, relations: &[&str]) -> TypeDefinition {
                 relation.to_string(),
                 json!({
                     "directly_related_user_types": [
-                        { "type": "user" }
+                        { "type": "user" },
+                        { "type": "principal" }
                     ]
                 }),
             )
@@ -326,20 +398,6 @@ fn merge_model_fragment(
 
 pub(crate) fn tuple_identity(tuple: &TupleKey) -> String {
     format!("{}|{}|{}", tuple.user, tuple.relation, tuple.object)
-}
-
-pub(crate) fn is_managed_root_tuple(tuple: &TupleKey) -> bool {
-    match tuple.object.split_once(':') {
-        Some(("org", _)) => matches!(
-            tuple.relation.as_str(),
-            "owner" | "admin" | "member" | "viewer"
-        ),
-        Some(("instance", _)) => matches!(
-            tuple.relation.as_str(),
-            "parent" | "owner" | "admin" | "viewer"
-        ),
-        _ => false,
-    }
 }
 
 pub(crate) fn validate_sealed_core(model: &CompiledModel) -> Result<(), FgaError> {

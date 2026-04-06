@@ -620,8 +620,7 @@ CREATE TABLE IF NOT EXISTS instance_trust_links (
 
 CREATE TABLE IF NOT EXISTS fga_instance_stores (
     instance_id  STRING(MAX) PRIMARY KEY,
-    store_id     STRING(MAX) NOT NULL,
-    FOREIGN KEY (instance_id) REFERENCES instances(instance_id) ON DELETE CASCADE
+    store_id     STRING(MAX) NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fga_instance_stores_store_id
     ON fga_instance_stores(store_id);

@@ -92,7 +92,7 @@ async fn create(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.create", || {
+        .run(&ctx, "login_flow.create", || {
             s.app.create_login_flow.execute(&ctx, cmd)
         })
         .await
@@ -111,7 +111,7 @@ async fn list(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.list", || {
+        .run(&ctx, "login_flow.list", || {
             s.app.list_login_flows.execute(&ctx)
         })
         .await
@@ -138,7 +138,7 @@ async fn get_one(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.get", || {
+        .run(&ctx, "login_flow.get", || {
             s.app.get_login_flow.execute(&ctx, &id)
         })
         .await
@@ -165,7 +165,7 @@ async fn update(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.update", || {
+        .run(&ctx, "login_flow.update", || {
             s.app.update_login_flow.execute(&ctx, cmd)
         })
         .await
@@ -175,7 +175,7 @@ async fn update(
             match s
                 .app
                 .runner
-                .run_fn(&ctx, "login_flow.get", || {
+                .run(&ctx, "login_flow.get", || {
                     s.app.get_login_flow.execute(&ctx, &flow_id)
                 })
                 .await
@@ -197,7 +197,7 @@ async fn delete_one(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.delete", || {
+        .run(&ctx, "login_flow.delete", || {
             s.app.delete_login_flow.execute(&ctx, &id)
         })
         .await
@@ -216,7 +216,7 @@ async fn promote(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.promote", || {
+        .run(&ctx, "login_flow.promote", || {
             s.app.promote_login_flow.execute(&ctx, &id)
         })
         .await
@@ -236,7 +236,7 @@ async fn archive(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.archive", || {
+        .run(&ctx, "login_flow.archive", || {
             s.app.archive_login_flow.execute(&ctx, &id)
         })
         .await
@@ -257,7 +257,7 @@ async fn resolve(
     match s
         .app
         .runner
-        .run_fn(&ctx, "login_flow.resolve", || {
+        .run(&ctx, "login_flow.resolve", || {
             s.app.resolve_login_flow.execute(&ctx)
         })
         .await

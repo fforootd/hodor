@@ -1,14 +1,22 @@
-use crate::{ApiState, response};
-use axum::{Router, extract::State, response::Response, routing::get};
+use crate::{ApiState, middleware::Identity, response};
+use axum::{Extension, Router, extract::State, response::Response, routing::get};
 use serde_json::{Value, json};
-use zitadel_db::{current_instance_id, list_jobs_for_instance};
 
 pub fn routes() -> Router<ApiState> {
     Router::new().route("/jobs", get(list_jobs))
 }
 
-async fn list_jobs(State(s): State<ApiState>) -> Response {
-    match list_jobs_for_instance(&s.db, current_instance_id().as_ref()).await {
+async fn list_jobs(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run(&ctx, "job.list", || s.app.list_jobs.execute(&ctx))
+        .await
+    {
         Ok(rows) => {
             let items: Vec<Value> = rows
                 .into_iter()
@@ -50,6 +58,6 @@ async fn list_jobs(State(s): State<ApiState>) -> Response {
                 total: Some(total),
             })
         }
-        Err(error) => response::internal(error),
+        Err(error) => response::app_error(error),
     }
 }

@@ -7,8 +7,9 @@ use zitadel_db::DEFAULT_INSTANCE_ID;
 
 use support::{
     ROOT_HOST, build_cloud_test_app, create_root_user_in_org, create_session_for_instance,
-    delete_on_host, get_on_host, grant_org_role, host_headers, insert_child_instance,
-    patch_json_on_host, post_json_on_host,
+    delete_on_host, get_on_host, grant_org_role, grant_org_role_in_instance, host_headers,
+    insert_child_instance, insert_instance_trust_link, insert_instance_with_parent,
+    patch_json_on_host, post_json_on_host, rebuild_platform_fga, setup_child,
 };
 
 async fn build_test_app() -> anyhow::Result<zitadel_testkit::TestApp> {
@@ -221,8 +222,87 @@ async fn root_bootstrap_exposes_capabilities_and_child_context_rejects_instance_
     assert_eq!(child_instances.status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         child_instances.json_value(),
-        json!({"error": "instance management is only available from the root instance", "code": 403})
+        json!({"error": "instance management is only available from a parent instance", "code": 403})
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn portal_instances_can_manage_their_own_children_when_instance_management_is_enabled()
+-> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let portal_org = "portal-org";
+    let portal_host = "portal.example.com";
+    let portal_instance = "portal-inst";
+    let tenant_instance = "portal-child";
+
+    let scoped = app.ctx.db.scoped_default();
+    sqlx::query("INSERT INTO orgs (instance_id, id, name, state) VALUES ($1, $2, $3, 'active')")
+        .bind(DEFAULT_INSTANCE_ID)
+        .bind(portal_org)
+        .bind("Portal Org")
+        .execute(scoped.pool())
+        .await
+        .context("insert portal org")?;
+
+    insert_instance_with_parent(
+        &app,
+        portal_instance,
+        DEFAULT_INSTANCE_ID,
+        portal_org,
+        portal_host,
+        "managed",
+        r#"{"instance_management":true,"billing":true}"#,
+    )
+    .await?;
+
+    let portal_user = support::insert_user_with_password(
+        &app,
+        portal_instance,
+        portal_org,
+        "portal-owner@example.com",
+        "portal-owner@example.com",
+        "password123",
+    )
+    .await?;
+    grant_org_role_in_instance(&app, portal_instance, portal_org, &portal_user.user_id, "owner")
+        .await?;
+    insert_instance_with_parent(
+        &app,
+        tenant_instance,
+        portal_instance,
+        portal_org,
+        "portal-child.example.com",
+        "managed",
+        "{}",
+    )
+    .await?;
+    let portal_session = create_session_for_instance(&app, portal_instance, &portal_user).await?;
+
+    let bootstrap = get_on_host(
+        &app,
+        "/v1/console/bootstrap",
+        portal_session.bearer_actor(),
+        portal_host,
+    )
+    .await?;
+    assert_eq!(bootstrap.status, axum::http::StatusCode::OK);
+    assert_eq!(
+        bootstrap.json_value()["capabilities"]["instance_management"],
+        true
+    );
+
+    let list = get_on_host(
+        &app,
+        "/v1/instances",
+        portal_session.bearer_actor(),
+        portal_host,
+    )
+    .await?;
+    assert_eq!(list.status, axum::http::StatusCode::OK);
+    assert_eq!(list.json_value()["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list.json_value()["items"][0]["instance_id"], tenant_instance);
 
     Ok(())
 }
@@ -256,11 +336,14 @@ async fn root_instance_access_uses_fga_not_only_session_org_scope() -> anyhow::R
         .context("insert org-b")?;
     sqlx::query("UPDATE users SET org_id = $1 WHERE instance_id = $2 AND id = $3")
         .bind("org-b")
-    .bind(scoped.instance_id())
-    .bind(&root_user.user_id)
-    .execute(scoped.pool())
-    .await
-    .context("move user to org-b")?;
+        .bind(scoped.instance_id())
+        .bind(&root_user.user_id)
+        .execute(scoped.pool())
+        .await
+        .context("move user to org-b")?;
+    rebuild_platform_fga(&app.ctx.api_state)
+        .await
+        .context("rebuild platform store after moving root user org")?;
 
     let after_move = get_on_host(
         &app,
@@ -281,6 +364,9 @@ async fn root_instance_access_uses_fga_not_only_session_org_scope() -> anyhow::R
     )
     .await
     .context("remove org-a owner membership")?;
+    rebuild_platform_fga(&app.ctx.api_state)
+        .await
+        .context("rebuild platform store after membership removal")?;
 
     let after_membership_change = get_on_host(
         &app,
@@ -441,6 +527,181 @@ async fn instances_support_get_update_and_deprovision_through_management_routes(
             })),
         "deprovisioned instances should remain visible with their updated state",
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn managed_support_grants_enable_and_revoke_child_instance_access() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let operator = app.ctx.admin_user().await?;
+    let operator_pat = app.ctx.create_pat(&operator, "support-grant-admin").await?;
+    let support_user =
+        create_root_user_in_org(&app, "support-org", "Support Org", "support@example.com").await?;
+    let support_session = create_session_for_instance(&app, DEFAULT_INSTANCE_ID, &support_user).await?;
+
+    let _ = setup_child(&app, "support-managed-child", "support-managed.example.com", "child-org").await?;
+
+    let before = get_on_host(
+        &app,
+        "/v1/instances/support-managed-child/sessions",
+        support_session.bearer_actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(before.status, axum::http::StatusCode::NOT_FOUND);
+
+    let created = post_json_on_host(
+        &app,
+        "/v1/support/grants",
+        operator_pat.actor(),
+        ROOT_HOST,
+        &json!({
+            "instance_id": "support-managed-child",
+            "role": "SUPPORT_READ",
+            "reason": "SUPPORT-123",
+            "duration_secs": 3600,
+            "principal_ref": format!("user:{}", support_user.user_id),
+        }),
+    )
+    .await?;
+    assert_eq!(created.status, axum::http::StatusCode::CREATED);
+    assert_eq!(created.json_value()["source_kind"], "support_grant_managed");
+    let grant_id = created.json_value()["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_string();
+
+    let after = get_on_host(
+        &app,
+        "/v1/instances/support-managed-child/sessions",
+        support_session.bearer_actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(after.status, axum::http::StatusCode::OK);
+
+    let revoked = delete_on_host(
+        &app,
+        &format!("/v1/support/grants/{grant_id}"),
+        operator_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(revoked.status, axum::http::StatusCode::NO_CONTENT);
+
+    let denied_again = get_on_host(
+        &app,
+        "/v1/instances/support-managed-child/sessions",
+        support_session.bearer_actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(denied_again.status, axum::http::StatusCode::NOT_FOUND);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn federated_support_grants_issue_tokens_that_respect_trust_and_revocation()
+-> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let operator = app.ctx.admin_user().await?;
+    let operator_pat = app.ctx.create_pat(&operator, "support-federated-admin").await?;
+    let federated_instance = "support-federated-child";
+    let federated_host = "support-federated.example.com";
+
+    insert_instance_with_parent(
+        &app,
+        federated_instance,
+        DEFAULT_INSTANCE_ID,
+        &app.ctx.db.default_org_id().await?,
+        federated_host,
+        "federated",
+        "{}",
+    )
+    .await?;
+
+    let child_scoped = app.ctx.db.db.scoped(federated_instance.to_string());
+    sqlx::query("INSERT INTO orgs (instance_id, id, name, state) VALUES ($1, $2, $3, 'active')")
+        .bind(federated_instance)
+        .bind("federated-org")
+        .bind("Federated Org")
+        .execute(child_scoped.pool())
+        .await
+        .context("insert federated org")?;
+    let child_user = support::insert_user_with_password(
+        &app,
+        federated_instance,
+        "federated-org",
+        "federated-admin@example.com",
+        "Federated Admin",
+        "password123",
+    )
+    .await?;
+    let _child_session = create_session_for_instance(&app, federated_instance, &child_user).await?;
+
+    let issuer = app.ctx.api_state.oidc.provider.issuer().into_owned();
+    let audience = format!("instance:{federated_instance}");
+    insert_instance_trust_link(
+        &app,
+        federated_instance,
+        &issuer,
+        &audience,
+        r#"["support_grant"]"#,
+    )
+    .await?;
+
+    let created = post_json_on_host(
+        &app,
+        "/v1/support/grants",
+        operator_pat.actor(),
+        ROOT_HOST,
+        &json!({
+            "instance_id": federated_instance,
+            "role": "SUPPORT_READ",
+            "reason": "SUPPORT-456",
+            "duration_secs": 3600
+        }),
+    )
+    .await?;
+    assert_eq!(created.status, axum::http::StatusCode::CREATED);
+    assert_eq!(created.json_value()["source_kind"], "support_grant_federated");
+    let grant_id = created.json_value()["grant_id"]
+        .as_str()
+        .expect("grant id")
+        .to_string();
+    let access_token = created.json_value()["access_token"]
+        .as_str()
+        .expect("federated access token")
+        .to_string();
+
+    let allowed = get_on_host(
+        &app,
+        "/v1/sessions",
+        zitadel_testkit::AuthActor::bearer(access_token.as_str()),
+        federated_host,
+    )
+    .await?;
+    assert_eq!(allowed.status, axum::http::StatusCode::OK);
+
+    let revoked = delete_on_host(
+        &app,
+        &format!("/v1/support/grants/{grant_id}"),
+        operator_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(revoked.status, axum::http::StatusCode::NO_CONTENT);
+
+    let denied = get_on_host(
+        &app,
+        "/v1/sessions",
+        zitadel_testkit::AuthActor::bearer(access_token.as_str()),
+        federated_host,
+    )
+    .await?;
+    assert_eq!(denied.status, axum::http::StatusCode::UNAUTHORIZED);
 
     Ok(())
 }

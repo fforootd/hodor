@@ -19,6 +19,15 @@ impl ListActions {
         ctx: &ActorContext,
         params: &ListParams,
     ) -> Result<ListResult<ActionRecord>, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .actions
             .list(ctx.instance_id(), params)
@@ -42,6 +51,15 @@ impl GetAction {
         ctx: &ActorContext,
         action_id: &str,
     ) -> Result<ActionRecord, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .actions
             .get(ctx.instance_id(), action_id)
@@ -66,6 +84,15 @@ impl CreateAction {
         ctx: &ActorContext,
         action: &ActionRecord,
     ) -> Result<ActionRecord, AppError> {
+        // Authz: caller must be admin on the instance
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         let result = self
             .repos
             .actions
@@ -109,6 +136,15 @@ impl UpdateAction {
         ctx: &ActorContext,
         action: &ActionRecord,
     ) -> Result<ActionRecord, AppError> {
+        // Authz: caller must be admin on the instance
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         let result = self
             .repos
             .actions
@@ -151,7 +187,7 @@ impl DeleteAction {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 

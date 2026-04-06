@@ -34,7 +34,7 @@ impl RegisterSchema {
         }
 
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         // Check for existing schema with same type
         let existing = self
@@ -103,6 +103,15 @@ impl GetSchema {
         ctx: &ActorContext,
         schema_id: &str,
     ) -> Result<SchemaRecord, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .schemas
             .get(ctx.instance_id(), schema_id)
@@ -137,7 +146,7 @@ impl UpdateSchema {
         cmd: UpdateSchemaCommand,
     ) -> Result<SchemaRecord, AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         let mut schema = self
             .repos
@@ -196,7 +205,7 @@ impl PromoteSchema {
         schema_id: &str,
     ) -> Result<bool, AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         let promoted = self
             .repos
@@ -241,6 +250,15 @@ impl CountSchemaUsers {
         ctx: &ActorContext,
         schema_id: &str,
     ) -> Result<i64, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .schemas
             .count_by_schema(ctx.instance_id(), schema_id)
@@ -264,6 +282,15 @@ impl ListSchemas {
         ctx: &ActorContext,
         params: &ListParams,
     ) -> Result<ListResult<SchemaRecord>, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .schemas
             .list(ctx.instance_id(), params)

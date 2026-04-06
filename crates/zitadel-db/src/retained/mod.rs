@@ -1,4 +1,5 @@
 mod auth;
+mod authz;
 mod instances;
 mod orgs;
 mod schemas;
@@ -14,6 +15,7 @@ use serde_json::Value;
 // ─── Re-exports from submodules ─────────────────────────────
 
 pub use auth::*;
+pub use authz::*;
 pub use instances::*;
 pub use orgs::*;
 pub use schemas::*;
@@ -325,6 +327,12 @@ pub struct MembershipRow {
     pub display_name: Option<String>,
     pub role: String,
     pub added_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveRoleBindingRecord {
+    pub principal_ref: String,
+    pub role_key: String,
 }
 
 // ─── Shared helper functions (used across submodules) ───────

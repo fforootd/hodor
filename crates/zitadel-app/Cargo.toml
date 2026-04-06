@@ -24,6 +24,7 @@ uuid = { workspace = true }
 
 # Workspace crates (for shared types)
 zitadel-expr = { workspace = true }
+zitadel-authz = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

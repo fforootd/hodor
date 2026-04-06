@@ -27,12 +27,11 @@ No YAML files. No Docker Compose. No database setup. One command, working in 60 
 
 For deterministic local credentials such as `admin / admin123`, use a seed file like `fixtures/zitadel.dev.toml` or the `just dev` workflow.
 
-**Root instance gets `*`:**
-The root instance (`inst_root`) is the operator's own instance. Its owners bypass FGA checks entirely — they have implicit wildcard access to all resources across all instances. This means:
-- No per-type FGA tuples needed for the operator's admin
-- New resource types (endpoints, schemas, etc.) work immediately without model changes
-- Customer instances still enforce strict FGA-based authorization
-- This mirrors the `root` user convention in Unix — secure by default, powerful when needed
+**Root instance uses explicit platform authz:**
+The root instance (`inst_root`) is the operator's own instance, but it is still authorized through the internal platform authorization model. Root staff get explicit platform roles and hierarchy tuples in the deployment-scoped `platform` store, and `operator_admin` remains the only break-glass bypass. This means:
+- New resource types participate in the same explicit authz model instead of depending on an implicit wildcard
+- Customer instances still enforce strict platform authorization for Zitadel admin behavior and separate customer FGA for customer-authored ReBAC
+- Break-glass remains available without coupling emergency access to FGA health
 
 **Startup lifecycle** (see [ADR-018](../adr/018-startup-lifecycle.md)):
 

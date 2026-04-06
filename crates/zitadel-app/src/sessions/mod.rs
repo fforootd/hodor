@@ -20,6 +20,15 @@ impl ListSessions {
         &self,
         ctx: &ActorContext,
     ) -> Result<Vec<SessionDetail>, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         Ok(self
             .repos
             .sessions
@@ -43,6 +52,15 @@ impl GetSession {
         ctx: &ActorContext,
         session_id: &str,
     ) -> Result<SessionDetail, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .sessions
             .get(ctx.instance_id(), session_id)

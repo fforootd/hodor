@@ -138,9 +138,12 @@ pub fn build_actor_context(identity: &crate::middleware::Identity) -> zitadel_ap
         auth: zitadel_app::AuthContext {
             identity: zitadel_app::Identity {
                 user_id: identity.user_id.clone(),
+                principal_ref: identity.principal_ref.clone(),
                 session_id: identity.session_id.clone(),
                 token_type: identity.token_type.clone(),
                 org_id: identity.org_id.clone(),
+                issuer_instance_id: identity.issuer_instance_id.clone(),
+                support_grant: identity.support_grant.clone(),
             },
             capabilities,
         },

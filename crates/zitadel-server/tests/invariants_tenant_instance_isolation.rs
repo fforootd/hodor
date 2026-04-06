@@ -586,7 +586,7 @@ async fn instance_management_blocks_child_and_outsider_contexts() -> anyhow::Res
     assert_eq!(child_get.status, StatusCode::FORBIDDEN);
     assert_eq!(
         child_get.json_value(),
-        json!({"error": "instance management is only available from the root instance", "code": 403})
+        json!({"error": "instance management is only available from a parent instance", "code": 403})
     );
 
     let child_update = patch_json_on_host(

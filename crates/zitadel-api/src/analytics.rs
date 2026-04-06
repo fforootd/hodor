@@ -6,8 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zitadel_db::{create_saved_query, delete_saved_query, list_saved_queries};
+use zitadel_app::saved_queries::CreateSavedQueryCommand;
 use zitadel_storage::AnalyticsQuery;
 
 pub fn routes() -> Router<ApiState> {
@@ -15,20 +14,7 @@ pub fn routes() -> Router<ApiState> {
         .route("/analytics/query", post(query))
         .route("/analytics/schema", get(schema))
         .route("/analytics/queries", get(list_queries).post(create_query))
-        .route(
-            "/analytics/queries/{id}",
-            axum::routing::delete(
-                |state: State<ApiState>,
-                 Extension(identity): Extension<Identity>,
-                 path: Path<String>| async move {
-                    let ctx = response::build_actor_context(&identity);
-                    if let Err(e) = crate::fga_check(&state, &ctx, "admin", "analytics:queries").await {
-                        return e;
-                    }
-                    delete_query(state, path).await
-                },
-            ),
-        )
+        .route("/analytics/queries/{id}", axum::routing::delete(delete_query))
 }
 
 #[derive(Deserialize)]
@@ -105,7 +91,14 @@ async fn list_queries(
     if let Err(e) = crate::fga_check(&s, &ctx, "viewer", "analytics:queries").await {
         return e;
     }
-    match list_saved_queries(&s.db, zitadel_db::current_instance_id().as_ref()).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "analytics.list_saved_queries", || {
+            s.app.list_saved_queries.execute(&ctx)
+        })
+        .await
+    {
         Ok(rows) => {
             let items: Vec<SavedQueryResponse> = rows
                 .into_iter()
@@ -137,19 +130,18 @@ async fn create_query(
     if let Err(e) = crate::fga_check(&s, &ctx, "admin", "analytics:queries").await {
         return e;
     }
-    if req.name.is_empty() || req.sql.is_empty() {
-        return response::bad_request("name and sql are required");
-    }
-    let id = format!("sq_{}", Uuid::new_v4());
-    match create_saved_query(
-        &s.db,
-        zitadel_db::current_instance_id().as_ref(),
-        &id,
-        &req.name,
-        &req.description,
-        &req.sql,
-    )
-    .await
+    let cmd = CreateSavedQueryCommand {
+        name: req.name,
+        description: req.description,
+        sql: req.sql,
+    };
+    match s
+        .app
+        .runner
+        .run(&ctx, "analytics.create_saved_query", || {
+            s.app.create_saved_query.execute(&ctx, cmd)
+        })
+        .await
     {
         Ok(row) => response::json_created(SavedQueryResponse {
             id: row.id,
@@ -163,10 +155,25 @@ async fn create_query(
 }
 
 /// DELETE /v1/analytics/queries/{id} — delete a saved query.
-async fn delete_query(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match delete_saved_query(&s.db, zitadel_db::current_instance_id().as_ref(), &id).await {
+async fn delete_query(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "admin", "analytics:queries").await {
+        return e;
+    }
+    match s
+        .app
+        .runner
+        .run(&ctx, "analytics.delete_saved_query", || {
+            s.app.delete_saved_query.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(true) => response::no_content(),
         Ok(false) => response::not_found("saved query not found"),
-        Err(error) => response::internal(error),
+        Err(error) => response::app_error(error),
     }
 }

@@ -62,7 +62,7 @@ async fn create(
         org_id: identity.org_id.clone(),
         metadata: req.metadata,
     };
-    match s.app.runner.run_fn(&ctx, "group.create", || s.app.create_group.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "group.create", || s.app.create_group.execute(&ctx, cmd)).await {
         Ok(group) => response::json_created(ItemResponse::from(group)),
         Err(e) => response::app_error(e),
     }
@@ -74,7 +74,7 @@ async fn get_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run_fn(&ctx, "group.get", || s.app.get_group.execute(&ctx, &id)).await {
+    match s.app.runner.run(&ctx, "group.get", || s.app.get_group.execute(&ctx, &id)).await {
         Ok(group) => response::json_ok(ItemResponse::from(group)),
         Err(e) => response::app_error(e),
     }
@@ -91,7 +91,7 @@ async fn list(
         cursor: p.cursor,
         search: None,
     };
-    match s.app.runner.run_fn(&ctx, "group.list", || s.app.list_groups.execute(&ctx, None, &params)).await {
+    match s.app.runner.run(&ctx, "group.list", || s.app.list_groups.execute(&ctx, None, &params)).await {
         Ok(result) => {
             let items: Vec<ItemResponse> =
                 result.items.into_iter().map(ItemResponse::from).collect();
@@ -125,7 +125,7 @@ async fn update(
             Some(req.metadata)
         },
     };
-    match s.app.runner.run_fn(&ctx, "group.update", || s.app.update_group.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "group.update", || s.app.update_group.execute(&ctx, cmd)).await {
         Ok(group) => response::json_ok(ItemResponse::from(group)),
         Err(e) => response::app_error(e),
     }
@@ -137,7 +137,7 @@ async fn delete_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run_fn(&ctx, "group.delete", || s.app.delete_group.execute(&ctx, &id)).await {
+    match s.app.runner.run(&ctx, "group.delete", || s.app.delete_group.execute(&ctx, &id)).await {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

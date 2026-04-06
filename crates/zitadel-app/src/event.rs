@@ -154,6 +154,22 @@ pub enum DomainEvent {
         instance_id: String,
         actor_id: String,
     },
+    #[serde(rename = "support.grant_created")]
+    SupportGrantCreated {
+        grant_id: String,
+        target_instance_id: String,
+        principal_ref: String,
+        role_key: String,
+        actor_id: String,
+    },
+    #[serde(rename = "support.grant_revoked")]
+    SupportGrantRevoked {
+        grant_id: String,
+        target_instance_id: String,
+        principal_ref: String,
+        role_key: String,
+        actor_id: String,
+    },
 
     // ── Settings ──
     #[serde(rename = "settings.updated")]
@@ -312,6 +328,8 @@ impl DomainEvent {
             Self::MembershipChanged { .. } => "membership.changed",
             Self::PatCreated { .. } => "pat.created",
             Self::PatRevoked { .. } => "pat.revoked",
+            Self::SupportGrantCreated { .. } => "support_grant.created",
+            Self::SupportGrantRevoked { .. } => "support_grant.revoked",
         }
     }
 
@@ -347,6 +365,7 @@ impl DomainEvent {
             | Self::ResourceDeleted { .. } => "resource",
             Self::MembershipChanged { .. } => "membership",
             Self::PatCreated { .. } | Self::PatRevoked { .. } => "pat",
+            Self::SupportGrantCreated { .. } | Self::SupportGrantRevoked { .. } => "support_grant",
         }
     }
 
@@ -393,6 +412,8 @@ impl DomainEvent {
             | Self::ResourceDeleted { resource_id, .. } => resource_id,
             Self::MembershipChanged { entity_id, .. } => entity_id,
             Self::PatCreated { pat_id, .. } | Self::PatRevoked { pat_id, .. } => pat_id,
+            Self::SupportGrantCreated { grant_id, .. }
+            | Self::SupportGrantRevoked { grant_id, .. } => grant_id,
         }
     }
 
@@ -434,7 +455,9 @@ impl DomainEvent {
             | Self::ResourceDeleted { actor_id, .. }
             | Self::MembershipChanged { actor_id, .. }
             | Self::PatCreated { actor_id, .. }
-            | Self::PatRevoked { actor_id, .. } => actor_id,
+            | Self::PatRevoked { actor_id, .. }
+            | Self::SupportGrantCreated { actor_id, .. }
+            | Self::SupportGrantRevoked { actor_id, .. } => actor_id,
             // Events without explicit actor
             Self::SessionStarted { user_id, .. } => user_id,
             Self::LoginFlowCompleted { user_id, .. } => user_id,

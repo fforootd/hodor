@@ -14,6 +14,7 @@ use axum::{
 };
 use serde_json::Value;
 use uuid::Uuid;
+use zitadel_api::ApiState;
 use zitadel_authn::password::encode_credential_json;
 use zitadel_config::Config;
 use zitadel_db::DEFAULT_INSTANCE_ID;
@@ -43,6 +44,10 @@ pub async fn build_cloud_test_app() -> anyhow::Result<TestApp> {
     .await
     .context("insert root domain")?;
 
+    rebuild_platform_fga(&ctx.api_state)
+        .await
+        .context("reconcile root fga tuples")?;
+
     let app_state = Arc::new(AppState {
         config: ctx.config.clone(),
         db: ctx.db.db.clone(),
@@ -66,9 +71,22 @@ pub async fn grant_org_role(
     user_id: &str,
     role: &str,
 ) -> anyhow::Result<()> {
-    zitadel_db::add_membership(&app.ctx.db.db, DEFAULT_INSTANCE_ID, "org", org_id, user_id, role)
+    grant_org_role_in_instance(app, DEFAULT_INSTANCE_ID, org_id, user_id, role).await
+}
+
+pub async fn grant_org_role_in_instance(
+    app: &TestApp,
+    instance_id: &str,
+    org_id: &str,
+    user_id: &str,
+    role: &str,
+) -> anyhow::Result<()> {
+    zitadel_db::add_membership(&app.ctx.db.db, instance_id, "org", org_id, user_id, role)
         .await
-        .with_context(|| format!("grant {role} membership for org {org_id}"))?;
+        .with_context(|| format!("grant {role} membership for org {org_id} in {instance_id}"))?;
+    rebuild_platform_fga(&app.ctx.api_state)
+        .await
+        .context("rebuild platform fga after membership grant")?;
     Ok(())
 }
 
@@ -142,17 +160,42 @@ pub async fn insert_child_instance(
     owner_org_id: &str,
     domain: &str,
 ) -> anyhow::Result<()> {
-    let scoped = app.ctx.db.scoped_default();
-    sqlx::query(
-        "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, feature_overrides) \
-         VALUES ($1, $2, $3, 'managed', 'active', 'global', '{}')",
+    insert_instance_with_parent(
+        app,
+        instance_id,
+        DEFAULT_INSTANCE_ID,
+        owner_org_id,
+        domain,
+        "managed",
+        "{}",
     )
+    .await
+}
+
+pub async fn insert_instance_with_parent(
+    app: &TestApp,
+    instance_id: &str,
+    parent_instance_id: &str,
+    owner_org_id: &str,
+    domain: &str,
+    kind: &str,
+    feature_overrides_json: &str,
+) -> anyhow::Result<()> {
+    let scoped = app.ctx.db.scoped_default();
+    let sql = format!(
+        "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, feature_overrides) \
+         VALUES ($1, $2, $3, $4, 'active', 'global', {})",
+        scoped.json_bind(5),
+    );
+    sqlx::query(&sql)
     .bind(instance_id)
-    .bind(DEFAULT_INSTANCE_ID)
+    .bind(parent_instance_id)
     .bind(owner_org_id)
+    .bind(kind)
+    .bind(feature_overrides_json)
     .execute(scoped.pool())
     .await
-    .context("insert child instance")?;
+    .context("insert instance")?;
     sqlx::query(
         "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
          VALUES ($1, $2, NULL, 1, 'active', 1)",
@@ -166,8 +209,35 @@ pub async fn insert_child_instance(
     let fga: &zitadel_fga::FgaService = &app.ctx.api_state.fga;
     fga.initialize_instance(instance_id)
         .await
-        .context("init child fga")?;
+        .context("init instance fga")?;
+    rebuild_platform_fga(&app.ctx.api_state)
+        .await
+        .context("rebuild platform fga after instance insert")?;
 
+    Ok(())
+}
+
+pub async fn insert_instance_trust_link(
+    app: &TestApp,
+    child_instance_id: &str,
+    issuer: &str,
+    audience: &str,
+    allowed_scopes_json: &str,
+) -> anyhow::Result<()> {
+    let scoped = app.ctx.db.scoped_default();
+    let sql = format!(
+        "INSERT INTO instance_trust_links (child_instance_id, issuer, audience, allowed_scopes, state) \
+         VALUES ($1, $2, $3, {}, 'active')",
+        scoped.json_bind(4),
+    );
+    sqlx::query(&sql)
+        .bind(child_instance_id)
+        .bind(issuer)
+        .bind(audience)
+        .bind(allowed_scopes_json)
+        .execute(scoped.pool())
+        .await
+        .context("insert instance trust link")?;
     Ok(())
 }
 
@@ -199,6 +269,14 @@ pub async fn setup_child(
     .execute(child_scoped.pool())
     .await
     .context("insert child admin user")?;
+
+    // Grant owner role so FGA checks pass for this child admin
+    zitadel_db::add_membership(&app.ctx.db.db, instance_id, "org", org_id, &user_id, "owner")
+        .await
+        .context("grant child admin org owner")?;
+    rebuild_platform_fga(&app.ctx.api_state)
+        .await
+        .context("reconcile child fga tuples")?;
 
     let user = UserFixture {
         user_id: user_id.clone(),
@@ -414,4 +492,13 @@ pub fn extract_ids(value: &Value) -> Vec<String> {
         .flatten()
         .filter_map(|item| item["id"].as_str().map(ToOwned::to_owned))
         .collect()
+}
+
+pub async fn rebuild_platform_fga(api_state: &ApiState) -> anyhow::Result<()> {
+    api_state
+        .fga
+        .rebuild_platform_store()
+        .await
+        .context("rebuild platform store")?;
+    Ok(())
 }

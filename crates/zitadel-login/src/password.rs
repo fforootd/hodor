@@ -47,6 +47,7 @@ pub(crate) async fn verify_and_migrate(
     let verify_result = match verify_result {
         Some(result) => result,
         None => {
+
             return Err(Json(FlowStepResponse {
                 flow_id: flow_id.to_string(),
                 step: LoginStep::Password.as_str().into(),

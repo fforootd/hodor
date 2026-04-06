@@ -62,7 +62,7 @@ async fn create(
         name: req.name,
         metadata: req.metadata,
     };
-    match s.app.runner.run_fn(&ctx, "org.create", || s.app.create_org.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "org.create", || s.app.create_org.execute(&ctx, cmd)).await {
         Ok(org) => response::json_created(OrgResponse::from(org)),
         Err(e) => response::app_error(e),
     }
@@ -74,7 +74,7 @@ async fn get_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run_fn(&ctx, "org.get", || s.app.get_org.execute(&ctx, &id)).await {
+    match s.app.runner.run(&ctx, "org.get", || s.app.get_org.execute(&ctx, &id)).await {
         Ok(org) => response::json_ok(OrgResponse::from(org)),
         Err(e) => response::app_error(e),
     }
@@ -91,7 +91,7 @@ async fn list(
         cursor: p.cursor,
         search: None,
     };
-    match s.app.runner.run_fn(&ctx, "org.list", || s.app.list_orgs.execute(&ctx, &params)).await {
+    match s.app.runner.run(&ctx, "org.list", || s.app.list_orgs.execute(&ctx, &params)).await {
         Ok(result) => {
             let items: Vec<OrgResponse> = result.items.into_iter().map(OrgResponse::from).collect();
             response::json_ok(response::ListResponse {
@@ -124,7 +124,7 @@ async fn update(
             Some(req.metadata)
         },
     };
-    match s.app.runner.run_fn(&ctx, "org.update", || s.app.update_org.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "org.update", || s.app.update_org.execute(&ctx, cmd)).await {
         Ok(org) => response::json_ok(OrgResponse::from(org)),
         Err(e) => response::app_error(e),
     }
@@ -136,7 +136,7 @@ async fn delete_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run_fn(&ctx, "org.delete", || s.app.delete_org.execute(&ctx, &id)).await {
+    match s.app.runner.run(&ctx, "org.delete", || s.app.delete_org.execute(&ctx, &id)).await {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

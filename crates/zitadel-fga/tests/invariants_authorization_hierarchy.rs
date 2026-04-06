@@ -4,7 +4,7 @@ use zitadel_db::{
     CreateManagedInstanceInput, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, add_membership, bootstrap,
     create_managed_instance, create_user, migrate,
 };
-use zitadel_fga::{CheckRequest, Evaluator, FgaService, StoreResolver, TupleKey};
+use zitadel_fga::{CheckRequest, Evaluator, FgaService, PLATFORM_STORE_ID, StoreResolver, TupleKey};
 
 async fn assert_root_org_owner_inherits_child_instance_admin(db: Db) -> anyhow::Result<()> {
     migrate::migrate(&db).await?;
@@ -52,10 +52,10 @@ async fn assert_root_org_owner_inherits_child_instance_admin(db: Db) -> anyhow::
     service
         .reconcile_root_hierarchy(DEFAULT_INSTANCE_ID)
         .await?;
-    let root_store = service.discover_store(DEFAULT_INSTANCE_ID).await?;
+    let root_store = service.discover_platform_store().await?;
     let allowed = service
         .check(
-            DEFAULT_INSTANCE_ID,
+            PLATFORM_STORE_ID,
             &root_store.id,
             CheckRequest {
                 tuple_key: TupleKey {

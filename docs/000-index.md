@@ -58,6 +58,7 @@ ADRs are grouped by theme. For the full chronological list, see the [collapsed t
 |---|---|---|
 | [020](adr/020-authorization-model.md) | Authorization Model — Immutable Core + Custom Fragment | Accepted |
 | [034](adr/034-multi-tenancy.md) | Multi-Tenancy via Instance Boundaries | Accepted |
+| [037](adr/037-fga-store-split-platform-customer.md) | FGA Store Split — Platform Store + Customer Stores | Proposed |
 
 ### Cloud Architecture
 
@@ -158,6 +159,10 @@ graph TD
     A020 --> A036[036 Staff Access]
     A031 --> A036
     A034 --> A036
+    A020 --> A037[037 FGA Store Split]
+    A031 --> A037
+    A034 --> A037
+    A036 --> A037
 ```
 
 ## Conventions
@@ -166,7 +171,7 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 037
+- **Next ADR number**: 038
 
 ---
 
@@ -211,5 +216,6 @@ graph TD
 | [034](adr/034-multi-tenancy.md) | Multi-Tenancy via Instance Boundaries | Accepted | 2026-04-04 |
 | [035](adr/035-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
 | [036](adr/036-staff-access-support-grants.md) | Staff Access and Support Grants | Proposed | 2026-04-05 |
+| [037](adr/037-fga-store-split-platform-customer.md) | FGA Store Split — Platform Store + Customer Stores | Proposed | 2026-04-05 |
 
 </details>

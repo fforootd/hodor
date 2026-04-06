@@ -616,8 +616,7 @@ CREATE TABLE IF NOT EXISTS instance_trust_links (
 
 CREATE TABLE IF NOT EXISTS fga_instance_stores (
     instance_id  TEXT PRIMARY KEY,
-    store_id     TEXT NOT NULL UNIQUE,
-    FOREIGN KEY (instance_id) REFERENCES instances(instance_id) ON DELETE CASCADE
+    store_id     TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS fga_authorization_models (

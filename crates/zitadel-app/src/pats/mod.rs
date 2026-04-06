@@ -100,6 +100,16 @@ impl ListPats {
         ctx: &ActorContext,
         user_id: &str,
     ) -> Result<Vec<PatRecord>, AppError> {
+        // Authz: caller must be admin or the target user themselves
+        crate::authz::require_permission_or_self(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("user:{}", user_id),
+            user_id,
+        )
+        .await?;
+
         self.repos
             .pats
             .list(ctx.instance_id(), user_id)
@@ -128,7 +138,7 @@ impl RevokePat {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 

@@ -31,9 +31,12 @@ fn login_actor_context() -> zitadel_app::ActorContext {
         auth: zitadel_app::context::AuthContext {
             identity: zitadel_app::context::Identity {
                 user_id: String::new(),
+                principal_ref: String::new(),
                 session_id: String::new(),
                 token_type: "login_flow".to_string(),
                 org_id: String::new(),
+                issuer_instance_id: None,
+                support_grant: None,
             },
             capabilities: vec![],
         },
@@ -670,6 +673,9 @@ pub(crate) async fn handle_password_step(
             IssueSessionCommand {
                 user_id: user.user_id.clone(),
                 auth_method: "password".to_string(),
+                user_agent: String::new(),
+                ip_address: String::new(),
+                fingerprint: String::new(),
             },
         )
         .await

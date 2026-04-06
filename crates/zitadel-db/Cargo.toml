@@ -21,3 +21,4 @@ google-cloud-gax = { workspace = true }
 zitadel-config = { workspace = true }
 zitadel-app = { workspace = true }
 zitadel-crypto = { workspace = true }
+zitadel-authz = { workspace = true }

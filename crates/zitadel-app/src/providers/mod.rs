@@ -34,7 +34,7 @@ impl CreateProvider {
         }
 
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
@@ -91,6 +91,15 @@ impl GetProvider {
         ctx: &ActorContext,
         provider_id: &str,
     ) -> Result<ProviderRecord, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .providers
             .get(ctx.instance_id(), provider_id)
@@ -115,6 +124,15 @@ impl ListProviders {
         ctx: &ActorContext,
         params: &ListParams,
     ) -> Result<ListResult<ProviderRecord>, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .providers
             .list(ctx.instance_id(), params)
@@ -149,7 +167,7 @@ impl UpdateProvider {
         cmd: UpdateProviderCommand,
     ) -> Result<ProviderRecord, AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         let mut provider = self
             .repos
@@ -211,7 +229,7 @@ impl DeleteProvider {
     )]
     pub async fn execute(&self, ctx: &ActorContext, provider_id: &str) -> Result<(), AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         self.repos
             .providers

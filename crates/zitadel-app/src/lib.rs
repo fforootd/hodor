@@ -30,17 +30,21 @@ pub mod apps;
 pub mod auth;
 pub mod credentials;
 pub mod groups;
+pub mod jobs;
 pub mod instances;
+pub mod memberships;
 pub mod orgs;
 pub mod pats;
 pub mod providers;
 pub mod console;
 pub mod login_flows;
 pub mod resources;
+pub mod saved_queries;
 pub mod schemas;
 pub mod search;
 pub mod sessions;
 pub mod settings;
+pub mod support;
 pub mod telemetry;
 pub mod users;
 
@@ -114,6 +118,11 @@ pub struct ApplicationServices {
     pub add_domain: instances::AddDomain,
     pub remove_domain: instances::RemoveDomain,
 
+    // Support
+    pub create_support_grant: support::CreateSupportGrant,
+    pub list_support_grants: support::ListSupportGrants,
+    pub revoke_support_grant: support::RevokeSupportGrant,
+
     // Settings
     pub get_settings: settings::GetSettings,
     pub update_settings: settings::UpdateSettings,
@@ -148,6 +157,19 @@ pub struct ApplicationServices {
 
     // Search
     pub search_entities: search::SearchEntities,
+
+    // Jobs
+    pub list_jobs: jobs::ListJobs,
+
+    // Memberships
+    pub list_memberships: memberships::ListMemberships,
+    pub add_membership: memberships::AddMembership,
+    pub remove_membership: memberships::RemoveMembership,
+
+    // Saved Queries
+    pub list_saved_queries: saved_queries::ListSavedQueries,
+    pub create_saved_query: saved_queries::CreateSavedQuery,
+    pub delete_saved_query: saved_queries::DeleteSavedQuery,
 
     // Telemetry
     pub list_fingerprints: telemetry::ListFingerprints,
@@ -239,6 +261,11 @@ impl ApplicationServices {
             add_domain: instances::AddDomain::new(repos.clone()),
             remove_domain: instances::RemoveDomain::new(repos.clone()),
 
+            // Support
+            create_support_grant: support::CreateSupportGrant::new(repos.clone()),
+            list_support_grants: support::ListSupportGrants::new(repos.clone()),
+            revoke_support_grant: support::RevokeSupportGrant::new(repos.clone()),
+
             // Settings
             get_settings: settings::GetSettings::new(repos.clone()),
             update_settings: settings::UpdateSettings::new(repos.clone()),
@@ -273,6 +300,19 @@ impl ApplicationServices {
 
             // Search
             search_entities: search::SearchEntities::new(repos.clone()),
+
+            // Jobs
+            list_jobs: jobs::ListJobs::new(repos.clone()),
+
+            // Memberships
+            list_memberships: memberships::ListMemberships::new(repos.clone()),
+            add_membership: memberships::AddMembership::new(repos.clone()),
+            remove_membership: memberships::RemoveMembership::new(repos.clone()),
+
+            // Saved Queries
+            list_saved_queries: saved_queries::ListSavedQueries::new(repos.clone()),
+            create_saved_query: saved_queries::CreateSavedQuery::new(repos.clone()),
+            delete_saved_query: saved_queries::DeleteSavedQuery::new(repos.clone()),
 
             // Telemetry
             list_fingerprints: telemetry::ListFingerprints::new(repos.clone()),

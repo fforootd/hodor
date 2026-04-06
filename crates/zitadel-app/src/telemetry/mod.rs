@@ -20,7 +20,7 @@ impl ListFingerprints {
         limit: i64,
     ) -> Result<Vec<FingerprintRecord>, AppError> {
         self.repos
-            .raw
+            .telemetry
             .list_fingerprints(ctx.instance_id(), cursor, limit)
             .await
             .map_err(AppError::Internal)
@@ -49,7 +49,7 @@ impl UpsertFingerprint {
         cmd: UpsertFingerprintCommand,
     ) -> Result<(), AppError> {
         self.repos
-            .raw
+            .telemetry
             .upsert_fingerprint(ctx.instance_id(), &cmd.id, &cmd.type_, &cmd.raw_data)
             .await
             .map_err(AppError::Internal)

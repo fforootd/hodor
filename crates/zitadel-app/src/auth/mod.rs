@@ -223,6 +223,9 @@ pub struct IssueSession {
 pub struct IssueSessionCommand {
     pub user_id: String,
     pub auth_method: String,
+    pub user_agent: String,
+    pub ip_address: String,
+    pub fingerprint: String,
 }
 
 impl IssueSession {
@@ -266,6 +269,9 @@ impl IssueSession {
                 &cmd.user_id,
                 &user.org_id,
                 &cmd.auth_method,
+                &cmd.user_agent,
+                &cmd.ip_address,
+                &cmd.fingerprint,
             )
             .await
             .map_err(AppError::Internal)?;

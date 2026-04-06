@@ -92,12 +92,24 @@ impl GetGroup {
         ctx: &ActorContext,
         group_id: &str,
     ) -> Result<GroupRecord, AppError> {
-        self.repos
+        let group = self
+            .repos
             .groups
             .get(ctx.instance_id(), group_id)
             .await
             .map_err(AppError::Internal)?
-            .ok_or_else(|| AppError::not_found("group", group_id))
+            .ok_or_else(|| AppError::not_found("group", group_id))?;
+
+        // Authz: caller must be viewer on the group's org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", group.org_id),
+        )
+        .await?;
+
+        Ok(group)
     }
 }
 
@@ -117,6 +129,18 @@ impl ListGroups {
         org_id: Option<&str>,
         params: &ListParams,
     ) -> Result<ListResult<GroupRecord>, AppError> {
+        // Authz: caller must be viewer on the target org (or own org if unfiltered)
+        let effective_org = org_id
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| ctx.org_id().to_string());
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", effective_org),
+        )
+        .await?;
+
         self.repos
             .groups
             .list(ctx.instance_id(), org_id, params)
@@ -144,16 +168,25 @@ impl DeleteGroup {
         ctx: &ActorContext,
         group_id: &str,
     ) -> Result<(), AppError> {
-        // Authz: caller must be admin on the target group
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("group:{}", group_id)).await?;
-
-        // Verify exists
-        self.repos
+        // Verify exists (instance-scoped: returns 404 for cross-instance)
+        let group = self
+            .repos
             .groups
             .get(ctx.instance_id(), group_id)
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("group", group_id))?;
+
+        crate::authz::require_scoped_permission(
+            &self.repos,
+            ctx,
+            "group.write",
+            &[
+                format!("org:{}", group.org_id),
+                format!("instance:{}", ctx.instance_id()),
+            ],
+        )
+        .await?;
 
         self.repos
             .groups
@@ -205,9 +238,6 @@ impl UpdateGroup {
         ctx: &ActorContext,
         cmd: UpdateGroupCommand,
     ) -> Result<GroupRecord, AppError> {
-        // Authz: caller must be admin on the target group
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("group:{}", cmd.group_id)).await?;
-
         let mut group = self
             .repos
             .groups
@@ -215,6 +245,17 @@ impl UpdateGroup {
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("group", &cmd.group_id))?;
+
+        crate::authz::require_scoped_permission(
+            &self.repos,
+            ctx,
+            "group.write",
+            &[
+                format!("org:{}", group.org_id),
+                format!("instance:{}", ctx.instance_id()),
+            ],
+        )
+        .await?;
 
         let mut fields_changed = Vec::new();
         if let Some(name) = cmd.name {

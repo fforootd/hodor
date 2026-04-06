@@ -102,7 +102,7 @@ Every Zitadel deployment has at least one **instance** — the root instance. In
 
 ### Root Instance
 
-The root instance is the operator's own instance. Its owners bypass FGA checks entirely — they have implicit wildcard access to all resources across all instances. This mirrors the `root` user convention in Unix.
+The root instance is the operator's own instance. It is authorized through the internal platform authorization model like every other instance-management path. Root staff get explicit platform roles and hierarchy relationships in the deployment-scoped `platform` FGA store; `operator_admin` remains the only break-glass bypass and is intentionally outside normal FGA relations.
 
 ### Child Instances
 

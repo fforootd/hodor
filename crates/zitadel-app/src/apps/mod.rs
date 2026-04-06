@@ -4,11 +4,6 @@ use crate::event::DomainEvent;
 use crate::repo::{AppRecord, ListParams, ListResult, Repositories};
 use std::sync::Arc;
 
-// Note: Apps are currently backed by the generic named resource table via
-// RawQueryRepository. App-specific fields (protocol, redirect_uris, etc.)
-// will migrate to a dedicated AppRepository when OIDC client validation
-// is added.
-
 pub struct CreateApp {
     repos: Arc<Repositories>,
 }
@@ -43,17 +38,27 @@ impl CreateApp {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
         let id = uuid::Uuid::now_v7().to_string();
 
-        // Persist via RawQueryRepository (apps table)
-        let resource = self
+        let record = AppRecord {
+            id: id.clone(),
+            group_id: cmd.group_id.clone(),
+            name: cmd.name,
+            protocol: cmd.protocol.clone(),
+            state: "active".to_string(),
+            metadata: cmd.metadata,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+
+        let created = self
             .repos
-            .raw
-            .create_named_resource(ctx.instance_id(), "apps", &id, &cmd.name, &cmd.group_id)
+            .apps
+            .create(ctx.instance_id(), &record)
             .await
             .map_err(AppError::Internal)?;
 
@@ -74,16 +79,7 @@ impl CreateApp {
             .await
             .map_err(AppError::Internal)?;
 
-        Ok(AppRecord {
-            id: resource.id,
-            group_id: String::new(),
-            name: resource.name,
-            protocol: String::new(),
-            state: resource.state,
-            metadata: cmd.metadata,
-            created_at: resource.created_at,
-            updated_at: resource.updated_at,
-        })
+        Ok(created)
     }
 }
 
@@ -98,24 +94,12 @@ impl GetApp {
 
     #[tracing::instrument(name = "use_case.get_app", skip_all)]
     pub async fn execute(&self, ctx: &ActorContext, app_id: &str) -> Result<AppRecord, AppError> {
-        let resource = self
-            .repos
-            .raw
-            .get_named_resource(ctx.instance_id(), "apps", app_id)
+        self.repos
+            .apps
+            .get(ctx.instance_id(), app_id)
             .await
             .map_err(AppError::Internal)?
-            .ok_or_else(|| AppError::not_found("app", app_id))?;
-
-        Ok(AppRecord {
-            id: resource.id,
-            group_id: String::new(),
-            name: resource.name,
-            protocol: String::new(),
-            state: resource.state,
-            metadata: serde_json::Value::Object(Default::default()),
-            created_at: resource.created_at,
-            updated_at: resource.updated_at,
-        })
+            .ok_or_else(|| AppError::not_found("app", app_id))
     }
 }
 
@@ -135,42 +119,11 @@ impl ListApps {
         _group_id: &str,
         params: &ListParams,
     ) -> Result<ListResult<AppRecord>, AppError> {
-        let limit = params.limit.unwrap_or(50) as i64;
-        let cursor = params.cursor.clone().unwrap_or_default();
-        let resources = self
-            .repos
-            .raw
-            .list_named_resources(ctx.instance_id(), "apps", &cursor, limit + 1)
+        self.repos
+            .apps
+            .list(ctx.instance_id(), Some(_group_id), params)
             .await
-            .map_err(AppError::Internal)?;
-
-        let has_more = resources.len() as i64 > limit;
-        let items: Vec<AppRecord> = resources
-            .into_iter()
-            .take(limit as usize)
-            .map(|r| AppRecord {
-                id: r.id,
-                group_id: String::new(),
-                name: r.name,
-                protocol: String::new(),
-                state: r.state,
-                metadata: serde_json::Value::Object(Default::default()),
-                created_at: r.created_at.clone(),
-                updated_at: r.updated_at,
-            })
-            .collect();
-
-        let next_cursor = if has_more {
-            items.last().map(|a| a.id.clone())
-        } else {
-            None
-        };
-
-        Ok(ListResult {
-            items,
-            next_cursor,
-            total_count: None,
-        })
+            .map_err(AppError::Internal)
     }
 }
 
@@ -194,14 +147,14 @@ impl UpdateApp {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
         let updated = self
             .repos
-            .raw
-            .update_named_resource_name(ctx.instance_id(), "apps", app_id, name)
+            .apps
+            .update_name(ctx.instance_id(), app_id, name)
             .await
             .map_err(AppError::Internal)?;
 

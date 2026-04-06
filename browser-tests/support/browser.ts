@@ -85,55 +85,22 @@ export async function completePasswordLogin(
 
   await expect(passwordInput).toBeVisible({ timeout: 15_000 })
   await passwordInput.fill(userPassword)
-  const submitPasswordStep = async (strategy: 'button' | 'form' | 'enter') => {
-    const buttonVisible = await signInButton.isVisible().catch(() => false)
-    if (strategy === 'button' && buttonVisible) {
-      await signInButton.click()
-      return
-    }
 
-    if (strategy === 'form') {
-      await page.locator('form').evaluate((form) => {
-        if (!(form instanceof HTMLFormElement)) {
-          throw new Error('visible login form not found')
-        }
-        form.requestSubmit()
-      })
-      return
-    }
-
-    if (strategy === 'enter') {
-      await passwordInput.press('Enter')
-      return
-    }
-
+  if (await signInButton.isVisible().catch(() => false)) {
+    await signInButton.click()
+  } else {
     await passwordInput.press('Enter')
   }
 
-  const submitStrategies: Array<'button' | 'form' | 'enter'> = ['button', 'form', 'enter']
-  for (const strategy of submitStrategies) {
-    await submitPasswordStep(strategy)
-
+  // Give the frontend time to process the response and trigger navigation.
+  for (let poll = 0; poll < 150; poll += 1) {
     if (!page.url().includes('/login')) {
       return
     }
-
-    if (
-      (await passwordInput.isVisible().catch(() => false)) &&
-      (await signInButton.isVisible().catch(() => false))
-    ) {
-      await signInButton.click()
+    if (!(await passwordInput.isVisible().catch(() => false))) {
+      return
     }
-
-    for (let poll = 0; poll < 30; poll += 1) {
-      if (!page.url().includes('/login')) {
-        return
-      }
-      if (!(await passwordInput.isVisible().catch(() => false))) {
-        return
-      }
-      await page.waitForTimeout(100)
-    }
+    await page.waitForTimeout(100)
   }
 
   const bodyText = await page.locator('body').innerText().catch(() => '')

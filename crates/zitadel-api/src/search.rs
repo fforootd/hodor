@@ -50,7 +50,7 @@ async fn search(
         query: q,
         limit: Some(p.limit as u32),
     };
-    match s.app.runner.run_fn(&ctx, "search", || s.app.search_entities.execute(&ctx, cmd)).await {
+    match s.app.runner.run(&ctx, "search", || s.app.search_entities.execute(&ctx, cmd)).await {
         Ok(results) => {
             let total = results.len();
             let results = results

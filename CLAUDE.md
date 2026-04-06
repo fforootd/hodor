@@ -37,7 +37,7 @@ crates/
   zitadel-authn/                  Password hashing (argon2id), session cookies
   zitadel-crypto/                 AES-256-GCM envelope encryption
   zitadel-config/                 TOML config loading with env var overrides
-  zitadel-authz/                  Cedar authorization model (POC)
+  zitadel-authz/                  Built-in role catalog + permission mappings
   zitadel-catalog/                Template catalog
   zitadel-schema/                 JSON Schema validation (stub)
 migrations/
@@ -99,7 +99,7 @@ just quality
 - **Domain vocabulary** in `docs/GLOSSARY.md` — use correct terminology.
 - **Config cascade:** CLI flags > env vars > TOML config > defaults. Every field is optional.
 - **Database:** SQLite default, Postgres supported. Migrations in both dialects.
-- **Authorization:** Cedar-based (POC) replacing OpenFGA. Root instance has implicit wildcard access.
+- **Authorization:** Embedded FGA for relationship evaluation plus a built-in role-permission catalog sourced from ZITADEL `InternalAuthZ`. Platform authz uses the internal `platform` store; `operator_admin` is the only break-glass bypass.
 
 ## Common Patterns
 

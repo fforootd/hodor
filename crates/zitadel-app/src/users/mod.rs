@@ -123,12 +123,24 @@ impl GetUser {
 
     #[tracing::instrument(name = "use_case.get_user", skip_all)]
     pub async fn execute(&self, ctx: &ActorContext, user_id: &str) -> Result<UserRecord, AppError> {
-        self.repos
+        let user = self
+            .repos
             .users
             .get(ctx.instance_id(), user_id)
             .await
             .map_err(AppError::Internal)?
-            .ok_or_else(|| AppError::not_found("user", user_id))
+            .ok_or_else(|| AppError::not_found("user", user_id))?;
+
+        // Authz: caller must be viewer on the user's org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", user.org_id),
+        )
+        .await?;
+
+        Ok(user)
     }
 }
 
@@ -150,6 +162,18 @@ impl ListUsers {
         org_id: Option<&str>,
         params: &ListParams,
     ) -> Result<ListResult<UserRecord>, AppError> {
+        // Authz: caller must be viewer on the target org (or own org if unfiltered)
+        let effective_org = org_id
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| ctx.org_id().to_string());
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", effective_org),
+        )
+        .await?;
+
         self.repos
             .users
             .list(ctx.instance_id(), org_id, params)
@@ -185,9 +209,6 @@ impl UpdateUser {
         ctx: &ActorContext,
         cmd: UpdateUserCommand,
     ) -> Result<UserRecord, AppError> {
-        // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", cmd.user_id)).await?;
-
         let mut user = self
             .repos
             .users
@@ -195,6 +216,9 @@ impl UpdateUser {
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("user", &cmd.user_id))?;
+
+        // Authz: caller must be admin on the target user
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", cmd.user_id)).await?;
 
         let mut fields_changed = Vec::new();
 
@@ -257,9 +281,6 @@ impl DeleteUser {
         fields(event_type = "user.deleted", category = "user")
     )]
     pub async fn execute(&self, ctx: &ActorContext, user_id: &str) -> Result<(), AppError> {
-        // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
-
         let _user = self
             .repos
             .users
@@ -267,6 +288,9 @@ impl DeleteUser {
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("user", user_id))?;
+
+        // Authz: caller must be admin on the target user
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
 
         self.repos
             .users
@@ -310,10 +334,7 @@ impl DeactivateUser {
         fields(event_type = "user.deactivated", category = "user")
     )]
     pub async fn execute(&self, ctx: &ActorContext, user_id: &str) -> Result<(), AppError> {
-        // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
-
-        // Verify user exists and is active
+        // Verify user exists and is active (instance-scoped: returns 404 for cross-instance)
         let user = self
             .repos
             .users
@@ -321,6 +342,9 @@ impl DeactivateUser {
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("user", user_id))?;
+
+        // Authz: caller must be admin on the target user
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
 
         if user.state != "active" {
             return Err(AppError::InvalidState {

@@ -91,7 +91,7 @@ async fn create(
     match s
         .app
         .runner
-        .run_fn(&ctx, "resource.create", || {
+        .run(&ctx, "resource.create", || {
             s.app.create_named_resource.execute(&ctx, cmd)
         })
         .await
@@ -111,7 +111,7 @@ async fn get_one(
     match s
         .app
         .runner
-        .run_fn(&ctx, "resource.get", || {
+        .run(&ctx, "resource.get", || {
             s.app.get_named_resource.execute(&ctx, kind, &id)
         })
         .await
@@ -133,7 +133,7 @@ async fn list(
     match s
         .app
         .runner
-        .run_fn(&ctx, "resource.list", || {
+        .run(&ctx, "resource.list", || {
             s.app
                 .list_named_resources
                 .execute(&ctx, kind, &cursor, limit)
@@ -171,7 +171,7 @@ async fn update(
     match s
         .app
         .runner
-        .run_fn(&ctx, "resource.update", || {
+        .run(&ctx, "resource.update", || {
             s.app.update_named_resource.execute(&ctx, cmd)
         })
         .await
@@ -192,7 +192,7 @@ async fn delete_one(
     match s
         .app
         .runner
-        .run_fn(&ctx, "resource.delete", || {
+        .run(&ctx, "resource.delete", || {
             s.app.delete_named_resource.execute(&ctx, kind, &id)
         })
         .await
@@ -214,7 +214,7 @@ pub mod membership {
     use super::*;
     use std::collections::HashMap;
     use axum::extract::Path;
-    use zitadel_db::current_instance_id;
+    use zitadel_app::memberships::{AddMembershipCommand, RemoveMembershipCommand};
 
     /// Injected via `Extension` so handlers know which entity type / path param to use.
     #[derive(Clone)]
@@ -272,7 +272,6 @@ pub mod membership {
         Extension(config): Extension<MembershipConfig>,
         Path(params): Path<HashMap<String, String>>,
     ) -> Response {
-        let instance_id = current_instance_id();
         let entity_id = match params.get(config.id_param) {
             Some(id) => id.as_str(),
             None => return response::bad_request(format!("missing {}", config.id_param)),
@@ -282,7 +281,14 @@ pub mod membership {
         if let Err(e) = crate::fga_check(&s, &ctx, "viewer", &object).await {
             return e;
         }
-        match zitadel_db::list_memberships(&s.db, &instance_id, config.entity_type, entity_id)
+        match s
+            .app
+            .runner
+            .run(&ctx, "membership.list", || {
+                s.app
+                    .list_memberships
+                    .execute(&ctx, config.entity_type, entity_id)
+            })
             .await
         {
             Ok(rows) => {
@@ -312,7 +318,6 @@ pub mod membership {
         Path(params): Path<HashMap<String, String>>,
         Json(req): Json<AddMemberRequest>,
     ) -> Response {
-        let instance_id = current_instance_id();
         let entity_id = match params.get(config.id_param) {
             Some(id) => id.as_str(),
             None => return response::bad_request(format!("missing {}", config.id_param)),
@@ -322,38 +327,32 @@ pub mod membership {
         if let Err(e) = crate::fga_check(&s, &ctx, "admin", &object).await {
             return e;
         }
-        match zitadel_db::add_membership(
-            &s.db,
-            &instance_id,
-            config.entity_type,
-            entity_id,
-            &req.user_id,
-            &req.role,
-        )
-        .await
+        let cmd = AddMembershipCommand {
+            entity_type: config.entity_type.to_string(),
+            entity_id: entity_id.to_string(),
+            user_id: req.user_id,
+            role: req.role,
+        };
+        match s
+            .app
+            .runner
+            .run(&ctx, "membership.add", || {
+                s.app.add_membership.execute(&ctx, cmd)
+            })
+            .await
         {
-            Ok(()) => {
-                // Emit membership event (best-effort — don't fail the request)
-                let _ = s.app.repos.events.append(
-                    &instance_id,
-                    &zitadel_app::DomainEvent::MembershipChanged {
-                        entity_type: config.entity_type.to_string(),
-                        entity_id: entity_id.to_string(),
-                        user_id: req.user_id.clone(),
-                        action: "added".to_string(),
-                        role: req.role.clone(),
-                        actor_id: ctx.user_id().to_string(),
-                    },
-                    None, None, None,
-                ).await;
+            Ok(record) => {
+                if let Err(error) = s.fga.rebuild_platform_store().await {
+                    return response::internal(error);
+                }
                 response::json_created(MemberResponse {
-                    user_id: req.user_id,
-                    display_name: None,
-                    role: req.role,
-                    added_at: String::new(),
+                    user_id: record.user_id,
+                    display_name: record.display_name,
+                    role: record.role,
+                    added_at: record.added_at,
                 })
             }
-            Err(e) => response::internal(e),
+            Err(e) => response::app_error(e),
         }
     }
 
@@ -363,7 +362,6 @@ pub mod membership {
         Extension(config): Extension<MembershipConfig>,
         Path(params): Path<HashMap<String, String>>,
     ) -> Response {
-        let instance_id = current_instance_id();
         let entity_id = match params.get(config.id_param) {
             Some(id) => id.as_str(),
             None => return response::bad_request(format!("missing {}", config.id_param)),
@@ -377,31 +375,26 @@ pub mod membership {
         if let Err(e) = crate::fga_check(&s, &ctx, "admin", &object).await {
             return e;
         }
-        match zitadel_db::remove_membership(
-            &s.db,
-            &instance_id,
-            config.entity_type,
-            entity_id,
-            user_id,
-        )
-        .await
+        let cmd = RemoveMembershipCommand {
+            entity_type: config.entity_type.to_string(),
+            entity_id: entity_id.to_string(),
+            user_id: user_id.to_string(),
+        };
+        match s
+            .app
+            .runner
+            .run(&ctx, "membership.remove", || {
+                s.app.remove_membership.execute(&ctx, cmd)
+            })
+            .await
         {
             Ok(()) => {
-                let _ = s.app.repos.events.append(
-                    &instance_id,
-                    &zitadel_app::DomainEvent::MembershipChanged {
-                        entity_type: config.entity_type.to_string(),
-                        entity_id: entity_id.to_string(),
-                        user_id: user_id.to_string(),
-                        action: "removed".to_string(),
-                        role: String::new(),
-                        actor_id: ctx.user_id().to_string(),
-                    },
-                    None, None, None,
-                ).await;
+                if let Err(error) = s.fga.rebuild_platform_store().await {
+                    return response::internal(error);
+                }
                 response::no_content()
             }
-            Err(e) => response::internal(e),
+            Err(e) => response::app_error(e),
         }
     }
 }

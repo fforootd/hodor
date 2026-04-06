@@ -147,9 +147,11 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         config.session.max_age_secs,
     )
     .await?;
+    zitadel_db::seed_builtin_role_definitions(&db).await?;
     let fga = Arc::new(FgaService::new(db.clone()));
+    fga.initialize_platform_store().await?;
     fga.initialize_instance(DEFAULT_INSTANCE_ID).await?;
-    fga.reconcile_root_hierarchy(DEFAULT_INSTANCE_ID).await?;
+    fga.rebuild_platform_store().await?;
 
     // ── ADR-032: Build application layer ──
     let repos = Arc::new(repo_bridge::build_repositories(
@@ -173,6 +175,15 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     let passwords = Arc::new(passwords);
     let cookie_config = Arc::new(cookie_config);
+    let support_grant_secret = Arc::new(if config.server.management_secret.is_empty() {
+        cookie_config
+            .secrets
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "dev-support-grant-secret".to_string())
+    } else {
+        config.server.management_secret.clone()
+    });
 
     let oidc_state = zitadel_oidc::OidcState::new_runtime_with_config(
         repos.oidc.clone(),
@@ -199,6 +210,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         oidc: oidc_state.clone(),
         passwords: passwords.clone(),
         cookie_config: cookie_config.clone(),
+        support_grant_secret,
         is_dev: config.is_dev(),
         app: app.clone(),
     };

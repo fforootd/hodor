@@ -21,6 +21,15 @@ impl GetSettings {
         org_id: Option<&str>,
         app_id: Option<&str>,
     ) -> Result<SettingsRecord, AppError> {
+        // Authz: caller must be viewer on their own org
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "viewer",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
+
         self.repos
             .settings
             .resolve(ctx.instance_id(), settings_type, org_id, app_id)
@@ -62,7 +71,7 @@ impl DeleteSettings {
             &self.repos,
             ctx,
             "admin",
-            &format!("instance:{}", ctx.instance_id()),
+            &format!("org:{}", ctx.org_id()),
         )
         .await?;
 
@@ -107,7 +116,7 @@ impl UpdateSettings {
         cmd: UpdateSettingsCommand,
     ) -> Result<(), AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
 
         let record = SettingsRecord {
             settings_type: cmd.settings_type.clone(),

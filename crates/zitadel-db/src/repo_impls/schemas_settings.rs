@@ -6,13 +6,14 @@ use super::entities::{
     SqlProviderRepository, SqlSchemaRepository, SqlSettingsRepository,
     json_string, limit_from_params,
     load_provider, load_schema, load_settings_exact, next_cursor, parse_scope,
-    provider_from_storage, provider_org_id, provider_payload_from_record,
+    provider_definition_from_storage, provider_from_storage, provider_org_id,
+    provider_payload_from_record,
     schema_from_retained, write_spanner_count, write_spanner_many, write_spanner_stmt,
 };
 use crate::{DEFAULT_ORG_ID, Db, delete_provider, first_org_id, list_schema_registry, provider};
 use zitadel_app::repo::{
-    BoxFuture, ListParams, ListResult, ProviderRecord, ProviderRepository, SchemaRecord,
-    SchemaRepository, SettingsRecord, SettingsRepository,
+    BoxFuture, ListParams, ListResult, ProviderDefinitionRecord, ProviderRecord,
+    ProviderRepository, SchemaRecord, SchemaRepository, SettingsRecord, SettingsRepository,
 };
 
 impl ProviderRepository for SqlProviderRepository {
@@ -56,6 +57,22 @@ impl ProviderRepository for SqlProviderRepository {
         let instance_id = instance_id.to_string();
         let provider_id = provider_id.to_string();
         Box::pin(async move { load_provider(&db, &instance_id, &provider_id).await })
+    }
+
+    fn get_definition(
+        &self,
+        instance_id: &str,
+        provider_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<ProviderDefinitionRecord>>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let provider_id = provider_id.to_string();
+        Box::pin(async move {
+            Ok(provider::get_provider_for(&db, &instance_id, &provider_id)
+                .await?
+                .map(provider_definition_from_storage)
+                .transpose()?)
+        })
     }
 
     fn list(
