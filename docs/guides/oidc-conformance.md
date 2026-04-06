@@ -17,12 +17,7 @@ just conformance-oidc-clean
 - `just conformance-oidc-clean`
   Stops and removes the local Dockerized conformance stack.
 
-The repository also keeps a temporary compatibility alias:
-
-- `just oidc-conformance`
-  Prints a deprecation warning, then forwards to `just conformance-oidc`.
-- `just oidc-conformance-rp`
-  Prints a deprecation warning, then forwards to `just journeys-oidc-rp`. This is a browser journey, not official protocol compliance.
+Protocol conformance is intentionally outside the required PR and release walls. CI runs it in `oidc-conformance-daily.yml` on a nightly schedule and exposes the same workflow through `workflow_dispatch` for manual reruns or certification-style checks.
 
 OIDC browser regression coverage now lives in the Journeys family instead of Conformance:
 

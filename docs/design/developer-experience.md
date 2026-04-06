@@ -143,7 +143,7 @@ SQLite is the default test database — no Docker, no setup:
 let db = zitadel_db::Db::open("").await?;
 ```
 
-The default fast path is `cargo nextest run --workspace` when `cargo-nextest` is installed; local `just test` and CI fall back to `cargo test --workspace` only when nextest is unavailable.
+The default fast path is `just test` or `just test-fast`. That lane runs the workspace `lib` and `bin` suites plus `crates/zitadel-app/tests/use_case_tests.rs`, using `cargo-nextest` when it is installed and falling back to `cargo test` otherwise. Use `just test-pr`, `just test-release`, and `just test-nightly` to reproduce the larger CI tiers locally.
 
 For full-router integration coverage, prefer the shared `crates/zitadel-testkit` helpers over ad hoc per-crate harnesses.
 
@@ -160,17 +160,17 @@ CI names use `tier + family`.
 
 | Tier | Purpose | Current families |
 |---|---|---|
-| `fast` | Cheap correctness and static feedback | Rust, web, docs |
-| `pr` | Targeted regression coverage on pull requests | `journeys`, `contracts`, `invariants`, `subsystems`, protocol-sensitive `conformance` |
-| `nightly` | Broader and slower coverage | `conformance`, env-gated `resilience` |
-| `release` | Post-merge or promotion coverage | current mainline reusable CI lanes |
-| `manual` | Operator-invoked debugging or certification runs | `conformance`, env-gated families |
+| `fast` | Cheap correctness and static feedback | docs, Rust static, fast Rust tests, web static, web unit |
+| `pr` | Required stable wall on pull requests | stable `journeys`, `contracts`, `invariants`, `subsystems`, plus all fast lanes |
+| `nightly` | Slower or quarantined coverage | `journeys-quarantine`, `conformance`, env-gated `resilience`, specialized perf and fuzz workflows |
+| `release` | Required stable wall on pushes to `main` | mirrors the `pr` stable wall |
+| `manual` | Operator-invoked debugging or certification runs | `conformance`, `journeys-quarantine`, env-gated families, specialized perf and fuzz |
 
-The default policy is tiered PR execution:
-- Fast lanes run on relevant PR changes.
-- Journey lanes run when browser-facing or product-flow behavior might have changed.
-- Contract, invariant, and subsystem lanes run when their owned crates or family-prefixed tests change.
-- Conformance lanes run on directly related protocol changes and on scheduled/manual workflows.
+The default policy is fixed stable-wall execution:
+- Fast lanes run on every pull request and on every push to `main`.
+- The PR wall always runs the full stable lane set; it does not depend on path-based test skipping.
+- The release wall mirrors the PR stable wall on `main`.
+- Nightly/manual workflows own quarantined browser coverage, official conformance, resilience, performance trends, and fuzzing.
 
 ## CI Build Reuse
 

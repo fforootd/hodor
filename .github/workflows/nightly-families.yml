@@ -1,0 +1,32 @@
+name: Nightly / Extended Families
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-families:
+    name: Nightly / Extended Families
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      execution_tier_label: Nightly
+      run_docs: false
+      run_fast_rust: false
+      run_fast_web: false
+      run_journeys_admin: false
+      run_journeys_login: false
+      run_journeys_oidc: false
+      run_journeys_quarantine: true
+      run_contracts: false
+      run_invariants: false
+      run_subsystems: false
+      run_resilience: true
+      artifact_prefix: nightly

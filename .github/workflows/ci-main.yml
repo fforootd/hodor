@@ -10,17 +10,19 @@ concurrency:
 
 jobs:
   ci:
-    name: Release / Fast And Families
+    name: Release / Stable Wall
     uses: ./.github/workflows/reusable-ci.yml
     with:
       execution_tier_label: Release
       run_docs: true
       run_fast_rust: true
       run_fast_web: true
-      run_journeys: true
+      run_journeys_admin: true
+      run_journeys_login: true
       run_journeys_oidc: true
+      run_journeys_quarantine: false
       run_contracts: true
       run_invariants: true
       run_subsystems: true
-      run_browser_artifacts: true
+      run_resilience: false
       artifact_prefix: main

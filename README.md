@@ -114,26 +114,36 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 ## Testing
 
 ```bash
-# Run Rust tests
+# Fast local Rust lane
 just test
+just test-fast
 
-# Run web unit tests
+# Fast web unit lane
 just test-web
 
-# Run browser journeys
+# Stable browser journeys
 just journeys
-just journeys-smoke
+just journeys-admin
+just journeys-login
 just journeys-oidc
+just journeys-quarantine
 
 # Run family-specific Rust suites
 just contracts
 just invariants
 just subsystems
 
+# Emulate CI locally
+just test-pr
+just test-release
+just test-nightly
+
 # Run official OIDC protocol compliance
 just conformance-oidc
 just oidc-conformance-op
 ```
+
+`just test` is the zero-config local default. It runs the fast Rust lane, not the full PR wall. The stable PR wall is always-on in CI and can be reproduced locally with `just test-pr`. Quarantined browser coverage is intentionally split into `just journeys-quarantine` so known unstable cases do not dilute required PR signal.
 
 ## Configuration
 

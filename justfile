@@ -150,18 +150,25 @@ build: ensure-webdist
 # ─── Testing ─────────────────────────────────────────────
 
 [private]
-_run-rust-tests:
+_run-rust-tests-fast:
     #!/usr/bin/env bash
     set -euo pipefail
     if cargo nextest --version >/dev/null 2>&1; then
-        cargo nextest run --workspace
+        cargo nextest run --workspace --lib --bins
+        cargo nextest run -p zitadel-app --test use_case_tests
     else
-        cargo test --workspace
+        cargo test --workspace --lib --bins
+        cargo test -p zitadel-app --test use_case_tests
     fi
 
-# Run Rust tests
+# Run the fast Rust lane
 [group('test')]
-test: _run-rust-tests
+test-fast: ensure-webdist
+    just _run-rust-tests-fast
+
+# Alias for the fast Rust lane
+[group('test')]
+test: test-fast
 
 # Run web component tests (Vitest)
 [group('test')]
@@ -184,25 +191,20 @@ _ensure-browser-tests-runtime:
 journeys: _ensure-node-modules _ensure-browser-tests-runtime
     npm run test:journeys -w browser-tests
 
-# Run browser journey smoke coverage
-[group('test')]
-journeys-smoke: _ensure-node-modules _ensure-browser-tests-runtime
-    npm run test:journeys:smoke -w browser-tests
-
-# Run browser OIDC journeys
-[group('test')]
-journeys-oidc: _ensure-node-modules _ensure-browser-tests-runtime
-    npm run test:journeys:oidc -w browser-tests
-
 # Run the admin-only browser journeys
 [group('test')]
 journeys-admin: _ensure-node-modules _ensure-browser-tests-runtime
     npm run test:journeys:admin -w browser-tests
 
-# Run admin-only browser journey smoke coverage
+# Run the password-login browser journeys
 [group('test')]
-journeys-admin-smoke: _ensure-node-modules _ensure-browser-tests-runtime
-    npm run test:journeys:admin:smoke -w browser-tests
+journeys-login: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:login -w browser-tests
+
+# Run browser OIDC journeys
+[group('test')]
+journeys-oidc: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:oidc -w browser-tests
 
 # Run OIDC code + PKCE journey coverage
 [group('test')]
@@ -213,6 +215,11 @@ journeys-oidc-op: _ensure-node-modules _ensure-browser-tests-runtime
 [group('test')]
 journeys-oidc-rp: _ensure-node-modules _ensure-browser-tests-runtime
     npm run test:journeys:oidc:rp -w browser-tests
+
+# Run browser cases intentionally quarantined from the stable PR wall
+[group('test')]
+journeys-quarantine: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:quarantine -w browser-tests
 
 # Run contract tests
 [group('test')]
@@ -239,85 +246,39 @@ subsystems: ensure-webdist
 resilience: ensure-webdist
     cargo test -p zitadel-storage --test resilience_storage_spanner_transient
 
-# Run the default PR-oriented local suite
+# Run the required PR wall locally
 [group('test')]
 test-pr:
     #!/usr/bin/env bash
     set -euo pipefail
     just docs-check
-    just test
+    just rust-static
+    just test-fast
+    just web-static
     just test-web
     just contracts
     just invariants
     just subsystems
-    just journeys-admin-smoke
+    just journeys-admin
+    just journeys-login
+    just journeys-oidc
+
+# Run the required main-branch wall locally
+[group('test')]
+test-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just test-pr
 
 # Run the nightly-oriented local suite
 [group('test')]
 test-nightly:
     #!/usr/bin/env bash
     set -euo pipefail
-    just test-pr
-    just journeys
-    just journeys-oidc
+    just test-release
+    just journeys-quarantine
     just resilience
     just conformance-oidc
-
-# Temporary alias for the old UI browser command
-[group('test')]
-test-ui:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just test-ui is deprecated; use just journeys-admin" >&2
-    just journeys-admin
-
-# Temporary alias for the old UI smoke command
-[group('test')]
-ui-smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just ui-smoke is deprecated; use just journeys-admin-smoke" >&2
-    just journeys-admin-smoke
-
-# Temporary alias for the old browser OIDC command
-[group('test')]
-test-acceptance-oidc:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just test-acceptance-oidc is deprecated; use just journeys-oidc" >&2
-    just journeys-oidc
-
-# Temporary alias for the old OIDC OP browser command
-[group('test')]
-acceptance-oidc-op:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just acceptance-oidc-op is deprecated; use just journeys-oidc-op" >&2
-    just journeys-oidc-op
-
-# Temporary alias for the old OIDC RP browser command
-[group('test')]
-acceptance-oidc-rp:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just acceptance-oidc-rp is deprecated; use just journeys-oidc-rp" >&2
-    just journeys-oidc-rp
-
-# Temporary alias for the old E2E browser command
-[group('test')]
-test-e2e:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just test-e2e is deprecated; use just journeys-admin" >&2
-    just journeys-admin
-
-# Temporary alias for the old smoke command
-[group('test')]
-e2e-smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just e2e-smoke is deprecated; use just journeys-admin-smoke" >&2
-    just journeys-admin-smoke
 
 # ─── Conformance ─────────────────────────────────────────
 
@@ -334,22 +295,6 @@ conformance-oidc:
 [group('conformance')]
 oidc-conformance-op:
     ./conformance/oidc/scripts/run-op.sh
-
-# Temporary alias for the old RP browser lane
-[group('conformance')]
-oidc-conformance-rp: _ensure-node-modules
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just oidc-conformance-rp is deprecated; use just journeys-oidc-rp" >&2
-    just journeys-oidc-rp
-
-# Run official OIDC protocol compliance
-[group('conformance')]
-oidc-conformance:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "warning: just oidc-conformance is deprecated; use just conformance-oidc" >&2
-    just conformance-oidc
 
 # Stop and remove local OIDC conformance containers
 [group('conformance')]
@@ -368,6 +313,22 @@ conformance-oidc-clean:
 typecheck: _ensure-node-modules
     npm run typecheck -w web
 
+# Run the fast Rust static lane
+[group('quality')]
+rust-static: ensure-webdist
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo fmt --check
+    cargo clippy --workspace -- -D warnings
+
+# Run the fast web static lane
+[group('quality')]
+web-static: _ensure-node-modules
+    #!/usr/bin/env bash
+    set -euo pipefail
+    npm run lint -w web
+    npm run typecheck -w web
+
 # ESLint for Vue/TS files
 [group('quality')]
 lint-web: _ensure-node-modules
@@ -379,19 +340,17 @@ rust-check: ensure-webdist
     #!/usr/bin/env bash
     set -euo pipefail
     echo "═══ cargo fmt ═══"
-    cargo fmt --check
-    echo ""
-    echo "═══ cargo clippy ═══"
-    cargo clippy --workspace -- -D warnings
+    just rust-static
     echo ""
     echo "═══ Rust tests ═══"
-    just _run-rust-tests
+    just test-fast
 
 # Fail on stale doc commands and local absolute links
 [group('quality')]
 docs-check:
     #!/usr/bin/env bash
     set -euo pipefail
+    python3 tools/validate-testing-manifest.py
     echo "═══ stale doc command checks ═══"
     ! rg -n \
         -e 'go run \./cmd/zitadel' \
@@ -405,6 +364,19 @@ docs-check:
         -e 'make webdist-only' \
         -e 'make webdist([^A-Za-z0-9_-]|$)' \
         README.md docs .github/workflows
+    ! rg -n \
+        -e 'just journeys-smoke' \
+        -e 'just journeys-admin-smoke' \
+        -e 'just test-ui' \
+        -e 'just ui-smoke' \
+        -e 'just test-acceptance-oidc' \
+        -e 'just acceptance-oidc-op' \
+        -e 'just acceptance-oidc-rp' \
+        -e 'just test-e2e' \
+        -e 'just e2e-smoke' \
+        -e 'just oidc-conformance([^A-Za-z0-9_-]|$)' \
+        -e 'just oidc-conformance-rp' \
+        README.md docs .github/workflows
     ! rg -n '\]\((/Users/|/home/)' README.md docs
 
 # Run the main local quality gate
@@ -412,19 +384,16 @@ docs-check:
 quality: ensure-webdist _ensure-node-modules
     #!/usr/bin/env bash
     set -euo pipefail
-    just rust-check
+    just rust-static
     echo ""
     echo "═══ docs checks ═══"
     just docs-check
     echo ""
-    echo "═══ typecheck (vue-tsc) ═══"
-    npm run typecheck -w web
-    echo ""
-    echo "═══ eslint ═══"
-    npm run lint -w web 2>/dev/null || echo "(skipped — eslint not configured or had warnings)"
+    echo "═══ web static ═══"
+    just web-static
     echo ""
     echo "═══ web tests (vitest) ═══"
-    npm test -w web
+    just test-web
     echo ""
     echo "✅ local quality gate passed"
 
