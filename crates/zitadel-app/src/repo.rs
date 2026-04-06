@@ -618,6 +618,7 @@ pub trait ProjectRepository: Send + Sync {
 }
 
 pub trait SessionRepository: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     fn create(
         &self,
         instance_id: &str,
@@ -1678,16 +1679,19 @@ pub trait OidcKeyRepository: Send + Sync {
 /// Repository for durable side-effects with retry semantics.
 pub trait EffectRepository: Send + Sync {
     /// Insert effects (typically in the same transaction as events).
-    fn create_batch(
+    /// Implementations must be idempotent by `(instance_id, source_key)`.
+    fn enqueue_batch(
         &self,
         instance_id: &str,
         effects: &[Effect],
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
-    /// Fetch pending/failed effects ready for dispatch (next_retry_at <= now).
-    fn fetch_pending(
+    /// Claim due effects for dispatch by assigning a lease atomically.
+    fn claim_due(
         &self,
         instance_id: &str,
+        worker_id: &str,
+        lease_ttl_secs: u64,
         limit: u32,
     ) -> BoxFuture<'_, anyhow::Result<Vec<Effect>>>;
 

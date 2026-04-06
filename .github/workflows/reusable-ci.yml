@@ -61,7 +61,7 @@ permissions:
 
 jobs:
   noop:
-    name: Noop
+    name: No Lanes
     if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_journeys_admin && !inputs.run_journeys_login && !inputs.run_journeys_oidc && !inputs.run_journeys_quarantine && !inputs.run_contracts && !inputs.run_invariants && !inputs.run_subsystems && !inputs.run_resilience }}
     runs-on: ubuntu-latest
     steps:
@@ -69,7 +69,7 @@ jobs:
         run: echo "No reusable CI lanes selected."
 
   fast-rust-static:
-    name: ${{ inputs.execution_tier_label }} / Fast / Rust / Static
+    name: Rust / Static
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
@@ -87,7 +87,7 @@ jobs:
         run: just rust-static
 
   fast-rust-tests:
-    name: ${{ inputs.execution_tier_label }} / Fast / Rust / Tests
+    name: Rust / Tests
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
@@ -109,7 +109,7 @@ jobs:
         run: just test-fast
 
   fast-docs-check:
-    name: ${{ inputs.execution_tier_label }} / Fast / Docs / Check
+    name: Docs / Check
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
@@ -123,7 +123,7 @@ jobs:
         run: just docs-check
 
   fast-docs-links:
-    name: ${{ inputs.execution_tier_label }} / Fast / Docs / Links
+    name: Docs / Links
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
@@ -135,7 +135,7 @@ jobs:
           args: --offline --no-progress README.md docs/**/*.md
 
   fast-web-static:
-    name: ${{ inputs.execution_tier_label }} / Fast / Web / Static
+    name: Web / Static
     if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
@@ -155,7 +155,7 @@ jobs:
         run: just web-static
 
   fast-web-unit:
-    name: ${{ inputs.execution_tier_label }} / Fast / Web / Unit
+    name: Web / Unit
     if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
@@ -175,7 +175,7 @@ jobs:
         run: just test-web
 
   prepare-webdist:
-    name: ${{ inputs.execution_tier_label }} / Prepare / Webdist
+    name: Prepare / Web Assets
     if: inputs.run_journeys_admin || inputs.run_journeys_login || inputs.run_journeys_oidc || inputs.run_journeys_quarantine
     runs-on: ubuntu-latest
     steps:
@@ -205,7 +205,7 @@ jobs:
           retention-days: 1
 
   prepare-rust-binary:
-    name: ${{ inputs.execution_tier_label }} / Prepare / Rust Binary
+    name: Prepare / Zitadel Binary
     if: inputs.run_journeys_admin || inputs.run_journeys_login || inputs.run_journeys_oidc || inputs.run_journeys_quarantine
     needs: prepare-webdist
     runs-on: ubuntu-latest
@@ -241,7 +241,7 @@ jobs:
           retention-days: 1
 
   contracts:
-    name: ${{ inputs.execution_tier_label }} / Contracts
+    name: Contracts
     if: inputs.run_contracts
     runs-on: ubuntu-latest
     steps:
@@ -259,7 +259,7 @@ jobs:
         run: just contracts
 
   invariants:
-    name: ${{ inputs.execution_tier_label }} / Invariants
+    name: Invariants
     if: inputs.run_invariants
     runs-on: ubuntu-latest
     steps:
@@ -277,7 +277,7 @@ jobs:
         run: just invariants
 
   subsystems:
-    name: ${{ inputs.execution_tier_label }} / Subsystems
+    name: Subsystems
     if: inputs.run_subsystems
     runs-on: ubuntu-latest
     services:
@@ -311,7 +311,7 @@ jobs:
         run: just subsystems
 
   resilience:
-    name: ${{ inputs.execution_tier_label }} / Resilience
+    name: Resilience
     if: inputs.run_resilience
     runs-on: ubuntu-latest
     steps:
@@ -329,7 +329,7 @@ jobs:
         run: just resilience
 
   journeys-admin:
-    name: ${{ inputs.execution_tier_label }} / Journeys / Admin
+    name: Journeys / Admin
     if: inputs.run_journeys_admin
     needs: prepare-rust-binary
     runs-on: ubuntu-latest
@@ -385,7 +385,7 @@ jobs:
           retention-days: 7
 
   journeys-login:
-    name: ${{ inputs.execution_tier_label }} / Journeys / Login
+    name: Journeys / Login
     if: inputs.run_journeys_login
     needs: prepare-rust-binary
     runs-on: ubuntu-latest
@@ -441,7 +441,7 @@ jobs:
           retention-days: 7
 
   journeys-oidc:
-    name: ${{ inputs.execution_tier_label }} / Journeys / OIDC
+    name: Journeys / OIDC
     if: inputs.run_journeys_oidc
     needs: prepare-rust-binary
     runs-on: ubuntu-latest
@@ -497,7 +497,7 @@ jobs:
           retention-days: 7
 
   journeys-quarantine:
-    name: ${{ inputs.execution_tier_label }} / Journeys / Quarantine
+    name: Journeys / Quarantine
     if: inputs.run_journeys_quarantine
     needs: prepare-rust-binary
     runs-on: ubuntu-latest

@@ -24,13 +24,15 @@ use crate::evaluation::*;
 use crate::traits::*;
 use crate::{CORE_MODEL_VERSION, LIST_SCAN_FALLBACK_LIMIT, PLATFORM_STORE_ID};
 
+type ExplicitModelCache = Arc<RwLock<HashMap<(String, String, String), CachedModel>>>;
+
 #[derive(Clone)]
 pub struct FgaService {
     pub(crate) db: Db,
     pub(crate) max_depth: usize,
     pub(crate) store_cache: Arc<RwLock<HashMap<String, StoreInfo>>>,
     pub(crate) active_model_cache: Arc<RwLock<HashMap<(String, String), CachedModel>>>,
-    pub(crate) explicit_model_cache: Arc<RwLock<HashMap<(String, String, String), CachedModel>>>,
+    pub(crate) explicit_model_cache: ExplicitModelCache,
 }
 
 impl FgaService {
@@ -254,14 +256,12 @@ impl FgaService {
 
         let mut allowed = Vec::new();
         for check_result in &result.results {
-            if check_result.allowed {
-                if let Some(ref corr) = check_result.correlation_id {
-                    if let Ok(i) = corr.parse::<usize>() {
-                        if let Some(id) = object_ids.get(i) {
-                            allowed.push(id.clone());
-                        }
-                    }
-                }
+            if check_result.allowed
+                && let Some(ref corr) = check_result.correlation_id
+                && let Ok(i) = corr.parse::<usize>()
+                && let Some(id) = object_ids.get(i)
+            {
+                allowed.push(id.clone());
             }
         }
         Ok(allowed)
@@ -692,26 +692,24 @@ impl FgaService {
             if let Some(fragments) = self
                 .load_active_model_fragments(instance_id, store_id)
                 .await?
+                && fragments.core_model_version == CORE_MODEL_VERSION
+                && fragments.custom_model == "{}"
+                && fragments.module_fragments == "[]"
             {
-                if fragments.core_model_version == CORE_MODEL_VERSION
-                    && fragments.custom_model == "{}"
-                    && fragments.module_fragments == "[]"
+                if self
+                    .cached_active_model(instance_id, store_id)
+                    .await
+                    .is_none()
                 {
-                    if self
-                        .cached_active_model(instance_id, store_id)
-                        .await
-                        .is_none()
-                    {
-                        let cached = self
-                            .load_model_row_from_db(instance_id, store_id, None)
-                            .await?
-                            .ok_or_else(|| {
-                                FgaError::NotFound("authorization model not found".into())
-                            })?;
-                        self.cache_model(instance_id, store_id, &cached, true).await;
-                    }
-                    return Ok(());
+                    let cached = self
+                        .load_model_row_from_db(instance_id, store_id, None)
+                        .await?
+                        .ok_or_else(|| {
+                            FgaError::NotFound("authorization model not found".into())
+                        })?;
+                    self.cache_model(instance_id, store_id, &cached, true).await;
                 }
+                return Ok(());
             }
 
             self.persist_model(instance_id, store_id, core_authorization_model())
@@ -1363,6 +1361,7 @@ impl FgaService {
         Ok(set.into_iter().collect())
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     pub(crate) async fn planned_object_candidates(
         &self,
@@ -1410,6 +1409,7 @@ impl FgaService {
         Ok(result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn resolve_object_candidate_source(
         &self,
@@ -1560,6 +1560,7 @@ impl FgaService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     pub(crate) async fn planned_user_candidates(
         &self,
@@ -1615,6 +1616,7 @@ impl FgaService {
         Ok(result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn resolve_user_candidate_source(
         &self,

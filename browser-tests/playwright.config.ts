@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: {
     command: './browser-tests/scripts/start-stack.sh',
     cwd: '..',
-    url: `${baseURL}/healthz`,
+    url: `${baseURL}/readyz`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

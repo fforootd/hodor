@@ -367,6 +367,7 @@ impl CredentialRepository for MockCredentialRepository {
 pub struct MockSessionRepository;
 
 impl SessionRepository for MockSessionRepository {
+    #[allow(clippy::too_many_arguments)]
     fn create(
         &self,
         _instance_id: &str,
@@ -1144,16 +1145,18 @@ impl crate::repo::SchemaRegistryRepository for NoopSchemaRegistryRepository {
 struct NoopEffectRepository;
 
 impl crate::repo::EffectRepository for NoopEffectRepository {
-    fn create_batch(
+    fn enqueue_batch(
         &self,
         _: &str,
         _: &[crate::effect::Effect],
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn fetch_pending(
+    fn claim_due(
         &self,
         _: &str,
+        _: &str,
+        _: u64,
         _: u32,
     ) -> BoxFuture<'_, anyhow::Result<Vec<crate::effect::Effect>>> {
         Box::pin(async { Ok(Vec::new()) })

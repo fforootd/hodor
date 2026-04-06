@@ -45,7 +45,7 @@ MOCK_PID=$!
 ZITADEL_PID=$!
 
 wait_for_url "${MOCK_URL}/healthz" "mock oidc"
-wait_for_url "${BASE_URL}/healthz" "zitadel"
+wait_for_url "${BASE_URL}/readyz" "zitadel"
 
 echo "[browser-tests] stack ready"
 

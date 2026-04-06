@@ -386,6 +386,7 @@ impl PatRepository for DbPatRepository {
 }
 
 impl SessionRepository for DbSessionRepository {
+    #[allow(clippy::too_many_arguments)]
     fn create(
         &self,
         instance_id: &str,
@@ -688,6 +689,7 @@ impl OidcTokenRepository for DbOidcTokenRepository {
         })
     }
 
+    #[allow(clippy::type_complexity)]
     fn lookup_active_token(
         &self,
         instance_id: &str,
@@ -906,6 +908,7 @@ impl OidcTokenRepository for DbOidcTokenRepository {
 }
 
 impl OidcKeyRepository for DbOidcKeyRepository {
+    #[allow(clippy::type_complexity)]
     fn list_active_keys(
         &self,
         instance_id: &str,
@@ -1400,6 +1403,7 @@ async fn load_password_hash(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_linked_identity(
     db: &Db,
     instance_id: &str,
@@ -1670,6 +1674,7 @@ async fn resolve_pat(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_session_record(
     db: &Db,
     instance_id: &str,
@@ -2013,6 +2018,7 @@ async fn create_oidc_auth_request(
     Ok(request_id)
 }
 
+#[allow(clippy::type_complexity)]
 async fn consume_oidc_auth_code(
     db: &Db,
     instance_id: &str,
@@ -2145,16 +2151,16 @@ async fn append_domain_event(
     session_id: Option<&str>,
     flow_id: Option<&str>,
 ) -> anyhow::Result<()> {
-    let event_id = Uuid::now_v7().to_string();
-    let org_id = event_org_id(event);
-    let actor_id = non_empty(Some(event.actor_id().to_string()));
-    let aggregate_id = non_empty(Some(event.aggregate_id().to_string()));
-    let aggregate_type = Some(event.category().to_string());
-    let resource_type = aggregate_type.clone();
-    let payload_json = serde_json::to_string(event).context("serialize domain event payload")?;
-
     match db {
         Db::Sql(_) => {
+            let event_id = Uuid::now_v7().to_string();
+            let org_id = event_org_id(event);
+            let actor_id = non_empty(Some(event.actor_id().to_string()));
+            let aggregate_id = non_empty(Some(event.aggregate_id().to_string()));
+            let aggregate_type = Some(event.category().to_string());
+            let resource_type = aggregate_type.clone();
+            let payload_json =
+                serde_json::to_string(event).context("serialize domain event payload")?;
             let scoped = db.scoped(instance_id.to_string());
             let sql = format!(
                 "INSERT INTO events \
@@ -2183,26 +2189,13 @@ async fn append_domain_event(
                 .await?;
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(
-                "INSERT INTO events \
-                 (id, instance_id, event_type, category, org_id, actor_id, aggregate_id, aggregate_type, resource_type, payload, metadata, request_id, session_id, flow_id, created_at) \
-                 VALUES \
-                 (@id, @instance_id, @event_type, @category, @org_id, @actor_id, @aggregate_id, @aggregate_type, @resource_type, @payload, @metadata, @request_id, @session_id, @flow_id, CURRENT_TIMESTAMP())",
-            );
-            stmt.add_param("id", &event_id);
-            stmt.add_param("instance_id", &instance_id);
-            stmt.add_param("event_type", &event.event_type());
-            stmt.add_param("category", &event.category());
-            stmt.add_param("org_id", &org_id);
-            stmt.add_param("actor_id", &actor_id);
-            stmt.add_param("aggregate_id", &aggregate_id);
-            stmt.add_param("aggregate_type", &aggregate_type);
-            stmt.add_param("resource_type", &resource_type);
-            stmt.add_param("payload", &payload_json);
-            stmt.add_param("metadata", &"{}");
-            stmt.add_param("request_id", &request_id);
-            stmt.add_param("session_id", &session_id);
-            stmt.add_param("flow_id", &flow_id);
+            let stmt = build_spanner_event_insert_stmt(
+                instance_id,
+                event,
+                request_id,
+                session_id,
+                flow_id,
+            )?;
             let _ = spanner
                 .client()
                 .read_write_transaction(|tx| {
@@ -2217,6 +2210,69 @@ async fn append_domain_event(
     }
 
     Ok(())
+}
+
+fn build_spanner_event_insert_stmt(
+    instance_id: &str,
+    event: &DomainEvent,
+    request_id: Option<&str>,
+    session_id: Option<&str>,
+    flow_id: Option<&str>,
+) -> anyhow::Result<Statement> {
+    let event_id = Uuid::now_v7().to_string();
+    let org_id = event_org_id(event);
+    let actor_id = non_empty(Some(event.actor_id().to_string()));
+    let aggregate_id = non_empty(Some(event.aggregate_id().to_string()));
+    let aggregate_type = Some(event.category().to_string());
+    let resource_type = aggregate_type.clone();
+    let payload_json = serde_json::to_string(event).context("serialize domain event payload")?;
+    let mut stmt = Statement::new(
+        "INSERT INTO events \
+         (id, instance_id, event_type, category, org_id, actor_id, aggregate_id, aggregate_type, resource_type, payload, metadata, request_id, session_id, flow_id, created_at) \
+         VALUES \
+         (@id, @instance_id, @event_type, @category, @org_id, @actor_id, @aggregate_id, @aggregate_type, @resource_type, @payload, @metadata, @request_id, @session_id, @flow_id, CURRENT_TIMESTAMP())",
+    );
+    stmt.add_param("id", &event_id);
+    stmt.add_param("instance_id", &instance_id);
+    stmt.add_param("event_type", &event.event_type());
+    stmt.add_param("category", &event.category());
+    stmt.add_param("org_id", &org_id);
+    stmt.add_param("actor_id", &actor_id);
+    stmt.add_param("aggregate_id", &aggregate_id);
+    stmt.add_param("aggregate_type", &aggregate_type);
+    stmt.add_param("resource_type", &resource_type);
+    stmt.add_param("payload", &payload_json);
+    stmt.add_param("metadata", &"{}");
+    stmt.add_param("request_id", &request_id);
+    stmt.add_param("session_id", &session_id);
+    stmt.add_param("flow_id", &flow_id);
+    Ok(stmt)
+}
+
+fn build_spanner_effect_insert_stmt(
+    instance_id: &str,
+    effect: &Effect,
+    config_json: &str,
+    payload_json: &str,
+) -> Statement {
+    let mut stmt = Statement::new(
+        "INSERT INTO effects \
+         (instance_id, id, event_id, source_key, effect_type, status, config, payload, attempt, max_attempts, last_error) \
+         VALUES \
+         (@instance_id, @id, @event_id, @source_key, @effect_type, @status, @config, @payload, @attempt, @max_attempts, @last_error)",
+    );
+    stmt.add_param("instance_id", &instance_id);
+    stmt.add_param("id", &effect.id);
+    stmt.add_param("event_id", &effect.event_id);
+    stmt.add_param("source_key", &effect.source_key);
+    stmt.add_param("effect_type", &effect.effect_type.as_str());
+    stmt.add_param("status", &effect.status.as_str());
+    stmt.add_param("config", &config_json);
+    stmt.add_param("payload", &payload_json);
+    stmt.add_param("attempt", &(effect.attempt as i64));
+    stmt.add_param("max_attempts", &(effect.max_attempts as i64));
+    stmt.add_param("last_error", &effect.last_error);
+    stmt
 }
 
 async fn list_domain_events(
@@ -2944,6 +3000,7 @@ impl UnitOfWork for SqlUnitOfWork {
         self.effects.push(effect);
     }
 
+    #[allow(clippy::explicit_auto_deref)]
     fn commit(self: Box<Self>) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async move {
             if self.events.is_empty() && self.effects.is_empty() {
@@ -2966,30 +3023,74 @@ impl UnitOfWork for SqlUnitOfWork {
                         .await?;
                     }
                     if !self.effects.is_empty() {
-                        super::effects::insert_effects_in_tx(
-                            &mut *tx,
-                            scoped.instance_id(),
-                            &self.effects,
-                        )
-                        .await?;
+                        super::effects::insert_effects_in_tx(&mut *tx, &scoped, &self.effects)
+                            .await?;
                     }
                     tx.commit().await?;
                 }
-                Db::Spanner(_) => {
-                    // For Spanner, each event is its own transaction (existing behavior)
-                    for buffered in &self.events {
-                        append_domain_event(
-                            &self.db,
-                            &buffered.instance_id,
-                            &buffered.event,
-                            buffered.request_id.as_deref(),
-                            buffered.session_id.as_deref(),
-                            buffered.flow_id.as_deref(),
-                        )
+                Db::Spanner(spanner) => {
+                    let event_statements = self
+                        .events
+                        .iter()
+                        .map(|buffered| {
+                            build_spanner_event_insert_stmt(
+                                &buffered.instance_id,
+                                &buffered.event,
+                                buffered.request_id.as_deref(),
+                                buffered.session_id.as_deref(),
+                                buffered.flow_id.as_deref(),
+                            )
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    let prepared_effects = self
+                        .effects
+                        .iter()
+                        .map(|effect| {
+                            Ok::<_, anyhow::Error>((
+                                effect.clone(),
+                                serde_json::to_string(&effect.config)
+                                    .context("serialize effect config")?,
+                                serde_json::to_string(&effect.payload)
+                                    .context("serialize effect payload")?,
+                            ))
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    let instance_id = self.instance_id.clone();
+                    let _ = spanner
+                        .client()
+                        .read_write_transaction(|tx| {
+                            let event_statements = event_statements.clone();
+                            let prepared_effects = prepared_effects.clone();
+                            let instance_id = instance_id.clone();
+                            Box::pin(async move {
+                                for stmt in event_statements {
+                                    tx.update(stmt).await?;
+                                }
+                                for (effect, config_json, payload_json) in &prepared_effects {
+                                    let mut exists = Statement::new(
+                                        "SELECT id FROM effects \
+                                         WHERE instance_id = @instance_id AND source_key = @source_key \
+                                         LIMIT 1",
+                                    );
+                                    exists.add_param("instance_id", &instance_id);
+                                    exists.add_param("source_key", &effect.source_key);
+                                    let mut rows = tx.query(exists).await?;
+                                    if rows.next().await?.is_some() {
+                                        continue;
+                                    }
+
+                                    let stmt = build_spanner_effect_insert_stmt(
+                                        &instance_id,
+                                        effect,
+                                        config_json,
+                                        payload_json,
+                                    );
+                                    tx.update(stmt).await?;
+                                }
+                                Ok::<(), SpannerError>(())
+                            })
+                        })
                         .await?;
-                    }
-                    // Effects in Spanner: create via standalone inserts
-                    // (full transactional support can be added when needed)
                 }
             }
             Ok(())

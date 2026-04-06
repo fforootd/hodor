@@ -349,6 +349,7 @@ pub(super) fn metadata_has_capability(metadata_json: &str, capability: &str) -> 
         .unwrap_or(false)
 }
 
+#[allow(clippy::type_complexity)]
 pub(super) fn instance_from_sql_row(
     row: (
         String,

@@ -318,6 +318,7 @@
   import { Spinner } from '@/components/ui/spinner'
   import { AlertCircle } from 'lucide-vue-next'
   import CaptchaWidget from './CaptchaWidget.vue'
+  import { PROTECTED_CAPTCHA_ACTIONS } from '@/login/constants'
 
   const props = withDefaults(
     defineProps<{
@@ -456,18 +457,9 @@
     return parts.join('')
   }
 
-  const protectedCaptchaActions = new Set([
-    'identifier',
-    'password',
-    'magic_link',
-    'sso',
-    'register_submit',
-    'send_reset',
-  ])
-
   function actionDisabled(action: string): boolean {
     if (!action || !props.captchaRequired || props.captchaSolved) return false
-    if (!protectedCaptchaActions.has(action)) return false
+    if (!PROTECTED_CAPTCHA_ACTIONS.has(action)) return false
     // Don't disable buttons for invisible POW challenges — they auto-solve.
     const hasPowChallenge = props.flowStep?.nodes?.some((n: any) => n.type === 'captcha_challenge')
     if (hasPowChallenge) return false

@@ -379,7 +379,7 @@ async fn complete_federated_login(
         }
     });
     let metadata_json = serde_json::to_string(&metadata)?;
-    let _ = repos
+    repos
         .sessions
         .update_metadata(instance_id.as_ref(), &created.session_id, &metadata_json)
         .await?;
@@ -455,7 +455,7 @@ async fn find_or_create_identity(
         .await?
     {
         let raw_claims = serde_json::to_string(&identity.claims)?;
-        let _ = repos
+        repos
             .credentials
             .touch_linked_identity(
                 instance_id,

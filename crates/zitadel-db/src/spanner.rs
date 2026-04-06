@@ -211,7 +211,7 @@ impl ParsedDatabaseName {
 async fn build_client_config(config: &StatefulStorageConfig) -> anyhow::Result<ClientConfig> {
     let mut client_config = ClientConfig::default();
     client_config.channel_config.num_channels =
-        cmp::max(1usize, cmp::min(config.max_open_conns as usize, 8usize));
+        (config.max_open_conns as usize).clamp(1usize, 8usize);
     client_config.session_config.min_opened = client_config.channel_config.num_channels;
     client_config.session_config.max_opened = cmp::max(
         client_config.channel_config.num_channels,

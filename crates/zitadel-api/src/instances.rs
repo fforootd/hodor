@@ -544,7 +544,7 @@ pub(crate) async fn require_parent_management(
         .get_instance
         .execute(&ctx, current_id.as_ref())
         .await
-        .map_err(|e| response::app_error(e))?;
+        .map_err(response::app_error)?;
 
     let default_features =
         FeatureMap::from([("instance_management".into(), instance.kind == "root")]);
@@ -585,7 +585,7 @@ pub(crate) async fn reconcile_after_mutation(
         .fga
         .rebuild_platform_store()
         .await
-        .map_err(|error| response::internal(error))
+        .map_err(response::internal)
 }
 
 pub(crate) async fn require_instance_relation(
@@ -619,5 +619,5 @@ async fn parent_relation_allowed(
         .fga
         .parent_relation_allowed(parent_instance_id, principal_ref, relation, object)
         .await
-        .map_err(|error| response::internal(error))
+        .map_err(response::internal)
 }

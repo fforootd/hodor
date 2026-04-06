@@ -198,7 +198,6 @@
           </SidebarGroup>
 
           <!-- Categorized navigation -->
-          <template v-if="showInstanceSection">
             <template v-for="category in categorizedNav" :key="category.key">
               <!-- Flat category: label + items always visible -->
               <SidebarGroup v-if="!category.drillable">
@@ -234,7 +233,6 @@
                 </SidebarGroupContent>
               </SidebarGroup>
             </template>
-          </template>
 
         </template>
       </SidebarContent>
@@ -481,8 +479,6 @@
     Plus,
     Link,
     BellRing,
-    CreditCard,
-    Wrench,
     ArrowLeft,
     UserCog,
     ShieldAlert,
@@ -557,20 +553,26 @@
   const searchResults = ref<SearchResult[]>([])
   const commandQuery = ref('')
   let debounceTimer: ReturnType<typeof setTimeout>
+  let searchAbort: AbortController | null = null
 
   function onCommandSearch(e: Event) {
     const query = (e.target as HTMLInputElement).value
     commandQuery.value = query
     clearTimeout(debounceTimer)
+    searchAbort?.abort()
     if (!query.trim()) {
       searchResults.value = []
       return
     }
     debounceTimer = setTimeout(async () => {
+      searchAbort = new AbortController()
       try {
         const resp = await searchApi.search(query.trim())
-        searchResults.value = (resp.results || []) as SearchResult[]
-      } catch {
+        if (!searchAbort.signal.aborted) {
+          searchResults.value = (resp.results || []) as SearchResult[]
+        }
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
         searchResults.value = []
       }
     }, 200)
@@ -754,10 +756,6 @@
     },
   )
 
-  // Whether to show the INSTANCE section in the sidebar.
-  // Always show product nav — the root instance has its own users/orgs/apps.
-  // When inside a child instance, the same nav links point to instance-scoped URLs.
-  const showInstanceSection = computed(() => true)
 
   // Categorized navigation: groups nav items into categories
   interface ResolvedCategory {
@@ -849,10 +847,14 @@
     },
   )
 
+  /** Strip the `i-` prefix used for instance-scoped route names. */
+  function normalizeRouteName(raw?: string | symbol | null): string {
+    return (String(raw ?? '')).replace(/^i-/, '')
+  }
+
   function isNavActive(item: NavItem): boolean {
     const r = route
-    // Normalize: strip i- prefix for comparison
-    const name = (r.name as string || '').replace(/^i-/, '')
+    const name = normalizeRouteName(r.name)
     if (item.route === '/users') {
       return name === 'users' || name === 'user-create' || name === 'user-detail'
     }
@@ -957,6 +959,7 @@
   })
 
   // Sync instance display state and sidebar counts when entering/leaving an instance.
+  let orgFetchAbort: AbortController | null = null
   watch(
     () => route.params.instanceId as string | undefined,
     async (newId) => {
@@ -965,12 +968,17 @@
       } else {
         clearInstance()
       }
+      // Cancel previous org fetch to prevent stale responses from racing.
+      orgFetchAbort?.abort()
+      orgFetchAbort = new AbortController()
+      const signal = orgFetchAbort.signal
       // Refresh orgs for the current scope.
       // The fetch layer rewrites to /v1/instances/:id/... when inside an instance.
       try {
         const orgResp = await orgApi.list()
-        applyOrgs(orgResp)
-      } catch {
+        if (!signal.aborted) applyOrgs(orgResp)
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
         applyOrgs([])
       }
     },
@@ -978,8 +986,7 @@
 
   const currentUserCreateType = computed(() => normalizeUserSchemaType(route.query.type))
   const pageTitle = computed(() => {
-    // Normalize: strip i- prefix for instance-scoped route names
-    const name = (route.name as string || '').replace(/^i-/, '')
+    const name = normalizeRouteName(route.name)
     if (name === 'users') return 'Users'
     if (name === 'user-create')
       return `New ${getUserSchemaLabel(currentUserCreateType.value)}`
@@ -1059,8 +1066,7 @@
     // Instance context is now shown in the sidebar selector — breadcrumb
     // only shows navigation within the current instance scope.
 
-    // Normalize route name (strip i- prefix for instance-scoped routes)
-    const name = (route.name as string || '').replace(/^i-/, '')
+    const name = normalizeRouteName(route.name)
     const parent = parentRoutes[name]
     if (parent) {
       crumbs.push({

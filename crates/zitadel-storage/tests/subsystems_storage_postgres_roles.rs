@@ -384,6 +384,12 @@ async fn seed_user(
     identifier: &str,
 ) -> anyhow::Result<()> {
     sqlx::query(
+        "INSERT INTO instances (instance_id, kind) VALUES ($1, 'root') ON CONFLICT DO NOTHING",
+    )
+    .bind(instance_id)
+    .execute(db.pool())
+    .await?;
+    sqlx::query(
         "INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
     )
     .bind(org_id)

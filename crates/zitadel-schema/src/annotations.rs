@@ -45,10 +45,7 @@ pub fn extract_annotations(schema: &Value) -> SchemaAnnotations {
             .get("x-table")
             .and_then(Value::as_str)
             .map(String::from),
-        auth_methods: schema
-            .get("x-auth-methods")
-            .cloned()
-            .unwrap_or(Value::Null),
+        auth_methods: schema.get("x-auth-methods").cloned().unwrap_or(Value::Null),
         ..Default::default()
     };
 
@@ -73,10 +70,7 @@ pub fn extract_annotations(schema: &Value) -> SchemaAnnotations {
                     .get("x-sensitive")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
-                claim_expr: def
-                    .get("x-claim")
-                    .and_then(Value::as_str)
-                    .map(String::from),
+                claim_expr: def.get("x-claim").and_then(Value::as_str).map(String::from),
                 identifier: def
                     .get("x-identifier")
                     .and_then(Value::as_bool)
@@ -129,17 +123,26 @@ pub fn check_editable_fields(schema_type: &str, payload: &Value) -> Result<(), V
     let Some(schema) = crate::bundled_schema(schema_type) else {
         return Ok(());
     };
+    check_editable_fields_in_schema(&schema, payload, &[])
+}
+
+pub fn check_editable_fields_in_schema(
+    schema: &Value,
+    payload: &Value,
+    reserved_fields: &[&str],
+) -> Result<(), Vec<String>> {
     let ann = extract_annotations(&schema);
     let Some(obj) = payload.as_object() else {
         return Ok(());
     };
+    let reserved: std::collections::HashSet<&str> = reserved_fields.iter().copied().collect();
 
     let violations: Vec<String> = obj
         .keys()
         .filter(|key| {
-            ann.fields
-                .get(key.as_str())
-                .is_some_and(|f| !f.editable)
+            !reserved.contains(key.as_str())
+                && key.as_str() != "metadata"
+                && ann.fields.get(key.as_str()).is_some_and(|f| !f.editable)
         })
         .cloned()
         .collect();

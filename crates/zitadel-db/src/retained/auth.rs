@@ -118,6 +118,7 @@ pub async fn get_oidc_client_record(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_oidc_auth_request_record(
     db: &Db,
     instance_id: &str,
@@ -195,6 +196,7 @@ pub async fn create_oidc_auth_request_record(
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 pub async fn consume_oidc_auth_code_record(
     db: &Db,
     instance_id: &str,
@@ -312,6 +314,7 @@ pub async fn consume_oidc_auth_code_record(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_login_flow(
     db: &Db,
     instance_id: &str,
@@ -448,6 +451,7 @@ pub async fn get_login_flow_record(
     Ok(rows.into_iter().find(|row| row.id == id))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_login_flow(
     db: &Db,
     instance_id: &str,

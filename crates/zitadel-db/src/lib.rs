@@ -140,6 +140,7 @@ pub struct SqlDb {
 
 /// Database handle for SQL or native Spanner backends.
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Db {
     Sql(SqlDb),
     Spanner(SpannerDb),

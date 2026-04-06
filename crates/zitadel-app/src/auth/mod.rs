@@ -349,4 +349,57 @@ impl RevokeSession {
 
         Ok(())
     }
+
+    #[tracing::instrument(
+        name = "use_case.revoke_own_session",
+        skip_all,
+        fields(event_type = "session.revoked", category = "session")
+    )]
+    pub async fn execute_self(&self, ctx: &ActorContext, session_id: &str) -> Result<(), AppError> {
+        let session = self
+            .repos
+            .sessions
+            .get(ctx.instance_id(), session_id)
+            .await
+            .map_err(AppError::Internal)?
+            .ok_or_else(|| AppError::not_found("session", session_id))?;
+
+        if session.user_id != ctx.user_id() {
+            return Err(AppError::PermissionDenied {
+                reason: format!(
+                    "principal {} cannot revoke session {}",
+                    ctx.principal_ref(),
+                    session_id
+                ),
+            });
+        }
+
+        let revoked = self
+            .repos
+            .sessions
+            .revoke(ctx.instance_id(), session_id)
+            .await
+            .map_err(AppError::Internal)?;
+
+        if !revoked {
+            return Err(AppError::not_found("session", session_id));
+        }
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::SessionRevoked {
+                    session_id: session_id.to_string(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                Some(ctx.user_id()),
+                Some(session_id),
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(())
+    }
 }

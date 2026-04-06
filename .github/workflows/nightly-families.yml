@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   nightly-families:
-    name: Nightly / Extended Families
+    name: Extended Families
     uses: ./.github/workflows/reusable-ci.yml
     with:
       execution_tier_label: Nightly

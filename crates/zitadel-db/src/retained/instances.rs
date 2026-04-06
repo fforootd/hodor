@@ -764,7 +764,7 @@ pub async fn delete_instance_row(
                 > 0)
         }
         Db::Spanner(spanner) => {
-            let mut exists_stmt = Statement::new(&format!(
+            let mut exists_stmt = Statement::new(format!(
                 "SELECT id FROM {table} WHERE instance_id = @instance_id AND id = @id LIMIT 1"
             ));
             exists_stmt.add_param("instance_id", &instance_id);
@@ -775,7 +775,7 @@ pub async fn delete_instance_row(
             {
                 return Ok(false);
             }
-            let mut delete_stmt = Statement::new(&format!(
+            let mut delete_stmt = Statement::new(format!(
                 "DELETE FROM {table} WHERE instance_id = @instance_id AND id = @id"
             ));
             delete_stmt.add_param("instance_id", &instance_id);
@@ -885,7 +885,7 @@ pub async fn create_named_resource(
                 stmt.add_param("response_types", &"[\"code\"]");
                 stmt
             } else {
-                Statement::new(&format!(
+                Statement::new(format!(
                     "INSERT INTO {table} (id, instance_id, org_id, name, state) \
                      VALUES (@id, @instance_id, @org_id, @name, 'active')"
                 ))
@@ -942,7 +942,7 @@ pub async fn get_named_resource(
             )
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(&format!(
+            let mut stmt = Statement::new(format!(
                 "SELECT id, name, state, CAST(created_at AS STRING) AS created_at, \
                         CAST(updated_at AS STRING) AS updated_at \
                  FROM {table} WHERE instance_id = @instance_id AND id = @id LIMIT 1"
@@ -999,7 +999,7 @@ pub async fn list_named_resources(
                 .collect())
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(&format!(
+            let mut stmt = Statement::new(format!(
                 "SELECT id, name, state, CAST(created_at AS STRING) AS created_at, \
                         CAST(updated_at AS STRING) AS updated_at \
                  FROM {table} WHERE instance_id = @instance_id AND id > @after_id \
@@ -1051,7 +1051,7 @@ pub async fn update_named_resource_name(
                 > 0)
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(&format!(
+            let mut stmt = Statement::new(format!(
                 "UPDATE {table} SET name = @name, updated_at = CURRENT_TIMESTAMP() \
                  WHERE instance_id = @instance_id AND id = @id"
             ));

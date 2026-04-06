@@ -96,6 +96,65 @@ impl SchemaValidator {
     }
 }
 
+fn normalize_schema(mut schema: Value) -> Value {
+    if let Some(obj) = schema.as_object_mut() {
+        let is_custom = obj
+            .get("$schema")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.starts_with("https://json-schema.org"));
+        if is_custom {
+            obj.remove("$schema");
+        }
+    }
+    schema
+}
+
+/// Build a metadata-only validation view from a full entity schema.
+///
+/// Reserved platform fields are removed, `required` is stripped, and
+/// `additionalProperties` is disabled so typed transport fields cannot be
+/// smuggled into the metadata envelope.
+pub fn extension_schema_view(schema: &Value, reserved_fields: &[&str]) -> Value {
+    let mut view = normalize_schema(schema.clone());
+    let reserved: std::collections::HashSet<&str> = reserved_fields.iter().copied().collect();
+
+    if let Some(obj) = view.as_object_mut() {
+        obj.remove("required");
+        obj.insert("additionalProperties".into(), Value::Bool(false));
+
+        if let Some(properties) = obj.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.retain(|field, _| field != "metadata" && !reserved.contains(field.as_str()));
+        }
+    }
+
+    view
+}
+
+/// Validate a payload against an arbitrary schema value.
+pub fn validate_schema(schema: &Value, payload: &Value) -> Result<(), Vec<ValidationError>> {
+    let schema = normalize_schema(schema.clone());
+    let validator = match Validator::new(&schema) {
+        Ok(validator) => validator,
+        Err(error) => {
+            return Err(vec![ValidationError {
+                path: String::new(),
+                message: format!("invalid schema: {error}"),
+            }]);
+        }
+    };
+
+    match validator.validate(payload) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(validator
+            .iter_errors(payload)
+            .map(|e| ValidationError {
+                path: e.instance_path.to_string(),
+                message: e.to_string(),
+            })
+            .collect()),
+    }
+}
+
 impl Default for SchemaValidator {
     fn default() -> Self {
         Self::new()

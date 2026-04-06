@@ -1,4 +1,4 @@
-name: CI PR
+name: CI / PR
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   ci:
-    name: PR / Stable Wall
+    name: Stable Wall
     uses: ./.github/workflows/reusable-ci.yml
     with:
       execution_tier_label: PR

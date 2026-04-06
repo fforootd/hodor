@@ -128,11 +128,11 @@ async fn list_own_sessions(
     Extension(identity): Extension<Identity>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.list_sessions.execute(&ctx).await {
+    match s.app.list_sessions.execute_self(&ctx).await {
         Ok(rows) => {
             let sessions: Vec<OwnSessionResponse> = rows
                 .into_iter()
-                .filter(|r| r.user_id == identity.user_id && r.revoked_at.is_none())
+                .filter(|r| r.revoked_at.is_none())
                 .map(|r| {
                     let current = r.id == identity.session_id;
                     OwnSessionResponse {
@@ -162,17 +162,15 @@ async fn revoke_own_session(
     Path(id): Path<String>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    // Verify the session belongs to this user.
-    match s.app.get_session.execute(&ctx, &id).await {
-        Ok(session) if session.user_id == identity.user_id => {}
-        Ok(_) => return response::forbidden("cannot revoke another user's session"),
+    match s.app.get_session.execute_self(&ctx, &id).await {
+        Ok(_) => {}
         Err(e) => return response::app_error(e),
     }
     match s
         .app
         .runner
         .run(&ctx, "session.revoke", || {
-            s.app.revoke_session.execute(&ctx, &id)
+            s.app.revoke_session.execute_self(&ctx, &id)
         })
         .await
     {
@@ -186,22 +184,19 @@ async fn revoke_other_sessions(
     Extension(identity): Extension<Identity>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.list_sessions.execute(&ctx).await {
+    match s.app.list_sessions.execute_self(&ctx).await {
         Ok(rows) => {
             let mut revoked = 0u32;
             for session in rows {
-                if session.user_id == identity.user_id
-                    && session.id != identity.session_id
+                if session.id != identity.session_id
                     && session.revoked_at.is_none()
-                {
-                    if s.app
+                    && s.app
                         .revoke_session
-                        .execute(&ctx, &session.id)
+                        .execute_self(&ctx, &session.id)
                         .await
                         .is_ok()
-                    {
-                        revoked += 1;
-                    }
+                {
+                    revoked += 1;
                 }
             }
             response::json_ok(serde_json::json!({ "revoked": revoked }))

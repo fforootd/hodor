@@ -174,10 +174,7 @@ where
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         // Extract schema type from extensions (set by route layer).
-        let schema_type = req
-            .extensions()
-            .get::<SchemaType>()
-            .map(|s| s.0);
+        let schema_type = req.extensions().get::<SchemaType>().map(|s| s.0);
 
         let bytes = axum::body::Bytes::from_request(req, state)
             .await
@@ -187,16 +184,15 @@ where
             .map_err(|e| bad_request(format!("invalid JSON: {e}")))?;
 
         // Validate against schema if one is specified.
-        if let Some(schema_type) = schema_type {
-            if let Err(errors) = zitadel_schema::validator::SchemaValidator::global()
-                .validate(schema_type, &value)
-            {
-                let details: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-                return Err(response::error(
-                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-                    format!("schema validation failed: {}", details.join("; ")),
-                ));
-            }
+        if let Some(schema_type) = schema_type
+            && let Err(errors) =
+                zitadel_schema::validator::SchemaValidator::global().validate(schema_type, &value)
+        {
+            let details: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+            return Err(response::error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                format!("schema validation failed: {}", details.join("; ")),
+            ));
         }
 
         let inner: T = serde_json::from_value(value)

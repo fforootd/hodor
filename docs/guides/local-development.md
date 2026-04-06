@@ -98,7 +98,7 @@ Local notification delivery is zero-config by default:
 - SMS resolves to the `dev_stdout` channel
 - rendered output is written to the server log instead of requiring SMTP or an SMS gateway
 
-You can inspect and override both through the Console at [NotificationsView.vue](../../web/src/console/views/NotificationsView.vue).
+You can inspect and override both through the Console notifications route, wired in [web/src/console/router.ts](../../web/src/console/router.ts).
 
 If you want to try a real integration locally, add an instance or org override for:
 

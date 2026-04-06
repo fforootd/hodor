@@ -1,4 +1,5 @@
 use crate::context::ActorContext;
+use crate::effect::Effect;
 use crate::error::AppError;
 use crate::event::DomainEvent;
 use crate::hook::{EffectHook, HookContext, HookPhase, PolicyInterceptor};
@@ -63,6 +64,7 @@ impl UseCaseRunner {
             actor_id: ctx.user_id().to_string(),
             org_id: ctx.org_id().to_string(),
             operation: operation.to_string(),
+            event_id: None,
             metadata: serde_json::Value::Null,
         };
 
@@ -107,6 +109,7 @@ impl UseCaseRunner {
             actor_id: ctx.user_id().to_string(),
             org_id: ctx.org_id().to_string(),
             operation: operation.to_string(),
+            event_id: None,
             metadata: serde_json::Value::Null,
         };
 
@@ -170,4 +173,20 @@ pub async fn run_effects(
             );
         }
     }
+}
+
+/// Ask effect hooks to plan durable work that must be enqueued before the
+/// source event can be marked as shipped.
+pub async fn plan_durable_effects(
+    hooks: &[Arc<dyn EffectHook>],
+    phase: HookPhase,
+    ctx: &HookContext,
+    event: Option<&DomainEvent>,
+) -> anyhow::Result<Vec<Effect>> {
+    let mut planned = Vec::new();
+    for hook in hooks {
+        let mut effects = hook.plan_durable_effects(phase, ctx, event).await?;
+        planned.append(&mut effects);
+    }
+    Ok(planned)
 }

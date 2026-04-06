@@ -147,7 +147,7 @@ just test-nightly
 
 ## CI Shape
 
-- `PR / Stable Wall` is fixed and always-on for every pull request.
-- `Release / Stable Wall` mirrors the same lane set on pushes to `main`.
+- The `CI / PR` workflow runs a fixed `Stable Wall` for every pull request.
+- The `CI / Main` workflow mirrors the same `Stable Wall` on pushes to `main`.
 - Nightly/manual coverage is split across `nightly-families.yml`, `oidc-conformance-daily.yml`, `db-perf-daily.yml`, and `fuzz-daily.yml`.
 - Deprecated compatibility aliases were removed. Docs should reference only canonical commands from the map above.

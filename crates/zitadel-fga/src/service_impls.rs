@@ -191,7 +191,7 @@ impl TupleRepository for FgaService {
                     .collect()
             }
             Db::Spanner(_) => {
-                let mut stmt = Statement::new(&format!(
+                let mut stmt = Statement::new(format!(
                     "SELECT raw_user, relation, raw_object, CAST(inserted_at AS STRING) AS inserted_at \
                      FROM fga_tuples \
                      WHERE scope_id = @scope_id \
@@ -600,7 +600,7 @@ impl ChangeRepository for FgaService {
                 }
             }
             Db::Spanner(_) => {
-                let mut stmt = Statement::new(&format!(
+                let mut stmt = Statement::new(format!(
                     "SELECT seq, operation, raw_user, relation, raw_object, CAST(created_at AS STRING) AS created_at \
                      FROM fga_tuple_changes \
                      WHERE scope_id = @scope_id \

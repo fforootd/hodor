@@ -124,6 +124,7 @@ pub async fn update_password_hash(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_user(
     db: &Db,
     instance_id: &str,
@@ -760,6 +761,7 @@ pub async fn touch_linked_identity(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_linked_identity_record(
     db: &Db,
     instance_id: &str,

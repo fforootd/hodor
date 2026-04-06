@@ -29,6 +29,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::effect::{Effect, EffectType};
 use crate::event::DomainEvent;
 use crate::hook::{
     ContextPatch, DenyReason, EffectHook, HookContext, HookPhase, HookPipeline, InterceptResult,
@@ -91,6 +92,103 @@ fn trigger_matches(trigger_expr: &str, ctx: &HookContext) -> bool {
             false
         }
     }
+}
+
+fn effect_env(ctx: &HookContext, event: Option<&DomainEvent>) -> serde_json::Value {
+    let mut env = serde_json::json!({
+        "instance_id": ctx.instance_id,
+        "actor_id": ctx.actor_id,
+        "org_id": ctx.org_id,
+        "operation": ctx.operation,
+        "metadata": ctx.metadata,
+    });
+
+    if let Some(event) = event
+        && let serde_json::Value::Object(map) = &mut env
+    {
+        map.insert(
+            "event_type".into(),
+            serde_json::Value::String(event.event_type().into()),
+        );
+        map.insert(
+            "category".into(),
+            serde_json::Value::String(event.category().into()),
+        );
+        map.insert(
+            "aggregate_id".into(),
+            serde_json::Value::String(event.aggregate_id().into()),
+        );
+        map.insert(
+            "event_id".into(),
+            ctx.event_id
+                .as_ref()
+                .map(|id| serde_json::Value::String(id.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
+    }
+
+    env
+}
+
+fn effect_trigger_matches(
+    action: &LoadedAction,
+    ctx: &HookContext,
+    event: Option<&DomainEvent>,
+) -> Result<bool, anyhow::Error> {
+    if action.trigger_expr.is_empty() || action.trigger_expr == "true" {
+        return Ok(true);
+    }
+
+    let env = effect_env(ctx, event);
+    zitadel_expr::eval(&action.trigger_expr, &env)
+        .map(|val| val.as_bool().unwrap_or(false))
+        .map_err(|e| anyhow::anyhow!("action '{}' trigger expression failed: {e}", action.name))
+}
+
+fn build_webhook_effect(
+    action: &LoadedAction,
+    ctx: &HookContext,
+    event: &DomainEvent,
+) -> Result<Effect, anyhow::Error> {
+    let event_id = ctx
+        .event_id
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("post-event durable webhook planning requires event_id"))?;
+    let url = action
+        .config
+        .get("url")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| anyhow::anyhow!("webhook action '{}' missing url", action.name))?;
+
+    let mut config = action.config.clone();
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert("url".into(), serde_json::Value::String(url.to_string()));
+    }
+
+    let payload = serde_json::json!({
+        "event_id": event_id,
+        "event_type": event.event_type(),
+        "category": event.category(),
+        "aggregate_id": event.aggregate_id(),
+        "action_id": action.id,
+        "action_name": action.name,
+        "context": {
+            "instance_id": ctx.instance_id,
+            "actor_id": ctx.actor_id,
+            "org_id": ctx.org_id,
+            "operation": ctx.operation,
+            "metadata": ctx.metadata,
+        },
+        "event": event,
+    });
+
+    Ok(Effect::new(
+        event_id.clone(),
+        format!("{event_id}:{}:webhook", action.id),
+        EffectType::Webhook,
+        config,
+        payload,
+    ))
 }
 
 // ─── PolicyInterceptor implementation ────────────────────────
@@ -312,55 +410,16 @@ impl EffectHook for ActionEffectHook {
                 )
                 .entered();
 
-                // Build environment with event data if available
-                let trigger_matches =
-                    if action.trigger_expr.is_empty() || action.trigger_expr == "true" {
-                        true
-                    } else {
-                        let mut env = serde_json::json!({
-                            "instance_id": ctx.instance_id,
-                            "actor_id": ctx.actor_id,
-                            "org_id": ctx.org_id,
-                            "operation": ctx.operation,
-                            "metadata": ctx.metadata,
-                        });
-
-                        // Enrich environment with event data for PostCommit/PostEvent phases
-                        if let Some(event) = event
-                            && let serde_json::Value::Object(map) = &mut env
-                        {
-                            map.insert(
-                                "event_type".into(),
-                                serde_json::Value::String(event.event_type().into()),
-                            );
-                            map.insert(
-                                "category".into(),
-                                serde_json::Value::String(event.category().into()),
-                            );
-                            map.insert(
-                                "aggregate_id".into(),
-                                serde_json::Value::String(event.aggregate_id().into()),
-                            );
+                let trigger_matches = match effect_trigger_matches(action, ctx, event) {
+                    Ok(matches) => matches,
+                    Err(error) => {
+                        tracing::warn!(action.id = %action.id, %error, "effect trigger expression failed");
+                        if action.fail_open {
+                            continue;
                         }
-
-                        match zitadel_expr::eval(&action.trigger_expr, &env) {
-                            Ok(val) => val.as_bool().unwrap_or(false),
-                            Err(e) => {
-                                tracing::warn!(
-                                    action.id = %action.id,
-                                    error = %e,
-                                    "effect trigger expression failed"
-                                );
-                                if action.fail_open {
-                                    continue;
-                                }
-                                return Err(anyhow::anyhow!(
-                                    "action '{}' trigger expression failed: {e}",
-                                    action.name
-                                ));
-                            }
-                        }
-                    };
+                        return Err(error);
+                    }
+                };
 
                 if !trigger_matches {
                     continue;
@@ -380,10 +439,6 @@ impl EffectHook for ActionEffectHook {
                         );
                     }
                     "webhook" => {
-                        // Webhook delivery uses the durable effects system.
-                        // The event consumer worker will create Effect records
-                        // for matching webhook actions once it gains access to
-                        // EffectRepository. Until then, log the intent.
                         let url = action
                             .config
                             .get("url")
@@ -397,7 +452,8 @@ impl EffectHook for ActionEffectHook {
                             action.name = %action.name,
                             webhook.url = %url,
                             event_type = %event_info,
-                            "webhook action matched — durable effect delivery pending"
+                            phase = ?phase,
+                            "webhook action matched"
                         );
                     }
                     "expr" => {
@@ -444,6 +500,48 @@ impl EffectHook for ActionEffectHook {
             }
 
             Ok(())
+        })
+    }
+
+    fn plan_durable_effects<'a>(
+        &'a self,
+        phase: HookPhase,
+        ctx: &'a HookContext,
+        event: Option<&'a DomainEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Effect>, anyhow::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            if phase != self.phase || phase != HookPhase::PostEvent {
+                return Ok(Vec::new());
+            }
+
+            let Some(event) = event else {
+                return Ok(Vec::new());
+            };
+
+            let mut planned = Vec::new();
+            for action in &self.actions {
+                if action.action_type != "webhook" {
+                    continue;
+                }
+
+                let trigger_matches = match effect_trigger_matches(action, ctx, Some(event)) {
+                    Ok(matches) => matches,
+                    Err(error) => {
+                        tracing::warn!(action.id = %action.id, %error, "durable effect trigger evaluation failed");
+                        if action.fail_open {
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                };
+                if !trigger_matches {
+                    continue;
+                }
+
+                planned.push(build_webhook_effect(action, ctx, event)?);
+            }
+
+            Ok(planned)
         })
     }
 }
@@ -601,6 +699,7 @@ mod tests {
             actor_id: "user-1".into(),
             org_id: "org-1".into(),
             operation: "user.create".into(),
+            event_id: None,
             metadata: serde_json::Value::Null,
         }
     }
@@ -763,6 +862,44 @@ mod tests {
             .on_event(HookPhase::PostEvent, &ctx, Some(&event))
             .await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn post_event_webhook_plans_durable_effect() {
+        let mut action = make_action("webhook", "post_event", "webhook", "true", 0);
+        action.config = serde_json::json!({
+            "url": "https://example.invalid/hooks/user-created",
+            "headers": {
+                "X-Test": "1"
+            }
+        });
+        let hook = ActionEffectHook::new(vec![LoadedAction::from(&action)], HookPhase::PostEvent);
+
+        let mut ctx = make_ctx();
+        ctx.event_id = Some("evt-1".into());
+        let event = DomainEvent::UserCreated {
+            user_id: "u-1".into(),
+            org_id: "org-1".into(),
+            identifier: "alice@example.com".into(),
+            schema_type: "human_user".into(),
+            actor_id: "admin".into(),
+        };
+
+        let effects = hook
+            .plan_durable_effects(HookPhase::PostEvent, &ctx, Some(&event))
+            .await
+            .unwrap();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].effect_type, EffectType::Webhook);
+        assert_eq!(effects[0].event_id, "evt-1");
+        assert_eq!(effects[0].source_key, "evt-1:action-webhook:webhook");
+        assert_eq!(
+            effects[0]
+                .config
+                .get("url")
+                .and_then(|value| value.as_str()),
+            Some("https://example.invalid/hooks/user-created")
+        );
     }
 
     #[test]

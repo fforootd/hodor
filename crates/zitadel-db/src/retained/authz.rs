@@ -52,6 +52,7 @@ fn role_definition_from_spanner_row(row: Row) -> anyhow::Result<RoleDefinition> 
     })
 }
 
+#[allow(clippy::type_complexity)]
 fn role_assignment_from_sql_row(
     row: (
         String,

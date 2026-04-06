@@ -84,6 +84,7 @@ impl EffectStatus {
 pub struct Effect {
     pub id: String,
     pub event_id: String,
+    pub source_key: String,
     pub effect_type: EffectType,
     pub status: EffectStatus,
     /// Delivery configuration (e.g. `{"url": "...", "headers": {...}}` for webhooks,
@@ -95,6 +96,8 @@ pub struct Effect {
     pub max_attempts: i32,
     pub next_retry_at: String,
     pub last_error: String,
+    pub lease_owner: String,
+    pub lease_expires_at: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
 }
@@ -103,6 +106,7 @@ impl Effect {
     /// Create a new pending effect with sensible defaults.
     pub fn new(
         event_id: String,
+        source_key: String,
         effect_type: EffectType,
         config: serde_json::Value,
         payload: serde_json::Value,
@@ -110,6 +114,7 @@ impl Effect {
         Self {
             id: uuid::Uuid::now_v7().to_string(),
             event_id,
+            source_key,
             effect_type,
             status: EffectStatus::Pending,
             config,
@@ -118,6 +123,8 @@ impl Effect {
             max_attempts: 5,
             next_retry_at: String::new(), // filled by DB default
             last_error: String::new(),
+            lease_owner: String::new(),
+            lease_expires_at: None,
             created_at: String::new(), // filled by DB default
             completed_at: None,
         }

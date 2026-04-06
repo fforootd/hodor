@@ -9,8 +9,9 @@ use uuid::Uuid;
 use zitadel_app::effect::{Effect, EffectType};
 use zitadel_app::hook::{HookContext, HookPhase, HookPipeline};
 use zitadel_app::repo::EffectRepository;
-use zitadel_app::usecase::run_effects;
+use zitadel_app::usecase::{plan_durable_effects, run_effects};
 use zitadel_config::{Config, RetentionConfig, WorkersConfig};
+use zitadel_db::repo_impls::DbEffectRepository;
 use zitadel_db::{
     BackendKind, DEFAULT_INSTANCE_ID, Db, Dialect, JobBudget, JobReconcileSpec, bool_true_sql,
     complete_job_run, current_timestamp_sql, delete_sink_inbox_records,
@@ -18,7 +19,6 @@ use zitadel_db::{
     delete_transient_state_records, due_job_names, ensure_event_partitions, fetch_unshipped_events,
     mark_events_shipped, timestamp_plus_expr, try_acquire_job_lease,
 };
-use zitadel_db::repo_impls::DbEffectRepository;
 
 #[derive(Clone)]
 struct JobSpec {
@@ -114,11 +114,16 @@ pub async fn start(
     // Start the effects worker (durable side-effect delivery with retry).
     {
         let effects_repo = DbEffectRepository::new(db.clone());
+        let worker_id = format!("effects:{}:{}", std::process::id(), Uuid::new_v4());
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
         tokio::spawn(async move {
             let poll_interval = Duration::from_secs(2);
             loop {
                 if let Err(error) =
-                    process_pending_effects(&effects_repo, DEFAULT_INSTANCE_ID).await
+                    process_pending_effects(&effects_repo, &client, DEFAULT_INSTANCE_ID, &worker_id)
+                        .await
                 {
                     warn!(%error, "effects worker tick failed");
                 }
@@ -203,8 +208,7 @@ fn builtins(config: &Config, backend: BackendKind) -> Vec<JobSpec> {
         JobSpec {
             name: "effects_gc",
             display_name: "Effects Cleanup",
-            description:
-                "Deletes completed and dead effects older than the retention period.",
+            description: "Deletes completed and dead effects older than the retention period.",
             cron: "0 */6 * * *",
             cadence: "6h",
             strategy: "chunked_delete",
@@ -419,6 +423,7 @@ async fn execute_job(db: &Db, config: &Config, job: &JobSpec) -> anyhow::Result<
         }
         "sink_inbox_gc" => delete_sink_inbox(db, &config.storage.retention, &budget).await?,
         "event_partition_maint" => maintain_event_storage(db, config, &budget).await?,
+        "effects_gc" => delete_effects(db, job, &budget).await?,
         other => anyhow::bail!("unsupported built-in job: {other}"),
     };
 
@@ -500,6 +505,31 @@ async fn maintain_event_storage(
     .await
 }
 
+async fn delete_effects(db: &Db, job: &JobSpec, budget: &JobBudget) -> anyhow::Result<i64> {
+    let repo = DbEffectRepository::new(db.clone());
+    let keep_for = parse_duration_spec(&job.retention)
+        .unwrap_or_else(|| Duration::from_secs(7 * 24 * 60 * 60));
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let cutoff = time_from_unix_secs(now_secs.saturating_sub(keep_for.as_secs()));
+
+    let mut removed = 0i64;
+    let started = std::time::Instant::now();
+    while removed < budget.max_rows_per_run as i64 && started.elapsed() < budget.max_run_duration {
+        let remaining = (budget.max_rows_per_run as i64 - removed) as u32;
+        let batch = budget.batch_size.min(remaining.max(1));
+        let deleted = repo.cleanup(DEFAULT_INSTANCE_ID, &cutoff, batch).await? as i64;
+        removed += deleted;
+        if deleted == 0 {
+            break;
+        }
+    }
+
+    Ok(removed)
+}
+
 fn parse_duration_spec(raw: &str) -> Option<Duration> {
     if raw.is_empty() {
         return None;
@@ -539,13 +569,19 @@ fn parse_duration_spec(raw: &str) -> Option<Duration> {
 /// and records success/failure with appropriate retry scheduling.
 async fn process_pending_effects(
     repo: &DbEffectRepository,
+    client: &reqwest::Client,
     instance_id: &str,
+    worker_id: &str,
 ) -> anyhow::Result<()> {
     const BATCH_SIZE: u32 = 50;
+    const LEASE_TTL_SECS: u64 = 60;
     const BASE_BACKOFF_SECS: u64 = 5;
     const MAX_BACKOFF_SECS: u64 = 480;
 
-    let effects = repo.fetch_pending(instance_id, BATCH_SIZE).await?;
+    let claim_token = format!("{worker_id}:{}", Uuid::new_v4());
+    let effects = repo
+        .claim_due(instance_id, &claim_token, LEASE_TTL_SECS, BATCH_SIZE)
+        .await?;
     if effects.is_empty() {
         return Ok(());
     }
@@ -558,7 +594,7 @@ async fn process_pending_effects(
             effect.attempt = effect.attempt,
         );
 
-        let result = dispatch_effect(effect).instrument(span).await;
+        let result = dispatch_effect(client, effect).instrument(span).await;
 
         match result {
             Ok(()) => {
@@ -572,12 +608,8 @@ async fn process_pending_effects(
             Err(error) => {
                 let next_attempt = effect.attempt + 1;
                 if next_attempt >= effect.max_attempts {
-                    repo.mark_dead(
-                        instance_id,
-                        &effect.id,
-                        &format!("{error:#}"),
-                    )
-                    .await?;
+                    repo.mark_dead(instance_id, &effect.id, &format!("{error:#}"))
+                        .await?;
                     tracing::warn!(
                         effect_id = %effect.id,
                         effect_type = %effect.effect_type.as_str(),
@@ -611,7 +643,7 @@ async fn process_pending_effects(
 }
 
 /// Dispatch a single effect based on its type.
-async fn dispatch_effect(effect: &Effect) -> anyhow::Result<()> {
+async fn dispatch_effect(client: &reqwest::Client, effect: &Effect) -> anyhow::Result<()> {
     match effect.effect_type {
         EffectType::Log => {
             tracing::info!(
@@ -627,10 +659,6 @@ async fn dispatch_effect(effect: &Effect) -> anyhow::Result<()> {
                 .get("url")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("webhook effect missing 'url' in config"))?;
-
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()?;
 
             let mut req = client.post(url).json(&effect.payload);
 
@@ -698,8 +726,7 @@ fn chrono_next_retry(backoff_secs: u64) -> String {
     let future = now + Duration::from_secs(backoff_secs);
     // Format as ISO 8601 compatible with SQLite datetime()
     let secs = future.as_secs();
-    let dt = time_from_unix_secs(secs);
-    dt
+    time_from_unix_secs(secs)
 }
 
 /// Simple UTC datetime string from unix seconds (no external crate needed).
@@ -750,6 +777,7 @@ async fn consume_events(db: &Db, hooks: &HookPipeline, instance_id: &str) -> any
         return Ok(());
     }
 
+    let effects_repo = DbEffectRepository::new(db.clone());
     let mut shipped_ids = Vec::with_capacity(events.len());
 
     for event_record in &events {
@@ -765,11 +793,27 @@ async fn consume_events(db: &Db, hooks: &HookPipeline, instance_id: &str) -> any
 
         let hook_ctx = HookContext {
             instance_id: event_record.instance_id.clone(),
-            actor_id: String::new(), // Not available from raw event record
+            actor_id: domain_event
+                .as_ref()
+                .map(|event| event.actor_id().to_string())
+                .unwrap_or_default(),
             org_id: String::new(),
             operation: event_record.event_type.clone(),
+            event_id: Some(event_record.id.clone()),
             metadata: serde_json::from_str(&event_record.metadata).unwrap_or_default(),
         };
+
+        let planned = plan_durable_effects(
+            &hooks.post_event_effects,
+            HookPhase::PostEvent,
+            &hook_ctx,
+            domain_event.as_ref(),
+        )
+        .instrument(span.clone())
+        .await?;
+        if !planned.is_empty() {
+            effects_repo.enqueue_batch(instance_id, &planned).await?;
+        }
 
         // Run PostEvent effects
         run_effects(

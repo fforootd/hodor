@@ -1,4 +1,6 @@
 <template>
+  <Toaster position="top-right" :expand="true" rich-colors />
+
   <AppBootstrapScreen
     v-if="bootstrapState !== 'ready'"
     app-name="account"
@@ -45,11 +47,11 @@
                   <AvatarFallback class="text-lg">{{ initial }}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <CardTitle>{{ profile.display_name || profile.identifier }}</CardTitle>
+                  <CardTitle>{{ profile?.display_name || profile?.identifier }}</CardTitle>
                   <p class="text-sm text-muted-foreground mt-0.5">
-                    {{ profile.identifier }}
-                    <Badge variant="outline" class="ml-2" :class="profile.state === 'active' ? 'border-emerald-300 text-emerald-700' : ''">
-                      {{ profile.state }}
+                    {{ profile?.identifier }}
+                    <Badge variant="outline" class="ml-2" :class="profile?.state === 'active' ? 'border-emerald-300 text-emerald-700' : ''">
+                      {{ profile?.state }}
                     </Badge>
                   </p>
                 </div>
@@ -102,39 +104,44 @@
               <CardTitle>Active Sessions</CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Device</TableHead>
-                    <TableHead>IP</TableHead>
-                    <TableHead class="text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="s in sessions" :key="s.id">
-                    <TableCell>
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm font-medium">{{ parseUserAgent(s.user_agent) }}</span>
-                        <Badge v-if="s.current" class="text-[10px] h-4 px-1">This device</Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell class="text-sm text-muted-foreground font-mono">{{ s.ip_address || '—' }}</TableCell>
-                    <TableCell class="text-right">
-                      <Button v-if="!s.current" variant="destructive" size="sm" @click="revokeSession(s.id)">
-                        Revoke
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                  <TableRow v-if="!sessions.length">
-                    <TableCell colspan="3" class="text-center text-muted-foreground py-8">
-                      No active sessions
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-              <Button v-if="sessions.length > 1" variant="outline" class="mt-4 text-destructive border-destructive/30" @click="revokeOthers">
-                Revoke all other sessions
-              </Button>
+              <div v-if="sessionsLoading" class="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                <Spinner class="size-4" /> Loading sessions…
+              </div>
+              <template v-else>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Device</TableHead>
+                      <TableHead>IP</TableHead>
+                      <TableHead class="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="s in sessions" :key="s.id">
+                      <TableCell>
+                        <div class="flex items-center gap-2">
+                          <span class="text-sm font-medium">{{ parseUserAgent(s.user_agent) }}</span>
+                          <Badge v-if="s.current" class="text-[10px] h-4 px-1">This device</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell class="text-sm text-muted-foreground font-mono">{{ s.ip_address || '—' }}</TableCell>
+                      <TableCell class="text-right">
+                        <Button v-if="!s.current" variant="destructive" size="sm" @click="revokeSession(s.id)">
+                          Revoke
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow v-if="!sessions.length">
+                      <TableCell colspan="3" class="text-center text-muted-foreground py-8">
+                        No active sessions
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+                <Button v-if="sessions.length > 1" variant="outline" class="mt-4 text-destructive border-destructive/30" @click="revokeOthers">
+                  Revoke all other sessions
+                </Button>
+              </template>
             </CardContent>
           </Card>
         </TabsContent>
@@ -146,27 +153,32 @@
               <CardTitle>My Activity</CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Event</TableHead>
-                    <TableHead class="text-right">Time</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="e in events" :key="e.id">
-                    <TableCell>
-                      <Badge variant="outline" class="font-mono text-xs">{{ e.event_type }}</Badge>
-                    </TableCell>
-                    <TableCell class="text-right text-sm text-muted-foreground">{{ e.time_ago }}</TableCell>
-                  </TableRow>
-                  <TableRow v-if="!events.length">
-                    <TableCell colspan="2" class="text-center text-muted-foreground py-8">
-                      No activity yet
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+              <div v-if="activityLoading" class="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                <Spinner class="size-4" /> Loading activity…
+              </div>
+              <template v-else>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Event</TableHead>
+                      <TableHead class="text-right">Time</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="e in events" :key="e.id">
+                      <TableCell>
+                        <Badge variant="outline" class="font-mono text-xs">{{ e.event_type }}</Badge>
+                      </TableCell>
+                      <TableCell class="text-right text-sm text-muted-foreground">{{ e.time_ago }}</TableCell>
+                    </TableRow>
+                    <TableRow v-if="!events.length">
+                      <TableCell colspan="2" class="text-center text-muted-foreground py-8">
+                        No activity yet
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </template>
             </CardContent>
           </Card>
         </TabsContent>
@@ -183,6 +195,7 @@ import {
   createReadyzWaiter,
   useAppBootstrap,
 } from '@/bootstrap/app-bootstrap'
+import { notifyError, notifySuccess } from '@/lib/notify'
 import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
 
 // shadcn components
@@ -194,8 +207,39 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Toaster } from '@/components/ui/sonner'
+import { Spinner } from '@/components/ui/spinner'
 
 import { LogOut } from 'lucide-vue-next'
+import { formatKey } from '@/console/utils/format'
+
+interface FieldPermission {
+  editable: boolean
+  sensitive: boolean
+  hidden: boolean
+  source: string
+}
+
+interface Identity {
+  id: string
+  identifier: string
+  display_name: string
+  state: string
+  profile?: Record<string, string>
+}
+
+interface Session {
+  id: string
+  user_agent: string
+  ip_address?: string
+  current: boolean
+}
+
+interface ActivityEvent {
+  id: string
+  event_type: string
+  time_ago: string
+}
 
 const DEFAULT_BRANDING: Branding = {
   org_id: '', org_name: 'Zitadel', logo_url: '',
@@ -205,14 +249,16 @@ const DEFAULT_BRANDING: Branding = {
 }
 
 const branding = ref<Branding>(DEFAULT_BRANDING)
-const profile = ref<any>(null)
-const profileData = ref<Record<string, any>>({})
-const fieldPermissions = ref<Record<string, any>>({})
+const profile = ref<Identity | null>(null)
+const profileData = ref<Record<string, string>>({})
+const fieldPermissions = ref<Record<string, FieldPermission>>({})
 const editFields = reactive<Record<string, string>>({})
 const showSensitive = reactive<Record<string, boolean>>({})
-const sessions = ref<any[]>([])
-const events = ref<any[]>([])
+const sessions = ref<Session[]>([])
+const events = ref<ActivityEvent[]>([])
 const saving = ref(false)
+const sessionsLoading = ref(false)
+const activityLoading = ref(false)
 const {
   state: bootstrapState,
   error: bootstrapError,
@@ -224,7 +270,9 @@ const {
   async () => {
     try {
       branding.value = await brandingApi.get()
-    } catch {}
+    } catch (e) {
+      console.error('Failed to load branding:', e)
+    }
     await loadProfile()
   },
   {
@@ -237,16 +285,14 @@ const initial = computed(() =>
 )
 
 const visibleFields = computed(() => {
-  const result: Record<string, any> = {}
+  const result: Record<string, FieldPermission> = {}
   for (const [field, perm] of Object.entries(fieldPermissions.value)) {
-    if (!(perm as any).hidden) result[field] = perm
+    if (!perm.hidden) result[field] = perm
   }
   return result
 })
 
-function formatLabel(field: string) {
-  return field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
+const formatLabel = formatKey
 
 function parseUserAgent(ua: string): string {
   if (!ua) return 'Unknown device'
@@ -266,64 +312,87 @@ function parseUserAgent(ua: string): string {
 }
 
 async function loadProfile() {
-  const data = await api.get<any>('/v1/account/profile')
+  const data = await api.get<{ identity: Identity; field_permissions: Record<string, FieldPermission> }>('/v1/account/profile')
   profile.value = data.identity
   profileData.value = data.identity.profile || {}
   fieldPermissions.value = data.field_permissions || {}
-  for (const [field, perm] of Object.entries(fieldPermissions.value) as any[]) {
+  for (const [field, perm] of Object.entries(fieldPermissions.value)) {
     if (perm.editable) editFields[field] = profileData.value[field] || ''
   }
 }
 
 async function loadSessions() {
+  sessionsLoading.value = true
   try {
-    const data = await api.get<any>('/v1/account/sessions')
+    const data = await api.get<{ sessions: Session[] }>('/v1/account/sessions')
     sessions.value = data.sessions || []
-  } catch {}
+  } catch (e) {
+    console.error('Failed to load sessions:', e)
+    notifyError('Failed to load sessions', e)
+  } finally {
+    sessionsLoading.value = false
+  }
 }
 
 async function loadActivity() {
+  activityLoading.value = true
   try {
-    const data = await api.get<any>('/v1/account/activity?limit=10')
+    const data = await api.get<{ events: ActivityEvent[] }>('/v1/account/activity?limit=10')
     events.value = data.events || []
-  } catch {}
+  } catch (e) {
+    console.error('Failed to load activity:', e)
+    notifyError('Failed to load activity', e)
+  } finally {
+    activityLoading.value = false
+  }
 }
 
 async function saveProfile() {
   saving.value = true
   try {
-    const profileUpdates: Record<string, any> = {}
-    for (const [field, perm] of Object.entries(fieldPermissions.value) as any[]) {
+    const profileUpdates: Record<string, string> = {}
+    for (const [field, perm] of Object.entries(fieldPermissions.value)) {
       if (perm.editable && editFields[field] !== (profileData.value[field] || '')) {
         profileUpdates[field] = editFields[field]
       }
     }
-    const body: any = {}
+    const body: { profile?: Record<string, string>; display_name?: string } = {}
     if (Object.keys(profileUpdates).length) body.profile = profileUpdates
-    if (editFields['display_name'] !== profile.value.display_name) {
-      body.display_name = editFields['display_name'] || profile.value.display_name
+    if (editFields['display_name'] !== profile.value?.display_name) {
+      body.display_name = editFields['display_name'] || profile.value?.display_name
     }
-    await api.patch<any>('/v1/account/profile', body)
+    await api.patch('/v1/account/profile', body)
     await loadProfile()
     await loadActivity()
-  } catch {}
-  saving.value = false
+    notifySuccess('Profile saved')
+  } catch (e) {
+    console.error('Failed to save profile:', e)
+    notifyError('Failed to save profile', e)
+  } finally {
+    saving.value = false
+  }
 }
 
 async function revokeSession(id: string) {
   try {
-    await api.post<any>(`/v1/account/sessions/${id}/revoke`, {})
+    await api.post(`/v1/account/sessions/${id}/revoke`, {})
     sessions.value = sessions.value.filter(s => s.id !== id)
     await loadActivity()
-  } catch {}
+  } catch (e) {
+    console.error('Failed to revoke session:', e)
+    notifyError('Failed to revoke session', e)
+  }
 }
 
 async function revokeOthers() {
   try {
-    await api.post<any>('/v1/account/sessions/revoke-others', {})
+    await api.post('/v1/account/sessions/revoke-others', {})
     await loadSessions()
     await loadActivity()
-  } catch {}
+  } catch (e) {
+    console.error('Failed to revoke sessions:', e)
+    notifyError('Failed to revoke sessions', e)
+  }
 }
 
 function signOut() {

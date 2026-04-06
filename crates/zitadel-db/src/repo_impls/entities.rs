@@ -470,6 +470,7 @@ pub(super) async fn load_group(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(super) async fn load_instance(
     db: &Db,
     instance_id: &str,

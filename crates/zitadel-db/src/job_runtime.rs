@@ -88,7 +88,7 @@ pub async fn reconcile_jobs(
                 let exists = rows.next().await?.is_some();
 
                 if exists {
-                    let mut stmt = Statement::new(&format!(
+                    let mut stmt = Statement::new(format!(
                         "UPDATE jobs \
                          SET display_name = @display_name, \
                              description = @description, \
@@ -116,7 +116,7 @@ pub async fn reconcile_jobs(
                         })
                         .await?;
                 } else {
-                    let mut stmt = Statement::new(&format!(
+                    let mut stmt = Statement::new(format!(
                         "INSERT INTO jobs \
                          (instance_id, name, display_name, description, cron, enabled, next_run_at, last_status, last_error, run_count, config_json, created_at, updated_at, last_rows_removed) \
                          VALUES \
@@ -241,7 +241,7 @@ pub async fn try_acquire_job_lease(
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                &sql.replace("$1", "@owner")
+                sql.replace("$1", "@owner")
                     .replace("$2", "@instance_id")
                     .replace("$3", "@name"),
             );
@@ -260,6 +260,7 @@ pub async fn try_acquire_job_lease(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn complete_job_run(
     db: &Db,
     instance_id: &str,
@@ -301,7 +302,7 @@ pub async fn complete_job_run(
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                &sql.replace("$1", "@status")
+                sql.replace("$1", "@status")
                     .replace("$2", "@error")
                     .replace("$3", "@removed")
                     .replace("$4", "@instance_id")
@@ -501,7 +502,7 @@ async fn delete_scoped_batches(
                 .rows_affected() as i64,
             Db::Spanner(spanner) => {
                 let mut stmt =
-                    Statement::new(&sql.replace("$1", "@instance_id").replace("$2", "@batch"));
+                    Statement::new(sql.replace("$1", "@instance_id").replace("$2", "@batch"));
                 stmt.add_param("instance_id", &instance_id);
                 stmt.add_param("batch", &(batch as i64));
                 let (_, affected) = spanner
@@ -553,7 +554,7 @@ async fn delete_unscoped_batches(
                 .await?
                 .rows_affected() as i64,
             Db::Spanner(spanner) => {
-                let mut stmt = Statement::new(&sql.replace("$1", "@batch"));
+                let mut stmt = Statement::new(sql.replace("$1", "@batch"));
                 stmt.add_param("batch", &(batch as i64));
                 let (_, affected) = spanner
                     .client()

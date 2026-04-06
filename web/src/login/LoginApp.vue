@@ -102,6 +102,7 @@
   import LoginShell from '@/login/components/LoginShell.vue'
   import LoginNodeRenderer from '@/login/components/LoginNodeRenderer.vue'
   import { CircleCheckBig } from 'lucide-vue-next'
+  import { PROTECTED_CAPTCHA_ACTIONS } from '@/login/constants'
 
   const props = withDefaults(
     defineProps<{
@@ -141,16 +142,16 @@
   const pendingAction = ref('')
   const captchaSolving = ref(false)
   const fingerprintCollected = ref(false)
-  const currentUrlParams = computed(() => new URLSearchParams(window.location.search))
+  const currentUrlParams = new URLSearchParams(window.location.search)
   const effectiveRedirectUri = computed(
-    () => props.redirectUri || currentUrlParams.value.get('redirect_uri') || '',
+    () => props.redirectUri || currentUrlParams.get('redirect_uri') || '',
   )
-  const effectiveState = computed(() => props.state || currentUrlParams.value.get('state') || '')
+  const effectiveState = computed(() => props.state || currentUrlParams.get('state') || '')
   const effectiveAuthRequestId = computed(
-    () => props.authRequestId || currentUrlParams.value.get('auth_request_id') || '',
+    () => props.authRequestId || currentUrlParams.get('auth_request_id') || '',
   )
-  const exitState = computed(() => currentUrlParams.value.get('exit') || '')
-  const continueTo = computed(() => currentUrlParams.value.get('continue_to') || '')
+  const exitState = computed(() => currentUrlParams.get('exit') || '')
+  const continueTo = computed(() => currentUrlParams.get('continue_to') || '')
   const isExitMode = computed(() => exitState.value !== '')
   const sanitizedContinueTo = computed(() => sanitizeContinueTo(continueTo.value))
   const exitCopy = computed(() => {
@@ -202,14 +203,7 @@
 
   const captchaSolved = computed(() => flowStep.value?.captcha_verified === true)
 
-  const protectedCaptchaActions = new Set([
-    'identifier',
-    'password',
-    'magic_link',
-    'sso',
-    'register_submit',
-    'send_reset',
-  ])
+  const protectedCaptchaActions = PROTECTED_CAPTCHA_ACTIONS
 
   const effectiveDarkMode = computed(() => {
     if (props.darkModeOverride) return props.darkModeOverride
@@ -412,17 +406,6 @@
       flowStep.value?.captcha_required === true &&
       flowStep.value?.captcha_verified !== true
     )
-  }
-
-  function normalizeAltchaDigest(algorithm: string): AlgorithmIdentifier {
-    switch (algorithm.toUpperCase()) {
-      case 'SHA-384':
-        return 'SHA-384'
-      case 'SHA-512':
-        return 'SHA-512'
-      default:
-        return 'SHA-256'
-    }
   }
 
   function resetCaptchaState() {

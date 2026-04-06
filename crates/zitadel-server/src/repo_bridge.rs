@@ -66,6 +66,7 @@ pub fn build_repositories(
 struct KvSessionRepo(Arc<DefaultTransientStorage>, Db);
 
 impl SessionRepository for KvSessionRepo {
+    #[allow(clippy::too_many_arguments)]
     fn create(
         &self,
         instance_id: &str,

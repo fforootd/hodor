@@ -12,10 +12,11 @@ use zitadel_app::error::AppError;
 use zitadel_app::hook::HookPipeline;
 use zitadel_app::repo::{
     AppRecord, AppRepository, BoxFuture, ConsoleBootstrapData, ConsoleQueryRepository,
-    DomainRecord, DomainRemoveResult, FingerprintRecord, GroupRecord, GroupRepository,
-    InstanceInfo, InstanceRecord, InstanceRepository, JobRecord, JobRepository, ListParams,
-    ListResult, NamedResourceRecord, OrgSummary, ProjectRepository, Repositories, RouteResolution,
-    SavedQueryRecord, SavedQueryRepository, TelemetryRepository,
+    CreatedSession, DomainRecord, DomainRemoveResult, FingerprintRecord, GroupRecord,
+    GroupRepository, InstanceInfo, InstanceRecord, InstanceRepository, JobRecord, JobRepository,
+    ListParams, ListResult, NamedResourceRecord, OrgSummary, ProjectRepository, Repositories,
+    RouteResolution, SavedQueryRecord, SavedQueryRepository, SessionDetail, SessionInfo,
+    SessionRepository, TelemetryRepository,
 };
 use zitadel_app::users::CreateUserCommand;
 use zitadel_app::{
@@ -37,6 +38,30 @@ fn test_ctx() -> ActorContext {
                 support_grant: None,
             },
             capabilities: vec![Capability::OperatorAdmin],
+        },
+        instance: InstanceContext {
+            instance_id: "test-instance".into(),
+            placement_mode: "global".into(),
+            region_key: None,
+            feature_overrides: Default::default(),
+            host: "localhost".into(),
+        },
+    }
+}
+
+fn self_service_ctx() -> ActorContext {
+    ActorContext {
+        auth: AuthContext {
+            identity: Identity {
+                user_id: "actor-1".into(),
+                principal_ref: "user:actor-1".into(),
+                session_id: "sess-1".into(),
+                token_type: "session".into(),
+                org_id: "org-1".into(),
+                issuer_instance_id: None,
+                support_grant: None,
+            },
+            capabilities: vec![],
         },
         instance: InstanceContext {
             instance_id: "test-instance".into(),
@@ -165,6 +190,100 @@ impl GroupRepository for MemoryGroupRepository {
         _user_id: &str,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
+    }
+}
+
+struct MemorySessionRepository {
+    store: Mutex<HashMap<(String, String), SessionDetail>>,
+}
+
+impl MemorySessionRepository {
+    fn new(sessions: Vec<SessionDetail>) -> Self {
+        let store = sessions
+            .into_iter()
+            .map(|session| (("test-instance".to_string(), session.id.clone()), session))
+            .collect();
+        Self {
+            store: Mutex::new(store),
+        }
+    }
+}
+
+impl SessionRepository for MemorySessionRepository {
+    #[allow(clippy::too_many_arguments)]
+    fn create(
+        &self,
+        _instance_id: &str,
+        user_id: &str,
+        org_id: &str,
+        _auth_method: &str,
+        _user_agent: &str,
+        _ip_address: &str,
+        _fingerprint: &str,
+    ) -> BoxFuture<'_, anyhow::Result<CreatedSession>> {
+        let user_id = user_id.to_string();
+        let org_id = org_id.to_string();
+        Box::pin(async move {
+            Ok(CreatedSession {
+                session_id: format!("created-{user_id}-{org_id}"),
+                token: "mock-token".to_string(),
+            })
+        })
+    }
+
+    fn find_by_token(
+        &self,
+        _instance_id: &str,
+        _token: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<SessionInfo>>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn revoke(&self, instance_id: &str, session_id: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let key = (instance_id.to_string(), session_id.to_string());
+        Box::pin(async move {
+            let mut store = self.store.lock().unwrap();
+            let Some(session) = store.get_mut(&key) else {
+                return Ok(false);
+            };
+            session.revoked_at = Some("2026-04-06T00:00:00Z".to_string());
+            Ok(true)
+        })
+    }
+
+    fn update_metadata(
+        &self,
+        _instance_id: &str,
+        _session_id: &str,
+        _metadata_json: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn list_by_instance(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SessionDetail>>> {
+        let instance_id = instance_id.to_string();
+        Box::pin(async move {
+            Ok(self
+                .store
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|((stored_instance_id, _), _)| stored_instance_id == &instance_id)
+                .map(|(_, session)| session.clone())
+                .collect())
+        })
+    }
+
+    fn get(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<SessionDetail>>> {
+        let key = (instance_id.to_string(), session_id.to_string());
+        Box::pin(async move { Ok(self.store.lock().unwrap().get(&key).cloned()) })
     }
 }
 
@@ -1394,6 +1513,86 @@ async fn instances_support_create_update_and_deprovision_state_transitions() {
         .await
         .unwrap_err();
     assert!(matches!(update_missing, AppError::NotFound { .. }));
+}
+
+#[tokio::test]
+async fn self_session_use_cases_bypass_org_viewer_checks_but_scope_to_the_actor() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.fga = Arc::new(zitadel_app::mock::MockFgaRepository { allow_all: false });
+    repos.sessions = Arc::new(MemorySessionRepository::new(vec![
+        SessionDetail {
+            id: "sess-1".into(),
+            user_id: "actor-1".into(),
+            org_id: "org-1".into(),
+            user_agent: "Browser A".into(),
+            ip_address: "127.0.0.1".into(),
+            created_at: "2026-04-06T00:00:00Z".into(),
+            expires_at: None,
+            revoked_at: None,
+        },
+        SessionDetail {
+            id: "sess-2".into(),
+            user_id: "other-user".into(),
+            org_id: "org-2".into(),
+            user_agent: "Browser B".into(),
+            ip_address: "127.0.0.2".into(),
+            created_at: "2026-04-06T01:00:00Z".into(),
+            expires_at: None,
+            revoked_at: None,
+        },
+    ]));
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = self_service_ctx();
+
+    let denied = app.list_sessions.execute(&ctx).await.unwrap_err();
+    assert!(matches!(denied, AppError::PermissionDenied { .. }));
+
+    let rows = app.list_sessions.execute_self(&ctx).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "sess-1");
+
+    let owned = app.get_session.execute_self(&ctx, "sess-1").await.unwrap();
+    assert_eq!(owned.user_id, "actor-1");
+
+    let denied = app
+        .get_session
+        .execute_self(&ctx, "sess-2")
+        .await
+        .unwrap_err();
+    assert!(matches!(denied, AppError::PermissionDenied { .. }));
+}
+
+#[tokio::test]
+async fn revoke_own_session_does_not_require_operator_admin() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.fga = Arc::new(zitadel_app::mock::MockFgaRepository { allow_all: false });
+    repos.sessions = Arc::new(MemorySessionRepository::new(vec![SessionDetail {
+        id: "sess-1".into(),
+        user_id: "actor-1".into(),
+        org_id: "org-1".into(),
+        user_agent: "Browser A".into(),
+        ip_address: "127.0.0.1".into(),
+        created_at: "2026-04-06T00:00:00Z".into(),
+        expires_at: None,
+        revoked_at: None,
+    }]));
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = self_service_ctx();
+
+    let denied = app
+        .revoke_session
+        .execute(&ctx, "sess-1")
+        .await
+        .unwrap_err();
+    assert!(matches!(denied, AppError::PermissionDenied { .. }));
+
+    app.revoke_session
+        .execute_self(&ctx, "sess-1")
+        .await
+        .unwrap();
+
+    let session = app.get_session.execute_self(&ctx, "sess-1").await.unwrap();
+    assert_eq!(session.revoked_at.as_deref(), Some("2026-04-06T00:00:00Z"));
 }
 
 // ─── ApplicationServices wiring test ─────────────────────

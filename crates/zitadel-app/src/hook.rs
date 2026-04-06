@@ -25,6 +25,7 @@ pub struct HookContext {
     pub actor_id: String,
     pub org_id: String,
     pub operation: String,
+    pub event_id: Option<String>,
     pub metadata: serde_json::Value,
 }
 
@@ -83,6 +84,16 @@ pub trait EffectHook: Send + Sync {
         ctx: &'a HookContext,
         event: Option<&'a crate::event::DomainEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send + 'a>>;
+
+    fn plan_durable_effects<'a>(
+        &'a self,
+        _phase: HookPhase,
+        _ctx: &'a HookContext,
+        _event: Option<&'a crate::event::DomainEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<crate::effect::Effect>, anyhow::Error>> + Send + 'a>>
+    {
+        Box::pin(async { Ok(Vec::new()) })
+    }
 }
 
 /// Registry that holds all active hooks, organized by phase.

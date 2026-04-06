@@ -1,4 +1,4 @@
-name: Release CI
+name: CI / Main
 
 on:
   push:
@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   ci:
-    name: Release / Stable Wall
+    name: Stable Wall
     uses: ./.github/workflows/reusable-ci.yml
     with:
       execution_tier_label: Release

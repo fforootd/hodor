@@ -55,7 +55,8 @@
   },
   "workflow_snippets": {
     ".github/workflows/ci-pr.yml": [
-      "name: PR / Stable Wall",
+      "name: CI / PR",
+      "name: Stable Wall",
       "execution_tier_label: PR",
       "run_docs: true",
       "run_fast_rust: true",
@@ -71,7 +72,8 @@
       "artifact_prefix: pr"
     ],
     ".github/workflows/ci-main.yml": [
-      "name: Release / Stable Wall",
+      "name: CI / Main",
+      "name: Stable Wall",
       "execution_tier_label: Release",
       "run_docs: true",
       "run_fast_rust: true",
@@ -88,6 +90,7 @@
     ],
     ".github/workflows/nightly-families.yml": [
       "name: Nightly / Extended Families",
+      "name: Extended Families",
       "execution_tier_label: Nightly",
       "run_docs: false",
       "run_fast_rust: false",

@@ -551,6 +551,7 @@ pub async fn remove_membership(
 
 // ─── Events ───
 
+#[allow(clippy::too_many_arguments)]
 pub async fn append_event(
     db: &Db,
     instance_id: &str,
@@ -1155,6 +1156,7 @@ pub async fn get_action(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_catalog_action(
     db: &Db,
     instance_id: &str,

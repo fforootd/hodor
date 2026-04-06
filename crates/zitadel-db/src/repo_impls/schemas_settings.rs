@@ -67,10 +67,10 @@ impl ProviderRepository for SqlProviderRepository {
         let instance_id = instance_id.to_string();
         let provider_id = provider_id.to_string();
         Box::pin(async move {
-            Ok(provider::get_provider_for(&db, &instance_id, &provider_id)
+            provider::get_provider_for(&db, &instance_id, &provider_id)
                 .await?
                 .map(provider_definition_from_storage)
-                .transpose()?)
+                .transpose()
         })
     }
 
@@ -436,19 +436,17 @@ impl SettingsRepository for SqlSettingsRepository {
         let org_id = org_id.map(str::to_string);
         let app_id = app_id.map(str::to_string);
         Box::pin(async move {
-            if let Some(app_id) = app_id.as_deref() {
-                if let Some(record) =
+            if let Some(app_id) = app_id.as_deref()
+                && let Some(record) =
                     load_settings_exact(&db, &instance_id, &settings_type, "app", app_id).await?
-                {
-                    return Ok(record);
-                }
+            {
+                return Ok(record);
             }
-            if let Some(org_id) = org_id.as_deref() {
-                if let Some(record) =
+            if let Some(org_id) = org_id.as_deref()
+                && let Some(record) =
                     load_settings_exact(&db, &instance_id, &settings_type, "org", org_id).await?
-                {
-                    return Ok(record);
-                }
+            {
+                return Ok(record);
             }
             if let Some(record) =
                 load_settings_exact(&db, &instance_id, &settings_type, "instance", "").await?
