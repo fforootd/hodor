@@ -143,6 +143,7 @@ mod tests {
             db.clone(),
             storage.transient.clone(),
             fga,
+            storage.analytics.clone(),
         ));
         let app = Arc::new(ApplicationServices::new(
             repos,

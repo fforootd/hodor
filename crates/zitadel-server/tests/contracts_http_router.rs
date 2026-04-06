@@ -43,6 +43,7 @@ async fn build_test_app_from_context(ctx: TestContext) -> anyhow::Result<TestApp
         secret_box: Arc::new(zitadel_crypto::SecretBox::new("", &HashMap::new())?),
         ready: AtomicBool::new(true),
         instance_resolver: Arc::new(InstanceResolver::new(&ctx.config, ctx.db.db.clone())),
+        app: ctx.api_state.app.clone(),
     });
     let router: Router = build_router(
         app_state,
@@ -262,7 +263,11 @@ async fn protected_routes_enforce_actor_contracts() -> anyhow::Result<()> {
         .await?;
     // Grant viewer role so FGA checks pass for read endpoints
     support::grant_org_role(&app, &user.org_id, &user.user_id, "viewer").await?;
-    app.ctx.api_state.fga.reconcile_root_hierarchy(zitadel_db::DEFAULT_INSTANCE_ID).await?;
+    app.ctx
+        .api_state
+        .fga
+        .reconcile_root_hierarchy(zitadel_db::DEFAULT_INSTANCE_ID)
+        .await?;
     let user_session = app.ctx.create_session(&user).await?;
     let user_pat = app.ctx.create_pat(&user, "route-user").await?;
     let admin_user = app.ctx.admin_user().await?;
@@ -323,7 +328,11 @@ async fn protected_routes_enforce_actor_contracts() -> anyhow::Result<()> {
         assert_eq!(user_response.status, axum::http::StatusCode::OK, "{path}");
 
         let user_pat_response = app.get(path, user_pat.actor()).await?;
-        assert_eq!(user_pat_response.status, axum::http::StatusCode::OK, "{path}");
+        assert_eq!(
+            user_pat_response.status,
+            axum::http::StatusCode::OK,
+            "{path}"
+        );
 
         let admin_response = app.get(path, admin_pat.actor()).await?;
         assert_eq!(admin_response.status, axum::http::StatusCode::OK, "{path}");

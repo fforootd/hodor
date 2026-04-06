@@ -40,6 +40,10 @@ pub struct Repositories {
     pub jobs: Arc<dyn JobRepository>,
     pub saved_queries: Arc<dyn SavedQueryRepository>,
     pub authorization: Arc<dyn AuthorizationRepository>,
+    pub fga_admin: Arc<dyn FgaAdminRepository>,
+    pub catalog: Arc<dyn CatalogRepository>,
+    pub observability: Arc<dyn ObservabilityRepository>,
+    pub schema_registry: Arc<dyn SchemaRegistryRepository>,
     pub uow: Arc<dyn UnitOfWorkFactory>,
 }
 
@@ -602,11 +606,7 @@ pub trait ProjectRepository: Send + Sync {
         name: &str,
     ) -> BoxFuture<'_, anyhow::Result<bool>>;
 
-    fn delete(
-        &self,
-        instance_id: &str,
-        project_id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+    fn delete(&self, instance_id: &str, project_id: &str) -> BoxFuture<'_, anyhow::Result<bool>>;
 }
 
 pub trait SessionRepository: Send + Sync {
@@ -1335,4 +1335,232 @@ pub trait SavedQueryRepository: Send + Sync {
         instance_id: &str,
         id: &str,
     ) -> BoxFuture<'_, anyhow::Result<bool>>;
+}
+
+// ─── FGA Admin ─────────────────────────────────────────────
+
+/// Minimal store info returned by FGA admin operations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FgaStoreInfo {
+    pub id: String,
+    pub name: String,
+}
+
+/// Error type for FGA admin operations, independent of the FGA engine.
+#[derive(Debug, thiserror::Error)]
+pub enum FgaAdminError {
+    #[error("bad request: {0}")]
+    BadRequest(String),
+    #[error("not found: {0}")]
+    NotFound(String),
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    #[error("internal: {0}")]
+    Internal(#[from] anyhow::Error),
+}
+
+/// Repository for FGA administrative operations exposed via the API.
+/// Customer-facing FGA endpoints and internal platform FGA endpoints
+/// delegate to this trait instead of calling FgaService directly.
+pub trait FgaAdminRepository: Send + Sync {
+    /// Discover the customer store for an instance.
+    fn discover_store(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, Result<FgaStoreInfo, FgaAdminError>>;
+
+    /// Discover the platform store.
+    fn discover_platform_store(
+        &self,
+    ) -> BoxFuture<'_, Result<FgaStoreInfo, FgaAdminError>>;
+
+    /// Check a single authorization tuple.
+    fn check(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Batch check multiple authorization tuples.
+    fn batch_check(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Read tuples from a store.
+    fn read_tuples(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Write tuples to a store.
+    fn write_tuples(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<(), FgaAdminError>>;
+
+    /// Expand a tuple.
+    fn expand(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// List objects a user has access to.
+    fn list_objects(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// List users that have access to an object.
+    fn list_users(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Read authorization model(s).
+    fn read_model(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        model_id: Option<&str>,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// List all authorization models.
+    fn read_models(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Write a new authorization model.
+    fn write_model(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        request: serde_json::Value,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Read tuple changes.
+    fn read_changes(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+        object_type: Option<&str>,
+        page_size: u32,
+        continuation_token: Option<&str>,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Get legacy model view.
+    fn legacy_model(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Get legacy model graph view.
+    fn legacy_model_graph(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
+
+    /// Rebuild the platform store (called after membership/user changes).
+    fn rebuild_platform_store(
+        &self,
+    ) -> BoxFuture<'_, Result<(), FgaAdminError>>;
+}
+
+// ─── Catalog ──────────────────────────────────────────────
+
+/// Repository for catalog template installation operations.
+pub trait CatalogRepository: Send + Sync {
+    /// Install a provider from a catalog template.
+    /// Returns the provider ID.
+    fn install_provider(
+        &self,
+        instance_id: &str,
+        template_id: &str,
+        variables: &serde_json::Value,
+    ) -> BoxFuture<'_, anyhow::Result<String>>;
+
+    /// Install an action from a catalog template.
+    /// Returns the action ID.
+    fn install_action(
+        &self,
+        instance_id: &str,
+        template_id: &str,
+        variables: &serde_json::Value,
+    ) -> BoxFuture<'_, anyhow::Result<String>>;
+}
+
+// ─── Observability ────────────────────────────────────────
+
+/// Observability overview data returned by the repository.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ObservabilityOverview {
+    pub auth_current: i64,
+    pub auth_previous: i64,
+    pub tokens_current: i64,
+    pub tokens_previous: i64,
+    pub failures_current: i64,
+    pub failures_previous: i64,
+    pub sessions_current: i64,
+    pub sessions_previous: i64,
+    pub auth_timestamps: Vec<i64>,
+    pub session_timestamps: Vec<i64>,
+    pub token_timestamps: Vec<i64>,
+    pub failure_timestamps: Vec<i64>,
+    pub top_operations: Vec<(String, i64)>,
+    pub top_users: Vec<(String, i64)>,
+    pub top_ips: Vec<(String, i64)>,
+    pub top_clients: Vec<(String, i64)>,
+    pub top_sdks: Vec<(String, i64)>,
+    pub delegation: Vec<(String, i64)>,
+}
+
+/// Repository for observability / analytics queries.
+pub trait ObservabilityRepository: Send + Sync {
+    /// Load the observability overview for an instance within a time range.
+    fn load_overview(
+        &self,
+        instance_id: &str,
+        range_hours: u64,
+    ) -> BoxFuture<'_, anyhow::Result<ObservabilityOverview>>;
+}
+
+// ─── Schema Registry ──────────────────────────────────────
+
+/// A schema registry entry for OpenAPI generation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SchemaRegistryEntry {
+    pub id: String,
+    pub type_name: String,
+    pub version: i64,
+    pub visibility: String,
+    pub is_default: bool,
+    pub schema_json: String,
+}
+
+/// Repository for schema registry lookups (used by OpenAPI generation).
+pub trait SchemaRegistryRepository: Send + Sync {
+    fn list_registry(
+        &self,
+        instance_id: &str,
+        after_id: &str,
+        type_filter: Option<&str>,
+        limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SchemaRegistryEntry>>>;
 }

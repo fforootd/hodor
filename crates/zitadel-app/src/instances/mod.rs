@@ -254,6 +254,10 @@ impl DeprovisionInstance {
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("instance", instance_id))?;
 
+        if instance.state == "deprovisioning" {
+            return Ok(());
+        }
+
         if instance.state != "active" && instance.state != "created" {
             return Err(AppError::InvalidState {
                 entity: "instance".to_string(),

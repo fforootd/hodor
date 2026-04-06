@@ -34,7 +34,8 @@ impl CreateGroup {
         }
 
         // Authz: caller must be admin on the target org
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id)).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id))
+            .await?;
 
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
@@ -163,11 +164,7 @@ impl DeleteGroup {
         skip_all,
         fields(event_type = "group.deleted", category = "group")
     )]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        group_id: &str,
-    ) -> Result<(), AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, group_id: &str) -> Result<(), AppError> {
         // Verify exists (instance-scoped: returns 404 for cross-instance)
         let group = self
             .repos

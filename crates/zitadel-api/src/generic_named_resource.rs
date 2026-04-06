@@ -12,10 +12,8 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use zitadel_app::resources::{
-    CreateNamedResourceCommand, UpdateNamedResourceCommand,
-};
 use zitadel_app::repo::NamedResourceRecord;
+use zitadel_app::resources::{CreateNamedResourceCommand, UpdateNamedResourceCommand};
 
 // ─── Config ────────────────────────────────────────────────
 
@@ -33,10 +31,7 @@ pub fn routes(kind: &'static str, prefix: &str) -> Router<ApiState> {
 
     Router::new()
         .route(&list_path, get(list).post(create))
-        .route(
-            &detail_path,
-            get(get_one).patch(update).delete(delete_one),
-        )
+        .route(&detail_path, get(get_one).patch(update).delete(delete_one))
         .layer(Extension(ResourceKind(kind)))
 }
 
@@ -212,8 +207,8 @@ pub mod membership {
     //! sub-resources (orgs, groups, etc.).
 
     use super::*;
-    use std::collections::HashMap;
     use axum::extract::Path;
+    use std::collections::HashMap;
     use zitadel_app::memberships::{AddMembershipCommand, RemoveMembershipCommand};
 
     /// Injected via `Extension` so handlers know which entity type / path param to use.
@@ -342,7 +337,7 @@ pub mod membership {
             .await
         {
             Ok(record) => {
-                if let Err(error) = s.fga.rebuild_platform_store().await {
+                if let Err(error) = s.app.repos.fga_admin.rebuild_platform_store().await {
                     return response::internal(error);
                 }
                 response::json_created(MemberResponse {
@@ -389,7 +384,7 @@ pub mod membership {
             .await
         {
             Ok(()) => {
-                if let Err(error) = s.fga.rebuild_platform_store().await {
+                if let Err(error) = s.app.repos.fga_admin.rebuild_platform_store().await {
                     return response::internal(error);
                 }
                 response::no_content()

@@ -62,11 +62,7 @@ impl DeleteSettings {
         skip_all,
         fields(event_type = "settings.deleted", category = "settings")
     )]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        settings_type: &str,
-    ) -> Result<(), AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, settings_type: &str) -> Result<(), AppError> {
         crate::authz::require_permission(
             &self.repos,
             ctx,
@@ -116,7 +112,13 @@ impl UpdateSettings {
         cmd: UpdateSettingsCommand,
     ) -> Result<(), AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         let record = SettingsRecord {
             settings_type: cmd.settings_type.clone(),

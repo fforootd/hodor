@@ -46,9 +46,14 @@ async fn list_fingerprints(
     let ctx = response::build_actor_context(&identity);
     let cursor = p.cursor.unwrap_or_default();
     let limit = p.limit.min(200);
-    match s.app.runner.run(&ctx, "telemetry.list_fingerprints", || {
-        s.app.list_fingerprints.execute(&ctx, &cursor, limit + 1)
-    }).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "telemetry.list_fingerprints", || {
+            s.app.list_fingerprints.execute(&ctx, &cursor, limit + 1)
+        })
+        .await
+    {
         Ok(rows) => {
             let has_more = rows.len() as i64 > limit;
             let items: Vec<FingerprintResponse> = rows
@@ -120,9 +125,14 @@ async fn ingest_fingerprint(
         type_,
         raw_data,
     };
-    match s.app.runner.run(&ctx, "telemetry.upsert_fingerprint", || {
-        s.app.upsert_fingerprint.execute(&ctx, cmd)
-    }).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "telemetry.upsert_fingerprint", || {
+            s.app.upsert_fingerprint.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(()) => response::json_created(serde_json::json!({"id": id})),
         Err(e) => response::app_error(e),
     }

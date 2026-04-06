@@ -18,6 +18,7 @@ use zitadel_db::{
     DEFAULT_INSTANCE_ID, Db, InstanceContext, resolve_domain_route, resolve_instance_route,
     with_instance_context,
 };
+use zitadel_fga::PLATFORM_STORE_ID;
 
 #[derive(Clone)]
 pub struct InstanceResolver {
@@ -106,6 +107,9 @@ impl InstanceResolver {
         // Path param takes highest priority — works regardless of cloud.enabled.
         // This is the primary mechanism for the console frontend.
         if let Some(instance_id) = path_instance_id {
+            if is_reserved_instance_id(&instance_id) {
+                anyhow::bail!("instance not found");
+            }
             let cache_key = format!("instance:{instance_id}");
             if let Some(cached) = self.cached(&cache_key) {
                 return cached
@@ -129,6 +133,9 @@ impl InstanceResolver {
         }
 
         if let Some(instance_id) = trusted_instance_id {
+            if is_reserved_instance_id(&instance_id) {
+                anyhow::bail!("instance not found");
+            }
             let cache_key = format!("instance:{instance_id}");
             if let Some(cached) = self.cached(&cache_key) {
                 return cached
@@ -207,6 +214,9 @@ impl InstanceResolver {
         &self,
         instance_id: &str,
     ) -> anyhow::Result<Option<InstanceContext>> {
+        if is_reserved_instance_id(instance_id) {
+            return Ok(None);
+        }
         let row = resolve_instance_route(&self.routing_db, instance_id).await?;
         Ok(row.map(|row| InstanceContext {
             instance_id: row.instance_id,
@@ -218,6 +228,10 @@ impl InstanceResolver {
             source: "trusted_header".into(),
         }))
     }
+}
+
+fn is_reserved_instance_id(instance_id: &str) -> bool {
+    instance_id == PLATFORM_STORE_ID
 }
 
 impl InstanceContextLayer {
@@ -537,6 +551,48 @@ mod tests {
         assert_eq!(ctx.instance_id, DEFAULT_INSTANCE_ID);
         assert_eq!(ctx.host, "root.example.com");
         assert_eq!(ctx.scheme, "https");
+    }
+
+    #[tokio::test]
+    async fn rejects_reserved_platform_path_instance_id() {
+        let resolver = seeded_resolver().await;
+        let req = Request::builder()
+            .uri("/v1/instances/_platform/console/bootstrap")
+            .header(header::HOST, "root.example.com")
+            .body(Body::empty())
+            .unwrap();
+
+        let err = resolver
+            .resolve(resolver.request_input(&req))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("instance not found"));
+    }
+
+    #[tokio::test]
+    async fn rejects_reserved_platform_trusted_header_override() {
+        let mut config = Config::default();
+        config.cloud.enabled = true;
+        config.server.trusted_proxies = vec!["127.0.0.1/32".into()];
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
+        let resolver = InstanceResolver::new(&config, db);
+
+        let mut req = Request::builder()
+            .header(header::HOST, "root.example.com")
+            .header("X-Zitadel-Instance", "_platform")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        let err = resolver
+            .resolve(resolver.request_input(&req))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("instance not found"));
     }
 
     #[test]

@@ -14,7 +14,10 @@ pub fn routes() -> Router<ApiState> {
         .route("/analytics/query", post(query))
         .route("/analytics/schema", get(schema))
         .route("/analytics/queries", get(list_queries).post(create_query))
-        .route("/analytics/queries/{id}", axum::routing::delete(delete_query))
+        .route(
+            "/analytics/queries/{id}",
+            axum::routing::delete(delete_query),
+        )
 }
 
 #[derive(Deserialize)]
@@ -49,10 +52,7 @@ async fn query(
 }
 
 /// GET /v1/analytics/schema — return table metadata for the schema browser.
-async fn schema(
-    State(s): State<ApiState>,
-    Extension(identity): Extension<Identity>,
-) -> Response {
+async fn schema(State(s): State<ApiState>, Extension(identity): Extension<Identity>) -> Response {
     let ctx = response::build_actor_context(&identity);
     if let Err(e) = crate::fga_check(&s, &ctx, "admin", "analytics:schema").await {
         return e;

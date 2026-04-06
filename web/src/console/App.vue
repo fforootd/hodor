@@ -164,6 +164,39 @@
             </SidebarGroupContent>
           </SidebarGroup>
 
+          <!-- Team (platform access management, root-only) -->
+          <SidebarGroup v-if="isRootInstance">
+            <SidebarGroupLabel class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Team</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton as-child :data-active="$route.name === 'team-members'" :tooltip="'Members'">
+                    <router-link to="/team/members">
+                      <UserCog class="size-4" />
+                      <span>Members</span>
+                    </router-link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton as-child :data-active="$route.name === 'team-access'" :tooltip="'Access'">
+                    <router-link to="/team/access">
+                      <KeyRound class="size-4" />
+                      <span>Access</span>
+                    </router-link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton as-child :data-active="$route.name === 'team-grants'" :tooltip="'Staff Grants'">
+                    <router-link to="/team/grants">
+                      <ShieldAlert class="size-4" />
+                      <span>Staff Grants</span>
+                    </router-link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
           <!-- Categorized navigation -->
           <template v-if="showInstanceSection">
             <template v-for="category in categorizedNav" :key="category.key">
@@ -451,6 +484,8 @@
     CreditCard,
     Wrench,
     ArrowLeft,
+    UserCog,
+    ShieldAlert,
   } from 'lucide-vue-next'
 
   const route = useRoute()
@@ -959,7 +994,9 @@
       instances: 'Instances',
       'instance-create': 'New Instance',
       'instance-detail': 'Instance',
-      team: 'Team',
+      'team-members': 'Members',
+      'team-access': 'Access',
+      'team-grants': 'Staff Grants',
       billing: 'Billing',
       'user-detail': 'User Detail',
       'identity-create': 'New User',
@@ -1004,6 +1041,9 @@
     'project-create': { label: 'Projects', path: '/projects' },
     'instance-detail': { label: 'Instances', path: '/instances' },
     'instance-create': { label: 'Instances', path: '/instances' },
+    'team-members': { label: 'Team', path: '/team/members' },
+    'team-access': { label: 'Team', path: '/team/members' },
+    'team-grants': { label: 'Team', path: '/team/members' },
     'schema-detail': { label: 'Schemas', path: '/schemas' },
     'provider-detail': { label: 'Providers', path: '/providers' },
     'provider-create': { label: 'Providers', path: '/providers' },

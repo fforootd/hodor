@@ -1,10 +1,5 @@
 use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
-use axum::{
-    Extension, Router,
-    extract::State,
-    response::Response,
-    routing::get,
-};
+use axum::{Extension, Router, extract::State, response::Response, routing::get};
 use serde::Serialize;
 use zitadel_app::repo::{ActionRecord, ListParams as AppListParams};
 
@@ -41,9 +36,17 @@ async fn list(State(s): State<ApiState>, Extension(identity): Extension<Identity
         cursor: None,
         search: None,
     };
-    match s.app.runner.run(&ctx, "action.list", || s.app.list_actions.execute(&ctx, &params)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "action.list", || {
+            s.app.list_actions.execute(&ctx, &params)
+        })
+        .await
+    {
         Ok(result) => {
-            let items: Vec<ActionResponse> = result.items.into_iter().map(action_from_record).collect();
+            let items: Vec<ActionResponse> =
+                result.items.into_iter().map(action_from_record).collect();
             response::json_ok(serde_json::json!({ "items": items }))
         }
         Err(e) => response::app_error(e),
@@ -56,7 +59,12 @@ async fn get_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "action.get", || s.app.get_action.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "action.get", || s.app.get_action.execute(&ctx, &id))
+        .await
+    {
         Ok(r) => response::json_ok(action_from_record(r)),
         Err(e) => response::app_error(e),
     }
@@ -68,7 +76,14 @@ async fn delete_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "action.delete", || s.app.delete_action.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "action.delete", || {
+            s.app.delete_action.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

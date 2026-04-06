@@ -6,12 +6,11 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use zitadel_app::repo::FgaAdminError;
 use zitadel_db::current_instance_id;
 use zitadel_fga::{
-    AuthorizationModelWriteRequest, BatchCheckRequest, ChangeRepository, CheckRequest,
-    CheckResponse, Evaluator, ExpandRequest, FgaApi, FgaError, ListObjectsRequest,
-    ListUsersRequest, ModelRepository, PLATFORM_STORE_ID, ReadRequest, StoreResolver,
-    TupleFilter, TupleKey, TupleKeySet, TupleRepository, WriteRequest,
+    AuthorizationModelWriteRequest, BatchCheckRequest, CheckRequest, ExpandRequest,
+    ListObjectsRequest, ListUsersRequest, PLATFORM_STORE_ID, ReadRequest, TupleKey, WriteRequest,
 };
 
 use crate::extractors::{StoreId, StoreModelPath};
@@ -33,11 +32,17 @@ pub fn customer_routes() -> Router<ApiState> {
         .route("/fga/expand", post(legacy_expand))
         .route("/fga/test", post(legacy_batch_test))
         .route("/fga/stores/{store_id}/check", post(check_store))
-        .route("/fga/stores/{store_id}/batch-check", post(batch_check_store))
+        .route(
+            "/fga/stores/{store_id}/batch-check",
+            post(batch_check_store),
+        )
         .route("/fga/stores/{store_id}/read", post(read_store))
         .route("/fga/stores/{store_id}/write", post(write_store))
         .route("/fga/stores/{store_id}/expand", post(expand_store))
-        .route("/fga/stores/{store_id}/list-objects", post(list_objects_store))
+        .route(
+            "/fga/stores/{store_id}/list-objects",
+            post(list_objects_store),
+        )
         .route("/fga/stores/{store_id}/list-users", post(list_users_store))
         .route("/fga/stores/{store_id}/changes", get(read_changes_store))
         .route(
@@ -67,33 +72,33 @@ pub fn internal_platform_routes() -> Router<ApiState> {
         .route_layer(axum::middleware::from_fn(middleware::require_fga_admin_pat))
 }
 
-fn fga_error_response(error: FgaError) -> Response {
+fn fga_error_response(error: FgaAdminError) -> Response {
     let (status, code, message, kind) = match error {
-        FgaError::BadRequest(message) => (
+        FgaAdminError::BadRequest(message) => (
             axum::http::StatusCode::BAD_REQUEST,
             "invalid_request",
             message,
             "configuration",
         ),
-        FgaError::NotFound(message) => (
+        FgaAdminError::NotFound(message) => (
             axum::http::StatusCode::NOT_FOUND,
             "not_found",
             message,
             "internal",
         ),
-        FgaError::Forbidden(message) => (
+        FgaAdminError::Forbidden(message) => (
             axum::http::StatusCode::FORBIDDEN,
             "forbidden",
             message,
             "internal",
         ),
-        FgaError::Unsupported(message) => (
+        FgaAdminError::Unsupported(message) => (
             axum::http::StatusCode::NOT_IMPLEMENTED,
             "unsupported",
             message,
             "configuration",
         ),
-        FgaError::Internal(error) => {
+        FgaAdminError::Internal(error) => {
             tracing::error!(error = %error, "embedded fga request failed");
             (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -146,34 +151,34 @@ async fn require_customer_fga_write(
     .await
 }
 
-fn validate_customer_target_instance(instance_id: &str) -> Result<(), FgaError> {
+fn validate_customer_target_instance(instance_id: &str) -> Result<(), FgaAdminError> {
     if instance_id == PLATFORM_STORE_ID {
-        return Err(FgaError::Forbidden(
+        return Err(FgaAdminError::Forbidden(
             "platform store is not available on customer-facing routes".into(),
         ));
     }
     Ok(())
 }
 
-fn validate_customer_store_id(instance_id: &str, store_id: &str) -> Result<(), FgaError> {
+fn validate_customer_store_id(instance_id: &str, store_id: &str) -> Result<(), FgaAdminError> {
     validate_customer_target_instance(instance_id)?;
     if store_id == PLATFORM_STORE_ID {
-        return Err(FgaError::Forbidden(
+        return Err(FgaAdminError::Forbidden(
             "platform store is not available on customer-facing routes".into(),
         ));
     }
     if store_id != instance_id {
-        return Err(FgaError::Forbidden(
+        return Err(FgaAdminError::Forbidden(
             "store_id must match the resolved target instance".into(),
         ));
     }
     Ok(())
 }
 
-async fn current_customer_store(state: &ApiState) -> Result<(String, String), FgaError> {
+async fn current_customer_store(state: &ApiState) -> Result<(String, String), FgaAdminError> {
     let instance_id = current_instance_id().into_owned();
     validate_customer_target_instance(&instance_id)?;
-    let store = state.fga.discover_store(&instance_id).await?;
+    let store = state.app.repos.fga_admin.discover_store(&instance_id).await?;
     validate_customer_store_id(&instance_id, &store.id)?;
     Ok((instance_id, store.id))
 }
@@ -196,7 +201,7 @@ async fn discover_customer_store(
 }
 
 async fn discover_platform_store(State(state): State<ApiState>) -> Response {
-    match state.fga.discover_platform_store().await {
+    match state.app.repos.fga_admin.discover_platform_store().await {
         Ok(store) => response::json_ok(json!({
             "store_id": store.id,
             "name": store.name,
@@ -222,33 +227,36 @@ async fn legacy_check(
         return response;
     }
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state
-            .fga
-            .check(
-                &instance_id,
-                &store_id,
-                CheckRequest {
-                    tuple_key: TupleKey {
-                        user: body.user.clone(),
-                        relation: body.relation.clone(),
-                        object: body.object.clone(),
-                        condition: None,
-                    },
-                    authorization_model_id: None,
-                    contextual_tuples: None,
-                    context: None,
+        Ok((instance_id, store_id)) => {
+            let check_req = json!({
+                "tuple_key": {
+                    "user": body.user,
+                    "relation": body.relation,
+                    "object": body.object,
                 },
-            )
-            .await
-        {
-            Ok(CheckResponse { allowed }) => response::json_ok(json!({
-                "allowed": allowed,
-                "user": body.user,
-                "relation": body.relation,
-                "object": body.object,
-            })),
-            Err(error) => fga_error_response(error),
-        },
+            });
+            match state
+                .app
+                .repos
+                .fga_admin
+                .check(&instance_id, &store_id, check_req)
+                .await
+            {
+                Ok(result) => {
+                    let allowed = result
+                        .get("allowed")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    response::json_ok(json!({
+                        "allowed": allowed,
+                        "user": body.user,
+                        "relation": body.relation,
+                        "object": body.object,
+                    }))
+                }
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -269,28 +277,38 @@ async fn legacy_read_tuples(
         return response;
     }
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state
-            .fga
-            .read_tuples(
-                &instance_id,
-                &store_id,
-                ReadRequest {
-                    tuple_key: Some(TupleFilter {
-                        user: query.user,
-                        relation: query.relation,
-                        object: query.object,
-                    }),
-                    page_size: Some(100),
-                    continuation_token: None,
+        Ok((instance_id, store_id)) => {
+            let read_req = json!({
+                "tuple_key": {
+                    "user": query.user,
+                    "relation": query.relation,
+                    "object": query.object,
                 },
-            )
-            .await
-        {
-            Ok(result) => response::json_ok(json!({
-                "tuples": result.tuples.into_iter().map(|tuple| tuple.key).collect::<Vec<_>>()
-            })),
-            Err(error) => fga_error_response(error),
-        },
+                "page_size": 100,
+            });
+            match state
+                .app
+                .repos
+                .fga_admin
+                .read_tuples(&instance_id, &store_id, read_req)
+                .await
+            {
+                Ok(result) => {
+                    // Extract tuple keys from the Value response
+                    let tuples = result
+                        .get("tuples")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|t| t.get("key").cloned())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    response::json_ok(json!({ "tuples": tuples }))
+                }
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -310,27 +328,25 @@ async fn legacy_write_tuples(
     }
     let count = body.tuples.len();
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state
-            .fga
-            .write_tuples(
-                &instance_id,
-                &store_id,
-                WriteRequest {
-                    writes: TupleKeySet {
-                        tuple_keys: body.tuples,
-                    },
-                    deletes: TupleKeySet { tuple_keys: vec![] },
-                    authorization_model_id: None,
-                },
-            )
-            .await
-        {
-            Ok(()) => response::json_ok(json!({
-                "status": "ok",
-                "written": count,
-            })),
-            Err(error) => fga_error_response(error),
-        },
+        Ok((instance_id, store_id)) => {
+            let write_req = json!({
+                "writes": { "tuple_keys": body.tuples },
+                "deletes": { "tuple_keys": serde_json::Value::Array(vec![]) },
+            });
+            match state
+                .app
+                .repos
+                .fga_admin
+                .write_tuples(&instance_id, &store_id, write_req)
+                .await
+            {
+                Ok(()) => response::json_ok(json!({
+                    "status": "ok",
+                    "written": count,
+                })),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -345,27 +361,25 @@ async fn legacy_delete_tuples(
     }
     let count = body.tuples.len();
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state
-            .fga
-            .write_tuples(
-                &instance_id,
-                &store_id,
-                WriteRequest {
-                    writes: TupleKeySet { tuple_keys: vec![] },
-                    deletes: TupleKeySet {
-                        tuple_keys: body.tuples,
-                    },
-                    authorization_model_id: None,
-                },
-            )
-            .await
-        {
-            Ok(()) => response::json_ok(json!({
-                "status": "ok",
-                "deleted": count,
-            })),
-            Err(error) => fga_error_response(error),
-        },
+        Ok((instance_id, store_id)) => {
+            let write_req = json!({
+                "writes": { "tuple_keys": serde_json::Value::Array(vec![]) },
+                "deletes": { "tuple_keys": body.tuples },
+            });
+            match state
+                .app
+                .repos
+                .fga_admin
+                .write_tuples(&instance_id, &store_id, write_req)
+                .await
+            {
+                Ok(()) => response::json_ok(json!({
+                    "status": "ok",
+                    "deleted": count,
+                })),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -379,10 +393,19 @@ async fn legacy_list_objects(
         return response;
     }
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state.fga.list_objects(&instance_id, &store_id, body).await {
-            Ok(result) => response::json_ok(result),
-            Err(error) => fga_error_response(error),
-        },
+        Ok((instance_id, store_id)) => {
+            let req_value = serde_json::to_value(&body).unwrap();
+            match state
+                .app
+                .repos
+                .fga_admin
+                .list_objects(&instance_id, &store_id, req_value)
+                .await
+            {
+                Ok(result) => response::json_ok(result),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -398,7 +421,7 @@ async fn legacy_model(
     if let Err(error) = validate_customer_target_instance(&instance_id) {
         return fga_error_response(error);
     }
-    match state.fga.legacy_model(&instance_id).await {
+    match state.app.repos.fga_admin.legacy_model(&instance_id).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -413,10 +436,19 @@ async fn legacy_write_model(
         return response;
     }
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state.fga.write_model(&instance_id, &store_id, body).await {
-            Ok(result) => response::json_ok(result),
-            Err(error) => fga_error_response(error),
-        },
+        Ok((instance_id, store_id)) => {
+            let req_value = serde_json::to_value(&body).unwrap();
+            match state
+                .app
+                .repos
+                .fga_admin
+                .write_model(&instance_id, &store_id, req_value)
+                .await
+            {
+                Ok(result) => response::json_ok(result),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -432,7 +464,7 @@ async fn legacy_model_graph(
     if let Err(error) = validate_customer_target_instance(&instance_id) {
         return fga_error_response(error);
     }
-    match state.fga.legacy_model_graph(&instance_id).await {
+    match state.app.repos.fga_admin.legacy_model_graph(&instance_id).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -447,10 +479,19 @@ async fn legacy_expand(
         return response;
     }
     match current_customer_store(&state).await {
-        Ok((instance_id, store_id)) => match state.fga.expand(&instance_id, &store_id, body).await {
-            Ok(result) => response::json_ok(result),
-            Err(error) => fga_error_response(error),
-        },
+        Ok((instance_id, store_id)) => {
+            let req_value = serde_json::to_value(&body).unwrap();
+            match state
+                .app
+                .repos
+                .fga_admin
+                .expand(&instance_id, &store_id, req_value)
+                .await
+            {
+                Ok(result) => response::json_ok(result),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -478,34 +519,53 @@ async fn legacy_batch_test(
     }
     match current_customer_store(&state).await {
         Ok((instance_id, store_id)) => {
-            let request = BatchCheckRequest {
-                checks: body
-                    .assertions
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, assertion)| zitadel_fga::BatchCheckItem {
-                        tuple_key: TupleKey {
-                            user: assertion.user.clone(),
-                            relation: assertion.relation.clone(),
-                            object: assertion.object.clone(),
-                            condition: None,
+            let checks: Vec<serde_json::Value> = body
+                .assertions
+                .iter()
+                .enumerate()
+                .map(|(idx, assertion)| {
+                    json!({
+                        "tuple_key": {
+                            "user": assertion.user,
+                            "relation": assertion.relation,
+                            "object": assertion.object,
                         },
-                        correlation_id: Some(idx.to_string()),
+                        "correlation_id": idx.to_string(),
                     })
-                    .collect(),
-                authorization_model_id: None,
-                contextual_tuples: None,
-                context: None,
-            };
-            match state.fga.batch_check(&instance_id, &store_id, request).await {
+                })
+                .collect();
+            let request = json!({ "checks": checks });
+            match state
+                .app
+                .repos
+                .fga_admin
+                .batch_check(&instance_id, &store_id, request)
+                .await
+            {
                 Ok(result) => {
+                    // Parse results from the Value response — results are keyed by correlation_id
+                    let result_map = result
+                        .get("results")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
                     let mut passed = 0usize;
-                    let results = body
+                    let results: Vec<serde_json::Value> = body
                         .assertions
                         .into_iter()
-                        .zip(result.results)
-                        .map(|(assertion, actual)| {
-                            let pass = assertion.expected == actual.allowed;
+                        .enumerate()
+                        .map(|(idx, assertion)| {
+                            let allowed = result_map
+                                .iter()
+                                .find(|r| {
+                                    r.get("correlation_id")
+                                        .and_then(|v| v.as_str())
+                                        == Some(&idx.to_string())
+                                })
+                                .and_then(|r| r.get("allowed"))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let pass = assertion.expected == allowed;
                             if pass {
                                 passed += 1;
                             }
@@ -514,11 +574,11 @@ async fn legacy_batch_test(
                                 "relation": assertion.relation,
                                 "object": assertion.object,
                                 "expected": assertion.expected,
-                                "actual": actual.allowed,
+                                "actual": allowed,
                                 "pass": pass,
                             })
                         })
-                        .collect::<Vec<_>>();
+                        .collect();
                     response::json_ok(json!({
                         "total": results.len(),
                         "passed": passed,
@@ -546,7 +606,14 @@ async fn check_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.check(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .check(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -565,7 +632,14 @@ async fn batch_check_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.batch_check(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .batch_check(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -584,7 +658,14 @@ async fn read_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.read_tuples(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .read_tuples(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -603,7 +684,14 @@ async fn write_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.write_tuples(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .write_tuples(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(()) => response::json_ok(json!({})),
         Err(error) => fga_error_response(error),
     }
@@ -622,7 +710,14 @@ async fn expand_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.expand(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .expand(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -641,7 +736,14 @@ async fn list_objects_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.list_objects(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .list_objects(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -660,7 +762,14 @@ async fn list_users_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.list_users(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .list_users(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -688,7 +797,9 @@ async fn read_changes_store(
         return fga_error_response(error);
     }
     match state
-        .fga
+        .app
+        .repos
+        .fga_admin
         .read_changes(
             &instance_id,
             &store_id,
@@ -715,7 +826,7 @@ async fn read_authorization_models_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.read_models(&instance_id, &store_id).await {
+    match state.app.repos.fga_admin.read_models(&instance_id, &store_id).await {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -734,7 +845,9 @@ async fn read_authorization_model_store(
         return fga_error_response(error);
     }
     match state
-        .fga
+        .app
+        .repos
+        .fga_admin
         .read_model(&instance_id, &store_id, Some(&model_id))
         .await
     {
@@ -756,7 +869,14 @@ async fn write_authorization_model_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.fga.write_model(&instance_id, &store_id, body).await {
+    let req_value = serde_json::to_value(&body).unwrap();
+    match state
+        .app
+        .repos
+        .fga_admin
+        .write_model(&instance_id, &store_id, req_value)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -766,11 +886,20 @@ async fn check_platform_store(
     State(state): State<ApiState>,
     Json(body): Json<CheckRequest>,
 ) -> Response {
-    match state.fga.discover_platform_store().await {
-        Ok(store) => match state.fga.check(PLATFORM_STORE_ID, &store.id, body).await {
-            Ok(result) => response::json_ok(result),
-            Err(error) => fga_error_response(error),
-        },
+    match state.app.repos.fga_admin.discover_platform_store().await {
+        Ok(store) => {
+            let req_value = serde_json::to_value(&body).unwrap();
+            match state
+                .app
+                .repos
+                .fga_admin
+                .check(PLATFORM_STORE_ID, &store.id, req_value)
+                .await
+            {
+                Ok(result) => response::json_ok(result),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -779,11 +908,20 @@ async fn read_platform_store(
     State(state): State<ApiState>,
     Json(body): Json<ReadRequest>,
 ) -> Response {
-    match state.fga.discover_platform_store().await {
-        Ok(store) => match state.fga.read_tuples(PLATFORM_STORE_ID, &store.id, body).await {
-            Ok(result) => response::json_ok(result),
-            Err(error) => fga_error_response(error),
-        },
+    match state.app.repos.fga_admin.discover_platform_store().await {
+        Ok(store) => {
+            let req_value = serde_json::to_value(&body).unwrap();
+            match state
+                .app
+                .repos
+                .fga_admin
+                .read_tuples(PLATFORM_STORE_ID, &store.id, req_value)
+                .await
+            {
+                Ok(result) => response::json_ok(result),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -792,9 +930,11 @@ async fn read_platform_changes(
     State(state): State<ApiState>,
     Query(query): Query<ReadChangesQuery>,
 ) -> Response {
-    match state.fga.discover_platform_store().await {
+    match state.app.repos.fga_admin.discover_platform_store().await {
         Ok(store) => match state
-            .fga
+            .app
+            .repos
+            .fga_admin
             .read_changes(
                 PLATFORM_STORE_ID,
                 &store.id,
@@ -812,11 +952,19 @@ async fn read_platform_changes(
 }
 
 async fn read_platform_authorization_models(State(state): State<ApiState>) -> Response {
-    match state.fga.discover_platform_store().await {
-        Ok(store) => match state.fga.read_models(PLATFORM_STORE_ID, &store.id).await {
-            Ok(result) => response::json_ok(result),
-            Err(error) => fga_error_response(error),
-        },
+    match state.app.repos.fga_admin.discover_platform_store().await {
+        Ok(store) => {
+            match state
+                .app
+                .repos
+                .fga_admin
+                .read_models(PLATFORM_STORE_ID, &store.id)
+                .await
+            {
+                Ok(result) => response::json_ok(result),
+                Err(error) => fga_error_response(error),
+            }
+        }
         Err(error) => fga_error_response(error),
     }
 }
@@ -825,9 +973,11 @@ async fn read_platform_authorization_model(
     State(state): State<ApiState>,
     axum::extract::Path(model_id): axum::extract::Path<String>,
 ) -> Response {
-    match state.fga.discover_platform_store().await {
+    match state.app.repos.fga_admin.discover_platform_store().await {
         Ok(store) => match state
-            .fga
+            .app
+            .repos
+            .fga_admin
             .read_model(PLATFORM_STORE_ID, &store.id, Some(&model_id))
             .await
         {

@@ -87,7 +87,14 @@ async fn list_schemas(
         cursor: p.cursor,
         search: p.type_filter,
     };
-    match s.app.runner.run(&ctx, "schema.list", || s.app.list_schemas.execute(&ctx, &params)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "schema.list", || {
+            s.app.list_schemas.execute(&ctx, &params)
+        })
+        .await
+    {
         Ok(result) => {
             let items: Vec<SchemaResponse> = result
                 .items
@@ -110,7 +117,12 @@ async fn get_schema(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "schema.get", || s.app.get_schema.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "schema.get", || s.app.get_schema.execute(&ctx, &id))
+        .await
+    {
         Ok(schema) => response::json_ok(SchemaResponse::from_record(schema, true)),
         Err(e) => response::app_error(e),
     }
@@ -141,7 +153,14 @@ async fn create_schema(
         schema_json: req.schema,
         visibility: vis,
     };
-    match s.app.runner.run(&ctx, "schema.register", || s.app.register_schema.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "schema.register", || {
+            s.app.register_schema.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(schema) => response::json_created(SchemaResponse::from_record(schema, true)),
         Err(e) => response::app_error(e),
     }
@@ -158,7 +177,14 @@ async fn update_schema(
         schema_id: id,
         schema_json: req.schema,
     };
-    match s.app.runner.run(&ctx, "schema.update", || s.app.update_schema.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "schema.update", || {
+            s.app.update_schema.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(schema) => response::json_ok(SchemaResponse::from_record(schema, false)),
         Err(e) => response::app_error(e),
     }
@@ -170,7 +196,14 @@ async fn promote_schema(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "schema.promote", || s.app.promote_schema.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "schema.promote", || {
+            s.app.promote_schema.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(true) => response::json_ok(serde_json::json!({"id": id, "promoted": true})),
         Ok(false) => response::not_found("schema not found"),
         Err(e) => response::app_error(e),
@@ -183,7 +216,14 @@ async fn schema_identity_count(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "schema.count_users", || s.app.count_schema_users.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "schema.count_users", || {
+            s.app.count_schema_users.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(count) => response::json_ok(serde_json::json!({"count": count})),
         Err(e) => response::app_error(e),
     }

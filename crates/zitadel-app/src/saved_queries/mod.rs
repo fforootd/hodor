@@ -50,7 +50,13 @@ impl CreateSavedQuery {
         let id = format!("sq_{}", uuid::Uuid::new_v4());
         self.repos
             .saved_queries
-            .create_saved_query(ctx.instance_id(), &id, &cmd.name, &cmd.description, &cmd.sql)
+            .create_saved_query(
+                ctx.instance_id(),
+                &id,
+                &cmd.name,
+                &cmd.description,
+                &cmd.sql,
+            )
             .await
             .map_err(AppError::Internal)
     }
@@ -66,11 +72,7 @@ impl DeleteSavedQuery {
     }
 
     #[tracing::instrument(name = "use_case.delete_saved_query", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        id: &str,
-    ) -> Result<bool, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, id: &str) -> Result<bool, AppError> {
         self.repos
             .saved_queries
             .delete_saved_query(ctx.instance_id(), id)

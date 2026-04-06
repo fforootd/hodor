@@ -33,7 +33,13 @@ impl CreateOrg {
         }
 
         // Authz: caller must be admin on their own org
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
@@ -95,13 +101,8 @@ impl GetOrg {
             .ok_or_else(|| AppError::not_found("org", org_id))?;
 
         // Authz: caller must be viewer on the org
-        crate::authz::require_permission(
-            &self.repos,
-            ctx,
-            "viewer",
-            &format!("org:{}", org_id),
-        )
-        .await?;
+        crate::authz::require_permission(&self.repos, ctx, "viewer", &format!("org:{}", org_id))
+            .await?;
 
         Ok(org)
     }
@@ -225,7 +226,8 @@ impl UpdateOrg {
             .ok_or_else(|| AppError::not_found("org", &cmd.org_id))?;
 
         // Authz: caller must be admin on the target org
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id)).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id))
+            .await?;
 
         let mut fields_changed = Vec::new();
         if let Some(name) = cmd.name {

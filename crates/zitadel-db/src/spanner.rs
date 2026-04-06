@@ -107,11 +107,6 @@ impl SpannerDb {
         let existing = self.current_ddl().await?;
         let normalized_existing = normalize_ddl(&existing);
         let normalized_target = normalize_ddl(ddl);
-        if !normalized_existing.is_empty() && normalized_existing != normalized_target {
-            anyhow::bail!(
-                "existing Spanner database schema does not match the prototype baseline; delete the database and retry"
-            );
-        }
         if normalized_existing.is_empty() && !ddl.is_empty() {
             let request = UpdateDatabaseDdlRequest {
                 database: self.database.full_name.clone(),
@@ -129,9 +124,41 @@ impl SpannerDb {
                 .wait(None)
                 .await
                 .context("wait for spanner DDL operation")?;
+            return Ok(());
         }
 
-        Ok(())
+        if normalized_existing == normalized_target {
+            return Ok(());
+        }
+
+        if let Some(missing) = normalized_target
+            .as_slice()
+            .strip_prefix(normalized_existing.as_slice())
+        {
+            if !missing.is_empty() {
+                let request = UpdateDatabaseDdlRequest {
+                    database: self.database.full_name.clone(),
+                    statements: ddl[normalized_existing.len()..].to_vec(),
+                    operation_id: String::new(),
+                    proto_descriptors: vec![],
+                };
+                let mut operation = self
+                    .admin
+                    .database()
+                    .update_database_ddl(request, None)
+                    .await
+                    .context("apply spanner suffix DDL")?;
+                operation
+                    .wait(None)
+                    .await
+                    .context("wait for spanner suffix DDL operation")?;
+            }
+            return Ok(());
+        }
+
+        anyhow::bail!(
+            "existing Spanner database schema does not match the prototype baseline; delete the database and retry"
+        );
     }
 
     pub async fn current_ddl(&self) -> anyhow::Result<Vec<String>> {
@@ -288,5 +315,24 @@ mod tests {
     #[test]
     fn rejects_invalid_database_name() {
         assert!(ParsedDatabaseName::parse("postgres://localhost/zitadel").is_err());
+    }
+
+    #[test]
+    fn normalized_ddl_detects_forward_suffixes() {
+        let existing = normalize_ddl(&[
+            "CREATE TABLE a (id INT64)".to_string(),
+            "CREATE TABLE b (id INT64)".to_string(),
+        ]);
+        let target = normalize_ddl(&[
+            "CREATE TABLE a (id INT64)".to_string(),
+            "CREATE TABLE b (id INT64)".to_string(),
+            "CREATE TABLE c (id INT64)".to_string(),
+        ]);
+
+        let suffix = target
+            .as_slice()
+            .strip_prefix(existing.as_slice())
+            .expect("target should contain existing DDL as a prefix");
+        assert_eq!(suffix, &["CREATE TABLE c (id INT64)"]);
     }
 }

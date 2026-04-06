@@ -10,12 +10,12 @@ use sqlx::Row;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use zitadel_db::{
-    Db, Dialect, DEFAULT_INSTANCE_ID, list_active_child_instance_ownerships,
-    list_active_org_role_memberships, list_active_role_bindings_for_scope, list_role_assignments,
-};
 use zitadel_app::repo::RoleAssignmentFilter;
 use zitadel_authz::relation_name_for_role;
+use zitadel_db::{
+    DEFAULT_INSTANCE_ID, Db, Dialect, list_active_child_instance_ownerships,
+    list_active_org_role_memberships, list_active_role_bindings_for_scope, list_role_assignments,
+};
 
 use crate::core_model::*;
 use crate::dto::*;
@@ -81,11 +81,44 @@ impl FgaService {
     }
 
     pub async fn initialize_platform_store(&self) -> Result<StoreInfo, FgaError> {
+        self.cleanup_platform_instance_row().await?;
         self.initialize_instance(PLATFORM_STORE_ID).await
     }
 
     pub async fn discover_platform_store(&self) -> Result<StoreInfo, FgaError> {
         self.discover_store(PLATFORM_STORE_ID).await
+    }
+
+    async fn cleanup_platform_instance_row(&self) -> Result<(), FgaError> {
+        match &self.db {
+            Db::Sql(_) => {
+                let scoped = self.scoped(PLATFORM_STORE_ID);
+                sqlx::query("DELETE FROM instances WHERE instance_id = $1")
+                    .bind(PLATFORM_STORE_ID)
+                    .execute(scoped.pool())
+                    .await
+                    .context("delete stale platform instance row")?;
+            }
+            Db::Spanner(spanner) => {
+                let platform_id = PLATFORM_STORE_ID.to_string();
+                let _ = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let platform_id = platform_id.clone();
+                        Box::pin(async move {
+                            let mut delete = Statement::new(
+                                "DELETE FROM instances WHERE instance_id = @instance_id",
+                            );
+                            delete.add_param("instance_id", &platform_id);
+                            tx.update(delete).await?;
+                            Ok::<(), SpannerError>(())
+                        })
+                    })
+                    .await
+                    .context("delete stale platform instance row")?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn rebuild_platform_store(&self) -> Result<(), FgaError> {
@@ -94,7 +127,9 @@ impl FgaService {
             .desired_platform_tuples(DEFAULT_INSTANCE_ID)
             .await
             .map_err(FgaError::Internal)?;
-        let current = self.read_all_store_tuples(PLATFORM_STORE_ID, &store.id).await?;
+        let current = self
+            .read_all_store_tuples(PLATFORM_STORE_ID, &store.id)
+            .await?;
         self.reconcile_managed_tuple_set(PLATFORM_STORE_ID, &store.id, desired, current)
             .await
     }
@@ -119,8 +154,13 @@ impl FgaService {
         relation: &str,
         object: &str,
     ) -> Result<bool, FgaError> {
-        self.parent_relation_allowed(root_instance_id, &format!("user:{user_id}"), relation, object)
-            .await
+        self.parent_relation_allowed(
+            root_instance_id,
+            &format!("user:{user_id}"),
+            relation,
+            object,
+        )
+        .await
     }
 
     pub async fn parent_relation_allowed(
@@ -227,7 +267,10 @@ impl FgaService {
         Ok(allowed)
     }
 
-    async fn desired_platform_tuples(&self, root_instance_id: &str) -> anyhow::Result<Vec<TupleKey>> {
+    async fn desired_platform_tuples(
+        &self,
+        root_instance_id: &str,
+    ) -> anyhow::Result<Vec<TupleKey>> {
         let mut tuples = Vec::new();
         let mut visited = HashSet::new();
         let mut parents = vec![root_instance_id.to_string()];
@@ -240,7 +283,8 @@ impl FgaService {
             let children =
                 list_active_child_instance_ownerships(&self.db, &parent_instance_id).await?;
 
-            for membership in list_active_org_role_memberships(&self.db, &parent_instance_id).await?
+            for membership in
+                list_active_org_role_memberships(&self.db, &parent_instance_id).await?
             {
                 if !matches!(
                     membership.role.as_str(),
@@ -327,7 +371,8 @@ impl FgaService {
                 ..Default::default()
             },
         )
-        .await? {
+        .await?
+        {
             if assignment
                 .expires_at
                 .as_deref()
@@ -351,7 +396,8 @@ impl FgaService {
                 &owner_org_id,
                 None,
             )
-            .await? {
+            .await?
+            {
                 if let Some(relation) = projected_child_relation(&binding.role_key) {
                     tuples.push(TupleKey {
                         user: binding.principal_ref,
@@ -401,8 +447,14 @@ impl FgaService {
         desired: Vec<TupleKey>,
         current: Vec<TupleKey>,
     ) -> Result<(), FgaError> {
-        let desired_set = desired.iter().map(tuple_identity).collect::<BTreeSet<String>>();
-        let current_set = current.iter().map(tuple_identity).collect::<BTreeSet<String>>();
+        let desired_set = desired
+            .iter()
+            .map(tuple_identity)
+            .collect::<BTreeSet<String>>();
+        let current_set = current
+            .iter()
+            .map(tuple_identity)
+            .collect::<BTreeSet<String>>();
 
         let writes = desired
             .into_iter()
@@ -422,25 +474,31 @@ impl FgaService {
             store_id,
             WriteRequest {
                 writes: TupleKeySet { tuple_keys: writes },
-                deletes: TupleKeySet { tuple_keys: deletes },
+                deletes: TupleKeySet {
+                    tuple_keys: deletes,
+                },
                 authorization_model_id: None,
             },
         )
         .await
     }
 
-    pub(crate) async fn cached_store(&self, instance_id: &str) -> Option<StoreInfo> {
-        self.store_cache.read().await.get(instance_id).cloned()
+    pub(crate) async fn cached_store(&self, scope_id: &str) -> Option<StoreInfo> {
+        self.store_cache.read().await.get(scope_id).cloned()
     }
 
-    pub(crate) async fn cache_store(&self, instance_id: &str, store: &StoreInfo) {
+    pub(crate) async fn cache_store(&self, scope_id: &str, store: &StoreInfo) {
         self.store_cache
             .write()
             .await
-            .insert(instance_id.to_string(), store.clone());
+            .insert(scope_id.to_string(), store.clone());
     }
 
-    pub(crate) async fn cached_active_model(&self, instance_id: &str, store_id: &str) -> Option<CachedModel> {
+    pub(crate) async fn cached_active_model(
+        &self,
+        instance_id: &str,
+        store_id: &str,
+    ) -> Option<CachedModel> {
         self.active_model_cache
             .read()
             .await
@@ -488,136 +546,139 @@ impl FgaService {
         }
     }
 
-    pub(crate) async fn invalidate_store_cache(&self, instance_id: &str) {
-        self.store_cache.write().await.remove(instance_id);
+    pub(crate) async fn invalidate_store_cache(&self, scope_id: &str) {
+        self.store_cache.write().await.remove(scope_id);
     }
 
-    pub(crate) async fn invalidate_model_caches(&self, instance_id: &str, store_id: &str) {
+    pub(crate) async fn invalidate_model_caches(&self, scope_id: &str, store_id: &str) {
         self.active_model_cache
             .write()
             .await
-            .remove(&(instance_id.to_string(), store_id.to_string()));
+            .remove(&(scope_id.to_string(), store_id.to_string()));
         self.explicit_model_cache.write().await.retain(
-            |(cached_instance_id, cached_store_id, _), _| {
-                cached_instance_id != instance_id || cached_store_id != store_id
+            |(cached_scope_id, cached_store_id, _), _| {
+                cached_scope_id != scope_id || cached_store_id != store_id
             },
         );
     }
 
-    pub(crate) async fn load_store_row(&self, instance_id: &str) -> Result<Option<StoreInfo>, FgaError> {
-        if let Some(store) = self.cached_store(instance_id).await {
+    pub(crate) async fn load_store_row(
+        &self,
+        scope_id: &str,
+    ) -> Result<Option<StoreInfo>, FgaError> {
+        if let Some(store) = self.cached_store(scope_id).await {
             return Ok(Some(store));
         }
 
         let store = match &self.db {
             Db::Sql(_) => {
-                let scoped = self.scoped(instance_id);
+                let scoped = self.scoped(scope_id);
                 let row = sqlx::query_as::<_, (String,)>(
-                    "SELECT store_id FROM fga_instance_stores WHERE instance_id = $1",
+                    "SELECT store_id FROM fga_stores WHERE scope_id = $1",
                 )
-                .bind(scoped.instance_id())
+                .bind(scope_id)
                 .fetch_optional(scoped.pool())
                 .await
-                .context("load instance store")?;
+                .context("load scope store")?;
 
                 row.map(|row| StoreInfo {
                     id: row.0,
-                    name: format!("zitadel-{instance_id}"),
+                    name: format!("zitadel-{scope_id}"),
                 })
             }
             Db::Spanner(_) => {
                 let mut stmt = Statement::new(
-                    "SELECT store_id FROM fga_instance_stores WHERE instance_id = @instance_id LIMIT 1",
+                    "SELECT store_id FROM fga_stores WHERE scope_id = @scope_id LIMIT 1",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &scope_id);
                 let row: Option<SpannerRow> =
-                    self.spanner_query_one(stmt, "load instance store").await?;
+                    self.spanner_query_one(stmt, "load scope store").await?;
                 row.map(|row| -> Result<StoreInfo, FgaError> {
                     Ok(StoreInfo {
                         id: row
                             .column_by_name::<String>("store_id")
                             .context("read spanner store_id")?,
-                        name: format!("zitadel-{instance_id}"),
+                        name: format!("zitadel-{scope_id}"),
                     })
                 })
                 .transpose()?
             }
         };
         if let Some(store) = &store {
-            self.cache_store(instance_id, store).await;
+            self.cache_store(scope_id, store).await;
         }
         Ok(store)
     }
 
-    pub(crate) async fn ensure_store_row(&self, instance_id: &str) -> Result<StoreInfo, FgaError> {
-        if let Some(store) = self.load_store_row(instance_id).await? {
+    pub(crate) async fn ensure_store_row(&self, scope_id: &str) -> Result<StoreInfo, FgaError> {
+        if let Some(store) = self.load_store_row(scope_id).await? {
             return Ok(store);
         }
 
         let store = match &self.db {
             Db::Sql(_) => {
-                let scoped = self.scoped(instance_id);
-                let store_id = instance_id.to_string();
+                let scoped = self.scoped(scope_id);
+                let store_id = scope_id.to_string();
                 let insert = match scoped.dialect() {
                     Dialect::Sqlite => {
-                        "INSERT OR IGNORE INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2)"
+                        "INSERT OR IGNORE INTO fga_stores (scope_id, store_id) VALUES ($1, $2)"
                     }
                     Dialect::Postgres => {
-                        "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2) ON CONFLICT (instance_id) DO NOTHING"
+                        "INSERT INTO fga_stores (scope_id, store_id) VALUES ($1, $2) ON CONFLICT (scope_id) DO NOTHING"
                     }
                     Dialect::Spanner => unreachable!("native Spanner does not use ScopedDb"),
                 };
                 sqlx::query(insert)
-                    .bind(scoped.instance_id())
+                    .bind(scope_id)
                     .bind(&store_id)
                     .execute(scoped.pool())
                     .await
-                    .context("insert instance store")?;
+                    .context("insert scope store")?;
                 StoreInfo {
                     id: store_id,
-                    name: format!("zitadel-{instance_id}"),
+                    name: format!("zitadel-{scope_id}"),
                 }
             }
             Db::Spanner(spanner) => {
-                let instance_id = instance_id.to_string();
-                let store_id = instance_id.clone();
+                let scope_id = scope_id.to_string();
+                let store_id = scope_id.clone();
                 let (_, store) = spanner
                     .client()
                     .read_write_transaction(|tx| {
-                        let instance_id = instance_id.clone();
+                        let scope_id = scope_id.clone();
                         let store_id = store_id.clone();
                         Box::pin(async move {
                             let mut check = Statement::new(
-                                "SELECT store_id FROM fga_instance_stores WHERE instance_id = @instance_id LIMIT 1",
+                                "SELECT store_id FROM fga_stores WHERE scope_id = @scope_id LIMIT 1",
                             );
-                            check.add_param("instance_id", &instance_id);
+                            check.add_param("scope_id", &scope_id);
                             let mut rows = tx.query(check).await?;
                             if let Some(row) = rows.next().await? {
                                 return Ok::<StoreInfo, SpannerError>(StoreInfo {
                                     id: row.column_by_name::<String>("store_id")?,
-                                    name: format!("zitadel-{instance_id}"),
+                                    name: format!("zitadel-{scope_id}"),
                                 });
                             }
 
                             let mut insert = Statement::new(
-                                "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES (@instance_id, @store_id)",
+                                "INSERT INTO fga_stores (scope_id, store_id) VALUES (@scope_id, @store_id)",
                             );
-                            insert.add_param("instance_id", &instance_id);
+                            insert.add_param("scope_id", &scope_id);
                             insert.add_param("store_id", &store_id);
                             tx.update(insert).await?;
                             Ok::<StoreInfo, SpannerError>(StoreInfo {
                                 id: store_id,
-                                name: format!("zitadel-{instance_id}"),
+                                name: format!("zitadel-{scope_id}"),
                             })
                         })
                     })
                     .await
-                    .context("insert instance store")?;
+                    .context("insert scope store")?;
                 store
             }
         };
-        self.cache_store(instance_id, &store).await;
-        self.ensure_default_model(instance_id, &store.id).await?;
+        self.cache_store(scope_id, &store).await;
+        self.ensure_default_model(scope_id, &store.id).await?;
 
         Ok(store)
     }
@@ -708,10 +769,10 @@ impl FgaService {
                 let row = sqlx::query_as::<_, (String, String, String)>(
                     "SELECT core_model_version, CAST(custom_model AS TEXT), CAST(module_fragments AS TEXT) \
                      FROM fga_authorization_models \
-                     WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 \
+                     WHERE scope_id = $1 AND store_id = $2 AND is_active = 1 \
                      ORDER BY created_at DESC LIMIT 1",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .fetch_optional(scoped.pool())
                 .await
@@ -732,10 +793,10 @@ impl FgaService {
                             IFNULL(custom_model, '{}') AS custom_model, \
                             IFNULL(module_fragments, '[]') AS module_fragments \
                      FROM fga_authorization_models \
-                     WHERE instance_id = @instance_id AND store_id = @store_id AND is_active = 1 \
+                     WHERE scope_id = @scope_id AND store_id = @store_id AND is_active = 1 \
                      ORDER BY created_at DESC LIMIT 1",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 let row = self
                     .spanner_query_one(stmt, "load active fga model fragments")
@@ -792,19 +853,19 @@ impl FgaService {
                     .await
                     .context("begin model transaction")?;
                 sqlx::query(
-                    "UPDATE fga_authorization_models SET is_active = 0 WHERE instance_id = $1 AND store_id = $2",
+                    "UPDATE fga_authorization_models SET is_active = 0 WHERE scope_id = $1 AND store_id = $2",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .execute(&mut *tx)
                 .await
                 .context("deactivate previous models")?;
                 sqlx::query(
                     "INSERT INTO fga_authorization_models \
-                     (instance_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
+                     (scope_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(&model_id)
                 .bind(&compiled.schema_version)
@@ -818,7 +879,7 @@ impl FgaService {
                 tx.commit().await.context("commit model transaction")?;
             }
             Db::Spanner(spanner) => {
-                let instance_id = instance_id.to_string();
+                let scope_id = instance_id.to_string();
                 let store_id = store_id.to_string();
                 let schema_version = compiled.schema_version.clone();
                 let model_id = model_id.clone();
@@ -827,7 +888,7 @@ impl FgaService {
                 let _ = spanner
                     .client()
                     .read_write_transaction(|tx| {
-                        let instance_id = instance_id.clone();
+                        let scope_id = scope_id.clone();
                         let store_id = store_id.clone();
                         let schema_version = schema_version.clone();
                         let model_id = model_id.clone();
@@ -836,19 +897,19 @@ impl FgaService {
                         Box::pin(async move {
                             let mut deactivate = Statement::new(
                                 "UPDATE fga_authorization_models SET is_active = 0 \
-                                 WHERE instance_id = @instance_id AND store_id = @store_id",
+                                 WHERE scope_id = @scope_id AND store_id = @store_id",
                             );
-                            deactivate.add_param("instance_id", &instance_id);
+                            deactivate.add_param("scope_id", &scope_id);
                             deactivate.add_param("store_id", &store_id);
                             tx.update(deactivate).await?;
 
                             let mut insert = Statement::new(
                                 "INSERT INTO fga_authorization_models \
-                                 (instance_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
+                                 (scope_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
                                  VALUES \
-                                 (@instance_id, @store_id, @model_id, @schema_version, @core_model_version, @compiled_model, @custom_model, @module_fragments, 1)",
+                                 (@scope_id, @store_id, @model_id, @schema_version, @core_model_version, @compiled_model, @custom_model, @module_fragments, 1)",
                             );
-                            insert.add_param("instance_id", &instance_id);
+                            insert.add_param("scope_id", &scope_id);
                             insert.add_param("store_id", &store_id);
                             insert.add_param("model_id", &model_id);
                             insert.add_param("schema_version", &schema_version);
@@ -921,9 +982,9 @@ impl FgaService {
                     sqlx::query_as::<_, (String, String, String, String)>(
                         "SELECT model_id, compiled_model, CAST(created_at AS TEXT), core_model_version \
                          FROM fga_authorization_models \
-                         WHERE instance_id = $1 AND store_id = $2 AND model_id = $3 LIMIT 1",
+                         WHERE scope_id = $1 AND store_id = $2 AND model_id = $3 LIMIT 1",
                     )
-                    .bind(scoped.instance_id())
+                    .bind(instance_id)
                     .bind(store_id)
                     .bind(model_id)
                     .fetch_optional(scoped.pool())
@@ -933,10 +994,10 @@ impl FgaService {
                     sqlx::query_as::<_, (String, String, String, String)>(
                         "SELECT model_id, compiled_model, CAST(created_at AS TEXT), core_model_version \
                          FROM fga_authorization_models \
-                         WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 \
+                         WHERE scope_id = $1 AND store_id = $2 AND is_active = 1 \
                          ORDER BY created_at DESC LIMIT 1",
                     )
-                    .bind(scoped.instance_id())
+                    .bind(instance_id)
                     .bind(store_id)
                     .fetch_optional(scoped.pool())
                     .await
@@ -953,18 +1014,18 @@ impl FgaService {
                         "SELECT model_id, compiled_model, CAST(created_at AS STRING) AS created_at, \
                                 IFNULL(core_model_version, '') AS core_model_version \
                          FROM fga_authorization_models \
-                         WHERE instance_id = @instance_id AND store_id = @store_id AND model_id = @model_id LIMIT 1",
+                         WHERE scope_id = @scope_id AND store_id = @store_id AND model_id = @model_id LIMIT 1",
                     )
                 } else {
                     Statement::new(
                         "SELECT model_id, compiled_model, CAST(created_at AS STRING) AS created_at, \
                                 IFNULL(core_model_version, '') AS core_model_version \
                          FROM fga_authorization_models \
-                         WHERE instance_id = @instance_id AND store_id = @store_id AND is_active = 1 \
+                         WHERE scope_id = @scope_id AND store_id = @store_id AND is_active = 1 \
                          ORDER BY created_at DESC LIMIT 1",
                     )
                 };
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 if let Some(model_id) = model_id {
                     stmt.add_param("model_id", &model_id);
@@ -1074,9 +1135,9 @@ impl FgaService {
             Db::Sql(_) => {
                 let scoped = self.scoped(instance_id);
                 let rows = sqlx::query(
-                    "SELECT object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5",
+                    "SELECT object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user FROM fga_tuples WHERE scope_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(&object.object_type)
                 .bind(&object.object_id)
@@ -1100,10 +1161,10 @@ impl FgaService {
                 let mut stmt = Statement::new(
                     "SELECT user_type, user_id, user_relation, raw_user \
                      FROM fga_tuples \
-                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                     WHERE scope_id = @scope_id AND store_id = @store_id \
                        AND object_type = @object_type AND object_id = @object_id AND relation = @relation",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("object_type", &object.object_type);
                 stmt.add_param("object_id", &object.object_id);
@@ -1158,11 +1219,11 @@ impl FgaService {
                 let rows = sqlx::query(
                     "SELECT DISTINCT object_type, object_id \
                      FROM fga_tuples \
-                     WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND relation = $4 \
+                     WHERE scope_id = $1 AND store_id = $2 AND object_type = $3 AND relation = $4 \
                        AND user_type = $5 AND user_id = $6 AND user_relation = $7 \
                      ORDER BY object_id",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(object_type)
                 .bind(relation)
@@ -1183,12 +1244,12 @@ impl FgaService {
                 let mut stmt = Statement::new(
                     "SELECT DISTINCT object_type, object_id \
                      FROM fga_tuples \
-                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                     WHERE scope_id = @scope_id AND store_id = @store_id \
                        AND object_type = @object_type AND relation = @relation \
                        AND user_type = @user_type AND user_id = @user_id AND user_relation = @user_relation \
                      ORDER BY object_id",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("object_type", &object_type);
                 stmt.add_param("relation", &relation);
@@ -1240,11 +1301,11 @@ impl FgaService {
                 let rows = sqlx::query(
                     "SELECT DISTINCT object_type, object_id \
                      FROM fga_tuples \
-                     WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND relation = $4 \
+                     WHERE scope_id = $1 AND store_id = $2 AND object_type = $3 AND relation = $4 \
                        AND user_type = $5 AND user_id = '*' AND user_relation = '' \
                      ORDER BY object_id",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(object_type)
                 .bind(relation)
@@ -1263,12 +1324,12 @@ impl FgaService {
                 let mut stmt = Statement::new(
                     "SELECT DISTINCT object_type, object_id \
                      FROM fga_tuples \
-                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                     WHERE scope_id = @scope_id AND store_id = @store_id \
                        AND object_type = @object_type AND relation = @relation \
                        AND user_type = @user_type AND user_id = '*' AND user_relation = '' \
                      ORDER BY object_id",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("object_type", &object_type);
                 stmt.add_param("relation", &relation);
@@ -1663,10 +1724,10 @@ impl FgaService {
                 let scoped = self.scoped(instance_id);
                 let rows = sqlx::query(
                     "SELECT DISTINCT object_type, object_id FROM fga_tuples \
-                     WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 \
+                     WHERE scope_id = $1 AND store_id = $2 AND object_type = $3 \
                      ORDER BY object_id LIMIT $4",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(object_type)
                 .bind(limit)
@@ -1683,10 +1744,10 @@ impl FgaService {
             Db::Spanner(_) => {
                 let mut stmt = Statement::new(
                     "SELECT DISTINCT object_type, object_id FROM fga_tuples \
-                     WHERE instance_id = @instance_id AND store_id = @store_id AND object_type = @object_type \
+                     WHERE scope_id = @scope_id AND store_id = @store_id AND object_type = @object_type \
                      ORDER BY object_id LIMIT @limit",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("object_type", &object_type);
                 stmt.add_param("limit", &limit);
@@ -1732,10 +1793,10 @@ impl FgaService {
                 let scoped = self.scoped(instance_id);
                 let rows = sqlx::query(
                     "SELECT DISTINCT user_type, user_id, user_relation FROM fga_tuples \
-                     WHERE instance_id = $1 AND store_id = $2 AND user_type = $3 \
+                     WHERE scope_id = $1 AND store_id = $2 AND user_type = $3 \
                      ORDER BY user_id LIMIT $4",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(&filter.user_type)
                 .bind(limit)
@@ -1756,10 +1817,10 @@ impl FgaService {
             Db::Spanner(_) => {
                 let mut stmt = Statement::new(
                     "SELECT DISTINCT user_type, user_id, user_relation FROM fga_tuples \
-                     WHERE instance_id = @instance_id AND store_id = @store_id AND user_type = @user_type \
+                     WHERE scope_id = @scope_id AND store_id = @store_id AND user_type = @user_type \
                      ORDER BY user_id LIMIT @limit",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("user_type", &filter.user_type);
                 stmt.add_param("limit", &limit);

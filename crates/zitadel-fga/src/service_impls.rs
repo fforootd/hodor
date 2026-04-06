@@ -60,9 +60,9 @@ impl ModelRepository for FgaService {
             Db::Sql(_) => {
                 let scoped = self.scoped(instance_id);
                 let rows = sqlx::query(
-                    "SELECT model_id, compiled_model, CAST(created_at AS TEXT) AS created_at FROM fga_authorization_models WHERE instance_id = $1 AND store_id = $2 ORDER BY created_at DESC",
+                    "SELECT model_id, compiled_model, CAST(created_at AS TEXT) AS created_at FROM fga_authorization_models WHERE scope_id = $1 AND store_id = $2 ORDER BY created_at DESC",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .fetch_all(scoped.pool())
                 .await
@@ -86,10 +86,10 @@ impl ModelRepository for FgaService {
                 let mut stmt = Statement::new(
                     "SELECT model_id, compiled_model, CAST(created_at AS STRING) AS created_at \
                      FROM fga_authorization_models \
-                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                     WHERE scope_id = @scope_id AND store_id = @store_id \
                      ORDER BY created_at DESC",
                 );
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 let rows: Vec<SpannerRow> = self
                     .spanner_query_all(stmt, "list authorization models")
@@ -159,7 +159,7 @@ impl TupleRepository for FgaService {
                 let rows = sqlx::query(
                     "SELECT raw_user, relation, raw_object, CAST(inserted_at AS TEXT) AS inserted_at
                      FROM fga_tuples
-                     WHERE instance_id = $1
+                     WHERE scope_id = $1
                        AND store_id = $2
                        AND ($3 = '' OR raw_user = $3)
                        AND ($4 = '' OR relation = $4)
@@ -167,7 +167,7 @@ impl TupleRepository for FgaService {
                      ORDER BY raw_object, relation, raw_user
                      LIMIT $6 OFFSET $7",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(filter.user.clone().unwrap_or_default())
                 .bind(filter.relation.clone().unwrap_or_default())
@@ -194,7 +194,7 @@ impl TupleRepository for FgaService {
                 let mut stmt = Statement::new(&format!(
                     "SELECT raw_user, relation, raw_object, CAST(inserted_at AS STRING) AS inserted_at \
                      FROM fga_tuples \
-                     WHERE instance_id = @instance_id \
+                     WHERE scope_id = @scope_id \
                        AND store_id = @store_id \
                        AND (@raw_user = '' OR raw_user = @raw_user) \
                        AND (@relation = '' OR relation = @relation) \
@@ -203,7 +203,7 @@ impl TupleRepository for FgaService {
                      LIMIT {} OFFSET {}",
                     page_size, offset
                 ));
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("raw_user", &filter.user.unwrap_or_default());
                 stmt.add_param("relation", &filter.relation.unwrap_or_default());
@@ -297,17 +297,17 @@ impl TupleRepository for FgaService {
                 for parsed in &writes {
                     let insert = match scoped.dialect() {
                         zitadel_db::Dialect::Sqlite => {
-                            "INSERT OR IGNORE INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                            "INSERT OR IGNORE INTO fga_tuples (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
                         }
                         zitadel_db::Dialect::Postgres => {
-                            "INSERT INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
+                            "INSERT INTO fga_tuples (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
                         }
                         zitadel_db::Dialect::Spanner => {
                             unreachable!("native Spanner does not use ScopedDb")
                         }
                     };
                     let result = sqlx::query(insert)
-                        .bind(scoped.instance_id())
+                        .bind(instance_id)
                         .bind(store_id)
                         .bind(&parsed.object.object_type)
                         .bind(&parsed.object.object_id)
@@ -322,9 +322,9 @@ impl TupleRepository for FgaService {
                         .context("insert fga tuple")?;
                     if result.rows_affected() > 0 {
                         sqlx::query(
-                            "INSERT INTO fga_tuple_changes (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'WRITE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                            "INSERT INTO fga_tuple_changes (scope_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'WRITE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                         )
-                        .bind(scoped.instance_id())
+                        .bind(instance_id)
                         .bind(store_id)
                         .bind(&parsed.object.object_type)
                         .bind(&parsed.object.object_id)
@@ -343,9 +343,9 @@ impl TupleRepository for FgaService {
 
                 for parsed in &deletes {
                     let result = sqlx::query(
-                        "DELETE FROM fga_tuples WHERE instance_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5 AND user_type = $6 AND user_id = $7 AND user_relation = $8",
+                        "DELETE FROM fga_tuples WHERE scope_id = $1 AND store_id = $2 AND object_type = $3 AND object_id = $4 AND relation = $5 AND user_type = $6 AND user_id = $7 AND user_relation = $8",
                     )
-                    .bind(scoped.instance_id())
+                    .bind(instance_id)
                     .bind(store_id)
                     .bind(&parsed.object.object_type)
                     .bind(&parsed.object.object_id)
@@ -358,9 +358,9 @@ impl TupleRepository for FgaService {
                     .context("delete fga tuple")?;
                     if result.rows_affected() > 0 {
                         sqlx::query(
-                            "INSERT INTO fga_tuple_changes (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'DELETE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                            "INSERT INTO fga_tuple_changes (scope_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) VALUES ($1, $2, 'DELETE', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                         )
-                        .bind(scoped.instance_id())
+                        .bind(instance_id)
                         .bind(store_id)
                         .bind(&parsed.object.object_type)
                         .bind(&parsed.object.object_id)
@@ -380,7 +380,7 @@ impl TupleRepository for FgaService {
                 tx.commit().await.context("commit tuple transaction")?;
             }
             Db::Spanner(spanner) => {
-                let instance_id = instance_id.to_string();
+                let scope_id = instance_id.to_string();
                 let store_id = store_id.to_string();
                 let model_id = model_id.clone();
                 let writes = writes.clone();
@@ -388,7 +388,7 @@ impl TupleRepository for FgaService {
                 let _ = spanner
                     .client()
                     .read_write_transaction(|tx| {
-                        let instance_id = instance_id.clone();
+                        let scope_id = scope_id.clone();
                         let store_id = store_id.clone();
                         let model_id = model_id.clone();
                         let writes = writes.clone();
@@ -397,13 +397,13 @@ impl TupleRepository for FgaService {
                             for parsed in writes {
                                 let mut exists = Statement::new(
                                     "SELECT raw_user FROM fga_tuples \
-                                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                                     WHERE scope_id = @scope_id AND store_id = @store_id \
                                        AND object_type = @object_type AND object_id = @object_id \
                                        AND relation = @relation AND user_type = @user_type \
                                        AND user_id = @user_id AND user_relation = @user_relation \
                                      LIMIT 1",
                                 );
-                                exists.add_param("instance_id", &instance_id);
+                                exists.add_param("scope_id", &scope_id);
                                 exists.add_param("store_id", &store_id);
                                 exists.add_param("object_type", &parsed.object.object_type);
                                 exists.add_param("object_id", &parsed.object.object_id);
@@ -423,11 +423,11 @@ impl TupleRepository for FgaService {
                                 let raw_user = parsed.user.as_raw();
                                 let mut insert = Statement::new(
                                     "INSERT INTO fga_tuples \
-                                     (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
+                                     (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
                                      VALUES \
-                                     (@instance_id, @store_id, @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user)",
+                                     (@scope_id, @store_id, @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user)",
                                 );
-                                insert.add_param("instance_id", &instance_id);
+                                insert.add_param("scope_id", &scope_id);
                                 insert.add_param("store_id", &store_id);
                                 insert.add_param("object_type", &parsed.object.object_type);
                                 insert.add_param("object_id", &parsed.object.object_id);
@@ -444,11 +444,11 @@ impl TupleRepository for FgaService {
 
                                 let mut change = Statement::new(
                                     "INSERT INTO fga_tuple_changes \
-                                     (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) \
+                                     (scope_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) \
                                      VALUES \
-                                     (@instance_id, @store_id, 'WRITE', @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user, @authorization_model_id)",
+                                     (@scope_id, @store_id, 'WRITE', @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user, @authorization_model_id)",
                                 );
-                                change.add_param("instance_id", &instance_id);
+                                change.add_param("scope_id", &scope_id);
                                 change.add_param("store_id", &store_id);
                                 change.add_param("object_type", &parsed.object.object_type);
                                 change.add_param("object_id", &parsed.object.object_id);
@@ -468,13 +468,13 @@ impl TupleRepository for FgaService {
                             for parsed in deletes {
                                 let mut exists = Statement::new(
                                     "SELECT raw_user FROM fga_tuples \
-                                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                                     WHERE scope_id = @scope_id AND store_id = @store_id \
                                        AND object_type = @object_type AND object_id = @object_id \
                                        AND relation = @relation AND user_type = @user_type \
                                        AND user_id = @user_id AND user_relation = @user_relation \
                                      LIMIT 1",
                                 );
-                                exists.add_param("instance_id", &instance_id);
+                                exists.add_param("scope_id", &scope_id);
                                 exists.add_param("store_id", &store_id);
                                 exists.add_param("object_type", &parsed.object.object_type);
                                 exists.add_param("object_id", &parsed.object.object_id);
@@ -494,12 +494,12 @@ impl TupleRepository for FgaService {
                                 let raw_user = parsed.user.as_raw();
                                 let mut delete = Statement::new(
                                     "DELETE FROM fga_tuples \
-                                     WHERE instance_id = @instance_id AND store_id = @store_id \
+                                     WHERE scope_id = @scope_id AND store_id = @store_id \
                                        AND object_type = @object_type AND object_id = @object_id \
                                        AND relation = @relation AND user_type = @user_type \
                                        AND user_id = @user_id AND user_relation = @user_relation",
                                 );
-                                delete.add_param("instance_id", &instance_id);
+                                delete.add_param("scope_id", &scope_id);
                                 delete.add_param("store_id", &store_id);
                                 delete.add_param("object_type", &parsed.object.object_type);
                                 delete.add_param("object_id", &parsed.object.object_id);
@@ -514,11 +514,11 @@ impl TupleRepository for FgaService {
 
                                 let mut change = Statement::new(
                                     "INSERT INTO fga_tuple_changes \
-                                     (instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) \
+                                     (scope_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id) \
                                      VALUES \
-                                     (@instance_id, @store_id, 'DELETE', @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user, @authorization_model_id)",
+                                     (@scope_id, @store_id, 'DELETE', @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user, @authorization_model_id)",
                                 );
-                                change.add_param("instance_id", &instance_id);
+                                change.add_param("scope_id", &scope_id);
                                 change.add_param("store_id", &store_id);
                                 change.add_param("object_type", &parsed.object.object_type);
                                 change.add_param("object_id", &parsed.object.object_id);
@@ -567,14 +567,14 @@ impl ChangeRepository for FgaService {
                 let rows = sqlx::query(
                     "SELECT seq, operation, raw_user, relation, raw_object, CAST(created_at AS TEXT) AS created_at
                      FROM fga_tuple_changes
-                     WHERE instance_id = $1
+                     WHERE scope_id = $1
                        AND store_id = $2
                        AND seq > $3
                        AND ($4 = '' OR object_type = $4)
                      ORDER BY seq ASC
                      LIMIT $5",
                 )
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(store_id)
                 .bind(after_seq)
                 .bind(object_type.unwrap_or_default())
@@ -603,7 +603,7 @@ impl ChangeRepository for FgaService {
                 let mut stmt = Statement::new(&format!(
                     "SELECT seq, operation, raw_user, relation, raw_object, CAST(created_at AS STRING) AS created_at \
                      FROM fga_tuple_changes \
-                     WHERE instance_id = @instance_id \
+                     WHERE scope_id = @scope_id \
                        AND store_id = @store_id \
                        AND seq > @after_seq \
                        AND (@object_type = '' OR object_type = @object_type) \
@@ -611,7 +611,7 @@ impl ChangeRepository for FgaService {
                      LIMIT {}",
                     limit
                 ));
-                stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("scope_id", &instance_id);
                 stmt.add_param("store_id", &store_id);
                 stmt.add_param("after_seq", &after_seq);
                 stmt.add_param("object_type", &object_type.unwrap_or_default());

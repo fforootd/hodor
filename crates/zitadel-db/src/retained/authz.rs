@@ -1,12 +1,10 @@
 use anyhow::Context;
-use google_cloud_spanner::{
-    client::Error as SpannerError, row::Row, statement::Statement,
-};
+use google_cloud_spanner::{client::Error as SpannerError, row::Row, statement::Statement};
 use zitadel_app::repo::{InstanceTrustLinkRecord, RoleAssignmentFilter, RoleAssignmentRecord};
 use zitadel_authz::{RoleDefinition, builtin_role_definitions};
 
-use crate::Db;
 use super::ActiveRoleBindingRecord;
+use crate::Db;
 
 fn now_rfc3339ish() -> String {
     let now = std::time::SystemTime::now()
@@ -288,7 +286,10 @@ pub async fn create_role_assignment(
                          @source_kind, @origin_instance_id, @approved_by, @reason, @expires_at, @revoked_at, @created_at, @updated_at)",
             );
             stmt.add_param("assignment_id", &assignment.assignment_id);
-            stmt.add_param("enforcement_instance_id", &assignment.enforcement_instance_id);
+            stmt.add_param(
+                "enforcement_instance_id",
+                &assignment.enforcement_instance_id,
+            );
             stmt.add_param("scope_kind", &assignment.scope_kind);
             stmt.add_param("scope_id", &assignment.scope_id);
             stmt.add_param("principal_ref", &assignment.principal_ref);
@@ -395,7 +396,9 @@ pub async fn list_role_assignments(
             )
             .fetch_all(db.pool())
             .await?;
-            rows.into_iter().map(role_assignment_from_sql_row).collect::<Vec<_>>()
+            rows.into_iter()
+                .map(role_assignment_from_sql_row)
+                .collect::<Vec<_>>()
         }
         Db::Spanner(spanner) => {
             let stmt = Statement::new(

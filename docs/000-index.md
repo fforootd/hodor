@@ -216,6 +216,6 @@ graph TD
 | [034](adr/034-multi-tenancy.md) | Multi-Tenancy via Instance Boundaries | Accepted | 2026-04-04 |
 | [035](adr/035-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
 | [036](adr/036-staff-access-support-grants.md) | Staff Access and Support Grants | Proposed | 2026-04-05 |
-| [037](adr/037-fga-store-split-platform-customer.md) | FGA Store Split — Platform Store + Customer Stores | Proposed | 2026-04-05 |
+| [037](adr/037-fga-store-split-platform-customer.md) | FGA Store Split — Platform Store + Customer Stores | Proposed | 2026-04-06 |
 
 </details>

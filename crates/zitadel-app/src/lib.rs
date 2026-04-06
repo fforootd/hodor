@@ -18,6 +18,7 @@ pub mod authz;
 pub mod context;
 pub mod error;
 pub mod event;
+pub mod features;
 pub mod hook;
 pub mod hook_engine;
 pub mod mock;
@@ -31,8 +32,8 @@ pub mod auth;
 pub mod console;
 pub mod credentials;
 pub mod groups;
-pub mod jobs;
 pub mod instances;
+pub mod jobs;
 pub mod login_flows;
 pub mod memberships;
 pub mod orgs;
@@ -53,6 +54,7 @@ pub use context::{
     ActorContext, AuthContext, Capability, Identity, InstanceContext, RequestContext,
 };
 pub use error::AppError;
+pub use features::{FeatureMap, feature_enabled, merge_feature_overrides, validate_feature_overrides};
 pub use event::DomainEvent;
 pub use hook::{EffectHook, HookContext, HookPhase, HookPipeline, PolicyInterceptor};
 pub use hook_engine::HookPipelineBuilder;

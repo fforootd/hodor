@@ -27,7 +27,7 @@ async fn openapi_json(State(state): State<Arc<AppState>>) -> Response {
         .into_owned()
     };
 
-    match zitadel_api::openapi::document(&state.db, &public_origin).await {
+    match zitadel_api::openapi::document(state.app.repos.schema_registry.as_ref(), &public_origin).await {
         Ok(document) => zitadel_api::response::json_ok(document),
         Err(error) => zitadel_api::response::internal_error(format!("openapi export: {error}")),
     }

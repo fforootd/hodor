@@ -126,10 +126,7 @@ impl ListLoginFlows {
     }
 
     #[tracing::instrument(name = "use_case.list_login_flows", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-    ) -> Result<Vec<LoginFlowRecord>, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext) -> Result<Vec<LoginFlowRecord>, AppError> {
         // Authz: caller must be viewer on their own org
         crate::authz::require_permission(
             &self.repos,
@@ -240,11 +237,7 @@ impl DeleteLoginFlow {
         skip_all,
         fields(event_type = "login_flow.configured", category = "login_flow")
     )]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        flow_id: &str,
-    ) -> Result<(), AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, flow_id: &str) -> Result<(), AppError> {
         crate::authz::require_permission(
             &self.repos,
             ctx,
@@ -275,11 +268,7 @@ impl PromoteLoginFlow {
         skip_all,
         fields(event_type = "login_flow.configured", category = "login_flow")
     )]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        flow_id: &str,
-    ) -> Result<bool, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, flow_id: &str) -> Result<bool, AppError> {
         crate::authz::require_permission(
             &self.repos,
             ctx,
@@ -310,11 +299,7 @@ impl ArchiveLoginFlow {
         skip_all,
         fields(event_type = "login_flow.configured", category = "login_flow")
     )]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        flow_id: &str,
-    ) -> Result<bool, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, flow_id: &str) -> Result<bool, AppError> {
         crate::authz::require_permission(
             &self.repos,
             ctx,
@@ -341,10 +326,7 @@ impl ResolveLoginFlow {
     }
 
     #[tracing::instrument(name = "use_case.resolve_login_flow", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-    ) -> Result<Option<LoginFlowRecord>, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext) -> Result<Option<LoginFlowRecord>, AppError> {
         let flows = self
             .repos
             .login_flows

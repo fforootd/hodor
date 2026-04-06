@@ -272,7 +272,9 @@ pub(super) fn schema_from_retained(record: crate::SchemaRegistryRecord) -> Schem
     }
 }
 
-pub(super) fn provider_from_storage(record: provider::ProviderRecord) -> anyhow::Result<ProviderRecord> {
+pub(super) fn provider_from_storage(
+    record: provider::ProviderRecord,
+) -> anyhow::Result<ProviderRecord> {
     let mut config = serde_json::to_value(&record.payload)?;
     if let Value::Object(map) = &mut config {
         map.remove("display_name");
@@ -302,7 +304,9 @@ pub(super) fn provider_definition_from_storage(
         org_id: record.org_id,
         created_at: record.created_at,
         updated_at: record.updated_at,
-        payload: serde_json::from_value::<AppProviderPayload>(serde_json::to_value(record.payload)?)?,
+        payload: serde_json::from_value::<AppProviderPayload>(serde_json::to_value(
+            record.payload,
+        )?)?,
     })
 }
 
@@ -413,7 +417,11 @@ pub(super) async fn load_user(
         }))
 }
 
-pub(super) async fn load_org(db: &Db, instance_id: &str, org_id: &str) -> anyhow::Result<Option<OrgRecord>> {
+pub(super) async fn load_org(
+    db: &Db,
+    instance_id: &str,
+    org_id: &str,
+) -> anyhow::Result<Option<OrgRecord>> {
     Ok(get_org(db, instance_id, org_id)
         .await?
         .map(|row| OrgRecord {
@@ -462,7 +470,10 @@ pub(super) async fn load_group(
     }
 }
 
-pub(super) async fn load_instance(db: &Db, instance_id: &str) -> anyhow::Result<Option<InstanceRecord>> {
+pub(super) async fn load_instance(
+    db: &Db,
+    instance_id: &str,
+) -> anyhow::Result<Option<InstanceRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
@@ -621,7 +632,11 @@ pub(super) async fn load_settings_exact(
     }
 }
 
-pub(super) async fn upsert_domain(db: &Db, instance_id: &str, domain: &DomainRecord) -> anyhow::Result<()> {
+pub(super) async fn upsert_domain(
+    db: &Db,
+    instance_id: &str,
+    domain: &DomainRecord,
+) -> anyhow::Result<()> {
     if domain.is_primary {
         let existing = list_instance_domains(db, instance_id).await?;
         for item in existing {
@@ -725,7 +740,10 @@ pub(super) async fn write_spanner_stmt(spanner: &SpannerDb, stmt: Statement) -> 
     Ok(())
 }
 
-pub(super) async fn write_spanner_count(spanner: &SpannerDb, stmt: Statement) -> anyhow::Result<u64> {
+pub(super) async fn write_spanner_count(
+    spanner: &SpannerDb,
+    stmt: Statement,
+) -> anyhow::Result<u64> {
     let (_, affected) = spanner
         .client()
         .read_write_transaction(|tx| {
@@ -736,7 +754,10 @@ pub(super) async fn write_spanner_count(spanner: &SpannerDb, stmt: Statement) ->
     Ok(affected as u64)
 }
 
-pub(super) async fn write_spanner_many(spanner: &SpannerDb, stmts: Vec<Statement>) -> anyhow::Result<()> {
+pub(super) async fn write_spanner_many(
+    spanner: &SpannerDb,
+    stmts: Vec<Statement>,
+) -> anyhow::Result<()> {
     let _ = spanner
         .client()
         .read_write_transaction(|tx| {

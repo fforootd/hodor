@@ -56,7 +56,12 @@ async fn create_pat(
         name: req.name.clone(),
         scopes: req.scopes,
     };
-    match s.app.runner.run(&ctx, "pat.create", || s.app.create_pat.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "pat.create", || s.app.create_pat.execute(&ctx, cmd))
+        .await
+    {
         Ok(result) => response::json_created(PatResponse {
             id: result.pat_id,
             user_id: req.user_id,
@@ -73,7 +78,14 @@ async fn list_pats(
     Extension(identity): Extension<Identity>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "pat.list", || s.app.list_pats.execute(&ctx, &identity.user_id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "pat.list", || {
+            s.app.list_pats.execute(&ctx, &identity.user_id)
+        })
+        .await
+    {
         Ok(rows) => {
             let items: Vec<serde_json::Value> = rows
                 .into_iter()
@@ -95,7 +107,12 @@ async fn revoke_pat(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "pat.revoke", || s.app.revoke_pat.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "pat.revoke", || s.app.revoke_pat.execute(&ctx, &id))
+        .await
+    {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

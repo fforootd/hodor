@@ -78,14 +78,14 @@ pub async fn require_scoped_permission(
                 Ok(false) => {}
                 Err(error) => {
                     tracing::warn!(
-                        instance_id = ctx.instance_id(),
-                        principal = ctx.principal_ref(),
-                        permission_key,
-                scope,
-                        role = candidate.role_key,
-                        error = %error,
-                        "permission check error (fail-open; allowing)"
-                    );
+                            instance_id = ctx.instance_id(),
+                            principal = ctx.principal_ref(),
+                            permission_key,
+                    scope,
+                            role = candidate.role_key,
+                            error = %error,
+                            "permission check error (fail-open; allowing)"
+                        );
                     return Ok(());
                 }
             }
@@ -202,14 +202,26 @@ fn relation_alias<'a>(
         ("admin", ("instance", _)) => Some(("instance.write", vec![object.to_string()])),
         ("viewer", ("org", _)) => Some((
             "org.read",
-            vec![object.to_string(), format!("instance:{}", ctx.instance_id())],
+            vec![
+                object.to_string(),
+                format!("instance:{}", ctx.instance_id()),
+            ],
         )),
         ("admin", ("org", _)) => Some((
             "org.write",
-            vec![object.to_string(), format!("instance:{}", ctx.instance_id())],
+            vec![
+                object.to_string(),
+                format!("instance:{}", ctx.instance_id()),
+            ],
         )),
-        ("viewer", ("user", _)) => Some(("org.user.read", vec![format!("instance:{}", ctx.instance_id())])),
-        ("admin", ("user", _)) => Some(("org.user.write", vec![format!("instance:{}", ctx.instance_id())])),
+        ("viewer", ("user", _)) => Some((
+            "org.user.read",
+            vec![format!("instance:{}", ctx.instance_id())],
+        )),
+        ("admin", ("user", _)) => Some((
+            "org.user.write",
+            vec![format!("instance:{}", ctx.instance_id())],
+        )),
         _ => None,
     }
 }
@@ -261,11 +273,7 @@ fn alias(permission_key: &str) -> Option<PermissionAlias> {
         ][..],
         "schema.read" => &["userschema.read", "support.read"][..],
         "schema.write" => &["userschema.write", "userschema.delete", "support.config"][..],
-        "support.grant.read" => &[
-            "support.grant.read",
-            "iam.read",
-            "system.instance.read",
-        ][..],
+        "support.grant.read" => &["support.grant.read", "iam.read", "system.instance.read"][..],
         "support.grant.write" => &[
             "support.grant.write",
             "support.grant.delete",

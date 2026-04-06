@@ -180,7 +180,13 @@ impl ListNamedResources {
                 .apps
                 .list(ctx.instance_id(), None, &params)
                 .await
-                .map(|result| result.items.into_iter().map(app_to_named_resource).collect())
+                .map(|result| {
+                    result
+                        .items
+                        .into_iter()
+                        .map(app_to_named_resource)
+                        .collect()
+                })
                 .map_err(AppError::Internal),
             _ => Err(AppError::validation(format!(
                 "unsupported named resource kind: {kind}"

@@ -1,22 +1,22 @@
+pub mod core_model;
 pub mod dto;
 pub mod error;
-pub mod traits;
+pub mod evaluation;
 pub mod service;
 pub mod service_impls;
-pub mod evaluation;
-pub mod core_model;
+pub mod traits;
 
 // Re-export everything for backward compatibility
+pub use core_model::core_authorization_model;
 pub use dto::*;
 pub use error::*;
-pub use traits::*;
 pub use service::FgaService;
-pub use core_model::core_authorization_model;
+pub use traits::*;
 
 // Constants
 pub const SCHEMA_VERSION_1_1: &str = "1.1";
 pub const CORE_MODEL_VERSION: &str = "core-2026-04-06-role-catalog-parent-hierarchy-v2";
-pub const PLATFORM_STORE_ID: &str = "platform";
+pub const PLATFORM_STORE_ID: &str = "_platform";
 pub(crate) const LIST_SCAN_FALLBACK_LIMIT: usize = 10_000;
 
 #[cfg(test)]
@@ -802,7 +802,7 @@ mod tests {
             let object_id = format!("doc-{idx}");
             sqlx::query(
                 "INSERT INTO fga_tuples \
-                 (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
+                 (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
                  VALUES ($1, $2, 'document', $3, 'viewer', 'user', 'anne', '', $4, 'user:anne')",
             )
             .bind(DEFAULT_INSTANCE_ID)
@@ -845,14 +845,21 @@ mod tests {
             .await
             .unwrap();
         let mut model = core_authorization_model();
-        model.type_definitions[1]
+        model
+            .type_definitions
+            .iter_mut()
+            .find(|type_def| type_def.type_name == "instance")
+            .expect("core model should contain instance type")
             .relations
             .insert("superadmin".into(), json!({ "this": {} }));
         let err = service
             .write_model(DEFAULT_INSTANCE_ID, &store.id, model)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("sealed type instance"));
+        assert!(
+            err.to_string()
+                .contains("sealed type instance cannot be modified")
+        );
     }
 
     #[tokio::test]
@@ -980,7 +987,7 @@ mod tests {
 
         sqlx::query(
             "UPDATE fga_authorization_models SET core_model_version = '' \
-             WHERE instance_id = $1 AND store_id = $2 AND model_id = $3",
+             WHERE scope_id = $1 AND store_id = $2 AND model_id = $3",
         )
         .bind(DEFAULT_INSTANCE_ID)
         .bind(&store.id)
@@ -1030,7 +1037,7 @@ mod tests {
             .unwrap();
 
         sqlx::query(
-            "UPDATE fga_authorization_models SET is_active = 0 WHERE instance_id = $1 AND store_id = $2",
+            "UPDATE fga_authorization_models SET is_active = 0 WHERE scope_id = $1 AND store_id = $2",
         )
         .bind(DEFAULT_INSTANCE_ID)
         .bind(&store.id)
@@ -1054,7 +1061,7 @@ mod tests {
         let compiled = serde_json::to_string(&core_authorization_model()).unwrap();
         sqlx::query(
             "INSERT INTO fga_authorization_models \
-             (instance_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
+             (scope_id, store_id, model_id, schema_version, core_model_version, compiled_model, custom_model, module_fragments, is_active) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)",
         )
         .bind(DEFAULT_INSTANCE_ID)
@@ -1088,7 +1095,7 @@ mod tests {
 
         let module_fragments: String = sqlx::query_scalar(
             "SELECT module_fragments FROM fga_authorization_models \
-             WHERE instance_id = $1 AND store_id = $2 AND is_active = 1 \
+             WHERE scope_id = $1 AND store_id = $2 AND is_active = 1 \
              ORDER BY created_at DESC LIMIT 1",
         )
         .bind(DEFAULT_INSTANCE_ID)
@@ -1100,7 +1107,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconcile_root_hierarchy_materializes_platform_store_only() {
+    async fn reconcile_root_hierarchy_materializes_platform_store_without_creating_child_store() {
         let (db, service) = test_service_with_db().await;
         let root_user_id = "root-user";
         create_user(
@@ -1166,25 +1173,12 @@ mod tests {
             .unwrap();
         assert!(platform_allowed.allowed);
 
-        let child_store = service.discover_store("child-a").await.unwrap();
-        let child_allowed = service
-            .check(
-                "child-a",
-                &child_store.id,
-                CheckRequest {
-                    tuple_key: TupleKey {
-                        user: format!("user:{root_user_id}"),
-                        relation: "admin".into(),
-                        object: "instance:child-a".into(),
-                        condition: None,
-                    },
-                    authorization_model_id: None,
-                    contextual_tuples: None,
-                    context: None,
-                },
-            )
-            .await
-            .unwrap();
-        assert!(!child_allowed.allowed);
+        let child_store_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM fga_stores WHERE scope_id = $1")
+                .bind("child-a")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(child_store_count, 0);
     }
 }

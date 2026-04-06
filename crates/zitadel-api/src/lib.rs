@@ -41,8 +41,12 @@ use zitadel_storage::{DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTr
 /// Shared API state.
 #[derive(Clone)]
 pub struct ApiState {
+    /// Infrastructure-only DB handle for middleware (instance resolution, capability checks).
+    /// **Handlers must use `app.repos.*` repository traits, never this field directly.**
     pub db: Db,
     pub app: Arc<ApplicationServices>,
+    /// FGA service — used by instance management for parent-relation checks.
+    /// Prefer `app.repos.fga_admin` for store rebuild and admin operations.
     pub fga: Arc<FgaService>,
     pub stateful: Arc<DefaultStatefulStorage>,
     pub transient: Arc<DefaultTransientStorage>,
@@ -54,7 +58,8 @@ pub struct ApiState {
     pub is_dev: bool,
 }
 
-/// Lightweight FGA permission check for handlers that bypass the use-case layer.
+/// FGA permission check for handlers. Delegates to the authorization layer
+/// via `require_permission` on the repository ports.
 /// Returns `Ok(())` if allowed, `Err(Response)` if denied.
 pub async fn fga_check(
     state: &ApiState,

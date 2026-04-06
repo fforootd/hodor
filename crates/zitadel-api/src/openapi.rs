@@ -1,12 +1,12 @@
 use anyhow::Context;
 use serde_json::{Map, Value, json};
-use zitadel_db::{Db, list_schema_registry};
+use zitadel_app::repo::SchemaRegistryRepository;
 
 const META_SCHEMA: &str = include_str!("meta_schema.json");
 
-pub async fn document(db: &Db, public_origin: &str) -> anyhow::Result<Value> {
+pub async fn document(schema_registry_repo: &dyn SchemaRegistryRepository, public_origin: &str) -> anyhow::Result<Value> {
     let meta_schema: Value = serde_json::from_str(META_SCHEMA).context("parse meta schema")?;
-    let schema_registry = match load_schema_registry(db).await {
+    let schema_registry = match load_schema_registry(schema_registry_repo).await {
         Ok(registry) => registry,
         Err(error) => {
             tracing::warn!(error = %error, "openapi export could not load schema registry");
@@ -76,21 +76,21 @@ struct SchemaRegistryEntry {
     schema: Value,
 }
 
-async fn load_schema_registry(db: &Db) -> anyhow::Result<Vec<SchemaRegistryEntry>> {
-    let rows = list_schema_registry(db, "", None, i64::MAX)
+async fn load_schema_registry(repo: &dyn SchemaRegistryRepository) -> anyhow::Result<Vec<SchemaRegistryEntry>> {
+    let entries = repo.list_registry("", "", None, i64::MAX)
         .await
         .context("query schema registry")?;
 
-    rows.into_iter()
-        .map(|row| {
-            let schema = serde_json::from_str(&row.schema_json)
-                .with_context(|| format!("parse schema registry entry {}", row.id))?;
+    entries.into_iter()
+        .map(|entry| {
+            let schema = serde_json::from_str(&entry.schema_json)
+                .with_context(|| format!("parse schema registry entry {}", entry.id))?;
             Ok(SchemaRegistryEntry {
-                id: row.id,
-                type_: row.type_,
-                version: row.version,
-                visibility: row.visibility,
-                is_default: row.is_default,
+                id: entry.id,
+                type_: entry.type_name,
+                version: entry.version,
+                visibility: entry.visibility,
+                is_default: entry.is_default,
                 schema,
             })
         })

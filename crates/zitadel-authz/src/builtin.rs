@@ -536,7 +536,12 @@ pub const BUILTIN_ROLES: &[BuiltinRole] = &[
     BuiltinRole {
         role_key: "ORG_PROJECT_CREATOR",
         scope_kind: "org",
-        permissions: &["user.global.read", "policy.read", "project.read:self", "project.create"],
+        permissions: &[
+            "user.global.read",
+            "policy.read",
+            "project.read:self",
+            "project.create",
+        ],
     },
     BuiltinRole {
         role_key: "ORG_ADMIN_IMPERSONATOR",

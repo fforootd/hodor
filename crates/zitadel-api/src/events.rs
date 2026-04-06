@@ -6,7 +6,6 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use zitadel_db::current_instance_id;
 use zitadel_storage::{AnalyticsQuery, AnalyticsQueryResult};
 
 pub fn routes() -> Router<ApiState> {
@@ -71,7 +70,7 @@ async fn list_events(
     let mut conditions = Vec::new();
     let mut params: Vec<String> = Vec::new();
 
-    params.push(current_instance_id().to_string());
+    params.push(ctx.instance_id().to_string());
     conditions.push(format!("instance_id = ${}", params.len()));
 
     if let Some(ref et) = p.event_type {

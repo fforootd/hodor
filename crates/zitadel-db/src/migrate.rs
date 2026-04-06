@@ -23,6 +23,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "00013_role_catalog",
         include_str!("../../../migrations/sqlite/00013_role_catalog.sql"),
     ),
+    (
+        "00014_fga_scope_cleanup",
+        include_str!("../../../migrations/sqlite/00014_fga_scope_cleanup.sql"),
+    ),
 ];
 
 const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
@@ -46,6 +50,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "00013_role_catalog",
         include_str!("../../../migrations/postgres/00013_role_catalog.sql"),
     ),
+    (
+        "00014_fga_scope_cleanup",
+        include_str!("../../../migrations/postgres/00014_fga_scope_cleanup.sql"),
+    ),
 ];
 
 const SPANNER_MIGRATIONS: &[(&str, &str)] = &[
@@ -68,6 +76,10 @@ const SPANNER_MIGRATIONS: &[(&str, &str)] = &[
     (
         "00005_role_catalog",
         include_str!("../../../migrations/spanner/00005_role_catalog.sql"),
+    ),
+    (
+        "00006_fga_scope_cleanup",
+        include_str!("../../../migrations/spanner/00006_fga_scope_cleanup.sql"),
     ),
 ];
 
@@ -324,6 +336,177 @@ fn strip_comments_and_validate(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Db;
+
+    #[tokio::test]
+    async fn sqlite_fga_scope_cleanup_migration_copies_data_and_deletes_platform_instance() {
+        let db = Db::open("").await.unwrap();
+        let pool = db.pool();
+
+        sqlx::query(
+            "CREATE TABLE _schema_version (
+                version INTEGER NOT NULL,
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO _schema_version (version) VALUES (5)")
+            .execute(pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE instances (
+                instance_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT 'managed',
+                state TEXT NOT NULL DEFAULT 'active',
+                placement_mode TEXT NOT NULL DEFAULT 'global',
+                feature_overrides TEXT NOT NULL DEFAULT '{}'
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE fga_instance_stores (
+                instance_id TEXT PRIMARY KEY,
+                store_id TEXT NOT NULL UNIQUE
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE fga_authorization_models (
+                instance_id TEXT NOT NULL,
+                store_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                core_model_version TEXT NOT NULL DEFAULT '',
+                compiled_model TEXT NOT NULL,
+                custom_model TEXT NOT NULL DEFAULT '{}',
+                module_fragments TEXT NOT NULL DEFAULT '[]',
+                is_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (instance_id, store_id, model_id)
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE fga_tuples (
+                instance_id TEXT NOT NULL,
+                store_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                user_type TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                user_relation TEXT NOT NULL DEFAULT '',
+                raw_object TEXT NOT NULL,
+                raw_user TEXT NOT NULL,
+                inserted_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation)
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE fga_tuple_changes (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                instance_id TEXT NOT NULL,
+                store_id TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                object_id TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                user_type TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                user_relation TEXT NOT NULL DEFAULT '',
+                raw_object TEXT NOT NULL,
+                raw_user TEXT NOT NULL,
+                authorization_model_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO instances (instance_id, kind, state, placement_mode, feature_overrides)
+             VALUES ('_platform', 'managed', 'active', 'global', '{}')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES ('_platform', '_platform')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO fga_authorization_models
+             (instance_id, store_id, model_id, schema_version, compiled_model, is_active)
+             VALUES ('_platform', '_platform', 'model-1', '1.1', '{\"type_definitions\":[],\"conditions\":{}}', 1)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO fga_tuples
+             (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user)
+             VALUES ('_platform', '_platform', 'instance', 'child-a', 'admin', 'user', 'anne', '', 'instance:child-a', 'user:anne')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO fga_tuple_changes
+             (seq, instance_id, store_id, operation, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user, authorization_model_id)
+             VALUES (42, '_platform', '_platform', 'WRITE', 'instance', 'child-a', 'admin', 'user', 'anne', '', 'instance:child-a', 'user:anne', 'model-1')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+        migrate(&db).await.unwrap();
+
+        let scope_id: String =
+            sqlx::query_scalar("SELECT scope_id FROM fga_stores WHERE store_id = '_platform'")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(scope_id, "_platform");
+
+        let tuple_scope: String = sqlx::query_scalar(
+            "SELECT scope_id FROM fga_tuples WHERE store_id = '_platform' LIMIT 1",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(tuple_scope, "_platform");
+
+        let change_seq: i64 = sqlx::query_scalar(
+            "SELECT seq FROM fga_tuple_changes WHERE store_id = '_platform' LIMIT 1",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(change_seq, 42);
+
+        let platform_row_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM instances WHERE instance_id = '_platform'")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(platform_row_count, 0);
+    }
 
     #[test]
     fn extract_goose_up_section() {

@@ -5093,6 +5093,7 @@ dependencies = [
  "zitadel-api",
  "zitadel-app",
  "zitadel-authn",
+ "zitadel-catalog",
  "zitadel-config",
  "zitadel-crypto",
  "zitadel-db",

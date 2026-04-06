@@ -34,7 +34,13 @@ impl CreateProvider {
         }
 
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
@@ -167,7 +173,13 @@ impl UpdateProvider {
         cmd: UpdateProviderCommand,
     ) -> Result<ProviderRecord, AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         let mut provider = self
             .repos
@@ -229,7 +241,13 @@ impl DeleteProvider {
     )]
     pub async fn execute(&self, ctx: &ActorContext, provider_id: &str) -> Result<(), AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         self.repos
             .providers

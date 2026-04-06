@@ -9,6 +9,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::collections::HashMap;
+use zitadel_db::current_instance_id;
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -117,8 +118,11 @@ async fn install_from_catalog(
         None => return response::not_found(format!("template not found: {id}")),
     };
 
+    let vars_value = serde_json::to_value(&req.variables).unwrap_or_default();
+    let instance_id = current_instance_id();
+
     match entry.entry_type.as_str() {
-        "provider" => match catalog.install_provider(&id, &req.variables, &s.db).await {
+        "provider" => match s.app.repos.catalog.install_provider(&instance_id, &id, &vars_value).await {
             Ok(provider_id) => (
                 StatusCode::CREATED,
                 Json(serde_json::json!({
@@ -131,7 +135,7 @@ async fn install_from_catalog(
                 .into_response(),
             Err(e) => response::internal(e),
         },
-        "action" => match catalog.install_action(&id, &req.variables, &s.db).await {
+        "action" => match s.app.repos.catalog.install_action(&instance_id, &id, &vars_value).await {
             Ok(action_id) => (
                 StatusCode::CREATED,
                 Json(serde_json::json!({

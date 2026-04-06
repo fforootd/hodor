@@ -20,7 +20,7 @@ With OpenFGA embedded (internal/fga), we need to answer three questions:
 > **customer instances**. Platform authorization (instance hierarchy, org ownership,
 > staff roles) uses a dedicated platform store, separate from any customer instance
 > store. Customers never see or interact with the platform store.
-> See [ADR-037](037-platform-fga-store-separation.md) for details.
+> See [ADR-037](037-fga-store-split-platform-customer.md) for details.
 
 Every Zitadel instance gets exactly **one** OpenFGA store. The authorization model
 is currently composed from two active layers:

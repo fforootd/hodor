@@ -53,7 +53,11 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
                 let ext_domain =
                     Some(cfg.server.external_domain.as_str()).filter(|d| !d.is_empty());
                 let changed = zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
-                tracing::info!(bootstrapped = changed, seeded_roles, "migration command completed");
+                tracing::info!(
+                    bootstrapped = changed,
+                    seeded_roles,
+                    "migration command completed"
+                );
             } else {
                 tracing::info!(seeded_roles, "migration command completed");
             }
@@ -122,7 +126,8 @@ pub(crate) fn run_openapi_export(args: OpenapiExportArgs) -> anyhow::Result<()> 
     let document = rt.block_on(async move {
         let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
             .await?;
-        let document = zitadel_api::openapi::document(&db, &public_origin(&cfg)).await?;
+        let schema_registry = zitadel_server::repo_bridge::schema_registry_repo(db.clone());
+        let document = zitadel_api::openapi::document(schema_registry.as_ref(), &public_origin(&cfg)).await?;
         db.close().await;
         anyhow::Ok(document)
     })?;

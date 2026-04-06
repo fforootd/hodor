@@ -2113,24 +2113,24 @@ async fn ensure_fga_store(db: &Db, instance_id: &str) -> anyhow::Result<String> 
             let scoped = db.scoped(instance_id.to_string());
             let sql = match scoped.dialect() {
                 Dialect::Sqlite => {
-                    "INSERT OR IGNORE INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2)"
+                    "INSERT OR IGNORE INTO fga_stores (scope_id, store_id) VALUES ($1, $2)"
                 }
                 Dialect::Postgres => {
-                    "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES ($1, $2) ON CONFLICT (instance_id) DO NOTHING"
+                    "INSERT INTO fga_stores (scope_id, store_id) VALUES ($1, $2) ON CONFLICT (scope_id) DO NOTHING"
                 }
                 Dialect::Spanner => unreachable!("spanner does not use ScopedDb"),
             };
             sqlx::query(sql)
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(&store_id)
                 .execute(scoped.pool())
                 .await?;
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                "INSERT INTO fga_instance_stores (instance_id, store_id) VALUES (@instance_id, @store_id)",
+                "INSERT INTO fga_stores (scope_id, store_id) VALUES (@scope_id, @store_id)",
             );
-            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("scope_id", &instance_id);
             stmt.add_param("store_id", &store_id);
             let _ = spanner
                 .client()
@@ -2152,17 +2152,17 @@ async fn load_fga_store(db: &Db, instance_id: &str) -> anyhow::Result<Option<Str
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
             let row: Option<(String,)> =
-                sqlx::query_as("SELECT store_id FROM fga_instance_stores WHERE instance_id = $1")
-                    .bind(scoped.instance_id())
+                sqlx::query_as("SELECT store_id FROM fga_stores WHERE scope_id = $1")
+                    .bind(instance_id)
                     .fetch_optional(scoped.pool())
                     .await?;
             Ok(row.map(|row| row.0))
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                "SELECT store_id FROM fga_instance_stores WHERE instance_id = @instance_id LIMIT 1",
+                "SELECT store_id FROM fga_stores WHERE scope_id = @scope_id LIMIT 1",
             );
-            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("scope_id", &instance_id);
             Ok(spanner_query_optional(spanner, stmt)
                 .await?
                 .and_then(|row| row.column_by_name::<String>("store_id").ok()))
@@ -2185,10 +2185,10 @@ async fn fga_check(
             let scoped = db.scoped(instance_id.to_string());
             let row: Option<(i64,)> = sqlx::query_as(
                 "SELECT 1 FROM fga_tuples \
-                 WHERE instance_id = $1 AND store_id = $2 AND raw_user = $3 AND relation = $4 AND raw_object = $5 \
+                 WHERE scope_id = $1 AND store_id = $2 AND raw_user = $3 AND relation = $4 AND raw_object = $5 \
                  LIMIT 1",
             )
-            .bind(scoped.instance_id())
+            .bind(instance_id)
             .bind(&store_id)
             .bind(user)
             .bind(relation)
@@ -2200,10 +2200,10 @@ async fn fga_check(
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
                 "SELECT raw_user FROM fga_tuples \
-                 WHERE instance_id = @instance_id AND store_id = @store_id AND raw_user = @raw_user AND relation = @relation AND raw_object = @raw_object \
+                 WHERE scope_id = @scope_id AND store_id = @store_id AND raw_user = @raw_user AND relation = @relation AND raw_object = @raw_object \
                  LIMIT 1",
             );
-            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("scope_id", &instance_id);
             stmt.add_param("store_id", &store_id);
             stmt.add_param("raw_user", &user);
             stmt.add_param("relation", &relation);
@@ -2228,15 +2228,15 @@ async fn write_fga_tuple(
             let scoped = db.scoped(instance_id.to_string());
             let sql = match scoped.dialect() {
                 Dialect::Sqlite => {
-                    "INSERT OR IGNORE INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                    "INSERT OR IGNORE INTO fga_tuples (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
                 }
                 Dialect::Postgres => {
-                    "INSERT INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
+                    "INSERT INTO fga_tuples (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
                 }
                 Dialect::Spanner => unreachable!("spanner does not use ScopedDb"),
             };
             sqlx::query(sql)
-                .bind(scoped.instance_id())
+                .bind(instance_id)
                 .bind(&store_id)
                 .bind(&parsed_object.object_type)
                 .bind(&parsed_object.object_id)
@@ -2255,11 +2255,11 @@ async fn write_fga_tuple(
             }
             let mut stmt = Statement::new(
                 "INSERT INTO fga_tuples \
-                 (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
+                 (scope_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) \
                  VALUES \
-                 (@instance_id, @store_id, @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user)",
+                 (@scope_id, @store_id, @object_type, @object_id, @relation, @user_type, @user_id, @user_relation, @raw_object, @raw_user)",
             );
-            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("scope_id", &instance_id);
             stmt.add_param("store_id", &store_id);
             stmt.add_param("object_type", &parsed_object.object_type);
             stmt.add_param("object_id", &parsed_object.object_id);
@@ -2299,9 +2299,9 @@ async fn delete_fga_tuple(
             let scoped = db.scoped(instance_id.to_string());
             sqlx::query(
                 "DELETE FROM fga_tuples \
-                 WHERE instance_id = $1 AND store_id = $2 AND raw_user = $3 AND relation = $4 AND raw_object = $5",
+                 WHERE scope_id = $1 AND store_id = $2 AND raw_user = $3 AND relation = $4 AND raw_object = $5",
             )
-            .bind(scoped.instance_id())
+            .bind(instance_id)
             .bind(&store_id)
             .bind(user)
             .bind(relation)
@@ -2312,9 +2312,9 @@ async fn delete_fga_tuple(
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
                 "DELETE FROM fga_tuples \
-                 WHERE instance_id = @instance_id AND store_id = @store_id AND raw_user = @raw_user AND relation = @relation AND raw_object = @raw_object",
+                 WHERE scope_id = @scope_id AND store_id = @store_id AND raw_user = @raw_user AND relation = @relation AND raw_object = @raw_object",
             );
-            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("scope_id", &instance_id);
             stmt.add_param("store_id", &store_id);
             stmt.add_param("raw_user", &user);
             stmt.add_param("relation", &relation);
@@ -2349,10 +2349,10 @@ async fn list_fga_relations(
             let rows: Vec<(String, String, String)> = sqlx::query_as(
                 "SELECT raw_user, relation, raw_object \
                  FROM fga_tuples \
-                 WHERE instance_id = $1 AND store_id = $2 AND raw_user = $3 AND object_type = $4 \
+                 WHERE scope_id = $1 AND store_id = $2 AND raw_user = $3 AND object_type = $4 \
                  ORDER BY relation, raw_object",
             )
-            .bind(scoped.instance_id())
+            .bind(instance_id)
             .bind(&store_id)
             .bind(user)
             .bind(object_type)
@@ -2371,10 +2371,10 @@ async fn list_fga_relations(
             let mut stmt = Statement::new(
                 "SELECT raw_user, relation, raw_object \
                  FROM fga_tuples \
-                 WHERE instance_id = @instance_id AND store_id = @store_id AND raw_user = @raw_user AND object_type = @object_type \
+                 WHERE scope_id = @scope_id AND store_id = @store_id AND raw_user = @raw_user AND object_type = @object_type \
                  ORDER BY relation, raw_object",
             );
-            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("scope_id", &instance_id);
             stmt.add_param("store_id", &store_id);
             stmt.add_param("raw_user", &user);
             stmt.add_param("object_type", &object_type);

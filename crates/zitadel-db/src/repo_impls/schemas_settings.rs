@@ -3,12 +3,11 @@ use google_cloud_spanner::statement::Statement;
 use serde_json::{Map, Value};
 
 use super::entities::{
-    SqlProviderRepository, SqlSchemaRepository, SqlSettingsRepository,
-    json_string, limit_from_params,
-    load_provider, load_schema, load_settings_exact, next_cursor, parse_scope,
+    SqlProviderRepository, SqlSchemaRepository, SqlSettingsRepository, json_string,
+    limit_from_params, load_provider, load_schema, load_settings_exact, next_cursor, parse_scope,
     provider_definition_from_storage, provider_from_storage, provider_org_id,
-    provider_payload_from_record,
-    schema_from_retained, write_spanner_count, write_spanner_many, write_spanner_stmt,
+    provider_payload_from_record, schema_from_retained, write_spanner_count, write_spanner_many,
+    write_spanner_stmt,
 };
 use crate::{DEFAULT_ORG_ID, Db, delete_provider, first_org_id, list_schema_registry, provider};
 use zitadel_app::repo::{
@@ -309,16 +308,10 @@ impl SchemaRepository for SqlSchemaRepository {
         })
     }
 
-    fn promote(
-        &self,
-        _instance_id: &str,
-        schema_id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+    fn promote(&self, _instance_id: &str, schema_id: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
         let db = self.db.clone();
         let schema_id = schema_id.to_string();
-        Box::pin(async move {
-            crate::promote_schema_record(&db, &schema_id).await
-        })
+        Box::pin(async move { crate::promote_schema_record(&db, &schema_id).await })
     }
 
     fn count_by_schema(
@@ -329,9 +322,7 @@ impl SchemaRepository for SqlSchemaRepository {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
         let schema_id = schema_id.to_string();
-        Box::pin(async move {
-            crate::count_users_for_schema(&db, &instance_id, &schema_id).await
-        })
+        Box::pin(async move { crate::count_users_for_schema(&db, &instance_id, &schema_id).await })
     }
 }
 
@@ -423,17 +414,13 @@ impl SettingsRepository for SqlSettingsRepository {
         })
     }
 
-    fn delete(
-        &self,
-        instance_id: &str,
-        settings_type: &str,
-    ) -> BoxFuture<'_, anyhow::Result<()>> {
+    fn delete(&self, instance_id: &str, settings_type: &str) -> BoxFuture<'_, anyhow::Result<()>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
         let settings_type = settings_type.to_string();
-        Box::pin(async move {
-            crate::delete_settings_record(&db, &instance_id, &settings_type).await
-        })
+        Box::pin(
+            async move { crate::delete_settings_record(&db, &instance_id, &settings_type).await },
+        )
     }
 
     fn resolve(

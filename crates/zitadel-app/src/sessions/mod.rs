@@ -16,10 +16,7 @@ impl ListSessions {
     }
 
     #[tracing::instrument(name = "use_case.list_sessions", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-    ) -> Result<Vec<SessionDetail>, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext) -> Result<Vec<SessionDetail>, AppError> {
         // Authz: caller must be viewer on their own org
         crate::authz::require_permission(
             &self.repos,

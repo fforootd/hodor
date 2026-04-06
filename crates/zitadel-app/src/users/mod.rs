@@ -67,7 +67,8 @@ impl CreateUser {
         };
 
         // Authz: caller must be admin on the target org
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", org_id)).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", org_id))
+            .await?;
 
         let id = uuid::Uuid::now_v7().to_string();
         let now = chrono_now();
@@ -218,7 +219,13 @@ impl UpdateUser {
             .ok_or_else(|| AppError::not_found("user", &cmd.user_id))?;
 
         // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", cmd.user_id)).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("user:{}", cmd.user_id),
+        )
+        .await?;
 
         let mut fields_changed = Vec::new();
 
@@ -290,7 +297,8 @@ impl DeleteUser {
             .ok_or_else(|| AppError::not_found("user", user_id))?;
 
         // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id))
+            .await?;
 
         self.repos
             .users
@@ -344,7 +352,8 @@ impl DeactivateUser {
             .ok_or_else(|| AppError::not_found("user", user_id))?;
 
         // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id))
+            .await?;
 
         if user.state != "active" {
             return Err(AppError::InvalidState {

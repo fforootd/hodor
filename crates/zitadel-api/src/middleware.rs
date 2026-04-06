@@ -5,14 +5,15 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use std::collections::BTreeSet;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use tracing::Span;
 use zitadel_authz::{grants_for_permission, role_grants_permission};
 use zitadel_db::{
     DEFAULT_INSTANCE_ID, current_instance_context, current_instance_id, load_instance_metadata,
     user_has_capability as db_user_has_capability,
 };
+use zitadel_fga::PLATFORM_STORE_ID;
 
 use crate::ApiState;
 use crate::response;
@@ -94,6 +95,9 @@ pub async fn require_scoped_instance_access(
     }
 
     let target_instance_id = current_instance_id().into_owned();
+    if target_instance_id == PLATFORM_STORE_ID {
+        return response::not_found("instance not found");
+    }
     let metadata = match load_instance_metadata(&state.db, &target_instance_id).await {
         Ok(Some(metadata)) => metadata,
         Ok(None) => return response::not_found("instance not found"),
@@ -303,7 +307,10 @@ async fn resolve_support_grant_token(
     }
     if !trust_link.allowed_scopes.is_empty()
         && !trust_link.allowed_scopes.iter().any(|scope| {
-            matches!(scope.as_str(), "support" | "support_grant" | "support_grants")
+            matches!(
+                scope.as_str(),
+                "support" | "support_grant" | "support_grants"
+            )
         })
     {
         return Ok(None);
@@ -389,8 +396,8 @@ mod tests {
         session::hash_token,
     };
     use zitadel_config::{Config, password::PasswordHasherConfig};
-    use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
     use zitadel_db::repo_impls::DbOidcRepository;
+    use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
     use zitadel_fga::{FgaService, StoreResolver};
     use zitadel_oidc::op::{ClientAuthMethod, ClientAuthentication, TokenExchangeRequest};
     use zitadel_storage::StorageRuntime;

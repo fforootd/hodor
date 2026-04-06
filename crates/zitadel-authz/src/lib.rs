@@ -43,7 +43,11 @@ pub fn builtin_role_definitions() -> &'static [RoleDefinition] {
                 role_key: role.role_key.to_string(),
                 relation_name: relation_name_for_role(role.role_key),
                 scope_kind: role.scope_kind.to_string(),
-                permissions: role.permissions.iter().map(|item| (*item).to_string()).collect(),
+                permissions: role
+                    .permissions
+                    .iter()
+                    .map(|item| (*item).to_string())
+                    .collect(),
                 builtin: true,
                 source_version: BUILTIN_ROLE_SOURCE_VERSION.to_string(),
             })
@@ -117,13 +121,20 @@ mod tests {
     #[test]
     fn relation_names_are_normalized_to_lower_snake_case() {
         assert_eq!(relation_name_for_role("IAM_OWNER"), "iam_owner");
-        assert_eq!(relation_name_for_role("PROJECT_GRANT_OWNER"), "project_grant_owner");
+        assert_eq!(
+            relation_name_for_role("PROJECT_GRANT_OWNER"),
+            "project_grant_owner"
+        );
     }
 
     #[test]
     fn permission_lookup_returns_expected_role() {
         let grants = grants_for_permission("instance", "iam.write");
         assert!(grants.iter().any(|grant| grant.role_key == "IAM_OWNER"));
-        assert!(!grants.iter().any(|grant| grant.role_key == "IAM_OWNER_VIEWER"));
+        assert!(
+            !grants
+                .iter()
+                .any(|grant| grant.role_key == "IAM_OWNER_VIEWER")
+        );
     }
 }

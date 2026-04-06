@@ -123,18 +123,20 @@ impl AppRepository for DbAppRepository {
         let instance_id = instance_id.to_string();
         let app_id = app_id.to_string();
         Box::pin(async move {
-            Ok(crate::get_named_resource(&db, &instance_id, "apps", &app_id)
-                .await?
-                .map(|record| AppRecord {
-                    id: record.id,
-                    group_id: String::new(),
-                    name: record.name,
-                    protocol: String::new(),
-                    state: record.state,
-                    metadata: serde_json::Value::Object(Default::default()),
-                    created_at: record.created_at,
-                    updated_at: record.updated_at,
-                }))
+            Ok(
+                crate::get_named_resource(&db, &instance_id, "apps", &app_id)
+                    .await?
+                    .map(|record| AppRecord {
+                        id: record.id,
+                        group_id: String::new(),
+                        name: record.name,
+                        protocol: String::new(),
+                        state: record.state,
+                        metadata: serde_json::Value::Object(Default::default()),
+                        created_at: record.created_at,
+                        updated_at: record.updated_at,
+                    }),
+            )
         })
     }
 
@@ -241,15 +243,17 @@ impl ProjectRepository for DbProjectRepository {
         let instance_id = instance_id.to_string();
         let project_id = project_id.to_string();
         Box::pin(async move {
-            Ok(crate::get_named_resource(&db, &instance_id, "projects", &project_id)
-                .await?
-                .map(|record| NamedResourceRecord {
-                    id: record.id,
-                    name: record.name,
-                    state: record.state,
-                    created_at: record.created_at,
-                    updated_at: record.updated_at,
-                }))
+            Ok(
+                crate::get_named_resource(&db, &instance_id, "projects", &project_id)
+                    .await?
+                    .map(|record| NamedResourceRecord {
+                        id: record.id,
+                        name: record.name,
+                        state: record.state,
+                        created_at: record.created_at,
+                        updated_at: record.updated_at,
+                    }),
+            )
         })
     }
 
@@ -305,15 +309,13 @@ impl ProjectRepository for DbProjectRepository {
         })
     }
 
-    fn delete(
-        &self,
-        instance_id: &str,
-        project_id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+    fn delete(&self, instance_id: &str, project_id: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
         let project_id = project_id.to_string();
-        Box::pin(async move { delete_instance_row(&db, &instance_id, "projects", &project_id).await })
+        Box::pin(
+            async move { delete_instance_row(&db, &instance_id, "projects", &project_id).await },
+        )
     }
 }
 
@@ -329,16 +331,18 @@ impl MembershipRepository for DbMembershipRepository {
         let entity_type = entity_type.to_string();
         let entity_id = entity_id.to_string();
         Box::pin(async move {
-            Ok(list_memberships(&db, &instance_id, &entity_type, &entity_id)
-                .await?
-                .into_iter()
-                .map(|row| MembershipRecord {
-                    user_id: row.user_id,
-                    display_name: row.display_name.filter(|value| !value.is_empty()),
-                    role: row.role,
-                    added_at: row.added_at,
-                })
-                .collect())
+            Ok(
+                list_memberships(&db, &instance_id, &entity_type, &entity_id)
+                    .await?
+                    .into_iter()
+                    .map(|row| MembershipRecord {
+                        user_id: row.user_id,
+                        display_name: row.display_name.filter(|value| !value.is_empty()),
+                        role: row.role,
+                        added_at: row.added_at,
+                    })
+                    .collect(),
+            )
         })
     }
 
@@ -356,7 +360,9 @@ impl MembershipRepository for DbMembershipRepository {
         let entity_id = entity_id.to_string();
         let user_id = user_id.to_string();
         let role = role.to_string();
-        Box::pin(async move { add_membership(&db, &instance_id, &entity_type, &entity_id, &user_id, &role).await })
+        Box::pin(async move {
+            add_membership(&db, &instance_id, &entity_type, &entity_id, &user_id, &role).await
+        })
     }
 
     fn remove(
@@ -371,7 +377,9 @@ impl MembershipRepository for DbMembershipRepository {
         let entity_type = entity_type.to_string();
         let entity_id = entity_id.to_string();
         let user_id = user_id.to_string();
-        Box::pin(async move { remove_membership(&db, &instance_id, &entity_type, &entity_id, &user_id).await })
+        Box::pin(async move {
+            remove_membership(&db, &instance_id, &entity_type, &entity_id, &user_id).await
+        })
     }
 }
 
@@ -411,7 +419,12 @@ impl ConsoleQueryRepository for DbConsoleQueryRepository {
     ) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
-        Box::pin(async move { Ok(load_entity_counts(&db, &instance_id).await?.into_iter().collect()) })
+        Box::pin(async move {
+            Ok(load_entity_counts(&db, &instance_id)
+                .await?
+                .into_iter()
+                .collect())
+        })
     }
 }
 

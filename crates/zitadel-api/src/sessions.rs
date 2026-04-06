@@ -1,10 +1,5 @@
 use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
-use axum::{
-    Extension, Router,
-    extract::State,
-    response::Response,
-    routing::get,
-};
+use axum::{Extension, Router, extract::State, response::Response, routing::get};
 use serde::Serialize;
 
 pub fn routes() -> Router<ApiState> {
@@ -78,7 +73,14 @@ async fn revoke_session(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "session.revoke", || s.app.revoke_session.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "session.revoke", || {
+            s.app.revoke_session.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

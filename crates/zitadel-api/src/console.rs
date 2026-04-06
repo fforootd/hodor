@@ -1,6 +1,6 @@
 use crate::{ApiState, middleware::Identity, response};
 use axum::{Extension, Router, extract::State, response::Response, routing::get};
-use zitadel_db::{FeatureMap, feature_enabled, merge_feature_overrides};
+use zitadel_app::{FeatureMap, feature_enabled, merge_feature_overrides};
 
 const META_SCHEMA: &str = include_str!("meta_schema.json");
 const ALLOWED_INSTANCE_FEATURES: &[&str] = &["instance_management", "billing"];

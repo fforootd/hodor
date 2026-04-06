@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Context;
 use serde_json::{Map, Value, json};
 
+use crate::SCHEMA_VERSION_1_1;
 use crate::dto::*;
 use crate::error::FgaError;
 use crate::evaluation::*;
-use crate::SCHEMA_VERSION_1_1;
 
 pub(crate) fn parse_relation_metadata(
     metadata: Option<&Value>,
@@ -272,7 +272,10 @@ pub fn core_authorization_model() -> AuthorizationModelWriteRequest {
                     ("org_user_manager".into(), json!({ "this": {} })),
                     ("org_settings_manager".into(), json!({ "this": {} })),
                     ("org_user_permission_editor".into(), json!({ "this": {} })),
-                    ("org_project_permission_editor".into(), json!({ "this": {} })),
+                    (
+                        "org_project_permission_editor".into(),
+                        json!({ "this": {} }),
+                    ),
                     ("org_project_creator".into(), json!({ "this": {} })),
                     ("org_admin_impersonator".into(), json!({ "this": {} })),
                     ("org_end_user_impersonator".into(), json!({ "this": {} })),

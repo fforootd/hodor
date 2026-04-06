@@ -22,9 +22,15 @@ async fn create_child_user_session(
     org_id: &str,
     identifier: &str,
 ) -> anyhow::Result<zitadel_testkit::SessionFixture> {
-    let user =
-        support::insert_user_with_password(app, instance_id, org_id, identifier, identifier, "password123")
-            .await?;
+    let user = support::insert_user_with_password(
+        app,
+        instance_id,
+        org_id,
+        identifier,
+        identifier,
+        "password123",
+    )
+    .await?;
     create_session_for_instance(app, instance_id, &user).await
 }
 
@@ -109,7 +115,10 @@ async fn root_users_are_owner_scoped_and_operators_are_unscoped() -> anyhow::Res
             Body::empty(),
         )
         .await?;
-    assert_eq!(operator_admin_list.status, axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(
+        operator_admin_list.status,
+        axum::http::StatusCode::NOT_FOUND
+    );
 
     Ok(())
 }
@@ -266,8 +275,14 @@ async fn portal_instances_can_manage_their_own_children_when_instance_management
         "password123",
     )
     .await?;
-    grant_org_role_in_instance(&app, portal_instance, portal_org, &portal_user.user_id, "owner")
-        .await?;
+    grant_org_role_in_instance(
+        &app,
+        portal_instance,
+        portal_org,
+        &portal_user.user_id,
+        "owner",
+    )
+    .await?;
     insert_instance_with_parent(
         &app,
         tenant_instance,
@@ -302,7 +317,10 @@ async fn portal_instances_can_manage_their_own_children_when_instance_management
     .await?;
     assert_eq!(list.status, axum::http::StatusCode::OK);
     assert_eq!(list.json_value()["items"].as_array().unwrap().len(), 1);
-    assert_eq!(list.json_value()["items"][0]["instance_id"], tenant_instance);
+    assert_eq!(
+        list.json_value()["items"][0]["instance_id"],
+        tenant_instance
+    );
 
     Ok(())
 }
@@ -325,6 +343,15 @@ async fn root_instance_access_uses_fga_not_only_session_org_scope() -> anyhow::R
     .await?;
     assert_eq!(initial.status, axum::http::StatusCode::OK);
     assert_eq!(initial.json_value()["items"].as_array().unwrap().len(), 1);
+
+    let initial_child_access = get_on_host(
+        &app,
+        "/v1/instances/inst-owned/sessions",
+        root_session.bearer_actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(initial_child_access.status, axum::http::StatusCode::OK);
 
     let scoped = app.ctx.db.scoped_default();
     sqlx::query("INSERT INTO orgs (instance_id, id, name, state) VALUES ($1, $2, $3, 'active')")
@@ -353,20 +380,20 @@ async fn root_instance_access_uses_fga_not_only_session_org_scope() -> anyhow::R
     )
     .await?;
     assert_eq!(after_move.status, axum::http::StatusCode::OK);
-    assert_eq!(after_move.json_value()["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        after_move.json_value()["items"].as_array().unwrap().len(),
+        1
+    );
 
-    zitadel_db::remove_membership(
-        &app.ctx.db.db,
-        DEFAULT_INSTANCE_ID,
-        "org",
-        "org-a",
-        &root_user.user_id,
+    let removed = delete_on_host(
+        &app,
+        &format!("/v1/orgs/org-a/members/{}", root_user.user_id),
+        root_session.bearer_actor(),
+        ROOT_HOST,
     )
     .await
     .context("remove org-a owner membership")?;
-    rebuild_platform_fga(&app.ctx.api_state)
-        .await
-        .context("rebuild platform store after membership removal")?;
+    assert_eq!(removed.status, axum::http::StatusCode::NO_CONTENT);
 
     let after_membership_change = get_on_host(
         &app,
@@ -378,15 +405,53 @@ async fn root_instance_access_uses_fga_not_only_session_org_scope() -> anyhow::R
     assert_eq!(after_membership_change.status, axum::http::StatusCode::OK);
     assert_eq!(after_membership_change.json_value()["items"], json!([]));
 
+    let revoked_child_access = get_on_host(
+        &app,
+        "/v1/instances/inst-owned/sessions",
+        root_session.bearer_actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(
+        revoked_child_access.status,
+        axum::http::StatusCode::NOT_FOUND
+    );
+
     Ok(())
 }
 
 #[tokio::test]
-async fn instance_pagination_skips_hidden_rows_without_losing_visible_instances() -> anyhow::Result<()>
-{
+async fn reserved_platform_instance_id_fails_closed_on_path_routes() -> anyhow::Result<()> {
     let app = build_test_app().await?;
-    let owner = create_root_user_in_org(&app, "org-visible", "Visible Org", "pager@example.com")
+    let owner = app
+        .ctx
+        .create_user("reserved-platform@example.com", "password123")
         .await?;
+    grant_org_role(&app, &owner.org_id, &owner.user_id, "owner").await?;
+    let owner_session = app.ctx.create_session(&owner).await?;
+
+    let response = get_on_host(
+        &app,
+        "/v1/instances/_platform/console/bootstrap",
+        owner_session.bearer_actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(response.status, axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.json_value(),
+        json!({"error": "instance not found", "code": 404})
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn instance_pagination_skips_hidden_rows_without_losing_visible_instances()
+-> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let owner =
+        create_root_user_in_org(&app, "org-visible", "Visible Org", "pager@example.com").await?;
     let owner_session = create_session_for_instance(&app, DEFAULT_INSTANCE_ID, &owner).await?;
 
     insert_child_instance(&app, "a-hidden", "1", "a-hidden.example.com").await?;
@@ -402,7 +467,10 @@ async fn instance_pagination_skips_hidden_rows_without_losing_visible_instances(
     )
     .await?;
     assert_eq!(first_page.status, axum::http::StatusCode::OK);
-    assert_eq!(first_page.json_value()["items"][0]["instance_id"], "b-visible");
+    assert_eq!(
+        first_page.json_value()["items"][0]["instance_id"],
+        "b-visible"
+    );
     assert_eq!(first_page.json_value()["next_cursor"], "b-visible");
 
     let second_page = get_on_host(
@@ -413,7 +481,10 @@ async fn instance_pagination_skips_hidden_rows_without_losing_visible_instances(
     )
     .await?;
     assert_eq!(second_page.status, axum::http::StatusCode::OK);
-    assert_eq!(second_page.json_value()["items"][0]["instance_id"], "d-visible");
+    assert_eq!(
+        second_page.json_value()["items"][0]["instance_id"],
+        "d-visible"
+    );
 
     let third_page = get_on_host(
         &app,
@@ -424,7 +495,10 @@ async fn instance_pagination_skips_hidden_rows_without_losing_visible_instances(
     .await?;
     assert_eq!(third_page.status, axum::http::StatusCode::OK);
     assert_eq!(third_page.json_value()["items"], json!([]));
-    assert_eq!(third_page.json_value()["next_cursor"], serde_json::Value::Null);
+    assert_eq!(
+        third_page.json_value()["next_cursor"],
+        serde_json::Value::Null
+    );
 
     Ok(())
 }
@@ -434,7 +508,10 @@ async fn instances_support_get_update_and_deprovision_through_management_routes(
 -> anyhow::Result<()> {
     let app = build_test_app().await?;
     let admin = app.ctx.admin_user().await?;
-    let admin_pat = app.ctx.create_pat(&admin, "instance-lifecycle-admin").await?;
+    let admin_pat = app
+        .ctx
+        .create_pat(&admin, "instance-lifecycle-admin")
+        .await?;
 
     let created = post_json_on_host(
         &app,
@@ -452,7 +529,10 @@ async fn instances_support_get_update_and_deprovision_through_management_routes(
         .as_str()
         .expect("created instance id should be present")
         .to_string();
-    assert_eq!(created_json["primary_domain"], "instance-lifecycle.example.com");
+    assert_eq!(
+        created_json["primary_domain"],
+        "instance-lifecycle.example.com"
+    );
     assert_eq!(created_json["state"], "active");
 
     let loaded = get_on_host(
@@ -538,9 +618,16 @@ async fn managed_support_grants_enable_and_revoke_child_instance_access() -> any
     let operator_pat = app.ctx.create_pat(&operator, "support-grant-admin").await?;
     let support_user =
         create_root_user_in_org(&app, "support-org", "Support Org", "support@example.com").await?;
-    let support_session = create_session_for_instance(&app, DEFAULT_INSTANCE_ID, &support_user).await?;
+    let support_session =
+        create_session_for_instance(&app, DEFAULT_INSTANCE_ID, &support_user).await?;
 
-    let _ = setup_child(&app, "support-managed-child", "support-managed.example.com", "child-org").await?;
+    let _ = setup_child(
+        &app,
+        "support-managed-child",
+        "support-managed.example.com",
+        "child-org",
+    )
+    .await?;
 
     let before = get_on_host(
         &app,
@@ -607,7 +694,10 @@ async fn federated_support_grants_issue_tokens_that_respect_trust_and_revocation
 -> anyhow::Result<()> {
     let app = build_test_app().await?;
     let operator = app.ctx.admin_user().await?;
-    let operator_pat = app.ctx.create_pat(&operator, "support-federated-admin").await?;
+    let operator_pat = app
+        .ctx
+        .create_pat(&operator, "support-federated-admin")
+        .await?;
     let federated_instance = "support-federated-child";
     let federated_host = "support-federated.example.com";
 
@@ -666,7 +756,10 @@ async fn federated_support_grants_issue_tokens_that_respect_trust_and_revocation
     )
     .await?;
     assert_eq!(created.status, axum::http::StatusCode::CREATED);
-    assert_eq!(created.json_value()["source_kind"], "support_grant_federated");
+    assert_eq!(
+        created.json_value()["source_kind"],
+        "support_grant_federated"
+    );
     let grant_id = created.json_value()["grant_id"]
         .as_str()
         .expect("grant id")

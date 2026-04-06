@@ -168,7 +168,14 @@ async fn revoke_own_session(
         Ok(_) => return response::forbidden("cannot revoke another user's session"),
         Err(e) => return response::app_error(e),
     }
-    match s.app.runner.run(&ctx, "session.revoke", || s.app.revoke_session.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "session.revoke", || {
+            s.app.revoke_session.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }
@@ -187,7 +194,12 @@ async fn revoke_other_sessions(
                     && session.id != identity.session_id
                     && session.revoked_at.is_none()
                 {
-                    if s.app.revoke_session.execute(&ctx, &session.id).await.is_ok() {
+                    if s.app
+                        .revoke_session
+                        .execute(&ctx, &session.id)
+                        .await
+                        .is_ok()
+                    {
                         revoked += 1;
                     }
                 }

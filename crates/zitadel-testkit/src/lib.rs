@@ -197,6 +197,7 @@ impl TestContext {
             db.db.clone(),
             storage.transient.clone(),
             fga.clone(),
+            storage.analytics.clone(),
         ));
         let hooks = Arc::new(HookPipeline::empty());
         let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));

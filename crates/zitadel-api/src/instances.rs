@@ -7,11 +7,11 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use zitadel_db::{FeatureMap, feature_enabled};
 use zitadel_app::{
     instances::{CreateInstanceCommand, UpdateInstanceCommand},
     repo::{InstanceRecord, ListParams as AppListParams},
 };
+use zitadel_app::{FeatureMap, feature_enabled};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -193,7 +193,14 @@ async fn create(
         primary_domain: Some(req.domain),
     };
 
-    match s.app.runner.run(&ctx, "instance.create", || s.app.create_instance.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "instance.create", || {
+            s.app.create_instance.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(instance) => {
             if let Err(resp) = reconcile_after_mutation(&s, &access.parent_instance_id).await {
                 return resp;
@@ -219,7 +226,14 @@ async fn get_one(
         Err(response) => return response,
     }
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "instance.get", || s.app.get_instance.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "instance.get", || {
+            s.app.get_instance.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(instance) => response::json_ok(InstanceResponse::from(instance)),
         Err(e) => response::app_error(e),
     }
@@ -245,8 +259,11 @@ async fn list(
         };
         return match s.app.list_instances.execute(&ctx, &params).await {
             Ok(result) => {
-                let items: Vec<InstanceResponse> =
-                    result.items.into_iter().map(InstanceResponse::from).collect();
+                let items: Vec<InstanceResponse> = result
+                    .items
+                    .into_iter()
+                    .map(InstanceResponse::from)
+                    .collect();
                 response::json_ok(response::ListResponse {
                     items,
                     next_cursor: result.next_cursor,
@@ -361,7 +378,14 @@ async fn update(
         },
         feature_overrides: req.feature_overrides,
     };
-    match s.app.runner.run(&ctx, "instance.update", || s.app.update_instance.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "instance.update", || {
+            s.app.update_instance.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(instance) => {
             if let Err(resp) = reconcile_after_mutation(&s, &access.parent_instance_id).await {
                 return resp;
@@ -387,7 +411,14 @@ async fn delete_one(
         Err(response) => return response,
     }
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "instance.deprovision", || s.app.deprovision_instance.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "instance.deprovision", || {
+            s.app.deprovision_instance.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(()) => {
             if let Err(resp) = reconcile_after_mutation(&s, &access.parent_instance_id).await {
                 return resp;
@@ -413,7 +444,14 @@ async fn list_domains(
         Ok(false) => response::not_found("instance not found"),
         Ok(true) => {
             let ctx = response::build_actor_context(&identity);
-            match s.app.runner.run(&ctx, "instance.list_domains", || s.app.list_domains.execute(&ctx, &id)).await {
+            match s
+                .app
+                .runner
+                .run(&ctx, "instance.list_domains", || {
+                    s.app.list_domains.execute(&ctx, &id)
+                })
+                .await
+            {
                 Ok(items) => response::json_ok(serde_json::json!({ "items": items })),
                 Err(e) => response::app_error(e),
             }
@@ -440,7 +478,14 @@ async fn add_domain(
                 instance_id: id,
                 domain: req.domain,
             };
-            match s.app.runner.run(&ctx, "instance.add_domain", || s.app.add_domain.execute(&ctx, cmd)).await {
+            match s
+                .app
+                .runner
+                .run(&ctx, "instance.add_domain", || {
+                    s.app.add_domain.execute(&ctx, cmd)
+                })
+                .await
+            {
                 Ok(domain) => response::json_created(domain),
                 Err(e) => response::app_error(e),
             }
@@ -462,7 +507,14 @@ async fn remove_domain(
         Ok(false) => response::not_found("instance not found"),
         Ok(true) => {
             let ctx = response::build_actor_context(&identity);
-            match s.app.runner.run(&ctx, "instance.remove_domain", || s.app.remove_domain.execute(&ctx, &id, &domain)).await {
+            match s
+                .app
+                .runner
+                .run(&ctx, "instance.remove_domain", || {
+                    s.app.remove_domain.execute(&ctx, &id, &domain)
+                })
+                .await
+            {
                 Ok(zitadel_app::repo::DomainRemoveResult::Deleted) => response::no_content(),
                 Ok(zitadel_app::repo::DomainRemoveResult::NotFound) => {
                     response::not_found("domain not found")
@@ -494,10 +546,8 @@ pub(crate) async fn require_parent_management(
         .await
         .map_err(|e| response::app_error(e))?;
 
-    let default_features = FeatureMap::from([(
-        "instance_management".into(),
-        instance.kind == "root",
-    )]);
+    let default_features =
+        FeatureMap::from([("instance_management".into(), instance.kind == "root")]);
     let parent_management_enabled = feature_enabled(
         &default_features,
         &instance.feature_overrides,

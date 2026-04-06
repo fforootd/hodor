@@ -124,8 +124,11 @@ const router = createRouter({
       component: () => import('@/console/views/InstanceLayout.vue'),
       children: productRoutes,
     },
-    // Root management routes
-    { path: '/team', name: 'team', component: () => import('@/console/views/TeamView.vue') },
+    // Root management routes — Team (platform access, ADR-037)
+    { path: '/team', redirect: '/team/members' },
+    { path: '/team/members', name: 'team-members', component: () => import('@/console/views/team/MembersView.vue') },
+    { path: '/team/access', name: 'team-access', component: () => import('@/console/views/team/AccessView.vue') },
+    { path: '/team/grants', name: 'team-grants', component: () => import('@/console/views/team/GrantsView.vue') },
     { path: '/billing', name: 'billing', component: () => import('@/console/views/BillingView.vue') },
     // Flat product routes (single-instance dev mode / backward compat)
     ...flattenRoutes(productRoutes),

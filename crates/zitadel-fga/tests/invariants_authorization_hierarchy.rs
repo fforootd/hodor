@@ -4,7 +4,9 @@ use zitadel_db::{
     CreateManagedInstanceInput, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, add_membership, bootstrap,
     create_managed_instance, create_user, migrate,
 };
-use zitadel_fga::{CheckRequest, Evaluator, FgaService, PLATFORM_STORE_ID, StoreResolver, TupleKey};
+use zitadel_fga::{
+    CheckRequest, Evaluator, FgaService, PLATFORM_STORE_ID, StoreResolver, TupleKey,
+};
 
 async fn assert_root_org_owner_inherits_child_instance_admin(db: Db) -> anyhow::Result<()> {
     migrate::migrate(&db).await?;
@@ -81,7 +83,8 @@ async fn root_org_owner_can_administer_child_instance_on_sqlite() -> anyhow::Res
 }
 
 #[tokio::test]
-async fn root_org_owner_can_administer_child_instance_on_postgres_when_configured() -> anyhow::Result<()> {
+async fn root_org_owner_can_administer_child_instance_on_postgres_when_configured()
+-> anyhow::Result<()> {
     let Some(url) = std::env::var("ZITADEL_TEST_POSTGRES_URL").ok() else {
         eprintln!("skipping Postgres hierarchy test: ZITADEL_TEST_POSTGRES_URL is not set");
         return Ok(());
@@ -91,7 +94,8 @@ async fn root_org_owner_can_administer_child_instance_on_postgres_when_configure
 }
 
 #[tokio::test]
-async fn root_org_owner_can_administer_child_instance_on_spanner_when_configured() -> anyhow::Result<()> {
+async fn root_org_owner_can_administer_child_instance_on_spanner_when_configured()
+-> anyhow::Result<()> {
     let Some(database) = std::env::var("ZITADEL_TEST_SPANNER_DATABASE").ok() else {
         eprintln!("skipping Spanner hierarchy test: ZITADEL_TEST_SPANNER_DATABASE is not set");
         return Ok(());

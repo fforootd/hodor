@@ -1,10 +1,5 @@
 use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
-use axum::{
-    Extension, Json, Router,
-    extract::State,
-    response::Response,
-    routing::get,
-};
+use axum::{Extension, Json, Router, extract::State, response::Response, routing::get};
 use serde::{Deserialize, Serialize};
 use zitadel_app::{
     providers::{CreateProviderCommand, UpdateProviderCommand},
@@ -71,7 +66,14 @@ async fn create(
         protocol: req.protocol,
         config: req.config,
     };
-    match s.app.runner.run(&ctx, "provider.create", || s.app.create_provider.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "provider.create", || {
+            s.app.create_provider.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(provider) => response::json_created(ProviderResponse::from(provider)),
         Err(e) => response::app_error(e),
     }
@@ -84,7 +86,14 @@ async fn list(State(s): State<ApiState>, Extension(identity): Extension<Identity
         cursor: None,
         search: None,
     };
-    match s.app.runner.run(&ctx, "provider.list", || s.app.list_providers.execute(&ctx, &params)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "provider.list", || {
+            s.app.list_providers.execute(&ctx, &params)
+        })
+        .await
+    {
         Ok(result) => {
             let items: Vec<ProviderResponse> = result
                 .items
@@ -108,7 +117,14 @@ async fn get_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "provider.get", || s.app.get_provider.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "provider.get", || {
+            s.app.get_provider.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(provider) => response::json_ok(ProviderResponse::from(provider)),
         Err(e) => response::app_error(e),
     }
@@ -134,7 +150,14 @@ async fn update(
             Some(req.config)
         },
     };
-    match s.app.runner.run(&ctx, "provider.update", || s.app.update_provider.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "provider.update", || {
+            s.app.update_provider.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(provider) => response::json_ok(ProviderResponse::from(provider)),
         Err(e) => response::app_error(e),
     }
@@ -146,7 +169,14 @@ async fn delete_one(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "provider.delete", || s.app.delete_provider.execute(&ctx, &id)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "provider.delete", || {
+            s.app.delete_provider.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

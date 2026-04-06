@@ -54,6 +54,7 @@ pub async fn build_cloud_test_app() -> anyhow::Result<TestApp> {
         secret_box: Arc::new(zitadel_crypto::SecretBox::new("", &HashMap::new())?),
         ready: AtomicBool::new(true),
         instance_resolver: Arc::new(InstanceResolver::new(&ctx.config, ctx.db.db.clone())),
+        app: ctx.api_state.app.clone(),
     });
     let router: Router = build_router(
         app_state,
@@ -188,14 +189,14 @@ pub async fn insert_instance_with_parent(
         scoped.json_bind(5),
     );
     sqlx::query(&sql)
-    .bind(instance_id)
-    .bind(parent_instance_id)
-    .bind(owner_org_id)
-    .bind(kind)
-    .bind(feature_overrides_json)
-    .execute(scoped.pool())
-    .await
-    .context("insert instance")?;
+        .bind(instance_id)
+        .bind(parent_instance_id)
+        .bind(owner_org_id)
+        .bind(kind)
+        .bind(feature_overrides_json)
+        .execute(scoped.pool())
+        .await
+        .context("insert instance")?;
     sqlx::query(
         "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
          VALUES ($1, $2, NULL, 1, 'active', 1)",
@@ -247,7 +248,13 @@ pub async fn setup_child(
     domain: &str,
     org_id: &str,
 ) -> anyhow::Result<(SessionFixture, PatFixture)> {
-    insert_child_instance(app, instance_id, &app.ctx.db.default_org_id().await?, domain).await?;
+    insert_child_instance(
+        app,
+        instance_id,
+        &app.ctx.db.default_org_id().await?,
+        domain,
+    )
+    .await?;
 
     let child_scoped = app.ctx.db.db.scoped(instance_id.to_string());
     sqlx::query("INSERT INTO orgs (instance_id, id, name, state) VALUES ($1, $2, $3, 'active')")
@@ -271,9 +278,16 @@ pub async fn setup_child(
     .context("insert child admin user")?;
 
     // Grant owner role so FGA checks pass for this child admin
-    zitadel_db::add_membership(&app.ctx.db.db, instance_id, "org", org_id, &user_id, "owner")
-        .await
-        .context("grant child admin org owner")?;
+    zitadel_db::add_membership(
+        &app.ctx.db.db,
+        instance_id,
+        "org",
+        org_id,
+        &user_id,
+        "owner",
+    )
+    .await
+    .context("grant child admin org owner")?;
     rebuild_platform_fga(&app.ctx.api_state)
         .await
         .context("reconcile child fga tuples")?;
@@ -288,7 +302,14 @@ pub async fn setup_child(
         .ctx
         .login_state
         .transient
-        .create_session(instance_id, &user.user_id, &user.org_id, "test", "127.0.0.1", "")
+        .create_session(
+            instance_id,
+            &user.user_id,
+            &user.org_id,
+            "test",
+            "127.0.0.1",
+            "",
+        )
         .await
         .context("create child session")?;
 
@@ -481,8 +502,14 @@ pub async fn delete_on_host(
     actor: AuthActor,
     host: &str,
 ) -> anyhow::Result<zitadel_testkit::TestResponse> {
-    app.request(Method::DELETE, path, actor, host_headers(host), Body::empty())
-        .await
+    app.request(
+        Method::DELETE,
+        path,
+        actor,
+        host_headers(host),
+        Body::empty(),
+    )
+    .await
 }
 
 pub fn extract_ids(value: &Value) -> Vec<String> {

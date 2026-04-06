@@ -21,7 +21,10 @@ async fn load_provider_via_repos(
     instance_id: &str,
     provider_id: &str,
 ) -> anyhow::Result<Option<ProviderDefinitionRecord>> {
-    repos.providers.get_definition(instance_id, provider_id).await
+    repos
+        .providers
+        .get_definition(instance_id, provider_id)
+        .await
 }
 use zitadel_oidc::rp::{
     RpAuthState, RpCallbackRequest, RpProviderSpec, RpStartRequest, StateStore,
@@ -650,6 +653,7 @@ mod tests {
             db.clone(),
             storage.transient.clone(),
             fga,
+            storage.analytics.clone(),
         ));
         let app = Arc::new(ApplicationServices::new(
             repos,
@@ -726,7 +730,10 @@ mod tests {
         )
         .await;
 
-        assert_eq!(callback_uri, "https://demo.example.com/v1/auth/sso/callback");
+        assert_eq!(
+            callback_uri,
+            "https://demo.example.com/v1/auth/sso/callback"
+        );
     }
 
     #[tokio::test]

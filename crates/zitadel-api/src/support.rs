@@ -10,9 +10,7 @@ use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::{
     ApiState,
-    instances::{
-        reconcile_after_mutation, require_instance_relation, require_parent_management,
-    },
+    instances::{reconcile_after_mutation, require_instance_relation, require_parent_management},
     middleware::Identity,
     response,
 };
@@ -20,7 +18,10 @@ use crate::{
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/support/grants", get(list_grants).post(create_grant))
-        .route("/support/grants/{grant_id}", axum::routing::delete(revoke_grant))
+        .route(
+            "/support/grants/{grant_id}",
+            axum::routing::delete(revoke_grant),
+        )
 }
 
 #[derive(Deserialize)]
@@ -147,7 +148,8 @@ async fn create_grant(
                 &ctx,
                 zitadel_app::support::CreateSupportGrantCommand {
                     target_instance_id: req.instance_id.clone(),
-                    principal_ref: (!req.principal_ref.is_empty()).then(|| req.principal_ref.clone()),
+                    principal_ref: (!req.principal_ref.is_empty())
+                        .then(|| req.principal_ref.clone()),
                     role: req.role.clone(),
                     reason: (!req.reason.is_empty()).then(|| req.reason.clone()),
                     expires_at,
@@ -168,13 +170,8 @@ async fn create_grant(
     if created.source_kind == "support_grant_federated" {
         let audience = support_grant_audience(&created.scope_id);
         let issuer = s.oidc.provider.issuer().into_owned();
-        match issue_support_grant_token(
-            &s,
-            &created,
-            &issuer,
-            &audience,
-            identity.user_id.as_str(),
-        ) {
+        match issue_support_grant_token(&s, &created, &issuer, &audience, identity.user_id.as_str())
+        {
             Ok(token) => {
                 body.access_token = Some(token);
                 body.issuer = Some(issuer);
@@ -199,14 +196,8 @@ async fn list_grants(
     if let Some(instance_id) = query.instance_id.as_deref()
         && !access.operator_admin
     {
-        match require_instance_relation(
-            &s,
-            &access,
-            &identity.principal_ref,
-            "viewer",
-            instance_id,
-        )
-        .await
+        match require_instance_relation(&s, &access, &identity.principal_ref, "viewer", instance_id)
+            .await
         {
             Ok(true) => {}
             Ok(false) => return response::not_found("instance not found"),
@@ -231,7 +222,10 @@ async fn list_grants(
         Ok(items) => response::json_ok(response::ListResponse {
             total: Some(items.len() as i64),
             next_cursor: None,
-            items: items.into_iter().map(GrantResponse::from_record).collect::<Vec<_>>(),
+            items: items
+                .into_iter()
+                .map(GrantResponse::from_record)
+                .collect::<Vec<_>>(),
         }),
         Err(error) => response::app_error(error),
     }
@@ -246,7 +240,13 @@ async fn revoke_grant(
         Ok(access) => access,
         Err(response) => return response,
     };
-    let Some(existing) = (match s.app.repos.authorization.get_role_assignment(&grant_id).await {
+    let Some(existing) = (match s
+        .app
+        .repos
+        .authorization
+        .get_role_assignment(&grant_id)
+        .await
+    {
         Ok(record) => record,
         Err(error) => return response::internal(error),
     }) else {

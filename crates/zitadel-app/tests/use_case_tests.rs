@@ -14,15 +14,15 @@ use zitadel_app::repo::{
     AppRecord, AppRepository, BoxFuture, ConsoleBootstrapData, ConsoleQueryRepository,
     DomainRecord, DomainRemoveResult, FingerprintRecord, GroupRecord, GroupRepository,
     InstanceInfo, InstanceRecord, InstanceRepository, JobRecord, JobRepository, ListParams,
-    ListResult, NamedResourceRecord, OrgSummary, ProjectRepository, Repositories,
-    RouteResolution, SavedQueryRecord, SavedQueryRepository, TelemetryRepository,
+    ListResult, NamedResourceRecord, OrgSummary, ProjectRepository, Repositories, RouteResolution,
+    SavedQueryRecord, SavedQueryRepository, TelemetryRepository,
 };
+use zitadel_app::users::CreateUserCommand;
 use zitadel_app::{
     groups::{CreateGroupCommand, UpdateGroupCommand},
     instances::{CreateInstanceCommand, UpdateInstanceCommand},
     resources::{CreateNamedResourceCommand, UpdateNamedResourceCommand},
 };
-use zitadel_app::users::CreateUserCommand;
 
 fn test_ctx() -> ActorContext {
     ActorContext {
@@ -55,7 +55,9 @@ fn test_services() -> (Arc<ApplicationServices>, Arc<Repositories>) {
     (app, repos)
 }
 
-fn test_services_with_repositories(repos: Repositories) -> (Arc<ApplicationServices>, Arc<Repositories>) {
+fn test_services_with_repositories(
+    repos: Repositories,
+) -> (Arc<ApplicationServices>, Arc<Repositories>) {
     let repos = Arc::new(repos);
     let hooks = Arc::new(HookPipeline::empty());
     let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
@@ -178,7 +180,11 @@ impl MemoryNamedResourceRepository {
 }
 
 impl AppRepository for MemoryNamedResourceRepository {
-    fn create(&self, instance_id: &str, app: &AppRecord) -> BoxFuture<'_, anyhow::Result<AppRecord>> {
+    fn create(
+        &self,
+        instance_id: &str,
+        app: &AppRecord,
+    ) -> BoxFuture<'_, anyhow::Result<AppRecord>> {
         let key = (
             instance_id.to_string(),
             "apps".to_string(),
@@ -203,16 +209,22 @@ impl AppRepository for MemoryNamedResourceRepository {
     fn get(&self, instance_id: &str, id: &str) -> BoxFuture<'_, anyhow::Result<Option<AppRecord>>> {
         let key = (instance_id.to_string(), "apps".to_string(), id.to_string());
         Box::pin(async move {
-            Ok(self.store.lock().unwrap().get(&key).cloned().map(|record| AppRecord {
-                id: record.id,
-                group_id: "org-1".into(),
-                name: record.name,
-                protocol: String::new(),
-                state: record.state,
-                metadata: serde_json::Value::Object(Default::default()),
-                created_at: record.created_at,
-                updated_at: record.updated_at,
-            }))
+            Ok(self
+                .store
+                .lock()
+                .unwrap()
+                .get(&key)
+                .cloned()
+                .map(|record| AppRecord {
+                    id: record.id,
+                    group_id: "org-1".into(),
+                    name: record.name,
+                    protocol: String::new(),
+                    state: record.state,
+                    metadata: serde_json::Value::Object(Default::default()),
+                    created_at: record.created_at,
+                    updated_at: record.updated_at,
+                }))
         })
     }
 
@@ -252,7 +264,12 @@ impl AppRepository for MemoryNamedResourceRepository {
         })
     }
 
-    fn update_name(&self, instance_id: &str, id: &str, name: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+    fn update_name(
+        &self,
+        instance_id: &str,
+        id: &str,
+        name: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
         let key = (instance_id.to_string(), "apps".to_string(), id.to_string());
         let next_name = name.to_string();
         Box::pin(async move {
@@ -297,7 +314,11 @@ impl ProjectRepository for MemoryNamedResourceRepository {
         instance_id: &str,
         id: &str,
     ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
-        let key = (instance_id.to_string(), "projects".to_string(), id.to_string());
+        let key = (
+            instance_id.to_string(),
+            "projects".to_string(),
+            id.to_string(),
+        );
         Box::pin(async move { Ok(self.store.lock().unwrap().get(&key).cloned()) })
     }
 
@@ -333,7 +354,11 @@ impl ProjectRepository for MemoryNamedResourceRepository {
         id: &str,
         name: &str,
     ) -> BoxFuture<'_, anyhow::Result<bool>> {
-        let key = (instance_id.to_string(), "projects".to_string(), id.to_string());
+        let key = (
+            instance_id.to_string(),
+            "projects".to_string(),
+            id.to_string(),
+        );
         let next_name = name.to_string();
         Box::pin(async move {
             let mut guard = self.store.lock().unwrap();
@@ -347,12 +372,12 @@ impl ProjectRepository for MemoryNamedResourceRepository {
         })
     }
 
-    fn delete(
-        &self,
-        instance_id: &str,
-        id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>> {
-        let key = (instance_id.to_string(), "projects".to_string(), id.to_string());
+    fn delete(&self, instance_id: &str, id: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let key = (
+            instance_id.to_string(),
+            "projects".to_string(),
+            id.to_string(),
+        );
         Box::pin(async move { Ok(self.store.lock().unwrap().remove(&key).is_some()) })
     }
 }
@@ -995,7 +1020,11 @@ async fn delete_org_not_found() {
     let (app, _) = test_services();
     let ctx = test_ctx();
 
-    let err = app.delete_org.execute(&ctx, "nonexistent").await.unwrap_err();
+    let err = app
+        .delete_org
+        .execute(&ctx, "nonexistent")
+        .await
+        .unwrap_err();
     assert!(matches!(err, AppError::NotFound { .. }));
 }
 
@@ -1137,7 +1166,11 @@ async fn groups_validate_and_persist_crud_behavior() {
         .unwrap_err();
     assert!(matches!(update_missing, AppError::NotFound { .. }));
 
-    let delete_missing = app.delete_group.execute(&ctx, &created.id).await.unwrap_err();
+    let delete_missing = app
+        .delete_group
+        .execute(&ctx, &created.id)
+        .await
+        .unwrap_err();
     assert!(matches!(delete_missing, AppError::NotFound { .. }));
 }
 
@@ -1286,7 +1319,10 @@ async fn instances_support_create_update_and_deprovision_state_transitions() {
         .await
         .unwrap();
     assert_eq!(created.state, "active");
-    assert_eq!(created.primary_domain.as_deref(), Some("tenant.example.com"));
+    assert_eq!(
+        created.primary_domain.as_deref(),
+        Some("tenant.example.com")
+    );
 
     let fetched = app
         .get_instance

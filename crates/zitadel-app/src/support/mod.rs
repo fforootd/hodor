@@ -256,7 +256,9 @@ fn normalize_support_role_key(role: &str) -> Result<String, AppError> {
     let definition = builtin_role_definition(&role_key)
         .ok_or_else(|| AppError::validation("unknown support role"))?;
     if definition.scope_kind != "instance" || !role_key.starts_with("SUPPORT_") {
-        return Err(AppError::validation("role must be an instance-scoped support role"));
+        return Err(AppError::validation(
+            "role must be an instance-scoped support role",
+        ));
     }
     Ok(role_key)
 }

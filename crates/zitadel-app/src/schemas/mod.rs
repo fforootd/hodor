@@ -34,7 +34,13 @@ impl RegisterSchema {
         }
 
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         // Check for existing schema with same type
         let existing = self
@@ -146,7 +152,13 @@ impl UpdateSchema {
         cmd: UpdateSchemaCommand,
     ) -> Result<SchemaRecord, AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         let mut schema = self
             .repos
@@ -199,13 +211,15 @@ impl PromoteSchema {
         skip_all,
         fields(event_type = "schema.updated", category = "schema")
     )]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        schema_id: &str,
-    ) -> Result<bool, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, schema_id: &str) -> Result<bool, AppError> {
         // Authz: caller must be admin on the current instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", ctx.org_id())).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", ctx.org_id()),
+        )
+        .await?;
 
         let promoted = self
             .repos
@@ -245,11 +259,7 @@ impl CountSchemaUsers {
     }
 
     #[tracing::instrument(name = "use_case.count_schema_users", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-        schema_id: &str,
-    ) -> Result<i64, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext, schema_id: &str) -> Result<i64, AppError> {
         // Authz: caller must be viewer on their own org
         crate::authz::require_permission(
             &self.repos,

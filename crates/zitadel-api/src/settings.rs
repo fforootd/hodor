@@ -29,7 +29,14 @@ async fn get_settings(
     Path(type_): Path<String>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.runner.run(&ctx, "settings.get", || s.app.get_settings.execute(&ctx, &type_, None, None)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "settings.get", || {
+            s.app.get_settings.execute(&ctx, &type_, None, None)
+        })
+        .await
+    {
         Ok(record) => response::json_ok(SettingsResponse {
             type_: record.settings_type,
             scope: record.scope,
@@ -51,7 +58,14 @@ async fn put_settings(
         scope: "instance".to_string(),
         data: data.clone(),
     };
-    match s.app.runner.run(&ctx, "settings.update", || s.app.update_settings.execute(&ctx, cmd)).await {
+    match s
+        .app
+        .runner
+        .run(&ctx, "settings.update", || {
+            s.app.update_settings.execute(&ctx, cmd)
+        })
+        .await
+    {
         Ok(()) => response::json_ok(SettingsResponse {
             type_,
             scope: "instance".into(),

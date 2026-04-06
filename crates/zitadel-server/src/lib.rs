@@ -22,6 +22,7 @@ pub struct AppState {
     pub secret_box: Arc<zitadel_crypto::SecretBox>,
     pub ready: AtomicBool,
     pub instance_resolver: Arc<routing::InstanceResolver>,
+    pub app: Arc<ApplicationServices>,
 }
 
 /// Build the full axum Router with all routes registered.
@@ -81,8 +82,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     // Bootstrap (create default org + admin if empty).
     if config.storage.stateful.resolve_bootstrap_mode() == "auto" {
-        let ext_domain = Some(config.server.external_domain.as_str())
-            .filter(|d| !d.is_empty());
+        let ext_domain = Some(config.server.external_domain.as_str()).filter(|d| !d.is_empty());
         zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
     }
 
@@ -132,10 +132,17 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     let passwords = zitadel_authn::password::Swapper::from_config(&hasher_config);
 
     // OIDC provider.
-    let public_origin_override = (!config.server.public_origin.trim().is_empty())
-        .then(|| config.server.public_origin.trim_end_matches('/').to_string());
-    let public_origin_fallback =
-        format!("http://{}:{}", config.server.external_domain, config.server.port);
+    let public_origin_override = (!config.server.public_origin.trim().is_empty()).then(|| {
+        config
+            .server
+            .public_origin
+            .trim_end_matches('/')
+            .to_string()
+    });
+    let public_origin_fallback = format!(
+        "http://{}:{}",
+        config.server.external_domain, config.server.port
+    );
     let login_path = if config.dev.conformance_login_html {
         "/conformance/login".to_string()
     } else {
@@ -158,6 +165,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         db.clone(),
         storage.transient.clone(),
         fga.clone(),
+        storage.analytics.clone(),
     ));
 
     // Build hook pipeline from stored action definitions.
@@ -239,9 +247,10 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         db,
         secret_box,
         ready: AtomicBool::new(false),
+        app: app.clone(),
     });
 
-    let app = build_router(state.clone(), api_state, oidc_state, login_state);
+    let router = build_router(state.clone(), api_state, oidc_state, login_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -253,7 +262,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     axum::serve(
         listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
+        router.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;

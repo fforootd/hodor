@@ -17,7 +17,8 @@ This ADR adds scoped, time-limited staff access to the authorization model.
 
 ### 1. Support access is modeled as platform roles on instances
 
-The core FGA model gains support-specific relations on the `instance` type in the internal deployment-scoped `platform` store:
+The core FGA model gains support-specific relations on the `instance` type in the
+internal deployment-scoped platform FGA scope (`_platform`):
 
 ```
 type instance
@@ -42,13 +43,20 @@ These are standard embedded-FGA relations in the platform model. They compose wi
 
 ### 2. Support grants are durable role assignments projected into platform tuples
 
-A support grant is a durable role assignment that binds a staff principal to a support role on a customer instance. For managed children, the assignment is projected into the `platform` store as a tuple on `instance:{child}`. For federated children, the assignment remains authoritative in the root deployment and is also materialized as a short-lived support token.
+A support grant is a durable role assignment that binds a staff principal to a support
+role on a customer instance. For managed children, the assignment is projected into
+the platform store as a tuple on `instance:{child}`. For federated children, the
+assignment remains authoritative in the root deployment and is also materialized as a
+short-lived support token.
 
 ```
 principal:root:staff_alice -> support_read -> instance:acme-prod
 ```
 
-Grant metadata such as `grant_id`, `reason`, issuer, and expiry lives in the authoritative assignment record. Managed instances enforce the grant through platform-store checks. Federated instances validate the support-grant token against root trust and enforce the role from the signed claims.
+Grant metadata such as `grant_id`, `reason`, issuer, and expiry lives in the
+authoritative assignment record. Managed instances enforce the grant through platform
+store checks. Federated instances validate the support-grant token against root trust
+and enforce the role from the signed claims.
 
 ### 3. Grant lifecycle
 
@@ -70,7 +78,10 @@ The root instance validates that the requesting staff user has permission to iss
 
 **Expiry.** Grants expire via the authoritative assignment metadata. Managed platform-tuple projection skips expired grants; federated support tokens use short expirations.
 
-**Revocation.** For early revocation, revoke the role assignment. Takes effect immediately for managed instances because the next platform projection removes the tuple. Federated instances reject revoked grants when validating the support token against the root-side assignment state.
+**Revocation.** For early revocation, revoke the role assignment. Takes effect
+immediately for managed instances because the write path rebuilds platform tuples after
+grant mutations. Federated instances reject revoked grants when validating the support
+token against the root-side assignment state.
 
 ### 4. Audit trail
 
@@ -90,7 +101,8 @@ Customers see support access events in their audit log. There is no hidden acces
 
 ### 5. Federated instances (future extension)
 
-For managed cloud instances, support access is enforced entirely through the internal `platform` store. No tuple is written into the child customer store.
+For managed cloud instances, support access is enforced entirely through the internal
+platform store. No tuple is written into the child customer store.
 
 For federated (on-prem) instances, the FGA check needs a different path because the federated instance has its own FGA store. Two approaches are available:
 
