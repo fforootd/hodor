@@ -1,4 +1,4 @@
-name: CI Main
+name: Release CI
 
 on:
   push:
@@ -10,12 +10,17 @@ concurrency:
 
 jobs:
   ci:
-    name: Fast And Extended CI
+    name: Release / Fast And Families
     uses: ./.github/workflows/reusable-ci.yml
     with:
+      execution_tier_label: Release
       run_docs: true
       run_fast_rust: true
       run_fast_web: true
-      run_extended_e2e: true
+      run_journeys: true
+      run_journeys_oidc: true
+      run_contracts: true
+      run_invariants: true
+      run_subsystems: true
       run_browser_artifacts: true
       artifact_prefix: main

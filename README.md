@@ -100,6 +100,8 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 
 ## Architecture
 
+> See [Product Architecture](docs/architecture/product-architecture.md) for the full deployment model — how one binary scales from SQLite on a laptop to Spanner in the cloud.
+
 - **Single binary** — REST API, login UI (Vue), admin console (Vue), account self-service (Vue). Zero external dependencies at Level 0.
 - **Typed resource families** — canonical family endpoints like `/v1/users` and `/v1/apps`, with `schema_id` for writes and `schema_type` for list filtering
 - **Schema-driven resources** — JSON Schema with annotations (`x-claim-mapping`, `x-user-editable`, `x-sensitive`, `x-hidden`)
@@ -115,15 +117,22 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 # Run Rust tests
 just test
 
-# Run the local Rust quality gate
-just rust-check
-
 # Run web unit tests
 just test-web
 
-# Run browser smoke or full suites
-just e2e-smoke
-just test-e2e
+# Run browser journeys
+just journeys
+just journeys-smoke
+just journeys-oidc
+
+# Run family-specific Rust suites
+just contracts
+just invariants
+just subsystems
+
+# Run official OIDC protocol compliance
+just conformance-oidc
+just oidc-conformance-op
 ```
 
 ## Configuration

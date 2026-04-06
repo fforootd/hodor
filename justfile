@@ -168,73 +168,198 @@ test: _run-rust-tests
 test-web: _ensure-node-modules
     npm test -w web
 
-# Run the extended Playwright suite
-[group('test')]
-test-e2e: _ensure-node-modules
+[private]
+_ensure-browser-tests-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -z "${ZITADEL_E2E_BINARY:-}" ]; then
+    if [ -z "${ZITADEL_BROWSER_TESTS_BINARY:-${ZITADEL_E2E_BINARY:-}}" ]; then
         just web
         cargo build -p zitadel
     else
-        echo "→ using prepared zitadel binary $ZITADEL_E2E_BINARY"
+        echo "→ using prepared browser-test binary ${ZITADEL_BROWSER_TESTS_BINARY:-$ZITADEL_E2E_BINARY}"
     fi
-    npm test -w e2e
 
-# Run Playwright smoke tests
+# Run all browser journeys
 [group('test')]
-e2e-smoke: _ensure-node-modules
+journeys: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys -w browser-tests
+
+# Run browser journey smoke coverage
+[group('test')]
+journeys-smoke: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:smoke -w browser-tests
+
+# Run browser OIDC journeys
+[group('test')]
+journeys-oidc: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:oidc -w browser-tests
+
+# Run the admin-only browser journeys
+[group('test')]
+journeys-admin: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:admin -w browser-tests
+
+# Run admin-only browser journey smoke coverage
+[group('test')]
+journeys-admin-smoke: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:admin:smoke -w browser-tests
+
+# Run OIDC code + PKCE journey coverage
+[group('test')]
+journeys-oidc-op: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:oidc:op -w browser-tests
+
+# Run upstream OIDC RP journey coverage
+[group('test')]
+journeys-oidc-rp: _ensure-node-modules _ensure-browser-tests-runtime
+    npm run test:journeys:oidc:rp -w browser-tests
+
+# Run contract tests
+[group('test')]
+contracts: ensure-webdist
+    cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance
+
+# Run invariant tests
+[group('test')]
+invariants: ensure-webdist
+    cargo test -p zitadel-server --test invariants_tenant_instance_isolation
+    cargo test -p zitadel-fga --test invariants_authorization_hierarchy
+
+# Run subsystem tests
+[group('test')]
+subsystems: ensure-webdist
+    cargo test -p zitadel-api --test subsystems_backend_boundary
+    cargo test -p zitadel-login --test subsystems_backend_boundary
+    cargo test -p zitadel-oidc --test subsystems_backend_boundary
+    cargo test -p zitadel-server --test subsystems_backend_boundary
+    cargo test -p zitadel-storage --test subsystems_storage_postgres_roles
+
+# Run resilience tests that are currently environment-gated
+[group('test')]
+resilience: ensure-webdist
+    cargo test -p zitadel-storage --test resilience_storage_spanner_transient
+
+# Run the default PR-oriented local suite
+[group('test')]
+test-pr:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -z "${ZITADEL_E2E_BINARY:-}" ]; then
-        just web
-        cargo build -p zitadel
-    else
-        echo "→ using prepared zitadel binary $ZITADEL_E2E_BINARY"
-    fi
-    npm run test:smoke -w e2e
+    just docs-check
+    just test
+    just test-web
+    just contracts
+    just invariants
+    just subsystems
+    just journeys-admin-smoke
+
+# Run the nightly-oriented local suite
+[group('test')]
+test-nightly:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just test-pr
+    just journeys
+    just journeys-oidc
+    just resilience
+    just conformance-oidc
+
+# Temporary alias for the old UI browser command
+[group('test')]
+test-ui:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just test-ui is deprecated; use just journeys-admin" >&2
+    just journeys-admin
+
+# Temporary alias for the old UI smoke command
+[group('test')]
+ui-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just ui-smoke is deprecated; use just journeys-admin-smoke" >&2
+    just journeys-admin-smoke
+
+# Temporary alias for the old browser OIDC command
+[group('test')]
+test-acceptance-oidc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just test-acceptance-oidc is deprecated; use just journeys-oidc" >&2
+    just journeys-oidc
+
+# Temporary alias for the old OIDC OP browser command
+[group('test')]
+acceptance-oidc-op:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just acceptance-oidc-op is deprecated; use just journeys-oidc-op" >&2
+    just journeys-oidc-op
+
+# Temporary alias for the old OIDC RP browser command
+[group('test')]
+acceptance-oidc-rp:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just acceptance-oidc-rp is deprecated; use just journeys-oidc-rp" >&2
+    just journeys-oidc-rp
+
+# Temporary alias for the old E2E browser command
+[group('test')]
+test-e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just test-e2e is deprecated; use just journeys-admin" >&2
+    just journeys-admin
+
+# Temporary alias for the old smoke command
+[group('test')]
+e2e-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "warning: just e2e-smoke is deprecated; use just journeys-admin-smoke" >&2
+    just journeys-admin-smoke
 
 # ─── Conformance ─────────────────────────────────────────
 
-# Alias for oidc-conformance
+# Alias for conformance-oidc
 [group('conformance')]
-conformance: oidc-conformance
+conformance: conformance-oidc
+
+# Run official OIDC protocol compliance
+[group('conformance')]
+conformance-oidc:
+    just oidc-conformance-op
 
 # Run the Dockerized OIDC provider conformance lane
 [group('conformance')]
 oidc-conformance-op:
     ./conformance/oidc/scripts/run-op.sh
 
-# Run the Compliance OIDC RP regression lane
+# Temporary alias for the old RP browser lane
 [group('conformance')]
 oidc-conformance-rp: _ensure-node-modules
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -z "${ZITADEL_E2E_BINARY:-}" ]; then
-        just web
-        cargo build -p zitadel
-    else
-        echo "→ using prepared zitadel binary $ZITADEL_E2E_BINARY"
-    fi
-    ./conformance/oidc/scripts/run-rp.sh
+    echo "warning: just oidc-conformance-rp is deprecated; use just journeys-oidc-rp" >&2
+    just journeys-oidc-rp
 
-# Run Compliance OIDC (surface: op, rp, or both)
+# Run official OIDC protocol compliance
 [group('conformance')]
-oidc-conformance SURFACE="both":
+oidc-conformance:
     #!/usr/bin/env bash
     set -euo pipefail
-    surface="${OIDC_CONFORMANCE_SURFACE:-{{SURFACE}}}"
-    case "$surface" in
-        op)   just oidc-conformance-op ;;
-        rp)   just oidc-conformance-rp ;;
-        both) just oidc-conformance-op && just oidc-conformance-rp ;;
-        *)    echo "invalid surface=$surface (expected op, rp, or both)"; exit 1 ;;
-    esac
+    echo "warning: just oidc-conformance is deprecated; use just conformance-oidc" >&2
+    just conformance-oidc
 
 # Stop and remove local OIDC conformance containers
 [group('conformance')]
 oidc-conformance-clean:
     ./conformance/oidc/scripts/clean.sh
+
+# Stop and remove local OIDC conformance containers
+[group('conformance')]
+conformance-oidc-clean:
+    just oidc-conformance-clean
 
 # ─── Quality ─────────────────────────────────────────────
 

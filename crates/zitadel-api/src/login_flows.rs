@@ -1,18 +1,13 @@
-// TODO(CLAUDE-2): Migrate login flow management to use cases (CLAUDE-2 handles login execution).
-use crate::{ApiState, response};
+use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
 use axum::{
-    Json, Router,
-    extract::{Path, Query, State},
+    Extension, Json, Router,
+    extract::{Query, State},
     response::Response,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zitadel_db::{
-    create_login_flow as db_create_login_flow, current_instance_id, delete_instance_row,
-    get_login_flow_record, list_login_flow_records, resolve_login_flow as db_resolve_login_flow,
-    set_login_flow_state, update_login_flow as db_update_login_flow,
-};
+use zitadel_app::login_flows::{CreateLoginFlowCommand, UpdateLoginFlowCommand};
+use zitadel_app::repo::LoginFlowRecord;
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -63,8 +58,8 @@ pub struct LoginFlowResponse {
     pub updated_at: String,
 }
 
-impl From<zitadel_db::LoginFlowRecord> for LoginFlowResponse {
-    fn from(record: zitadel_db::LoginFlowRecord) -> Self {
+impl From<LoginFlowRecord> for LoginFlowResponse {
+    fn from(record: LoginFlowRecord) -> Self {
         Self {
             id: record.id,
             name: record.name,
@@ -72,61 +67,54 @@ impl From<zitadel_db::LoginFlowRecord> for LoginFlowResponse {
             state: record.state,
             is_default: record.is_default,
             enabled: record.enabled,
-            priority: record.priority,
-            config: serde_json::from_str(&record.config_json).unwrap_or_default(),
-            audience: serde_json::from_str(&record.audience_json).unwrap_or_default(),
-            auth_methods: serde_json::from_str(&record.auth_methods_json).unwrap_or_default(),
+            priority: record.priority as i64,
+            config: record.config,
+            audience: record.audience,
+            auth_methods: record.auth_methods,
             created_at: record.created_at,
             updated_at: record.updated_at,
         }
     }
 }
 
-async fn create(State(s): State<ApiState>, Json(req): Json<LoginFlowRequest>) -> Response {
-    let id = Uuid::new_v4().to_string();
-    let config = response::to_json_string(&req.config);
-    let audience = response::to_json_string(&req.audience);
-    let auth_methods = response::to_json_string(&req.auth_methods);
-    match db_create_login_flow(
-        &s.db,
-        current_instance_id().as_ref(),
-        &id,
-        &req.name,
-        &req.strategy,
-        &config,
-        &audience,
-        &auth_methods,
-        req.is_default,
-    )
-    .await
+async fn create(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<LoginFlowRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let cmd = CreateLoginFlowCommand {
+        flow_id: None,
+        name: req.name,
+        steps: req.config,
+        branding: req.audience,
+    };
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.create", || {
+            s.app.create_login_flow.execute(&ctx, cmd)
+        })
+        .await
     {
-        Ok(_) => response::json_created(LoginFlowResponse {
-            id,
-            name: req.name,
-            strategy: req.strategy,
-            state: "draft".into(),
-            is_default: req.is_default,
-            enabled: true,
-            priority: 0,
-            config: req.config,
-            audience: req.audience,
-            auth_methods: req.auth_methods,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }),
-        Err(e) => response::bad_request(format!("{e}")),
+        Ok(record) => response::json_created(LoginFlowResponse::from(record)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn list(State(s): State<ApiState>, Query(p): Query<response::PaginationParams>) -> Response {
-    let cursor = p.cursor.unwrap_or_default();
-    match list_login_flow_records(
-        &s.db,
-        current_instance_id().as_ref(),
-        &cursor,
-        p.limit.min(200),
-    )
-    .await
+async fn list(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Query(_p): Query<response::PaginationParams>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.list", || {
+            s.app.list_login_flows.execute(&ctx)
+        })
+        .await
     {
         Ok(rows) => {
             let items: Vec<LoginFlowResponse> =
@@ -137,83 +125,149 @@ async fn list(State(s): State<ApiState>, Query(p): Query<response::PaginationPar
                 total: None,
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn get_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match get_login_flow_record(&s.db, current_instance_id().as_ref(), &id).await {
-        Ok(Some(f)) => response::json_ok(LoginFlowResponse::from(f)),
-        Ok(None) => response::not_found("login flow not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn get_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.get", || {
+            s.app.get_login_flow.execute(&ctx, &id)
+        })
+        .await
+    {
+        Ok(f) => response::json_ok(LoginFlowResponse::from(f)),
+        Err(e) => response::app_error(e),
     }
 }
 
 async fn update(
     State(s): State<ApiState>,
-    Path(id): Path<String>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
     Json(req): Json<LoginFlowRequest>,
 ) -> Response {
-    let config = response::to_json_string(&req.config);
-    let auth_methods = response::to_json_string(&req.auth_methods);
-    match db_update_login_flow(
-        &s.db,
-        current_instance_id().as_ref(),
-        &id,
-        &req.name,
-        &req.strategy,
-        &config,
-        &auth_methods,
-        req.is_default,
-    )
-    .await
+    let ctx = response::build_actor_context(&identity);
+    let flow_id = id.clone();
+    let cmd = UpdateLoginFlowCommand {
+        flow_id: Some(id),
+        name: req.name,
+        steps: req.config,
+        branding: req.audience,
+    };
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.update", || {
+            s.app.update_login_flow.execute(&ctx, cmd)
+        })
+        .await
     {
-        Ok(false) => response::not_found("login flow not found"),
-        Ok(true) => match get_login_flow_record(&s.db, current_instance_id().as_ref(), &id).await {
-            Ok(Some(f)) => response::json_ok(LoginFlowResponse::from(f)),
-            _ => response::not_found("not found"),
-        },
-        Err(e) => response::internal_error(format!("{e}")),
+        Ok(()) => {
+            // Re-fetch to return updated state
+            match s
+                .app
+                .runner
+                .run_fn(&ctx, "login_flow.get", || {
+                    s.app.get_login_flow.execute(&ctx, &flow_id)
+                })
+                .await
+            {
+                Ok(f) => response::json_ok(LoginFlowResponse::from(f)),
+                Err(e) => response::app_error(e),
+            }
+        }
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match delete_instance_row(&s.db, current_instance_id().as_ref(), "login_flows", &id).await {
-        Ok(true) => response::no_content(),
-        Ok(false) => response::not_found("login flow not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn delete_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.delete", || {
+            s.app.delete_login_flow.execute(&ctx, &id)
+        })
+        .await
+    {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn promote(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match set_login_flow_state(&s.db, current_instance_id().as_ref(), &id, "active", true).await {
+async fn promote(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.promote", || {
+            s.app.promote_login_flow.execute(&ctx, &id)
+        })
+        .await
+    {
         Ok(true) => response::json_ok(serde_json::json!({"id": id, "state": "active"})),
         Ok(false) => response::not_found("login flow not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn archive(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    match set_login_flow_state(
-        &s.db,
-        current_instance_id().as_ref(),
-        &id,
-        "archived",
-        false,
-    )
-    .await
+async fn archive(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.archive", || {
+            s.app.archive_login_flow.execute(&ctx, &id)
+        })
+        .await
     {
         Ok(true) => response::json_ok(serde_json::json!({"id": id, "state": "archived"})),
         Ok(false) => response::not_found("login flow not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
 /// Resolve which login flow to use based on audience targeting.
-async fn resolve(State(s): State<ApiState>, Json(_body): Json<serde_json::Value>) -> Response {
-    match db_resolve_login_flow(&s.db, current_instance_id().as_ref()).await {
-        Ok(Some(r)) => response::json_ok(serde_json::json!({"flow_id": r.0, "flow_name": r.1})),
-        Ok(None) => response::json_ok(serde_json::json!({"flow_id": null, "flow_name": "default"})),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn resolve(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(_body): Json<serde_json::Value>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "login_flow.resolve", || {
+            s.app.resolve_login_flow.execute(&ctx)
+        })
+        .await
+    {
+        Ok(Some(f)) => {
+            response::json_ok(serde_json::json!({"flow_id": f.id, "flow_name": f.name}))
+        }
+        Ok(None) => {
+            response::json_ok(serde_json::json!({"flow_id": null, "flow_name": "default"}))
+        }
+        Err(e) => response::app_error(e),
     }
 }

@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-04-04
-**Depends-on:** ADR-021 (Multi-Tenancy via Instance Boundaries), ADR-026 (Cloud Deployment Architecture), ADR-029 (Control Plane, Auth Data Plane, and Bounded Eventual Consistency), ADR-030 (Customer Portal, Regional Projections, and Control-Plane Integrations)
+**Depends-on:** ADR-034 (Multi-Tenancy via Instance Boundaries), ADR-026 (Cloud Deployment Architecture), ADR-029 (Control Plane, Auth Data Plane, and Bounded Eventual Consistency), ADR-030 (Customer Portal, Regional Projections, and Control-Plane Integrations)
 **Supersedes:** The separate portal service and regional projection machinery described in ADR-030, while retaining ADR-030's integration and failure model guidance.
 **Related:** [Architecture Overview](../architecture/overview.md), [Storage Architecture](../design/storage-architecture.md)
 

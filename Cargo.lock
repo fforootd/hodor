@@ -5648,8 +5648,10 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zitadel-app",
  "zitadel-authn",
  "zitadel-config",
+ "zitadel-crypto",
  "zitadel-db",
  "zitadel-storage",
 ]

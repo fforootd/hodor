@@ -21,6 +21,7 @@ use zitadel_authn::{
     session::hash_token,
 };
 use zitadel_config::{Config, password::PasswordHasherConfig};
+use zitadel_crypto::SecretBox;
 use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
 use zitadel_fga::{FgaService, StoreResolver};
 use zitadel_login::LoginState;
@@ -163,6 +164,7 @@ impl TestContext {
         config.server.public_origin = "http://localhost:18080".into();
         config.server.force_insecure_cookies = true;
         config.password_hasher = PasswordHasherConfig::dev_defaults();
+        let secret_box = Arc::new(SecretBox::new("", &std::collections::HashMap::new())?);
 
         let cookie_config = Arc::new(CookieConfig::new_with_max_age(
             vec!["test-secret".into()],
@@ -172,12 +174,6 @@ impl TestContext {
         ));
 
         let passwords = Arc::new(Swapper::from_config(&config.password_hasher));
-        let oidc_state = OidcState::new_with_config(
-            db.db.clone(),
-            config.server.public_origin.clone(),
-            "/login".into(),
-            &config.oidc,
-        );
         let storage = StorageRuntime::from_config(
             &config.storage,
             db.db.clone(),
@@ -190,12 +186,24 @@ impl TestContext {
         // Build application services (ADR-032).
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
             db.db.clone(),
-            storage.stateful.clone(),
             storage.transient.clone(),
             fga.clone(),
         ));
         let hooks = Arc::new(HookPipeline::empty());
-        let app = Arc::new(ApplicationServices::new(repos, hooks));
+        let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
+
+        let oidc_state = OidcState::new_runtime_with_config(
+            repos.oidc.clone(),
+            config.server.public_origin.clone(),
+            "/login".into(),
+            DEFAULT_INSTANCE_ID.to_string(),
+            &config.oidc,
+            db.db.clone(),
+            secret_box,
+            storage.transient.clone(),
+            cookie_config.clone(),
+        )
+        .with_public_origin_override(&config.server.public_origin);
 
         let api_state = ApiState {
             db: db.db.clone(),
@@ -211,12 +219,12 @@ impl TestContext {
         };
 
         let login_state = LoginState {
-            db: db.db.clone(),
             stateful: storage.stateful.clone(),
             transient: storage.transient.clone(),
             passwords,
             cookie_config: cookie_config.clone(),
             public_origin: Arc::new(config.server.public_origin.clone()),
+            public_origin_override: Some(Arc::new(config.server.public_origin.clone())),
             conformance_login_html: false,
             rp: Arc::new(RpService::new(
                 ReqwestHttpClient::new(),

@@ -193,7 +193,7 @@ impl SubmitLoginStep {
 
     async fn handle_password(
         &self,
-        ctx: &ActorContext,
+        _ctx: &ActorContext,
         cmd: &SubmitLoginStepCommand,
     ) -> Result<SubmitLoginStepResult, AppError> {
         let user_id = cmd.data["user_id"]
@@ -307,6 +307,14 @@ impl RevokeSession {
         fields(event_type = "session.revoked", category = "session")
     )]
     pub async fn execute(&self, ctx: &ActorContext, session_id: &str) -> Result<(), AppError> {
+        // Only operator admins can revoke arbitrary sessions by ID.
+        // Regular users revoke their own session by logging out (separate path).
+        if !ctx.is_operator_admin() {
+            return Err(AppError::PermissionDenied {
+                reason: "session revocation requires operator admin".to_string(),
+            });
+        }
+
         let revoked = self
             .repos
             .sessions

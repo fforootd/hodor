@@ -148,20 +148,30 @@ The default fast path is `cargo nextest run --workspace` when `cargo-nextest` is
 
 For full-router integration coverage, prefer the shared `crates/zitadel-testkit` helpers over ad hoc per-crate harnesses.
 
+Test naming follows two axes:
+
+- **Family** describes what the test proves: `conformance`, `journeys`, `contracts`, `invariants`, `subsystems`, `resilience`, `performance`, `upgrade`
+- **Tier** describes when it runs: `fast`, `pr`, `nightly`, `release`, `manual`
+
+The naming matters. A browser test is not automatically a top-level category. Playwright OIDC flows are `journeys`, while official OIDC validation is `conformance`.
+
 ## CI Tiers
 
-CI uses one taxonomy everywhere: `tier + domain`.
+CI names use `tier + family`.
 
-| Tier | Purpose | Current lanes |
+| Tier | Purpose | Current families |
 |---|---|---|
-| Fast | Cheap correctness and static feedback for PRs | Fast Rust, Fast Web, Fast Docs |
-| Extended | Broader behavioral coverage for relevant PRs | Extended E2E |
-| Compliance | Protocol and certification-style coverage | Compliance OIDC |
+| `fast` | Cheap correctness and static feedback | Rust, web, docs |
+| `pr` | Targeted regression coverage on pull requests | `journeys`, `contracts`, `invariants`, `subsystems`, protocol-sensitive `conformance` |
+| `nightly` | Broader and slower coverage | `conformance`, env-gated `resilience` |
+| `release` | Post-merge or promotion coverage | current mainline reusable CI lanes |
+| `manual` | Operator-invoked debugging or certification runs | `conformance`, env-gated families |
 
 The default policy is tiered PR execution:
 - Fast lanes run on relevant PR changes.
-- Extended lanes run when browser-facing behavior might have changed.
-- Compliance lanes run on directly related protocol changes and on scheduled/manual workflows.
+- Journey lanes run when browser-facing or product-flow behavior might have changed.
+- Contract, invariant, and subsystem lanes run when their owned crates or family-prefixed tests change.
+- Conformance lanes run on directly related protocol changes and on scheduled/manual workflows.
 
 ## CI Build Reuse
 

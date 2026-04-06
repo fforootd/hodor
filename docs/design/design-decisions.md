@@ -1,6 +1,6 @@
 # Design Decisions
 
-Resolved architecture and product decisions, with rationale.
+Compact resolved decisions with rationale. These complement the full ADRs in `docs/adr/` — use this file for quick reference, the ADRs for deep context. See the [ADR Index](../000-index.md) for the full list.
 
 ## Architecture
 

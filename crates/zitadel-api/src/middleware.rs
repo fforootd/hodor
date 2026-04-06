@@ -1,14 +1,14 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{Request, StatusCode, header},
+    http::{Method, Request, StatusCode, header},
     middleware::Next,
     response::Response,
 };
 use std::borrow::Cow;
 use tracing::Span;
 use zitadel_db::{
-    DEFAULT_INSTANCE_ID, current_instance_context, current_instance_id, load_identity_metadata,
+    DEFAULT_INSTANCE_ID, current_instance_context, current_instance_id, load_instance_metadata,
     user_has_capability as db_user_has_capability,
 };
 
@@ -58,6 +58,67 @@ pub async fn auth_gate(
             tracing::error!(error = %e, "token resolution failed");
             response::error(StatusCode::INTERNAL_SERVER_ERROR, "authentication error")
         }
+    }
+}
+
+/// Restrict embedded FGA routes to operator-admin PATs.
+pub async fn require_fga_admin_pat(req: Request<Body>, next: Next) -> Response {
+    let Some(identity) = identity_from_request(&req).cloned() else {
+        return response::error(StatusCode::UNAUTHORIZED, "authentication required");
+    };
+    if identity.token_type != "pat" {
+        return response::forbidden("personal access token required");
+    }
+    if !identity.operator_admin {
+        return response::forbidden("operator admin required");
+    }
+    next.run(req).await
+}
+
+/// Enforce a second FGA check for path-scoped child-instance routes.
+pub async fn require_scoped_instance_access(
+    State(state): State<ApiState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let Some(identity) = identity_from_request(&req).cloned() else {
+        return response::error(StatusCode::UNAUTHORIZED, "authentication required");
+    };
+    if identity.operator_admin {
+        return next.run(req).await;
+    }
+
+    let target_instance_id = current_instance_id().into_owned();
+    let metadata = match load_instance_metadata(&state.db, &target_instance_id).await {
+        Ok(Some(metadata)) => metadata,
+        Ok(None) => return response::not_found("instance not found"),
+        Err(error) => {
+            tracing::error!(%error, instance_id = %target_instance_id, "load scoped instance metadata failed");
+            return response::internal_error(format!("{error}"));
+        }
+    };
+
+    let Some(root_instance_id) = metadata.parent_instance_id else {
+        return next.run(req).await;
+    };
+
+    // Reconcile is now only called after write operations in instance handlers.
+    // Read-path middleware skips it to avoid latency on every request.
+
+    let relation = scoped_instance_relation(req.method());
+    match state
+        .fga
+        .root_relation_allowed(
+            &root_instance_id,
+            &identity.user_id,
+            relation,
+            &format!("instance:{target_instance_id}"),
+        )
+        .await
+    {
+        Ok(true) => next.run(req).await,
+        Ok(false) => response::not_found("instance not found"),
+        Err(error) => response::internal_error(format!("{error}")),
     }
 }
 
@@ -135,19 +196,6 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
         ));
     }
 
-    if let Ok(claims) = state.oidc.provider.validate_access_token(raw_token).await {
-        if let Some(identity) = load_identity_metadata(&state.db, &instance_id, &claims.sub).await?
-        {
-            return Ok(Some(Identity {
-                user_id: claims.sub,
-                session_id: String::new(),
-                token_type: "oidc".to_string(),
-                org_id: identity.org_id,
-                operator_admin: metadata_has_capability(&identity.metadata_json, "operator_admin"),
-            }));
-        }
-    }
-
     Ok(None)
 }
 
@@ -179,26 +227,16 @@ async fn user_has_capability(
     db_user_has_capability(&state.db, instance_id, user_id, capability).await
 }
 
-fn metadata_has_capability(metadata: &str, capability: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(metadata)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("capabilities")
-                .and_then(serde_json::Value::as_array)
-                .cloned()
-        })
-        .map(|items| {
-            items
-                .iter()
-                .any(|item| item.as_str().is_some_and(|entry| entry == capability))
-        })
-        .unwrap_or(false)
-}
-
 /// Extract the Identity from request extensions (set by auth_gate).
 pub fn identity_from_request(req: &Request<Body>) -> Option<&Identity> {
     req.extensions().get::<Identity>()
+}
+
+fn scoped_instance_relation(method: &Method) -> &'static str {
+    match *method {
+        Method::GET | Method::HEAD | Method::OPTIONS => "viewer",
+        _ => "admin",
+    }
 }
 
 #[cfg(test)]
@@ -210,6 +248,7 @@ mod tests {
     use axum::{Router, body::to_bytes, http::Request};
     use tower::util::ServiceExt;
     use uuid::Uuid;
+    use zitadel_app::{ApplicationServices, HookPipeline};
     use zitadel_authn::{
         cookie::{CookieConfig, sign},
         password::{Swapper, encode_credential_json},
@@ -217,7 +256,9 @@ mod tests {
     };
     use zitadel_config::{Config, password::PasswordHasherConfig};
     use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
+    use zitadel_db::repo_impls::DbOidcRepository;
     use zitadel_fga::{FgaService, StoreResolver};
+    use zitadel_oidc::op::{ClientAuthMethod, ClientAuthentication, TokenExchangeRequest};
     use zitadel_storage::StorageRuntime;
 
     async fn test_state() -> ApiState {
@@ -242,8 +283,12 @@ mod tests {
                 .unwrap();
         let fga = Arc::new(FgaService::new(db.clone()));
         fga.initialize_instance(DEFAULT_INSTANCE_ID).await.unwrap();
+        let app = Arc::new(ApplicationServices::new(
+            Arc::new(zitadel_app::mock::mock_repositories()),
+            Arc::new(HookPipeline::empty()),
+        ));
         let oidc = zitadel_oidc::OidcState::new_with_config(
-            db.clone(),
+            Arc::new(DbOidcRepository::new(db.clone())),
             config.server.public_origin.clone(),
             "/login".into(),
             &config.oidc,
@@ -251,6 +296,7 @@ mod tests {
 
         ApiState {
             db,
+            app,
             fga,
             stateful: storage.stateful.clone(),
             transient: storage.transient.clone(),
@@ -327,6 +373,85 @@ mod tests {
         token
     }
 
+    async fn mint_oidc_access_token(state: &ApiState, user_id: &str) -> String {
+        let scoped = state.db.scoped_default();
+        let org_id: (String,) =
+            sqlx::query_as("SELECT id FROM orgs WHERE instance_id = $1 LIMIT 1")
+                .bind(scoped.instance_id())
+                .fetch_one(scoped.pool())
+                .await
+                .unwrap();
+        let app_id = Uuid::new_v4().to_string();
+        let client_id = format!("client-{}", Uuid::new_v4());
+        let client_secret = "oidc-secret";
+        let redirect_uri = "https://app.example/callback";
+        let app_sql = format!(
+            "INSERT INTO apps \
+             (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, post_logout_redirect_uris, grant_types, response_types, state) \
+             VALUES ($1, $2, $3, $4, 'oidc', $5, $6, {}, {}, {}, {}, 'active')",
+            scoped.json_bind(7),
+            scoped.json_bind(8),
+            scoped.json_bind(9),
+            scoped.json_bind(10),
+        );
+        sqlx::query(&app_sql)
+            .bind(&app_id)
+            .bind(scoped.instance_id())
+            .bind(&org_id.0)
+            .bind("OIDC test app")
+            .bind(&client_id)
+            .bind(client_secret)
+            .bind(r#"["https://app.example/callback"]"#)
+            .bind(r#"["https://app.example/logout"]"#)
+            .bind(r#"["authorization_code"]"#)
+            .bind(r#"["code"]"#)
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        let auth_request_id = Uuid::new_v4().to_string();
+        let code = "oidc-code";
+        let auth_sql = format!(
+            "INSERT INTO oidc_auth_requests \
+             (id, instance_id, client_id, redirect_uri, scope, state, nonce, response_type, prompt, user_id, session_id, code, done, auth_time) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'code', {}, $9, '', $10, 1, CURRENT_TIMESTAMP)",
+            scoped.json_bind(8),
+        );
+        sqlx::query(&auth_sql)
+            .bind(&auth_request_id)
+            .bind(scoped.instance_id())
+            .bind(&client_id)
+            .bind(redirect_uri)
+            .bind("openid profile")
+            .bind("state-1")
+            .bind("nonce-1")
+            .bind("[]")
+            .bind(user_id)
+            .bind(code)
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        state
+            .oidc
+            .provider
+            .token(&TokenExchangeRequest {
+                grant_type: "authorization_code".into(),
+                code: code.into(),
+                redirect_uri: redirect_uri.into(),
+                client_auth: Some(ClientAuthentication {
+                    client_id,
+                    client_secret: client_secret.into(),
+                    method: ClientAuthMethod::ClientSecretPost,
+                }),
+                code_verifier: String::new(),
+                refresh_token: String::new(),
+            })
+            .await
+            .unwrap()
+            .access_token
+    }
+
     #[tokio::test]
     async fn protected_routes_keep_the_uniform_401_shape_without_credentials() {
         let state = test_state().await;
@@ -391,5 +516,26 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["token_type"], "pat");
+    }
+
+    #[tokio::test]
+    async fn protected_routes_reject_valid_oidc_access_tokens() {
+        let state = test_state().await;
+        let (user_id, _) = create_user(&state, "oidc-boundary@example.com", "password123").await;
+        let access_token = mint_oidc_access_token(&state, &user_id).await;
+
+        let app: Router = crate::routes(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/auth/whoami")
+                    .header(header::AUTHORIZATION, format!("Bearer {access_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

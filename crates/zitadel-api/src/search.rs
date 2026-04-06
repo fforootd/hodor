@@ -6,7 +6,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use zitadel_db::{current_instance_id, search_records};
+use zitadel_app::search::SearchEntitiesCommand;
 
 pub fn routes() -> Router<ApiState> {
     Router::new().route("/search", get(search))
@@ -36,18 +36,21 @@ struct SearchResponse {
     total: usize,
 }
 
-// TODO(CLAUDE-4): Call search use case when available
 async fn search(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
     Query(p): Query<SearchParams>,
 ) -> Response {
-    let _ctx = response::build_actor_context(&identity);
+    let ctx = response::build_actor_context(&identity);
     let q = match p.q {
         Some(q) if !q.is_empty() => q,
         _ => return response::bad_request("q parameter required"),
     };
-    match search_records(&s.db, current_instance_id().as_ref(), &q, p.limit).await {
+    let cmd = SearchEntitiesCommand {
+        query: q,
+        limit: Some(p.limit as u32),
+    };
+    match s.app.runner.run_fn(&ctx, "search", || s.app.search_entities.execute(&ctx, cmd)).await {
         Ok(results) => {
             let total = results.len();
             let results = results
@@ -56,11 +59,11 @@ async fn search(
                     resource_type: record.resource_type,
                     id: record.id,
                     title: record.title,
-                    subtitle: record.subtitle,
+                    subtitle: record.subtitle.unwrap_or_default(),
                 })
                 .collect();
             response::json_ok(SearchResponse { results, total })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }

@@ -28,6 +28,8 @@ pub enum DomainEvent {
     },
     #[serde(rename = "user.deactivated")]
     UserDeactivated { user_id: String, actor_id: String },
+    #[serde(rename = "user.deleted")]
+    UserDeleted { user_id: String, actor_id: String },
 
     // ── Credentials ──
     #[serde(rename = "credential.password_set")]
@@ -91,6 +93,11 @@ pub enum DomainEvent {
         fields_changed: Vec<String>,
         actor_id: String,
     },
+    #[serde(rename = "org.deleted")]
+    OrgDeleted {
+        org_id: String,
+        actor_id: String,
+    },
 
     // ── Groups ──
     #[serde(rename = "group.created")]
@@ -104,6 +111,11 @@ pub enum DomainEvent {
     GroupUpdated {
         group_id: String,
         fields_changed: Vec<String>,
+        actor_id: String,
+    },
+    #[serde(rename = "group.deleted")]
+    GroupDeleted {
+        group_id: String,
         actor_id: String,
     },
 
@@ -150,6 +162,11 @@ pub enum DomainEvent {
         settings_type: String,
         actor_id: String,
     },
+    #[serde(rename = "settings.deleted")]
+    SettingsDeleted {
+        settings_type: String,
+        actor_id: String,
+    },
 
     // ── Providers ──
     #[serde(rename = "provider.configured")]
@@ -178,6 +195,14 @@ pub enum DomainEvent {
     #[serde(rename = "login_flow.configured")]
     LoginFlowConfigured { flow_id: String, actor_id: String },
 
+    // ── Security ──
+    #[serde(rename = "security.bot_detection")]
+    BotDetection {
+        fingerprint: String,
+        payload: serde_json::Value,
+        metadata: serde_json::Value,
+    },
+
     // ── PATs ──
     #[serde(rename = "pat.created")]
     PatCreated {
@@ -196,6 +221,7 @@ impl DomainEvent {
             Self::UserCreated { .. } => "user.created",
             Self::UserUpdated { .. } => "user.updated",
             Self::UserDeactivated { .. } => "user.deactivated",
+            Self::UserDeleted { .. } => "user.deleted",
             Self::PasswordSet { .. } => "credential.password_set",
             Self::IdentityLinked { .. } => "credential.identity_linked",
             Self::IdentityUnlinked { .. } => "credential.identity_unlinked",
@@ -207,19 +233,23 @@ impl DomainEvent {
             Self::TokenRevoked { .. } => "token.revoked",
             Self::OrgCreated { .. } => "org.created",
             Self::OrgUpdated { .. } => "org.updated",
+            Self::OrgDeleted { .. } => "org.deleted",
             Self::GroupCreated { .. } => "group.created",
             Self::GroupUpdated { .. } => "group.updated",
+            Self::GroupDeleted { .. } => "group.deleted",
             Self::AppCreated { .. } => "app.created",
             Self::AppUpdated { .. } => "app.updated",
             Self::InstanceCreated { .. } => "instance.created",
             Self::InstanceUpdated { .. } => "instance.updated",
             Self::InstanceDeprovisioned { .. } => "instance.deprovisioned",
             Self::SettingsUpdated { .. } => "settings.updated",
+            Self::SettingsDeleted { .. } => "settings.deleted",
             Self::ProviderConfigured { .. } => "provider.configured",
             Self::ProviderRemoved { .. } => "provider.removed",
             Self::SchemaRegistered { .. } => "schema.registered",
             Self::SchemaUpdated { .. } => "schema.updated",
             Self::LoginFlowConfigured { .. } => "login_flow.configured",
+            Self::BotDetection { .. } => "security.bot_detection",
             Self::PatCreated { .. } => "pat.created",
             Self::PatRevoked { .. } => "pat.revoked",
         }
@@ -228,25 +258,27 @@ impl DomainEvent {
     /// Returns the category (first segment of event_type).
     pub fn category(&self) -> &'static str {
         match self {
-            Self::UserCreated { .. } | Self::UserUpdated { .. } | Self::UserDeactivated { .. } => {
-                "user"
-            }
+            Self::UserCreated { .. }
+            | Self::UserUpdated { .. }
+            | Self::UserDeactivated { .. }
+            | Self::UserDeleted { .. } => "user",
             Self::PasswordSet { .. }
             | Self::IdentityLinked { .. }
             | Self::IdentityUnlinked { .. } => "credential",
             Self::SessionStarted { .. } | Self::SessionRevoked { .. } => "session",
             Self::LoginFlowCompleted { .. } | Self::OtpVerified { .. } => "auth",
             Self::TokenIssued { .. } | Self::TokenRevoked { .. } => "token",
-            Self::OrgCreated { .. } | Self::OrgUpdated { .. } => "org",
-            Self::GroupCreated { .. } | Self::GroupUpdated { .. } => "group",
+            Self::OrgCreated { .. } | Self::OrgUpdated { .. } | Self::OrgDeleted { .. } => "org",
+            Self::GroupCreated { .. } | Self::GroupUpdated { .. } | Self::GroupDeleted { .. } => "group",
             Self::AppCreated { .. } | Self::AppUpdated { .. } => "app",
             Self::InstanceCreated { .. }
             | Self::InstanceUpdated { .. }
             | Self::InstanceDeprovisioned { .. } => "instance",
-            Self::SettingsUpdated { .. } => "settings",
+            Self::SettingsUpdated { .. } | Self::SettingsDeleted { .. } => "settings",
             Self::ProviderConfigured { .. } | Self::ProviderRemoved { .. } => "provider",
             Self::SchemaRegistered { .. } | Self::SchemaUpdated { .. } => "schema",
             Self::LoginFlowConfigured { .. } => "login_flow",
+            Self::BotDetection { .. } => "security",
             Self::PatCreated { .. } | Self::PatRevoked { .. } => "pat",
         }
     }
@@ -256,7 +288,8 @@ impl DomainEvent {
         match self {
             Self::UserCreated { user_id, .. }
             | Self::UserUpdated { user_id, .. }
-            | Self::UserDeactivated { user_id, .. } => user_id,
+            | Self::UserDeactivated { user_id, .. }
+            | Self::UserDeleted { user_id, .. } => user_id,
             Self::PasswordSet { user_id, .. }
             | Self::IdentityLinked { user_id, .. }
             | Self::IdentityUnlinked { user_id, .. } => user_id,
@@ -266,19 +299,25 @@ impl DomainEvent {
             Self::LoginFlowCompleted { flow_id, .. } => flow_id,
             Self::OtpVerified { user_id, .. } => user_id,
             Self::TokenIssued { token_id, .. } | Self::TokenRevoked { token_id, .. } => token_id,
-            Self::OrgCreated { org_id, .. } | Self::OrgUpdated { org_id, .. } => org_id,
-            Self::GroupCreated { group_id, .. } | Self::GroupUpdated { group_id, .. } => group_id,
+            Self::OrgCreated { org_id, .. }
+            | Self::OrgUpdated { org_id, .. }
+            | Self::OrgDeleted { org_id, .. } => org_id,
+            Self::GroupCreated { group_id, .. }
+            | Self::GroupUpdated { group_id, .. }
+            | Self::GroupDeleted { group_id, .. } => group_id,
             Self::AppCreated { app_id, .. } | Self::AppUpdated { app_id, .. } => app_id,
             Self::InstanceCreated { instance_id, .. }
             | Self::InstanceUpdated { instance_id, .. }
             | Self::InstanceDeprovisioned { instance_id, .. } => instance_id,
             Self::SettingsUpdated { scope, .. } => scope,
+            Self::SettingsDeleted { settings_type, .. } => settings_type,
             Self::ProviderConfigured { provider_id, .. }
             | Self::ProviderRemoved { provider_id, .. } => provider_id,
             Self::SchemaRegistered { schema_id, .. } | Self::SchemaUpdated { schema_id, .. } => {
                 schema_id
             }
             Self::LoginFlowConfigured { flow_id, .. } => flow_id,
+            Self::BotDetection { fingerprint, .. } => fingerprint,
             Self::PatCreated { pat_id, .. } | Self::PatRevoked { pat_id, .. } => pat_id,
         }
     }
@@ -289,6 +328,7 @@ impl DomainEvent {
             Self::UserCreated { actor_id, .. }
             | Self::UserUpdated { actor_id, .. }
             | Self::UserDeactivated { actor_id, .. }
+            | Self::UserDeleted { actor_id, .. }
             | Self::PasswordSet { actor_id, .. }
             | Self::IdentityLinked { actor_id, .. }
             | Self::IdentityUnlinked { actor_id, .. }
@@ -296,14 +336,17 @@ impl DomainEvent {
             | Self::TokenRevoked { actor_id, .. }
             | Self::OrgCreated { actor_id, .. }
             | Self::OrgUpdated { actor_id, .. }
+            | Self::OrgDeleted { actor_id, .. }
             | Self::GroupCreated { actor_id, .. }
             | Self::GroupUpdated { actor_id, .. }
+            | Self::GroupDeleted { actor_id, .. }
             | Self::AppCreated { actor_id, .. }
             | Self::AppUpdated { actor_id, .. }
             | Self::InstanceCreated { actor_id, .. }
             | Self::InstanceUpdated { actor_id, .. }
             | Self::InstanceDeprovisioned { actor_id, .. }
             | Self::SettingsUpdated { actor_id, .. }
+            | Self::SettingsDeleted { actor_id, .. }
             | Self::ProviderConfigured { actor_id, .. }
             | Self::ProviderRemoved { actor_id, .. }
             | Self::SchemaRegistered { actor_id, .. }
@@ -316,6 +359,7 @@ impl DomainEvent {
             Self::LoginFlowCompleted { user_id, .. } => user_id,
             Self::OtpVerified { user_id, .. } => user_id,
             Self::TokenIssued { subject, .. } => subject,
+            Self::BotDetection { fingerprint, .. } => fingerprint,
         }
     }
 }

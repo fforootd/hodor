@@ -3,48 +3,41 @@ use crate::op::{AuthRequestStore, ClaimSource, ClientStore, KeyStore};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
-use zitadel_db::{
-    Db, consume_oidc_auth_code_record, create_oidc_auth_request_record, get_oidc_client_record,
-    load_user_claims_record,
-};
+use zitadel_app::repo::{OidcAuthRequest, OidcRepository};
 
 #[derive(Clone)]
 pub struct ZitadelOpStore {
-    db: Db,
+    repo: Arc<dyn OidcRepository>,
 }
 
 impl ZitadelOpStore {
-    pub fn new(db: Db) -> Self {
-        Self { db }
-    }
-
-    fn parse_string_list(raw: &str) -> Vec<String> {
-        serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+    pub fn new(repo: Arc<dyn OidcRepository>) -> Self {
+        Self { repo }
     }
 }
 
 impl ClientStore for ZitadelOpStore {
-    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
-    // Currently zitadel-oidc cannot depend on zitadel-app without creating a circular dependency.
     async fn find_client(
         &self,
         instance_id: &str,
         client_id: &str,
     ) -> anyhow::Result<Option<ClientMetadata>> {
-        Ok(get_oidc_client_record(&self.db, instance_id, client_id)
+        Ok(self
+            .repo
+            .find_client(instance_id, client_id)
             .await?
-            .map(|record| ClientMetadata {
-                client_id: client_id.to_string(),
-                client_secret: record.client_secret,
-                redirect_uris: Self::parse_string_list(&record.redirect_uris_json),
-                grant_types: Self::parse_string_list(&record.grant_types_json),
-                response_types: Self::parse_string_list(&record.response_types_json),
-                state: record.state,
+            .map(|info| ClientMetadata {
+                app_id: info.app_id,
+                client_id: info.client_id,
+                client_secret: info.client_secret.unwrap_or_default(),
+                redirect_uris: info.redirect_uris,
+                post_logout_redirect_uris: info.post_logout_redirect_uris,
+                grant_types: info.grant_types,
+                response_types: info.response_types,
+                state: info.state,
             }))
     }
 
-    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn authenticate_client_secret(
         &self,
         instance_id: &str,
@@ -60,71 +53,133 @@ impl ClientStore for ZitadelOpStore {
 }
 
 impl AuthRequestStore for ZitadelOpStore {
-    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn create_auth_request(
         &self,
         instance_id: &str,
         request: &NewAuthRequest,
     ) -> anyhow::Result<String> {
-        let auth_request_id = Uuid::new_v4().to_string();
-        create_oidc_auth_request_record(
-            &self.db,
-            instance_id,
-            &auth_request_id,
-            &request.client_id,
-            &request.redirect_uri,
-            &request.scope,
-            &request.state,
-            &request.nonce,
-            &request.response_type,
-            &request.code_challenge,
-            &request.code_challenge_method,
-            &serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_string()),
-            &request.login_hint,
-            request.max_age.map(|value| value as i64),
-        )
-        .await?;
-
-        Ok(auth_request_id)
+        let app_request = OidcAuthRequest {
+            id: String::new(),
+            user_id: None,
+            session_id: None,
+            client_id: request.client_id.clone(),
+            redirect_uri: request.redirect_uri.clone(),
+            scope: request.scope.clone(),
+            state: request.state.clone(),
+            nonce: Some(request.nonce.clone()).filter(|s| !s.is_empty()),
+            response_type: request.response_type.clone(),
+            code_challenge: Some(request.code_challenge.clone()).filter(|s| !s.is_empty()),
+            code_challenge_method: Some(request.code_challenge_method.clone())
+                .filter(|s| !s.is_empty()),
+            prompt: request.prompt.clone(),
+            login_hint: Some(request.login_hint.clone()).filter(|s| !s.is_empty()),
+            max_age: request.max_age,
+            auth_time: None,
+        };
+        self.repo
+            .create_auth_request(instance_id, &app_request)
+            .await
     }
 
-    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn consume_auth_code(
         &self,
         instance_id: &str,
         code: &str,
     ) -> anyhow::Result<Option<ConsumedAuthRequest>> {
-        Ok(consume_oidc_auth_code_record(&self.db, instance_id, code)
+        Ok(self
+            .repo
+            .consume_auth_code(instance_id, code)
             .await?
-            .map(|record| ConsumedAuthRequest {
-                auth_request_id: record.auth_request_id,
-                user_id: record.user_id,
-                client_id: record.client_id,
-                redirect_uri: record.redirect_uri,
-                scope: record.scope,
-                nonce: record.nonce,
-                code_challenge: record.code_challenge,
-                auth_time: record.auth_time.and_then(|value| u64::try_from(value).ok()),
+            .map(|req| ConsumedAuthRequest {
+                auth_request_id: req.id,
+                user_id: req.user_id.unwrap_or_default(),
+                session_id: req.session_id.unwrap_or_default(),
+                client_id: req.client_id,
+                redirect_uri: req.redirect_uri,
+                scope: req.scope,
+                state: req.state,
+                nonce: req.nonce.unwrap_or_default(),
+                response_type: req.response_type,
+                code_challenge: req.code_challenge.unwrap_or_default(),
+                code_challenge_method: req.code_challenge_method.unwrap_or_default(),
+                prompt: req.prompt,
+                login_hint: req.login_hint.unwrap_or_default(),
+                max_age: req.max_age,
+                auth_time: req.auth_time.as_deref().and_then(parse_auth_time),
             }))
     }
 }
 
 impl ClaimSource for ZitadelOpStore {
-    // TODO(CLAUDE-4): Delegate to OidcRepository trait once the dependency graph allows it.
     async fn load_user_claims(
         &self,
         instance_id: &str,
         subject: &str,
     ) -> anyhow::Result<Option<UserClaims>> {
-        Ok(load_user_claims_record(&self.db, instance_id, subject)
+        Ok(self
+            .repo
+            .load_user_claims(instance_id, subject)
             .await?
-            .map(|record| UserClaims {
-                subject: subject.to_string(),
-                name: record.display_name,
-                email_verified: !record.identifier.is_empty(),
-                email: record.identifier,
+            .map(|claims| UserClaims {
+                subject: claims.sub,
+                name: claims.name.unwrap_or_default(),
+                email: claims.email.unwrap_or_default(),
+                email_verified: claims.email_verified.unwrap_or(false),
             }))
     }
+}
+
+/// Parse auth_time from the DB — may be a Unix epoch or a timestamp string.
+fn parse_auth_time(s: &str) -> Option<u64> {
+    // Try numeric epoch first.
+    if let Ok(epoch) = s.parse::<u64>() {
+        return Some(epoch);
+    }
+    // Try common timestamp formats (SQLite: "YYYY-MM-DD HH:MM:SS", Postgres ISO).
+    for fmt in &[
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f%:z",
+        "%Y-%m-%dT%H:%M:%S",
+    ] {
+        if let Some(epoch) = parse_timestamp_to_epoch(s, fmt) {
+            return Some(epoch);
+        }
+    }
+    None
+}
+
+fn parse_timestamp_to_epoch(s: &str, _fmt: &str) -> Option<u64> {
+    // Simple UTC timestamp parser for "YYYY-MM-DD HH:MM:SS" format.
+    let parts: Vec<&str> = s.splitn(2, ' ').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let date_parts: Vec<u32> = parts[0].split('-').filter_map(|p| p.parse().ok()).collect();
+    let time_parts: Vec<u32> = parts[1].split(':').filter_map(|p| p.parse().ok()).collect();
+    if date_parts.len() != 3 || time_parts.len() != 3 {
+        return None;
+    }
+    // Simplified: calculate days from Unix epoch (1970-01-01).
+    let (year, month, day) = (date_parts[0], date_parts[1], date_parts[2]);
+    let (hour, min, sec) = (time_parts[0], time_parts[1], time_parts[2]);
+    let mut days: i64 = 0;
+    for y in 1970..year {
+        days += if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+    }
+    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    for m in 1..month {
+        days += month_days[m as usize] as i64;
+        if m == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            days += 1;
+        }
+    }
+    days += (day as i64) - 1;
+    let secs = days * 86400 + (hour as i64) * 3600 + (min as i64) * 60 + (sec as i64);
+    u64::try_from(secs).ok()
 }
 
 #[derive(Clone)]
@@ -167,6 +222,10 @@ impl KeyStore for RuntimeKeyStore {
         }
         anyhow::bail!("OIDC signing keys not ready after 5s")
     }
+
+    async fn signing_keys(&self, instance_id: &str) -> anyhow::Result<Vec<Arc<SigningKeys>>> {
+        Ok(vec![self.active_signing_key(instance_id).await?])
+    }
 }
 
 #[allow(dead_code)]
@@ -176,6 +235,12 @@ fn _assert_json_value_send_sync(_: &Value) {}
 mod tests {
     use super::*;
     use crate::op::{AuthRequestStore, ClientStore};
+    use zitadel_db::Db;
+    use zitadel_db::repo_impls::DbOidcRepository;
+
+    fn make_store(db: Db) -> ZitadelOpStore {
+        ZitadelOpStore::new(Arc::new(DbOidcRepository::new(db)))
+    }
 
     #[tokio::test]
     async fn finds_client_and_parses_registered_redirect_uris() {
@@ -218,7 +283,7 @@ mod tests {
             .await
             .unwrap();
 
-        let store = ZitadelOpStore::new(db);
+        let store = make_store(db);
         let client = store
             .find_client(zitadel_db::DEFAULT_INSTANCE_ID, "client-1")
             .await
@@ -264,7 +329,7 @@ mod tests {
         .await
         .unwrap();
 
-        let store = ZitadelOpStore::new(db);
+        let store = make_store(db);
         let first = store
             .consume_auth_code(zitadel_db::DEFAULT_INSTANCE_ID, "code-1")
             .await
@@ -301,7 +366,7 @@ mod tests {
         .await
         .unwrap();
 
-        let store = ZitadelOpStore::new(db);
+        let store = make_store(db);
         let auth = store
             .consume_auth_code(zitadel_db::DEFAULT_INSTANCE_ID, "code-1")
             .await

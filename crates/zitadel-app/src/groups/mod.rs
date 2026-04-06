@@ -33,6 +33,9 @@ impl CreateGroup {
             return Err(AppError::validation("name is required"));
         }
 
+        // Authz: caller must be admin on the target org
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id)).await?;
+
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
 
@@ -122,6 +125,61 @@ impl ListGroups {
     }
 }
 
+pub struct DeleteGroup {
+    repos: Arc<Repositories>,
+}
+
+impl DeleteGroup {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(
+        name = "use_case.delete_group",
+        skip_all,
+        fields(event_type = "group.deleted", category = "group")
+    )]
+    pub async fn execute(
+        &self,
+        ctx: &ActorContext,
+        group_id: &str,
+    ) -> Result<(), AppError> {
+        // Authz: caller must be admin on the target group
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("group:{}", group_id)).await?;
+
+        // Verify exists
+        self.repos
+            .groups
+            .get(ctx.instance_id(), group_id)
+            .await
+            .map_err(AppError::Internal)?
+            .ok_or_else(|| AppError::not_found("group", group_id))?;
+
+        self.repos
+            .groups
+            .delete(ctx.instance_id(), group_id)
+            .await
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::GroupDeleted {
+                    group_id: group_id.to_string(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(())
+    }
+}
+
 pub struct UpdateGroup {
     repos: Arc<Repositories>,
 }
@@ -147,6 +205,9 @@ impl UpdateGroup {
         ctx: &ActorContext,
         cmd: UpdateGroupCommand,
     ) -> Result<GroupRecord, AppError> {
+        // Authz: caller must be admin on the target group
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("group:{}", cmd.group_id)).await?;
+
         let mut group = self
             .repos
             .groups

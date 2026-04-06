@@ -337,8 +337,10 @@ mod tests {
     async fn authorization_error_redirect_points_back_to_client() {
         let db = zitadel_db::Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        let repo: std::sync::Arc<dyn zitadel_app::repo::OidcRepository> =
+            std::sync::Arc::new(zitadel_db::repo_impls::DbOidcRepository::new(db.clone()));
         let oidc = OidcState::new(
-            db.clone(),
+            repo,
             "https://issuer.example".to_string(),
             "/conformance/login".to_string(),
         );

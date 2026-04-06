@@ -10,6 +10,12 @@ use uuid::Uuid;
 use zitadel_db::{create_saved_query, delete_saved_query, list_saved_queries};
 use zitadel_storage::AnalyticsQuery;
 
+// TODO(ADR-032): Analytics queries (query, schema) use s.analytics directly.
+// Saved query operations (list, create, delete) use zitadel_db directly.
+// Analytics storage is a separate role (ADR-010) not yet exposed through
+// Repositories. Saved queries should migrate to use cases when an
+// AnalyticsRepository is added.
+
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/analytics/query", post(query))
@@ -36,6 +42,7 @@ async fn query(State(s): State<ApiState>, Json(req): Json<QueryRequest>) -> Resp
         .analytics
         .query(&AnalyticsQuery {
             sql: req.sql,
+            params: vec![],
             limit: req.limit,
         })
         .await

@@ -3,6 +3,10 @@ name: Reusable CI
 on:
   workflow_call:
     inputs:
+      execution_tier_label:
+        required: false
+        type: string
+        default: CI
       run_docs:
         required: false
         type: boolean
@@ -15,7 +19,27 @@ on:
         required: false
         type: boolean
         default: true
-      run_extended_e2e:
+      run_journeys:
+        required: false
+        type: boolean
+        default: true
+      run_journeys_oidc:
+        required: false
+        type: boolean
+        default: true
+      run_contracts:
+        required: false
+        type: boolean
+        default: true
+      run_invariants:
+        required: false
+        type: boolean
+        default: true
+      run_subsystems:
+        required: false
+        type: boolean
+        default: true
+      run_conformance_oidc:
         required: false
         type: boolean
         default: true
@@ -38,14 +62,14 @@ permissions:
 jobs:
   noop:
     name: Noop
-    if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_extended_e2e && !inputs.run_browser_artifacts }}
+    if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_journeys && !inputs.run_journeys_oidc && !inputs.run_contracts && !inputs.run_invariants && !inputs.run_subsystems && !inputs.run_browser_artifacts }}
     runs-on: ubuntu-latest
     steps:
       - name: No lanes selected
         run: echo "No reusable CI lanes selected."
 
   fast-rust-static:
-    name: Fast Rust Static
+    name: ${{ inputs.execution_tier_label }} / Fast / Rust / Static
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
@@ -69,7 +93,7 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
   fast-rust-tests:
-    name: Fast Rust Tests
+    name: ${{ inputs.execution_tier_label }} / Fast / Rust / Tests
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
@@ -94,7 +118,7 @@ jobs:
         run: cargo nextest run --workspace
 
   postgres-storage-integration:
-    name: Postgres Storage Integration
+    name: ${{ inputs.execution_tier_label }} / Fast / Storage / Postgres
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     services:
@@ -131,7 +155,7 @@ jobs:
         run: cargo test -p zitadel-storage --test postgres_roles -- --nocapture
 
   fuzz-quick:
-    name: Fuzz Quick
+    name: ${{ inputs.execution_tier_label }} / Fast / Fuzz
     if: inputs.run_fuzz
     runs-on: ubuntu-latest
     steps:
@@ -155,7 +179,7 @@ jobs:
         run: just fuzz-quick
 
   fast-docs-check:
-    name: Fast Docs Check
+    name: ${{ inputs.execution_tier_label }} / Fast / Docs / Check
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
@@ -169,7 +193,7 @@ jobs:
         run: just docs-check
 
   fast-docs-links:
-    name: Fast Docs Links
+    name: ${{ inputs.execution_tier_label }} / Fast / Docs / Links
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
@@ -181,7 +205,7 @@ jobs:
           args: --offline --no-progress README.md docs/**/*.md
 
   prepare-webdist:
-    name: Prepare Webdist
+    name: ${{ inputs.execution_tier_label }} / Prepare / Webdist
     if: inputs.run_browser_artifacts
     runs-on: ubuntu-latest
     steps:
@@ -211,7 +235,7 @@ jobs:
           retention-days: 1
 
   prepare-rust-binary:
-    name: Prepare Rust Binary
+    name: ${{ inputs.execution_tier_label }} / Prepare / Rust Binary
     if: inputs.run_browser_artifacts
     needs: prepare-webdist
     runs-on: ubuntu-latest
@@ -247,7 +271,7 @@ jobs:
           retention-days: 1
 
   fast-web-static:
-    name: Fast Web Static
+    name: ${{ inputs.execution_tier_label }} / Fast / Web / Static
     if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
@@ -269,7 +293,7 @@ jobs:
         run: npm run typecheck -w web
 
   fast-web-unit:
-    name: Fast Web Unit
+    name: ${{ inputs.execution_tier_label }} / Fast / Web / Unit
     if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
@@ -287,14 +311,77 @@ jobs:
       - name: Run Vitest
         run: npm test -w web
 
-  extended-e2e:
-    name: Extended E2E
-    if: inputs.run_extended_e2e && inputs.run_browser_artifacts
+  contracts:
+    name: ${{ inputs.execution_tier_label }} / Contracts
+    if: inputs.run_contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Ensure embedded web placeholder exists
+        run: just ensure-webdist
+
+      - name: Run contract suites
+        run: just contracts
+
+  invariants:
+    name: ${{ inputs.execution_tier_label }} / Invariants
+    if: inputs.run_invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Ensure embedded web placeholder exists
+        run: just ensure-webdist
+
+      - name: Run invariant suites
+        run: just invariants
+
+  subsystems:
+    name: ${{ inputs.execution_tier_label }} / Subsystems
+    if: inputs.run_subsystems
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Ensure embedded web placeholder exists
+        run: just ensure-webdist
+
+      - name: Run subsystem suites
+        run: just subsystems
+
+  journeys-admin:
+    name: ${{ inputs.execution_tier_label }} / Journeys / Admin
+    if: inputs.run_journeys && inputs.run_browser_artifacts
     needs: prepare-rust-binary
     runs-on: ubuntu-latest
     env:
       CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_E2E_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
+      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -329,16 +416,72 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run full Playwright suite
-        run: npm test -w e2e -- --reporter=github,line,html
+      - name: Run admin journey suite
+        run: npm run test:journeys:admin -w browser-tests -- --reporter=github,line,html
 
       - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: ${{ inputs.artifact_prefix }}-e2e-report
+          name: ${{ inputs.artifact_prefix }}-journeys-admin-report
           path: |
-            e2e/playwright-report
-            e2e/test-results
+            browser-tests/playwright-report
+            browser-tests/test-results
+          if-no-files-found: warn
+          retention-days: 7
+
+  journeys-oidc:
+    name: ${{ inputs.execution_tier_label }} / Journeys / OIDC
+    if: inputs.run_journeys_oidc && inputs.run_browser_artifacts
+    needs: prepare-rust-binary
+    runs-on: ubuntu-latest
+    env:
+      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
+      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Restore zitadel binary
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: ${{ inputs.artifact_prefix }}-zitadel-binary
+          path: .
+
+      - name: Extract zitadel binary
+        run: |
+          mkdir -p "$CI_TMP_DIR/zitadel-bin"
+          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4.2.4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run OIDC journey suite
+        run: npm run test:journeys:oidc -w browser-tests -- --reporter=github,line,html
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ inputs.artifact_prefix }}-journeys-oidc-report
+          path: |
+            browser-tests/playwright-report
+            browser-tests/test-results
           if-no-files-found: warn
           retention-days: 7

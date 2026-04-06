@@ -11,6 +11,7 @@ pub struct InstanceContext {
     pub resolved_org_id: Option<String>,
     pub placement_mode: String,
     pub region_key: Option<String>,
+    pub scheme: String,
     pub host: String,
     pub source: String,
 }
@@ -22,6 +23,7 @@ impl InstanceContext {
             resolved_org_id: None,
             placement_mode: "global".into(),
             region_key: None,
+            scheme: String::new(),
             host: String::new(),
             source: String::new(),
         }
@@ -55,6 +57,22 @@ pub fn current_instance_id_or<'a>(fallback: &'a str) -> Cow<'a, str> {
         .unwrap_or_else(|| Cow::Borrowed(fallback))
 }
 
+pub fn current_request_origin() -> Option<String> {
+    current_instance_context().and_then(|ctx| {
+        if ctx.scheme.is_empty() || ctx.host.is_empty() {
+            None
+        } else {
+            Some(format!("{}://{}", ctx.scheme, ctx.host))
+        }
+    })
+}
+
+pub fn current_request_origin_or<'a>(fallback: &'a str) -> Cow<'a, str> {
+    current_request_origin()
+        .map(Cow::Owned)
+        .unwrap_or_else(|| Cow::Borrowed(fallback))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +88,7 @@ mod tests {
                 resolved_org_id: Some("org_parent".into()),
                 placement_mode: "regional".into(),
                 region_key: Some("europe-west1".into()),
+                scheme: "https".into(),
                 host: "login.example.com".into(),
                 source: "host".into(),
             },
@@ -83,5 +102,25 @@ mod tests {
 
         assert_eq!(scoped.resolved_org_id.as_deref(), Some("org_parent"));
         assert_eq!(current_instance_id().as_ref(), DEFAULT_INSTANCE_ID);
+    }
+
+    #[tokio::test]
+    async fn task_local_context_exposes_request_origin() {
+        let origin = with_instance_context(
+            InstanceContext {
+                instance_id: "inst_cloud".into(),
+                resolved_org_id: None,
+                placement_mode: "global".into(),
+                region_key: None,
+                scheme: "https".into(),
+                host: "demo.example.com".into(),
+                source: "host".into(),
+            },
+            async { current_request_origin() },
+        )
+        .await;
+
+        assert_eq!(origin.as_deref(), Some("https://demo.example.com"));
+        assert!(current_request_origin().is_none());
     }
 }

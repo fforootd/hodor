@@ -12,7 +12,7 @@ pub fn routes(state: OidcState) -> Router {
 
 async fn jwks(State(state): State<OidcState>) -> Response {
     match state.provider.jwks().await {
-        Ok(set) => Json(set).into_response(),
+        Ok(set) => Json::<crate::oidc::JsonWebKeySet>(set).into_response(),
         Err(error) => protocol_error_response(error),
     }
 }

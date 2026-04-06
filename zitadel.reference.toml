@@ -116,6 +116,27 @@ cross_origin_opener = "same-origin"
 # PostgreSQL (scale-out): "postgres://user:pass@host:5432/zitadel?sslmode=require"
 url = "sqlite://./data/zitadel.db"
 
+# Optional explicit backend override. Usually inferred from `url` or `database`.
+# backend = "sqlite"
+# backend = "postgres"
+# backend = "spanner"
+
+# Native Cloud Spanner database name. When this is set, the runtime infers
+# `backend = "spanner"` unless you override it explicitly.
+# database = "projects/my-project/instances/zitadel/databases/zitadel"
+
+# Optional Spanner credentials for local tooling or non-ADC environments.
+# Cloud Run on GCP should normally use ADC on its attached service account.
+# credentials_file = "/etc/zitadel/gcp-service-account.json"
+# credentials_json = "{\"type\":\"service_account\",...}"
+
+# Example cloud-mode Spanner config:
+# backend  = "spanner"
+# url      = ""
+# database = "projects/my-project/instances/zitadel/databases/zitadel"
+# migrate  = "check"   # runtime service
+# bootstrap = "skip"   # runtime service
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Schema Migration — controls behavior of 'zitadel start'
 # ─────────────────────────────────────────────────────────────────────────────
@@ -195,6 +216,11 @@ backend = "memory"
 [cloud]
 # Enable cloud instance resolution. Leave false for normal self-hosted installs.
 enabled = false
+
+# Example Cloud Run + Spanner cloud-mode settings:
+# enabled = true
+# [cloud.control_plane]
+# url = "" # leave empty to keep routing tables in the main Spanner database
 
 # In-process route cache used for hostname -> instance lookups.
 resolver_cache_capacity = 50000

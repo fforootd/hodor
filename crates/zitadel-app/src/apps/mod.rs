@@ -34,6 +34,9 @@ impl CreateApp {
             return Err(AppError::validation("name is required"));
         }
 
+        // Authz: caller must be admin on the current instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+
         // Verify group exists
         self.repos
             .groups

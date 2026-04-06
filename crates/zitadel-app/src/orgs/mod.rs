@@ -32,6 +32,9 @@ impl CreateOrg {
             return Err(AppError::validation("name is required"));
         }
 
+        // Authz: caller must be admin on the current instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
 
@@ -114,6 +117,58 @@ impl ListOrgs {
     }
 }
 
+// ─── DeleteOrg ───
+
+pub struct DeleteOrg {
+    repos: Arc<Repositories>,
+}
+
+impl DeleteOrg {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(
+        name = "use_case.delete_org",
+        skip_all,
+        fields(event_type = "org.deleted", category = "org")
+    )]
+    pub async fn execute(&self, ctx: &ActorContext, org_id: &str) -> Result<(), AppError> {
+        crate::authz::require_operator_admin(ctx)?;
+
+        let _org = self
+            .repos
+            .orgs
+            .get(ctx.instance_id(), org_id)
+            .await
+            .map_err(AppError::Internal)?
+            .ok_or_else(|| AppError::not_found("org", org_id))?;
+
+        self.repos
+            .orgs
+            .delete(ctx.instance_id(), org_id)
+            .await
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::OrgDeleted {
+                    org_id: org_id.to_string(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(())
+    }
+}
+
 pub struct UpdateOrg {
     repos: Arc<Repositories>,
 }
@@ -139,6 +194,9 @@ impl UpdateOrg {
         ctx: &ActorContext,
         cmd: UpdateOrgCommand,
     ) -> Result<OrgRecord, AppError> {
+        // Authz: caller must be admin on the target org
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", cmd.org_id)).await?;
+
         let mut org = self
             .repos
             .orgs

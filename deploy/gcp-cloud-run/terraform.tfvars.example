@@ -1,0 +1,18 @@
+project_id              = "my-gcp-project"
+region                  = "us-central1"
+platform_domain         = "zitadel.example.com"
+spanner_instance_config = "regional-us-central1"
+
+# Leave container_image empty to use the repo + image name/tag fields below.
+container_image = ""
+image_name      = "zitadel"
+image_tag       = "latest"
+
+cookie_secrets    = "replace-me-with-a-long-random-secret"
+management_secret = "replace-me-with-a-long-random-secret"
+admin_password    = "replace-me"
+admin_pat         = "replace-me-with-a-long-random-token"
+
+# Optional hardening. When omitted, Zitadel stores secrets in plaintext mode.
+encryption_active_key_id = ""
+encryption_keys          = ""

@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -14,7 +14,8 @@ use zitadel_fga::{
     TupleKeySet, TupleRepository, WriteRequest,
 };
 
-use crate::{ApiState, response};
+use crate::extractors::{StoreId, StoreModelPath};
+use crate::{ApiState, middleware, response};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -53,6 +54,7 @@ pub fn routes() -> Router<ApiState> {
             "/fga/stores/{store_id}/authorization-models/{model_id}",
             get(read_authorization_model_store),
         )
+        .route_layer(axum::middleware::from_fn(middleware::require_fga_admin_pat))
 }
 
 fn fga_error_response(error: FgaError) -> Response {
@@ -411,7 +413,7 @@ async fn legacy_batch_test(
 
 async fn check_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<CheckRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -423,7 +425,7 @@ async fn check_store(
 
 async fn batch_check_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<BatchCheckRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -435,7 +437,7 @@ async fn batch_check_store(
 
 async fn read_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<ReadRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -447,7 +449,7 @@ async fn read_store(
 
 async fn write_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<WriteRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -459,7 +461,7 @@ async fn write_store(
 
 async fn expand_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<ExpandRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -471,7 +473,7 @@ async fn expand_store(
 
 async fn list_objects_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<ListObjectsRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -483,7 +485,7 @@ async fn list_objects_store(
 
 async fn list_users_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<ListUsersRequest>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -503,7 +505,7 @@ struct ReadChangesQuery {
 
 async fn read_changes_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Query(query): Query<ReadChangesQuery>,
 ) -> Response {
     let instance_id = current_instance_id();
@@ -525,7 +527,7 @@ async fn read_changes_store(
 
 async fn read_authorization_models_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
 ) -> Response {
     let instance_id = current_instance_id();
     match state.fga.read_models(&instance_id, &store_id).await {
@@ -536,7 +538,7 @@ async fn read_authorization_models_store(
 
 async fn read_authorization_model_store(
     State(state): State<ApiState>,
-    Path((store_id, model_id)): Path<(String, String)>,
+    StoreModelPath { store_id, model_id }: StoreModelPath,
 ) -> Response {
     let instance_id = current_instance_id();
     match state
@@ -551,7 +553,7 @@ async fn read_authorization_model_store(
 
 async fn write_authorization_model_store(
     State(state): State<ApiState>,
-    Path(store_id): Path<String>,
+    StoreId(store_id): StoreId,
     Json(body): Json<AuthorizationModelWriteRequest>,
 ) -> Response {
     let instance_id = current_instance_id();

@@ -6,6 +6,7 @@
 
 | Document | What it covers |
 |---|---|
+| [Product Architecture](../architecture/product-architecture.md) | One binary, deployment tiers (SQLite → Spanner), instance hierarchy, cloud-exclusive features |
 | [Architecture Overview](../architecture/overview.md) | System diagram, three domains, request pipeline, deployment topologies |
 | [Event Pipeline](../architecture/event-pipeline.md) | Events table as queue, async consumers, backpressure, OTEL export |
 
@@ -33,7 +34,8 @@ Numbered decisions with rationale. See [ADR Index](../000-index.md) for the full
 
 These docs are designed to be readable by both humans and AI coding assistants. Key navigation:
 
-- **Understanding the codebase:** Start with [Architecture Overview](../architecture/overview.md)
+- **Understanding the deployment model:** Start with [Product Architecture](../architecture/product-architecture.md)
+- **Understanding the runtime:** See [Architecture Overview](../architecture/overview.md)
 - **Understanding a design choice:** Check [ADR Index](../000-index.md)
 - **Understanding patterns:** Read [Design Patterns](../design/design-patterns.md)
 - **Understanding constraints:** Read [Developer Experience](../design/developer-experience.md)

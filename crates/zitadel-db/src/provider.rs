@@ -257,7 +257,7 @@ pub async fn list_providers(scoped: &ScopedDb) -> anyhow::Result<Vec<ProviderRec
     let created_at = scoped.as_text("created_at");
     let updated_at = scoped.as_text("updated_at");
     let sql = format!(
-        "SELECT id, org_id, display_name, kind, protocol, {connection}, {mapping}, {target}, {linking}, {session}, {ui}, {enabled}, {catalog_ref}, {created_at}, {updated_at} \
+        "SELECT id, COALESCE(org_id, ''), display_name, kind, protocol, {connection}, {mapping}, {target}, {linking}, {session}, {ui}, {enabled}, {catalog_ref}, {created_at}, {updated_at} \
          FROM providers WHERE instance_id = $1 ORDER BY display_order, display_name"
     );
 
@@ -274,7 +274,7 @@ pub async fn list_providers_for(db: &Db, instance_id: &str) -> anyhow::Result<Ve
         Db::Sql(_) => list_providers(&db.scoped(instance_id.to_string())).await,
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                "SELECT id, org_id, display_name, kind, protocol, connection, mapping, target, linking, \
+                "SELECT id, IFNULL(org_id, '') AS org_id, display_name, kind, protocol, connection, mapping, target, linking, \
                         session, ui, enabled, catalog_ref, CAST(created_at AS STRING) AS created_at, \
                         CAST(updated_at AS STRING) AS updated_at \
                  FROM providers WHERE instance_id = @instance_id ORDER BY display_order, display_name",
@@ -303,7 +303,7 @@ pub async fn get_provider(scoped: &ScopedDb, id: &str) -> anyhow::Result<Option<
     let created_at = scoped.as_text("created_at");
     let updated_at = scoped.as_text("updated_at");
     let sql = format!(
-        "SELECT id, org_id, display_name, kind, protocol, {connection}, {mapping}, {target}, {linking}, {session}, {ui}, {enabled}, {catalog_ref}, {created_at}, {updated_at} \
+        "SELECT id, COALESCE(org_id, ''), display_name, kind, protocol, {connection}, {mapping}, {target}, {linking}, {session}, {ui}, {enabled}, {catalog_ref}, {created_at}, {updated_at} \
          FROM providers WHERE instance_id = $1 AND id = $2"
     );
 
@@ -325,7 +325,7 @@ pub async fn get_provider_for(
         Db::Sql(_) => get_provider(&db.scoped(instance_id.to_string()), id).await,
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                "SELECT id, org_id, display_name, kind, protocol, connection, mapping, target, linking, \
+                "SELECT id, IFNULL(org_id, '') AS org_id, display_name, kind, protocol, connection, mapping, target, linking, \
                         session, ui, enabled, catalog_ref, CAST(created_at AS STRING) AS created_at, \
                         CAST(updated_at AS STRING) AS updated_at \
                  FROM providers WHERE instance_id = @instance_id AND id = @id LIMIT 1",

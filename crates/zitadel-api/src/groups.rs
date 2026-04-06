@@ -1,7 +1,7 @@
-use crate::{ApiState, middleware::Identity, response};
+use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::Response,
     routing::get,
 };
@@ -10,7 +10,6 @@ use zitadel_app::{
     groups::{CreateGroupCommand, UpdateGroupCommand},
     repo::{GroupRecord, ListParams as AppListParams},
 };
-
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/groups", get(list).post(create))
@@ -18,6 +17,9 @@ pub fn routes() -> Router<ApiState> {
             "/groups/{id}",
             get(get_one).patch(update).delete(delete_one),
         )
+        .merge(crate::generic_named_resource::membership_routes(
+            "group", "groups", "group_id",
+        ))
 }
 
 #[derive(Deserialize)]
@@ -60,7 +62,7 @@ async fn create(
         org_id: identity.org_id.clone(),
         metadata: req.metadata,
     };
-    match s.app.create_group.execute(&ctx, cmd).await {
+    match s.app.runner.run_fn(&ctx, "group.create", || s.app.create_group.execute(&ctx, cmd)).await {
         Ok(group) => response::json_created(ItemResponse::from(group)),
         Err(e) => response::app_error(e),
     }
@@ -69,10 +71,10 @@ async fn create(
 async fn get_one(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.get_group.execute(&ctx, &id).await {
+    match s.app.runner.run_fn(&ctx, "group.get", || s.app.get_group.execute(&ctx, &id)).await {
         Ok(group) => response::json_ok(ItemResponse::from(group)),
         Err(e) => response::app_error(e),
     }
@@ -89,7 +91,7 @@ async fn list(
         cursor: p.cursor,
         search: None,
     };
-    match s.app.list_groups.execute(&ctx, None, &params).await {
+    match s.app.runner.run_fn(&ctx, "group.list", || s.app.list_groups.execute(&ctx, None, &params)).await {
         Ok(result) => {
             let items: Vec<ItemResponse> =
                 result.items.into_iter().map(ItemResponse::from).collect();
@@ -106,7 +108,7 @@ async fn list(
 async fn update(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
     Json(req): Json<CreateRequest>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
@@ -123,25 +125,20 @@ async fn update(
             Some(req.metadata)
         },
     };
-    match s.app.update_group.execute(&ctx, cmd).await {
+    match s.app.runner.run_fn(&ctx, "group.update", || s.app.update_group.execute(&ctx, cmd)).await {
         Ok(group) => response::json_ok(ItemResponse::from(group)),
         Err(e) => response::app_error(e),
     }
 }
 
-async fn delete_one(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    // No delete_group use case — keep direct DB call.
-    // TODO(CLAUDE-4): Add DeleteGroup use case.
-    match zitadel_db::delete_instance_row(
-        &s.db,
-        zitadel_db::current_instance_id().as_ref(),
-        "groups",
-        &id,
-    )
-    .await
-    {
-        Ok(true) => response::no_content(),
-        Ok(false) => response::not_found("group not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+async fn delete_one(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.runner.run_fn(&ctx, "group.delete", || s.app.delete_group.execute(&ctx, &id)).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }

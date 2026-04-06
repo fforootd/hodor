@@ -17,13 +17,35 @@ pub struct ListResponse<T: Serialize> {
 /// Shared pagination query parameters for list endpoints.
 #[derive(Deserialize)]
 pub struct PaginationParams {
-    #[serde(default = "default_limit")]
+    #[serde(default = "default_limit", deserialize_with = "clamp_limit")]
     pub limit: i64,
     pub cursor: Option<String>,
 }
 
 fn default_limit() -> i64 {
     50
+}
+
+fn clamp_limit<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+    let raw = i64::deserialize(deserializer)?;
+    Ok(raw.clamp(1, 500))
+}
+
+/// Maximum length for user-supplied name fields (255 UTF-8 chars).
+pub const MAX_NAME_LENGTH: usize = 255;
+
+/// Validate that a name is non-empty and within length limits.
+/// Returns a 400 Response on failure, Ok(()) on success.
+pub fn validate_name(field: &str, value: &str) -> Result<(), Response> {
+    if value.trim().is_empty() {
+        return Err(bad_request(format!("{field} is required")));
+    }
+    if value.len() > MAX_NAME_LENGTH {
+        return Err(bad_request(format!(
+            "{field} exceeds maximum length of {MAX_NAME_LENGTH}"
+        )));
+    }
+    Ok(())
 }
 
 /// Standard error response.
@@ -63,6 +85,10 @@ pub fn not_found(msg: impl Into<String>) -> Response {
 
 pub fn bad_request(msg: impl Into<String>) -> Response {
     error(StatusCode::BAD_REQUEST, msg)
+}
+
+pub fn forbidden(msg: impl Into<String>) -> Response {
+    error(StatusCode::FORBIDDEN, msg)
 }
 
 pub fn internal_error(msg: impl Into<String>) -> Response {

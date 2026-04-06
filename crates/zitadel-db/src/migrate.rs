@@ -2,20 +2,62 @@ use crate::{BackendKind, Db};
 use sqlx::{Connection, Executor};
 
 /// Embedded migration SQL files.
-const SQLITE_MIGRATIONS: &[(&str, &str)] = &[(
-    "00001_initial",
-    include_str!("../../../migrations/sqlite/00001_initial.sql"),
-)];
+const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "00001_initial",
+        include_str!("../../../migrations/sqlite/00001_initial.sql"),
+    ),
+    (
+        "00010_oidc_logout_runtime",
+        include_str!("../../../migrations/sqlite/00010_oidc_logout_runtime.sql"),
+    ),
+    (
+        "00011_optional_org",
+        include_str!("../../../migrations/sqlite/00011_optional_org.sql"),
+    ),
+    (
+        "00012_org_fk_set_null",
+        include_str!("../../../migrations/sqlite/00012_org_fk_set_null.sql"),
+    ),
+];
 
-const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[(
-    "00001_initial",
-    include_str!("../../../migrations/postgres/00001_initial.sql"),
-)];
+const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "00001_initial",
+        include_str!("../../../migrations/postgres/00001_initial.sql"),
+    ),
+    (
+        "00010_oidc_logout_runtime",
+        include_str!("../../../migrations/postgres/00010_oidc_logout_runtime.sql"),
+    ),
+    (
+        "00011_optional_org",
+        include_str!("../../../migrations/postgres/00011_optional_org.sql"),
+    ),
+    (
+        "00012_org_fk_set_null",
+        include_str!("../../../migrations/postgres/00012_org_fk_set_null.sql"),
+    ),
+];
 
-const SPANNER_MIGRATIONS: &[(&str, &str)] = &[(
-    "00001_initial",
-    include_str!("../../../migrations/spanner/00001_initial.sql"),
-)];
+const SPANNER_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "00001_initial",
+        include_str!("../../../migrations/spanner/00001_initial.sql"),
+    ),
+    (
+        "00002_oidc_logout_runtime",
+        include_str!("../../../migrations/spanner/00002_oidc_logout_runtime.sql"),
+    ),
+    (
+        "00003_optional_org",
+        include_str!("../../../migrations/spanner/00003_optional_org.sql"),
+    ),
+    (
+        "00004_org_fk_set_null",
+        include_str!("../../../migrations/spanner/00004_org_fk_set_null.sql"),
+    ),
+];
 
 const POSTGRES_MIGRATION_LOCK_ID: i64 = 6_900_181_427_071;
 
@@ -31,11 +73,10 @@ pub async fn migrate(db: &Db) -> anyhow::Result<()> {
     };
 
     if backend == BackendKind::Spanner {
-        let (_, sql) = SPANNER_MIGRATIONS
-            .last()
-            .expect("spanner baseline migration must exist");
-        let up_sql = extract_goose_up(sql);
-        let statements = split_statements(&up_sql);
+        let statements = SPANNER_MIGRATIONS
+            .iter()
+            .flat_map(|(_, sql)| split_statements(&extract_goose_up(sql)))
+            .collect::<Vec<_>>();
         let spanner = db
             .spanner()
             .expect("spanner backend should expose native spanner client");
@@ -344,7 +385,7 @@ mod tests {
     #[test]
     fn spanner_baseline_is_native_googlesql_only() {
         let (_, sql) = SPANNER_MIGRATIONS
-            .last()
+            .first()
             .expect("spanner baseline migration must exist");
         let up = extract_goose_up(sql);
 

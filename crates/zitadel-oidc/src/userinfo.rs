@@ -38,7 +38,7 @@ async fn userinfo(State(state): State<OidcState>, req: axum::extract::Request) -
     };
 
     match state.provider.userinfo(&token).await {
-        Ok(info) => Json(info).into_response(),
+        Ok(info) => Json::<crate::oidc::UserInfoResponse>(info).into_response(),
         Err(error) => protocol_error_response(error),
     }
 }

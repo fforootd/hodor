@@ -6,7 +6,7 @@ on:
     paths:
       - package.json
       - web/package.json
-      - e2e/package.json
+      - browser-tests/package.json
       - packages/client-js/package.json
       - deploy/cloudflare-containers/package.json
       - .github/workflows/dependency-health.yml
@@ -32,7 +32,7 @@ jobs:
           files: |
             package.json
             web/package.json
-            e2e/package.json
+            browser-tests/package.json
             packages/client-js/package.json
             deploy/cloudflare-containers/package.json
 

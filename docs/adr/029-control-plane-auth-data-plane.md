@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-04-04
-**Depends-on:** ADR-010 (Three-Tier Data Architecture), ADR-017 (Process Cache Semantics), ADR-021 (Multi-Tenancy via Instance Boundaries)
+**Depends-on:** ADR-010 (Three-Tier Data Architecture), ADR-017 (Process Cache Semantics), ADR-034 (Multi-Tenancy via Instance Boundaries)
 **Related:** [Architecture Overview](../architecture/overview.md), [Storage Architecture](../design/storage-architecture.md)
 
 ## Context

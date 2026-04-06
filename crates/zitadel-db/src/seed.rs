@@ -411,22 +411,25 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 .await?;
 
         let redirect_uris = serde_json::to_string(&app.redirect_uris)?;
+        let post_logout_redirect_uris = serde_json::to_string(&app.post_logout_redirect_uris)?;
         let grant_types = serde_json::to_string(&app.grant_types)?;
         let response_types = serde_json::to_string(&app.response_types)?;
 
         if let Some(row) = existing {
             if app.on_conflict == "update" {
                 let sql = format!(
-                    "UPDATE apps SET name = $1, client_secret = $2, redirect_uris = {}, grant_types = {}, response_types = {}, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+                    "UPDATE apps SET name = $1, client_secret = $2, redirect_uris = {}, post_logout_redirect_uris = {}, grant_types = {}, response_types = {}, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
                     scoped.json_bind(4),
                     scoped.json_bind(5),
                     scoped.json_bind(6),
+                    scoped.json_bind(7),
                 );
                 sqlx::query(&sql)
                     .bind(&app.name)
                     .bind(&app.client_secret)
                     .bind(&row.0)
                     .bind(&redirect_uris)
+                    .bind(&post_logout_redirect_uris)
                     .bind(&grant_types)
                     .bind(&response_types)
                     .execute(pool)
@@ -435,11 +438,12 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         } else {
             let id = Uuid::new_v4().to_string();
             let sql = format!(
-                "INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state) \
-                 VALUES ($1, 'default', $2, $3, $4, $5, $6, {}, {}, {}, 'active')",
+                "INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, post_logout_redirect_uris, grant_types, response_types, state) \
+                 VALUES ($1, 'default', $2, $3, $4, $5, $6, {}, {}, {}, {}, 'active')",
                 scoped.json_bind(7),
                 scoped.json_bind(8),
                 scoped.json_bind(9),
+                scoped.json_bind(10),
             );
             sqlx::query(&sql)
                 .bind(&id)
@@ -449,6 +453,7 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
                 .bind(&app.client_id)
                 .bind(&app.client_secret)
                 .bind(&redirect_uris)
+                .bind(&post_logout_redirect_uris)
                 .bind(&grant_types)
                 .bind(&response_types)
                 .execute(pool)

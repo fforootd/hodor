@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
-ARTIFACT_ROOT="${OIDC_CONFORMANCE_ARTIFACTS_DIR:-$ROOT_DIR/artifacts/oidc-conformance}"
+ARTIFACT_ROOT="${OIDC_JOURNEYS_ARTIFACTS_DIR:-${OIDC_CONFORMANCE_ARTIFACTS_DIR:-$ROOT_DIR/artifacts/journeys/oidc}}"
 ARTIFACT_DIR="${ARTIFACT_ROOT}/rp"
 
 mkdir -p "$ARTIFACT_DIR"
+echo "warning: conformance/oidc/scripts/run-rp.sh is deprecated; use journeys-oidc-rp instead" >&2
 
 copy_reports() {
   {
@@ -16,12 +17,12 @@ copy_reports() {
 
   rm -rf "$ARTIFACT_DIR/playwright-report" "$ARTIFACT_DIR/test-results"
 
-  if [[ -d "$ROOT_DIR/e2e/playwright-report" ]]; then
-    cp -R "$ROOT_DIR/e2e/playwright-report" "$ARTIFACT_DIR/" || true
+  if [[ -d "$ROOT_DIR/browser-tests/playwright-report" ]]; then
+    cp -R "$ROOT_DIR/browser-tests/playwright-report" "$ARTIFACT_DIR/" || true
   fi
 
-  if [[ -d "$ROOT_DIR/e2e/test-results" ]]; then
-    cp -R "$ROOT_DIR/e2e/test-results" "$ARTIFACT_DIR/" || true
+  if [[ -d "$ROOT_DIR/browser-tests/test-results" ]]; then
+    cp -R "$ROOT_DIR/browser-tests/test-results" "$ARTIFACT_DIR/" || true
   fi
 }
 
@@ -39,4 +40,4 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
 fi
 
 PLAYWRIGHT_JSON_OUTPUT_FILE="$ARTIFACT_DIR/results.json" \
-  npm run test:rp -w e2e -- --reporter="$reporters" 2>&1 | tee "$ARTIFACT_DIR/run.log"
+  npm run test:journeys:oidc:rp -w browser-tests -- --reporter="$reporters" 2>&1 | tee "$ARTIFACT_DIR/run.log"

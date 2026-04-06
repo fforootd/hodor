@@ -18,9 +18,14 @@ jobs:
     outputs:
       fast_rust: ${{ steps.filter.outputs.fast_rust }}
       fast_web: ${{ steps.filter.outputs.fast_web }}
-      extended_e2e: ${{ steps.filter.outputs.extended_e2e }}
-      compliance_oidc: ${{ steps.filter.outputs.compliance_oidc }}
+      journeys: ${{ steps.filter.outputs.journeys }}
+      journeys_oidc: ${{ steps.filter.outputs.journeys_oidc }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      invariants: ${{ steps.filter.outputs.invariants }}
+      subsystems: ${{ steps.filter.outputs.subsystems }}
+      conformance_oidc: ${{ steps.filter.outputs.conformance_oidc }}
       docs: ${{ steps.filter.outputs.docs }}
+      terraform_gcp: ${{ steps.filter.outputs.terraform_gcp }}
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -43,14 +48,15 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - '.nvmrc'
-            extended_e2e:
+            journeys:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'crates/**'
               - 'migrations/**'
               - 'fixtures/**'
               - 'web/**'
-              - 'e2e/**'
+              - 'browser-tests/journeys/admin/**'
+              - 'browser-tests/support/**'
               - 'package.json'
               - 'package-lock.json'
               - '.nvmrc'
@@ -58,15 +64,76 @@ jobs:
               - '.github/workflows/reusable-ci.yml'
               - '.github/workflows/ci-pr.yml'
               - '.github/workflows/ci-main.yml'
-            compliance_oidc:
+            journeys_oidc:
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'crates/**'
+              - 'crates/zitadel-api/**'
+              - 'crates/zitadel-authn/**'
+              - 'crates/zitadel-login/**'
+              - 'crates/zitadel-oidc/**'
+              - 'crates/zitadel-server/**'
+              - 'migrations/**'
+              - 'fixtures/**'
+              - 'web/**'
+              - 'browser-tests/journeys/login/**'
+              - 'browser-tests/support/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.nvmrc'
+              - 'justfile'
+              - '.github/workflows/reusable-ci.yml'
+              - '.github/workflows/ci-pr.yml'
+              - '.github/workflows/ci-main.yml'
+            contracts:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/zitadel-server/**'
+              - 'crates/**/tests/contracts_*'
+              - 'fixtures/**'
+              - 'migrations/**'
+              - 'justfile'
+              - '.github/workflows/reusable-ci.yml'
+              - '.github/workflows/ci-pr.yml'
+              - '.github/workflows/ci-main.yml'
+            invariants:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/zitadel-fga/**'
+              - 'crates/zitadel-server/**'
+              - 'crates/**/tests/invariants_*'
+              - 'fixtures/**'
+              - 'migrations/**'
+              - 'justfile'
+              - '.github/workflows/reusable-ci.yml'
+              - '.github/workflows/ci-pr.yml'
+              - '.github/workflows/ci-main.yml'
+            subsystems:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/zitadel-api/**'
+              - 'crates/zitadel-login/**'
+              - 'crates/zitadel-oidc/**'
+              - 'crates/zitadel-server/**'
+              - 'crates/zitadel-storage/**'
+              - 'crates/**/tests/subsystems_*'
+              - 'fixtures/**'
+              - 'migrations/**'
+              - 'justfile'
+              - '.github/workflows/reusable-ci.yml'
+              - '.github/workflows/ci-pr.yml'
+              - '.github/workflows/ci-main.yml'
+            conformance_oidc:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/zitadel-api/**'
+              - 'crates/zitadel-authn/**'
+              - 'crates/zitadel-login/**'
+              - 'crates/zitadel-oidc/**'
+              - 'crates/zitadel-server/**'
               - 'migrations/**'
               - 'fixtures/**'
               - 'conformance/**'
               - 'web/**'
-              - 'e2e/**'
               - 'package.json'
               - 'package-lock.json'
               - '.nvmrc'
@@ -80,38 +147,56 @@ jobs:
               - 'docs/**'
               - '.github/workflows/**'
               - 'justfile'
+            terraform_gcp:
+              - 'deploy/gcp-cloud-run/**'
+              - '.github/workflows/ci-pr.yml'
 
   ci:
-    name: Fast And Extended CI
+    name: PR / Fast And Families
     needs: changes
     uses: ./.github/workflows/reusable-ci.yml
     with:
+      execution_tier_label: PR
       run_docs: ${{ needs.changes.outputs.docs == 'true' }}
       run_fast_rust: ${{ needs.changes.outputs.fast_rust == 'true' }}
       run_fast_web: ${{ needs.changes.outputs.fast_web == 'true' }}
-      run_extended_e2e: ${{ needs.changes.outputs.extended_e2e == 'true' }}
-      run_browser_artifacts: ${{ needs.changes.outputs.extended_e2e == 'true' }}
+      run_journeys: ${{ needs.changes.outputs.journeys == 'true' }}
+      run_journeys_oidc: ${{ needs.changes.outputs.journeys_oidc == 'true' }}
+      run_contracts: ${{ needs.changes.outputs.contracts == 'true' }}
+      run_invariants: ${{ needs.changes.outputs.invariants == 'true' }}
+      run_subsystems: ${{ needs.changes.outputs.subsystems == 'true' }}
+      run_conformance_oidc: ${{ needs.changes.outputs.conformance_oidc == 'true' }}
+      run_browser_artifacts: ${{ needs.changes.outputs.journeys == 'true' || needs.changes.outputs.journeys_oidc == 'true' }}
       run_fuzz: ${{ needs.changes.outputs.fast_rust == 'true' }}
       artifact_prefix: pr
 
-  prepare-compliance-browser-artifacts:
-    name: Prepare Compliance Browser Artifacts
+  terraform-gcp-cloud-run:
+    name: Terraform GCP Cloud Run
     needs: changes
-    if: needs.changes.outputs.compliance_oidc == 'true'
-    uses: ./.github/workflows/reusable-ci.yml
-    with:
-      run_docs: false
-      run_fast_rust: false
-      run_fast_web: false
-      run_extended_e2e: false
-      run_browser_artifacts: true
-      artifact_prefix: compliance-oidc
+    if: needs.changes.outputs.terraform_gcp == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/gcp-cloud-run
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Init providers
+        run: terraform init -backend=false
+
+      - name: Validate configuration
+        run: terraform validate
 
   prepare-conformance-image:
-    name: Prepare Conformance Image
+    name: PR / Prepare / Conformance Image
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.compliance_oidc == 'true'
+    if: needs.changes.outputs.conformance_oidc == 'true'
     outputs:
       image_tag: ${{ steps.image_meta.outputs.image_tag }}
     steps:
@@ -133,8 +218,8 @@ jobs:
           file: ./Dockerfile
           tags: ${{ steps.image_meta.outputs.image_tag }}
           outputs: type=docker,dest=${{ github.workspace }}/.ci-tmp/zitadel-oidc-conformance.tar
-          cache-from: type=gha,scope=compliance-oidc-image
-          cache-to: type=gha,mode=max,scope=compliance-oidc-image
+          cache-from: type=gha,scope=oidc-protocol-compliance-image
+          cache-to: type=gha,mode=max,scope=oidc-protocol-compliance-image
 
       - name: Compress conformance image
         run: gzip -1 "$GITHUB_WORKSPACE/.ci-tmp/zitadel-oidc-conformance.tar"
@@ -142,18 +227,17 @@ jobs:
       - name: Upload conformance image artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: compliance-oidc-image
+          name: oidc-protocol-compliance-image
           path: ${{ github.workspace }}/.ci-tmp/zitadel-oidc-conformance.tar.gz
           retention-days: 1
 
-  compliance-oidc:
-    name: Compliance OIDC
+  oidc-protocol-compliance:
+    name: PR / Conformance / OIDC
     runs-on: ubuntu-latest
     needs:
       - changes
-      - prepare-compliance-browser-artifacts
       - prepare-conformance-image
-    if: always() && needs.changes.outputs.compliance_oidc == 'true'
+    if: always() && needs.changes.outputs.conformance_oidc == 'true'
     permissions:
       contents: read
       issues: write
@@ -163,13 +247,12 @@ jobs:
       artifact-id: ${{ steps.upload_artifact.outputs.artifact-id }}
       artifact-url: ${{ steps.upload_artifact.outputs.artifact-url }}
     env:
-      OIDC_CONFORMANCE_SURFACE: both
+      OIDC_CONFORMANCE_SURFACE: op
       OIDC_CONFORMANCE_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/oidc-conformance
       OIDC_CONFORMANCE_SUMMARY_MD: ${{ github.workspace }}/artifacts/oidc-conformance/summary.md
       OIDC_CONFORMANCE_SUMMARY_JSON: ${{ github.workspace }}/artifacts/oidc-conformance/summary.json
       OIDC_CONFORMANCE_COMMENT_MD: ${{ github.workspace }}/artifacts/oidc-conformance/comment.md
       CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_E2E_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
       OIDC_CONFORMANCE_ZITADEL_IMAGE: ${{ needs.prepare-conformance-image.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v6.0.2
@@ -182,62 +265,24 @@ jobs:
         id: preflight
         continue-on-error: true
         run: |
-          test "${{ needs.prepare-compliance-browser-artifacts.result }}" = "success"
           test "${{ needs.prepare-conformance-image.result }}" = "success"
-
-      - name: Restore prepared zitadel binary
-        if: steps.preflight.outcome == 'success'
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: compliance-oidc-zitadel-binary
-          path: .
-
-      - name: Extract prepared zitadel binary
-        if: steps.preflight.outcome == 'success'
-        run: |
-          mkdir -p "$CI_TMP_DIR/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
 
       - name: Restore prepared conformance image
         if: steps.preflight.outcome == 'success'
         uses: actions/download-artifact@v4.3.0
         with:
-          name: compliance-oidc-image
+          name: oidc-protocol-compliance-image
           path: ${{ github.workspace }}/.ci-tmp/compliance-image
 
       - name: Load prepared conformance image
         if: steps.preflight.outcome == 'success'
         run: gunzip -c "$CI_TMP_DIR/compliance-image/zitadel-oidc-conformance.tar.gz" | docker load
 
-      - uses: actions/setup-node@v6.3.0
-        if: steps.preflight.outcome == 'success'
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        if: steps.preflight.outcome == 'success'
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install dependencies
-        if: steps.preflight.outcome == 'success'
-        run: npm ci --prefer-offline
-
-      - name: Install Chromium
-        if: steps.preflight.outcome == 'success'
-        run: npx playwright install --with-deps chromium
-
-      - name: Run Compliance OIDC
+      - name: Run OIDC Protocol Compliance
         id: run_conformance
         if: steps.preflight.outcome == 'success'
         continue-on-error: true
-        run: just oidc-conformance
+        run: just conformance-oidc
 
       - name: Resolve compliance run status
         if: always()
@@ -249,7 +294,7 @@ jobs:
           fi
           echo "value=$status" >> "$GITHUB_OUTPUT"
 
-      - name: Summarize Compliance OIDC
+      - name: Summarize OIDC Protocol Compliance
         if: always()
         id: summarize
         run: |
@@ -261,17 +306,17 @@ jobs:
             --json-out "$OIDC_CONFORMANCE_SUMMARY_JSON" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Upload Compliance OIDC artifacts
+      - name: Upload OIDC Protocol Compliance artifacts
         if: always()
         id: upload_artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: compliance-oidc-pr-${{ github.event.pull_request.number }}
+          name: pr-conformance-oidc-${{ github.event.pull_request.number }}
           path: artifacts/oidc-conformance
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Compose Compliance OIDC comment
+      - name: Compose OIDC Protocol Compliance comment
         if: always()
         env:
           ARTIFACT_URL: ${{ steps.upload_artifact.outputs.artifact-url }}
@@ -283,11 +328,11 @@ jobs:
             printf -- '- Artifact: [download](%s)\n' "$ARTIFACT_URL" >> "$OIDC_CONFORMANCE_COMMENT_MD"
           fi
 
-      - name: Publish Compliance OIDC summary
+      - name: Publish OIDC Protocol Compliance summary
         if: always()
         run: cat "$OIDC_CONFORMANCE_COMMENT_MD" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Update Compliance OIDC PR comment
+      - name: Update OIDC Protocol Compliance PR comment
         if: always() && github.event.pull_request.head.repo.fork == false
         uses: actions/github-script@v8
         env:
@@ -295,7 +340,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const marker = '<!-- compliance-oidc-report -->';
+            const marker = '<!-- oidc-protocol-compliance-report -->';
             const body = `${marker}\n${fs.readFileSync(process.env.COMMENT_PATH, 'utf8')}`;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
@@ -324,6 +369,6 @@ jobs:
               });
             }
 
-      - name: Fail if Compliance OIDC failed
+      - name: Fail if OIDC Protocol Compliance failed
         if: always() && (steps.preflight.outcome != 'success' || steps.run_conformance.outcome != 'success')
         run: exit 1

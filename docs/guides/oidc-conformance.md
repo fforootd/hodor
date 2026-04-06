@@ -1,39 +1,48 @@
-# Compliance OIDC
+# OIDC Protocol Compliance
 
-The repository uses a dedicated `Compliance OIDC` lane for protocol-focused coverage. The local entrypoints stay the same:
+The repository uses a dedicated `OIDC Protocol Compliance` lane for official protocol validation. In the current repo, that means the OpenID Provider conformance lane only.
 
 ```bash
+just conformance-oidc
 just oidc-conformance-op
-just oidc-conformance-rp
-just oidc-conformance
-just oidc-conformance-clean
+just conformance-oidc-clean
 ```
 
 ## What Each Target Does
 
+- `just conformance-oidc`
+  Runs the canonical OIDC protocol compliance lane. Today this resolves to the OP conformance target.
 - `just oidc-conformance-op`
   Runs the official OpenID Foundation conformance suite against Zitadel as an OpenID Provider. The current repo target is the Core Basic static-client profile.
-- `just oidc-conformance-rp`
-  Runs the current RP-focused regression lane using the repository's Playwright OIDC RP suite.
-- `just oidc-conformance`
-  Runs both surfaces by default.
-- `just oidc-conformance-clean`
+- `just conformance-oidc-clean`
   Stops and removes the local Dockerized conformance stack.
 
-The OP lane is the official protocol conformance lane. The current profile is intentionally narrower than full certification: it runs the Core Basic static-client plan through an HTTPS reverse proxy plus a plain HTML conformance login surface. The RP lane is the current reproducible regression path for the Zitadel RP and broker flow. A dedicated OIDF RP harness and broader OP profiles can be added later without changing the top-level entrypoints.
+The repository also keeps a temporary compatibility alias:
 
-In CI, the lane is wired as:
-- `Prepare Rust Binary` for the RP surface
-- `Prepare Conformance Image` for the OP surface
-- `Compliance OIDC` for the final aggregated run, summary, and artifacts
+- `just oidc-conformance`
+  Prints a deprecation warning, then forwards to `just conformance-oidc`.
+- `just oidc-conformance-rp`
+  Prints a deprecation warning, then forwards to `just journeys-oidc-rp`. This is a browser journey, not official protocol compliance.
 
-This keeps protocol coverage under one domain name while still letting the OP and RP surfaces consume the correct prepared output.
+OIDC browser regression coverage now lives in the Journeys family instead of Conformance:
+
+```bash
+just journeys-oidc
+just journeys-oidc-op
+just journeys-oidc-rp
+```
+
+In CI, protocol compliance is wired as:
+
+- `Prepare Conformance Image`
+- `OIDC Protocol Compliance`
+
+That boundary is intentional: journeys protect Zitadel-specific product behavior, while conformance protects official standards behavior.
 
 ## Requirements
 
 - Docker with Compose support
 - `git`
-- `npm ci` completed for the workspace when running the RP lane
 
 The OP lane clones the pinned OIDF suite release into `${XDG_CACHE_HOME:-$HOME/.cache}/hodor/oidc-conformance/` by default, builds the suite JAR with Docker, starts the suite stack, then starts a dedicated Zitadel container on the same Docker network.
 
@@ -45,23 +54,10 @@ Run only the OP conformance lane:
 just oidc-conformance-op
 ```
 
-Run only the RP daily lane:
+Run the canonical protocol lane:
 
 ```bash
-just oidc-conformance-rp
-```
-
-Run both:
-
-```bash
-just oidc-conformance
-```
-
-You can also select the aggregate surface explicitly:
-
-```bash
-just oidc-conformance op
-just oidc-conformance rp
+just conformance-oidc
 ```
 
 ## Artifacts And Debugging
@@ -80,10 +76,7 @@ Useful environment variables:
 - `OIDC_CONFORMANCE_SUITE_REF`
 - `OIDC_CONFORMANCE_PROJECT`
 - `OIDC_CONFORMANCE_ZITADEL_IMAGE`
-- `ZITADEL_E2E_BINARY`
 
 `OIDC_CONFORMANCE_ZITADEL_IMAGE` lets CI or local callers provide a prebuilt Docker image for the OP lane instead of rebuilding via `docker compose --build`.
-
-`ZITADEL_E2E_BINARY` lets CI or local callers provide a prepared Zitadel binary for the RP lane instead of rebuilding with `cargo build -p zitadel`.
 
 When `OIDC_CONFORMANCE_KEEP_STACK=1` is set, the OP Docker stack stays up after the run for manual debugging.

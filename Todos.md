@@ -1,47 +1,60 @@
 # Hodor Todos
 
+> Last cleaned: 2026-04-05. Completed items removed (preserved in git history).
+
+## Protocol & Identity
+
 - SAML SP, IDP (will be annoying in rust as well)
-- IdentityListView should we UserListView
-- ~~Secrets encryption in secrets storage with list of masterkeys~~ ✅ ALE: AES-256-GCM envelope encryption with rotatable key ring, `secrets` table
-- Groups as Marketplace addon for FGA?
-- Should we also store the flows? In the events... also we want to instrument them meaning the client provides trace context and so on
-- Timestamps should be local time not UTC in the UI
-- Secrets generator defaults.... I think we should store that on the user schemas
-- toml really the best idea? Should we consider creating a schema for the config instead?
-- CLI to transfrom data from auth0, keycloak into zitadel (migratiion cases). The cli should check the import files against the schemas and badge the uploads with error and progress trackings
-- ~~OTEL for zitadel~~ ✅ Tier 3 fire-and-forget with circuit breakers
-- Observabilty ingestion from sdk
 - OP Claim mappings and validation with schema and expr
-- Load test
-- Describe interaction Schmema FGA and EXPR
-- Move all objects into the metaschema
-- Generate UI stubs from schemas?
-- Should we allow customers to store sync schemas, setting and such things from git?
-- Use Goose for DB migrations
-- User Uniqeness per org not per instance
-- Make sure uniqness is given for ids as well as username or other fields from schemas
-- Test first time onboarding wizard... a) if it even works and b) security wise
-- ~~Caching, etag, cache control, hot path in-memory, redis, sql? (some after load tests)~~ ✅ ADR-017: tiered caching (L1 in-db, L2 SQLite, L3 Redis opt-in, L4 HTTP/ETag)
-- Frontend Packages and webcomponents
-- ~~Circuit Breakers for non critical stuff OTEL... Analytics, to be sure OLPT keeps stable~~ ✅ CB on OTEL sink, drainer, and analytics
-- Login better error handling
-- ~~We should allow to redact or hash the IP addresses~~ ✅ IP modes: keep, redact, hash, mask
-- Single user list
-- ~~Circtui breakers~~ ✅ implemented on all non-critical sinks
-- Usage telemetry
-- ~~Logger~~ ✅ three-tier logging with per-stream modes (buffered/sampled/off)
 - Client generation for SDKs (starting with TS/JS which we need for Vue anyways)
-- ~~Refactor storage interfaces, we should have clear interfaces for in-mem, sql and redis with circuit breakers and everything.~~ ✅ generic Cache[K,V] interface planned in ADR-017
-- We need to document how managed service for the storages work
-- ~~Http middleware think what fields we want to store (token hash, user agent, ip, etc.)~~ ✅ RequestLogMiddleware stores method, path, status, duration, actor_id
-- ~~Clarify how the middleware works and make sure its rock solid esp. with the circuit breakers, actions logic~~ ✅ Middleware → logger → cache → drainer (CB isolated)
-- Actions logic with webhooks
-- Vscode extension
+- Token settings per instance - per org - per project - per app
+
+## Schema & Data Model
+
+- Move all objects into the metaschema
+- Describe interaction Schema FGA and EXPR
+- Generate UI stubs from schemas?
+- User uniqueness per org not per instance
+- Make sure uniqueness is given for ids as well as username or other fields from schemas
+- Secrets generator defaults — should store on user schemas
+- toml really the best idea? Should we consider creating a schema for the config instead?
+
+## Developer Experience
+
+- IdentityListView should be UserListView
+- Should we allow customers to store/sync schemas, settings and such things from git?
+- Use Goose for DB migrations
+- Test first time onboarding wizard — a) if it even works and b) security wise
+- CLI to transform data from auth0, keycloak into zitadel (migration cases). The CLI should check the import files against the schemas and badge the uploads with error and progress tracking
+- VSCode extension
 - Remote MCP
-- ~~Shared cache with PG unlogged tables or redis for high scale cases (we need to define though what needs to go in there) -> auth requests, session ??~~ ✅ Defined in ADR-017 L3: session tokens, rate limits, auth requests (Redis opt-in)
-- ~~Start-without-migrations CLI devex (separate from caching ADR — affects CLI UX: start vs start-from-*)~~ ✅ ADR-018: `start` + `migrate` commands, config-driven lifecycle (auto/check/skip)
+
+## Observability
+
+- Observability ingestion from SDK
+- Usage telemetry
+
+## UI / Frontend
+
+- Timestamps should be local time not UTC in the UI
+- Frontend packages and web components
+- Login better error handling
+- Single user list
+
+## Cloud & Operations
+
+- We need to document how managed service for the storages work
+
+## Actions & Integrations
+
+- Should we also store the flows? In the events... also we want to instrument them meaning the client provides trace context and so on
+- Actions logic with webhooks
+- Groups as marketplace addon for FGA?
+
+## Cache & Performance
+
+- Load test
 - PG unlogged tables evaluation (deferred to post-perf-test — see ADR-017)
 - Implement L4 HTTP caching: ETag for OIDC Discovery, JWKS, schema definitions
 - Implement SQLite kv_cache + query_cache tables (ADR-017 L2 expansion)
 - Generic Cache[K,V] interface implementation (SQLite + in-memory + Redis backends)
-- Token settings per instance - per org - per project - per app

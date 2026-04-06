@@ -32,7 +32,9 @@ pub(crate) async fn load_login_flow_impl(
     let scoped = kv.scoped(instance_id);
     let sql = format!(
         "SELECT COALESCE(step, 'identifier'), COALESCE({}, '{{}}'), COALESCE(redirect_uri, '') \
-         FROM auth_states WHERE instance_id = $1 AND id = $2 AND type = 'login_flow'",
+         FROM auth_states \
+         WHERE instance_id = $1 AND id = $2 AND type = 'login_flow' \
+           AND done = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
         scoped.as_text("data"),
     );
     let row: Option<(String, String, String)> = sqlx::query_as(&sql)
@@ -57,7 +59,9 @@ pub(crate) async fn set_login_flow_step_impl(
 ) -> anyhow::Result<bool> {
     let scoped = kv.scoped(instance_id);
     let result = sqlx::query(
-        "UPDATE auth_states SET step = $1 WHERE instance_id = $2 AND id = $3 AND type = 'login_flow'",
+        "UPDATE auth_states SET step = $1 \
+         WHERE instance_id = $2 AND id = $3 AND type = 'login_flow' \
+           AND done = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
     )
     .bind(step)
     .bind(scoped.instance_id())
@@ -76,7 +80,9 @@ pub(crate) async fn advance_login_flow_to_password_impl(
 ) -> anyhow::Result<bool> {
     let scoped = kv.scoped(instance_id);
     let sql = format!(
-        "UPDATE auth_states SET step = 'password', user_id = $1, data = {} WHERE instance_id = $2 AND id = $3",
+        "UPDATE auth_states SET step = 'password', user_id = $1, data = {} \
+         WHERE instance_id = $2 AND id = $3 AND type = 'login_flow' \
+           AND done = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
         scoped.json_bind(4),
     );
     let result = sqlx::query(&sql)
@@ -97,7 +103,9 @@ pub(crate) async fn update_login_flow_data_impl(
 ) -> anyhow::Result<bool> {
     let scoped = kv.scoped(instance_id);
     let sql = format!(
-        "UPDATE auth_states SET data = {} WHERE instance_id = $1 AND id = $2 AND type = 'login_flow'",
+        "UPDATE auth_states SET data = {} \
+         WHERE instance_id = $1 AND id = $2 AND type = 'login_flow' \
+           AND done = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
         scoped.json_bind(3),
     );
     let result = sqlx::query(&sql)
@@ -116,7 +124,9 @@ pub(crate) async fn complete_login_flow_impl(
 ) -> anyhow::Result<bool> {
     let scoped = kv.scoped(instance_id);
     let result = sqlx::query(
-        "UPDATE auth_states SET step = 'complete', done = 1 WHERE instance_id = $1 AND id = $2",
+        "UPDATE auth_states SET step = 'complete', done = 1 \
+         WHERE instance_id = $1 AND id = $2 AND type = 'login_flow' \
+           AND done = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
     )
     .bind(scoped.instance_id())
     .bind(flow_id)

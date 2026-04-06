@@ -1,9 +1,6 @@
 use crate::{ApiState, middleware::Identity, response};
 use axum::{Extension, Router, extract::State, response::Response, routing::get};
-use zitadel_db::{
-    FeatureMap, feature_enabled, load_console_bootstrap_data, load_entity_counts,
-    merge_feature_overrides,
-};
+use zitadel_db::{FeatureMap, feature_enabled, merge_feature_overrides};
 
 const META_SCHEMA: &str = include_str!("meta_schema.json");
 const ALLOWED_INSTANCE_FEATURES: &[&str] = &["instance_management", "billing"];
@@ -32,14 +29,17 @@ async fn bootstrap(
     // Keys must match the x-catalog type names so the frontend's applyCounts()
     // can resolve them — aggregate parents (e.g. "users") sum their children
     // (human_user + service_user + ai_agent), so we return per-subtype counts.
-    let bootstrap = match load_console_bootstrap_data(
-        &s.db,
-        zitadel_db::current_instance_id().as_ref(),
-    )
-    .await
+    let ctx = response::build_actor_context(&identity);
+    let bootstrap = match s
+        .app
+        .runner
+        .run_fn(&ctx, "console.bootstrap", || {
+            s.app.load_console_bootstrap.execute(&ctx)
+        })
+        .await
     {
         Ok(data) => data,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::app_error(error),
     };
 
     let counts = bootstrap
@@ -130,8 +130,19 @@ async fn bootstrap(
 }
 
 /// Entity counts for sidebar badges.
-async fn entity_counts(State(s): State<ApiState>) -> Response {
-    match load_entity_counts(&s.db, zitadel_db::current_instance_id().as_ref()).await {
+async fn entity_counts(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "console.entity_counts", || {
+            s.app.load_entity_counts.execute(&ctx)
+        })
+        .await
+    {
         Ok(counts) => {
             let result = counts
                 .into_iter()
@@ -139,6 +150,6 @@ async fn entity_counts(State(s): State<ApiState>) -> Response {
                 .collect::<serde_json::Map<String, serde_json::Value>>();
             response::json_ok(serde_json::Value::Object(result))
         }
-        Err(error) => response::internal_error(format!("{error}")),
+        Err(error) => response::app_error(error),
     }
 }

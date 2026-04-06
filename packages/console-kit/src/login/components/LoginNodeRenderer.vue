@@ -26,7 +26,7 @@
   </template>
 
   <Transition name="fade" mode="out-in">
-    <form v-if="flowStep" :key="flowStep.step" class="space-y-4" @submit.prevent="emit('submit')">
+    <form v-if="flowStep" :key="flowStep.step" class="space-y-4" @submit.prevent="handleSubmit">
       <template v-for="(node, i) in orderedNodes" :key="i">
         <h1 v-if="node.type === 'heading'" class="text-xl font-semibold text-center">
           {{ node.text }}
@@ -161,6 +161,7 @@
           v-else-if="node.type === 'submit'"
           :type="node.action === 'back' ? 'button' : 'submit'"
           :variant="node.action === 'back' ? 'outline' : 'default'"
+          :data-action="node.action || ''"
           class="w-full"
           :disabled="
             preview ||
@@ -169,7 +170,7 @@
             !passwordsMatch ||
             actionDisabled(node.action || '')
           "
-          @click="emit('action', node.action || '')"
+          @click="node.action === 'back' ? emit('action', node.action || '') : undefined"
         >
           <Spinner v-if="loading" class="size-4 mr-2" />
           {{ loading ? 'Loading...' : node.label }}
@@ -343,7 +344,7 @@
   )
 
   const emit = defineEmits<{
-    submit: []
+    submit: [action?: string]
     action: [action: string, extra?: Record<string, string>]
     'update:form-data': [value: Record<string, any>]
     'update:confirm-passwords': [value: Record<string, string>]
@@ -419,6 +420,12 @@
       ...confirmPasswords.value,
       [name]: String(value ?? ''),
     })
+  }
+
+  function handleSubmit(event: Event) {
+    const submitter = (event as SubmitEvent).submitter as HTMLElement | null
+    const action = submitter?.getAttribute('data-action') || undefined
+    emit('submit', action)
   }
 
   function escapeHtml(str: string): string {

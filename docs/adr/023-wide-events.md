@@ -2,7 +2,7 @@
 
 **Status**: Accepted  
 **Date**: 2026-03-29  
-**Builds on**: ADR-010 (Three-Tier Data), ADR-004 (Apps as Identities), ADR-017 (SDK Generation)  
+**Builds on**: ADR-010 (Three-Tier Data), ADR-004 (Apps as Identities), ADR-014 (SDK Generation)  
 **Supersedes**: The implicit OTEL-as-internal-model pattern
 
 ## Context

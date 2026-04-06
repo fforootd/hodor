@@ -221,6 +221,7 @@ async fn analytics_row_map(
     let result = analytics
         .query(&AnalyticsQuery {
             sql,
+            params: vec![],
             limit: Some(1),
         })
         .await?;
@@ -253,6 +254,7 @@ async fn fetch_timestamps(
     let result = analytics
         .query(&AnalyticsQuery {
             sql,
+            params: vec![],
             limit: Some(5000),
         })
         .await?;
@@ -279,6 +281,7 @@ async fn fetch_breakdown(
     let result = analytics
         .query(&AnalyticsQuery {
             sql,
+            params: vec![],
             limit: Some(8),
         })
         .await?;

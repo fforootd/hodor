@@ -31,6 +31,41 @@ pub struct Repositories {
     pub pats: Arc<dyn PatRepository>,
     pub search: Arc<dyn SearchRepository>,
     pub actions: Arc<dyn ActionRepository>,
+    pub raw: Arc<dyn RawQueryRepository>,
+    pub uow: Arc<dyn UnitOfWorkFactory>,
+}
+
+// ─── Unit of Work ──────────────────────────────────────────
+
+/// Factory for creating transactional scopes (ADR-032 §5).
+///
+/// A `UnitOfWork` collects domain events and flushes them atomically
+/// when `commit()` is called. State mutations go through the normal
+/// repository methods; events are buffered and written in a single
+/// transaction on commit.
+pub trait UnitOfWorkFactory: Send + Sync {
+    fn begin<'a>(
+        &'a self,
+        instance_id: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<Box<dyn UnitOfWork>>>;
+}
+
+/// A transactional scope that buffers domain events and commits them
+/// atomically. Use cases call `buffer_event()` instead of
+/// `repos.events.append()`, then `commit()` at the end.
+pub trait UnitOfWork: Send {
+    /// Buffer an event for atomic commit.
+    fn buffer_event(
+        &mut self,
+        event: DomainEvent,
+        request_id: Option<String>,
+        session_id: Option<String>,
+        flow_id: Option<String>,
+    );
+
+    /// Commit all buffered events in a single transaction.
+    /// After this call, the UnitOfWork is consumed.
+    fn commit(self: Box<Self>) -> BoxFuture<'static, anyhow::Result<()>>;
 }
 
 // ─── Shared record types ───
@@ -92,7 +127,7 @@ pub struct InstanceRecord {
     pub kind: String,
     pub placement_mode: String,
     pub region_key: Option<String>,
-    pub owner_org_id: String,
+    pub owner_org_id: Option<String>,
     pub feature_overrides: serde_json::Value,
     pub primary_domain: Option<String>,
     pub created_at: String,
@@ -266,6 +301,7 @@ pub trait UserRepository: Send + Sync {
     ) -> BoxFuture<'_, anyhow::Result<UserRecord>>;
 
     fn deactivate(&self, instance_id: &str, user_id: &str) -> BoxFuture<'_, anyhow::Result<()>>;
+    fn delete(&self, instance_id: &str, user_id: &str) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
 pub trait OrgRepository: Send + Sync {
@@ -292,6 +328,8 @@ pub trait OrgRepository: Send + Sync {
         instance_id: &str,
         org: &OrgRecord,
     ) -> BoxFuture<'_, anyhow::Result<OrgRecord>>;
+
+    fn delete(&self, instance_id: &str, org_id: &str) -> BoxFuture<'_, anyhow::Result<bool>>;
 
     fn first_org_id(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Option<String>>>;
 }
@@ -335,6 +373,15 @@ pub trait CredentialRepository: Send + Sync {
         provider_id: &str,
         external_sub: &str,
     ) -> BoxFuture<'_, anyhow::Result<Option<LinkedIdentityRecord>>>;
+
+    fn touch_linked_identity(
+        &self,
+        instance_id: &str,
+        provider_id: &str,
+        external_sub: &str,
+        external_email: &str,
+        raw_claims: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
 pub trait SessionRepository: Send + Sync {
@@ -353,6 +400,13 @@ pub trait SessionRepository: Send + Sync {
     ) -> BoxFuture<'_, anyhow::Result<Option<SessionInfo>>>;
 
     fn revoke(&self, instance_id: &str, session_id: &str) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    fn update_metadata(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+        metadata_json: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
 #[derive(Clone, Debug)]
@@ -400,6 +454,20 @@ pub trait InstanceRepository: Send + Sync {
         instance_id: &str,
         domain: &DomainRecord,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn remove_domain(
+        &self,
+        instance_id: &str,
+        domain: &str,
+    ) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>>;
+}
+
+/// Outcome of a domain-removal attempt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DomainRemoveResult {
+    Deleted,
+    NotFound,
+    PrimaryDomain,
 }
 
 #[derive(Clone, Debug)]
@@ -454,6 +522,15 @@ pub trait LoginFlowRepository: Send + Sync {
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
     fn delete_flow(&self, instance_id: &str, flow_id: &str) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Atomically set a flow's state and enabled flag (for promote/archive).
+    fn set_state(
+        &self,
+        instance_id: &str,
+        flow_id: &str,
+        state: &str,
+        enabled: bool,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
 }
 
 pub trait OidcRepository: Send + Sync {
@@ -484,9 +561,11 @@ pub trait OidcRepository: Send + Sync {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OidcClientInfo {
+    pub app_id: String,
     pub client_id: String,
     pub client_secret: Option<String>,
     pub redirect_uris: Vec<String>,
+    pub post_logout_redirect_uris: Vec<String>,
     pub grant_types: Vec<String>,
     pub response_types: Vec<String>,
     pub state: String,
@@ -496,11 +575,18 @@ pub struct OidcClientInfo {
 pub struct OidcAuthRequest {
     pub id: String,
     pub user_id: Option<String>,
+    pub session_id: Option<String>,
     pub client_id: String,
     pub redirect_uri: String,
     pub scope: String,
+    pub state: String,
     pub nonce: Option<String>,
+    pub response_type: String,
     pub code_challenge: Option<String>,
+    pub code_challenge_method: Option<String>,
+    pub prompt: Vec<String>,
+    pub login_hint: Option<String>,
+    pub max_age: Option<u64>,
     pub auth_time: Option<String>,
 }
 
@@ -555,6 +641,12 @@ pub trait SettingsRepository: Send + Sync {
         settings: &SettingsRecord,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
+    fn delete(
+        &self,
+        instance_id: &str,
+        settings_type: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
     /// Resolve settings with cascade: instance defaults → org overrides → app overrides.
     fn resolve(
         &self,
@@ -574,27 +666,26 @@ pub trait FgaRepository: Send + Sync {
         object: &str,
     ) -> BoxFuture<'_, anyhow::Result<bool>>;
 
-    fn write_tuple(
+    /// Write relationship tuples (batch).
+    fn write(
         &self,
         instance_id: &str,
-        user: &str,
-        relation: &str,
-        object: &str,
+        writes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
-    fn delete_tuple(
+    /// Delete relationship tuples (batch).
+    fn delete(
         &self,
         instance_id: &str,
-        user: &str,
-        relation: &str,
-        object: &str,
+        deletes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
-    fn list_relations(
+    /// Read tuples matching an optional filter (user, relation, object).
+    /// Empty strings in the filter tuple mean "any".
+    fn read(
         &self,
         instance_id: &str,
-        user: &str,
-        object_type: &str,
+        filter: Option<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<Vec<FgaRelation>>>;
 }
 
@@ -635,6 +726,21 @@ pub trait SchemaRepository: Send + Sync {
         instance_id: &str,
         schema: &SchemaRecord,
     ) -> BoxFuture<'_, anyhow::Result<SchemaRecord>>;
+
+    /// Atomically promote a schema to `is_default = true`, demoting all other
+    /// schemas of the same type.
+    fn promote(
+        &self,
+        instance_id: &str,
+        schema_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    /// Count users that reference this schema.
+    fn count_by_schema(
+        &self,
+        instance_id: &str,
+        schema_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<i64>>;
 }
 
 pub trait GroupRepository: Send + Sync {
@@ -752,4 +858,161 @@ pub trait ActionRepository: Send + Sync {
     ) -> BoxFuture<'_, anyhow::Result<ActionRecord>>;
 
     fn delete(&self, instance_id: &str, action_id: &str) -> BoxFuture<'_, anyhow::Result<()>>;
+}
+
+// ─── Raw query repository ───
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NamedResourceRecord {
+    pub id: String,
+    pub name: String,
+    pub state: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleBootstrapData {
+    pub counts: Vec<(String, i64)>,
+    pub orgs: Vec<OrgSummary>,
+    pub instance: InstanceInfo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OrgSummary {
+    pub id: String,
+    pub name: String,
+    pub state: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InstanceInfo {
+    pub instance_id: String,
+    pub kind: String,
+    pub feature_overrides_json: String,
+    pub parent_instance_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FingerprintRecord {
+    pub id: String,
+    pub type_: String,
+    pub raw_data_json: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JobRecord {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub cron: String,
+    pub enabled: bool,
+    pub last_status: String,
+    pub last_error: String,
+    pub run_count: i64,
+    pub last_rows_removed: i64,
+    pub last_run_at: Option<String>,
+    pub next_run_at: Option<String>,
+    pub lease_expires_at: Option<String>,
+    pub config_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedQueryRecord {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub sql: String,
+    pub created_at: String,
+}
+
+pub trait RawQueryRepository: Send + Sync {
+    fn create_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+        name: &str,
+        org_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>>;
+
+    fn get_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>>;
+
+    fn list_named_resources(
+        &self,
+        instance_id: &str,
+        table: &str,
+        cursor: &str,
+        limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>>;
+
+    fn update_named_resource_name(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+        name: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    fn delete_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+
+    fn load_console_bootstrap(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<ConsoleBootstrapData>>;
+
+    fn load_entity_counts(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>>;
+
+    fn list_fingerprints(
+        &self,
+        instance_id: &str,
+        cursor: &str,
+        limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<FingerprintRecord>>>;
+
+    fn upsert_fingerprint(
+        &self,
+        instance_id: &str,
+        id: &str,
+        type_: &str,
+        raw_data: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn list_jobs(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<JobRecord>>>;
+
+    fn list_saved_queries(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SavedQueryRecord>>>;
+
+    fn create_saved_query(
+        &self,
+        instance_id: &str,
+        id: &str,
+        name: &str,
+        description: &str,
+        sql: &str,
+    ) -> BoxFuture<'_, anyhow::Result<SavedQueryRecord>>;
+
+    fn delete_saved_query(
+        &self,
+        instance_id: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>>;
 }

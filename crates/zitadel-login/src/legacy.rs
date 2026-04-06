@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::{current_instance_id, update_password_hash};
+use zitadel_db::current_instance_id;
 
 use crate::LoginState;
 use crate::redirect::build_auth_redirect;
@@ -94,24 +94,14 @@ pub(crate) async fn login(
 
     // Transparent hash migration.
     if let zitadel_authn::password::VerifyResult::NeedUpdate(new_hash) = verify_result {
-        let cred_json = zitadel_authn::password::encode_credential_json(&new_hash);
-        let _ = update_password_hash(&state.db, &instance_id, &user.user_id, &cred_json).await;
+        let _ = state
+            .app
+            .repos
+            .credentials
+            .set_password(&instance_id, &user.user_id, &new_hash)
+            .await;
     }
 
-    let auth_request = match state
-        .transient
-        .load_auth_request_redirect(&instance_id, &req.auth_request_id)
-        .await
-    {
-        Ok(auth_request) => auth_request,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load auth request: {e}")})),
-            )
-                .into_response();
-        }
-    };
     let created_session = match state
         .transient
         .create_session(&instance_id, &user.user_id, &user.org_id, "", "", "")
@@ -127,25 +117,36 @@ pub(crate) async fn login(
         }
     };
     let mut redirect_uri = String::new();
-    if let Some(auth_request) = auth_request {
+    if !req.auth_request_id.is_empty() {
         let code = Uuid::new_v4().to_string();
-        if let Err(e) = state
+        let auth_request = match state
             .transient
             .complete_auth_request(
                 &instance_id,
                 &req.auth_request_id,
                 &user.user_id,
+                Some(&created_session.session_id),
                 &code,
                 Some(&created_session.created_at),
             )
             .await
         {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("complete auth request: {e}")})),
-            )
-                .into_response();
-        }
+            Ok(Some(auth_request)) => auth_request,
+            Ok(None) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "authorization request no longer exists"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("complete auth request: {e}")})),
+                )
+                    .into_response();
+            }
+        };
         redirect_uri = build_auth_redirect(&auth_request.redirect_uri, &auth_request.state, &code);
     }
     // Sign session token and set as cookie.

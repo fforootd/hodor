@@ -74,7 +74,8 @@ struct InstanceResponse {
     placement_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     region_key: Option<String>,
-    owner_org_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner_org_id: Option<String>,
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     feature_overrides: serde_json::Value,
     created_at: String,
@@ -191,15 +192,10 @@ async fn create(
         primary_domain: Some(req.domain),
     };
 
-    match s.app.create_instance.execute(&ctx, cmd).await {
+    match s.app.runner.run_fn(&ctx, "instance.create", || s.app.create_instance.execute(&ctx, cmd)).await {
         Ok(instance) => {
-            // FGA reconcile after create — the use case doesn't handle this yet.
-            if let Err(error) = s
-                .fga
-                .reconcile_root_hierarchy(&access.root_instance_id)
-                .await
-            {
-                return response::internal_error(format!("{error}"));
+            if let Err(resp) = reconcile_after_mutation(&s, &access.root_instance_id).await {
+                return resp;
             }
             response::json_created(InstanceResponse::from(instance))
         }
@@ -222,7 +218,7 @@ async fn get_one(
         Err(response) => return response,
     }
     let ctx = response::build_actor_context(&identity);
-    match s.app.get_instance.execute(&ctx, &id).await {
+    match s.app.runner.run_fn(&ctx, "instance.get", || s.app.get_instance.execute(&ctx, &id)).await {
         Ok(instance) => response::json_ok(InstanceResponse::from(instance)),
         Err(e) => response::app_error(e),
     }
@@ -237,41 +233,99 @@ async fn list(
         Ok(access) => access,
         Err(response) => return response,
     };
+
+    // Operator admins bypass FGA filtering entirely.
+    if access.operator_admin {
+        let ctx = response::build_actor_context(&identity);
+        let params = AppListParams {
+            limit: Some(p.limit.min(200) as u32),
+            cursor: p.cursor,
+            search: None,
+        };
+        return match s.app.list_instances.execute(&ctx, &params).await {
+            Ok(result) => {
+                let items: Vec<InstanceResponse> =
+                    result.items.into_iter().map(InstanceResponse::from).collect();
+                response::json_ok(response::ListResponse {
+                    items,
+                    next_cursor: result.next_cursor,
+                    total: result.total_count.map(|c| c as i64),
+                })
+            }
+            Err(e) => response::app_error(e),
+        };
+    }
+
+    // Loop through DB pages and batch-filter each page via FGA
+    // (1 batch call per page instead of N individual checks per item).
     let ctx = response::build_actor_context(&identity);
-    let params = AppListParams {
-        limit: Some(p.limit.min(200) as u32),
-        cursor: p.cursor,
-        search: None,
-    };
-    match s.app.list_instances.execute(&ctx, &params).await {
-        Ok(result) => {
-            // Filter by FGA relation — each instance is checked individually.
-            // TODO: Push FGA filtering into the use case or repository layer.
-            let mut filtered = Vec::new();
-            for item in result.items {
-                match require_instance_relation(
-                    &s,
-                    &access,
-                    &identity.user_id,
-                    "viewer",
-                    &item.instance_id,
-                )
-                .await
-                {
-                    Ok(true) => filtered.push(item),
-                    Ok(false) => {}
-                    Err(resp) => return resp,
+    let requested_limit = p.limit.min(200) as usize;
+    let mut cursor = p.cursor;
+    let mut filtered = Vec::new();
+    let mut total = None;
+
+    loop {
+        let params = AppListParams {
+            limit: Some(requested_limit as u32),
+            cursor: cursor.clone(),
+            search: None,
+        };
+        let result = match s.app.list_instances.execute(&ctx, &params).await {
+            Ok(result) => result,
+            Err(e) => return response::app_error(e),
+        };
+        if total.is_none() {
+            total = result.total_count.map(|c| c as i64);
+        }
+
+        let page_next_cursor = result.next_cursor.clone();
+
+        // Batch-check FGA visibility for all items in this page.
+        let instance_ids: Vec<String> = result
+            .items
+            .iter()
+            .map(|item| item.instance_id.clone())
+            .collect();
+
+        let visible_ids = match s
+            .fga
+            .root_batch_filter(
+                &access.root_instance_id,
+                &identity.user_id,
+                "viewer",
+                "instance",
+                &instance_ids,
+            )
+            .await
+        {
+            Ok(ids) => ids,
+            Err(error) => return response::internal_error(format!("{error}")),
+        };
+
+        for item in result.items {
+            if visible_ids.contains(&item.instance_id) {
+                filtered.push(item);
+                if filtered.len() == requested_limit {
+                    let next_cursor = filtered.last().map(|r| r.instance_id.clone());
+                    let items = filtered.into_iter().map(InstanceResponse::from).collect();
+                    return response::json_ok(response::ListResponse {
+                        items,
+                        next_cursor,
+                        total,
+                    });
                 }
             }
-            let items: Vec<InstanceResponse> =
-                filtered.into_iter().map(InstanceResponse::from).collect();
-            response::json_ok(response::ListResponse {
-                items,
-                next_cursor: result.next_cursor,
-                total: result.total_count.map(|c| c as i64),
-            })
         }
-        Err(e) => response::app_error(e),
+
+        let Some(next_cursor) = page_next_cursor else {
+            let items = filtered.into_iter().map(InstanceResponse::from).collect();
+            return response::json_ok(response::ListResponse {
+                items,
+                next_cursor: None,
+                total,
+            });
+        };
+        cursor = Some(next_cursor);
     }
 }
 
@@ -306,15 +360,10 @@ async fn update(
         },
         feature_overrides: req.feature_overrides,
     };
-    match s.app.update_instance.execute(&ctx, cmd).await {
+    match s.app.runner.run_fn(&ctx, "instance.update", || s.app.update_instance.execute(&ctx, cmd)).await {
         Ok(instance) => {
-            // FGA reconcile after update — the use case doesn't handle this yet.
-            if let Err(error) = s
-                .fga
-                .reconcile_root_hierarchy(&access.root_instance_id)
-                .await
-            {
-                return response::internal_error(format!("{error}"));
+            if let Err(resp) = reconcile_after_mutation(&s, &access.root_instance_id).await {
+                return resp;
             }
             response::json_ok(InstanceResponse::from(instance))
         }
@@ -337,15 +386,10 @@ async fn delete_one(
         Err(response) => return response,
     }
     let ctx = response::build_actor_context(&identity);
-    match s.app.deprovision_instance.execute(&ctx, &id).await {
+    match s.app.runner.run_fn(&ctx, "instance.deprovision", || s.app.deprovision_instance.execute(&ctx, &id)).await {
         Ok(()) => {
-            // FGA reconcile after deprovision — the use case doesn't handle this yet.
-            if let Err(error) = s
-                .fga
-                .reconcile_root_hierarchy(&access.root_instance_id)
-                .await
-            {
-                return response::internal_error(format!("{error}"));
+            if let Err(resp) = reconcile_after_mutation(&s, &access.root_instance_id).await {
+                return resp;
             }
             response::no_content()
         }
@@ -353,8 +397,7 @@ async fn delete_one(
     }
 }
 
-// ── Domain management (still uses direct DB — no domain use cases yet) ──
-// TODO: Create domain use cases in zitadel-app and migrate these endpoints.
+// ─── Domain management ──────────────────────────────────────
 
 async fn list_domains(
     State(s): State<ApiState>,
@@ -367,10 +410,13 @@ async fn list_domains(
     };
     match require_instance_relation(&s, &access, &identity.user_id, "viewer", &id).await {
         Ok(false) => response::not_found("instance not found"),
-        Ok(true) => match zitadel_db::list_instance_domains(&s.db, &id).await {
-            Ok(items) => response::json_ok(serde_json::json!({ "items": items })),
-            Err(error) => response::internal_error(format!("{error}")),
-        },
+        Ok(true) => {
+            let ctx = response::build_actor_context(&identity);
+            match s.app.runner.run_fn(&ctx, "instance.list_domains", || s.app.list_domains.execute(&ctx, &id)).await {
+                Ok(items) => response::json_ok(serde_json::json!({ "items": items })),
+                Err(e) => response::app_error(e),
+            }
+        }
         Err(response) => response,
     }
 }
@@ -385,15 +431,19 @@ async fn add_domain(
         Ok(access) => access,
         Err(response) => return response,
     };
-    if req.domain.is_empty() {
-        return response::bad_request("domain is required");
-    }
     match require_instance_relation(&s, &access, &identity.user_id, "admin", &id).await {
         Ok(false) => response::not_found("instance not found"),
-        Ok(true) => match zitadel_db::add_instance_domain(&s.db, &id, &req.domain).await {
-            Ok(domain) => response::json_created(domain),
-            Err(error) => response::bad_request(format!("domain already taken: {error}")),
-        },
+        Ok(true) => {
+            let ctx = response::build_actor_context(&identity);
+            let cmd = zitadel_app::instances::AddDomainCommand {
+                instance_id: id,
+                domain: req.domain,
+            };
+            match s.app.runner.run_fn(&ctx, "instance.add_domain", || s.app.add_domain.execute(&ctx, cmd)).await {
+                Ok(domain) => response::json_created(domain),
+                Err(e) => response::app_error(e),
+            }
+        }
         Err(response) => response,
     }
 }
@@ -409,16 +459,19 @@ async fn remove_domain(
     };
     match require_instance_relation(&s, &access, &identity.user_id, "admin", &id).await {
         Ok(false) => response::not_found("instance not found"),
-        Ok(true) => match zitadel_db::delete_instance_domain(&s.db, &id, &domain).await {
-            Ok(zitadel_db::DomainDeleteOutcome::Deleted) => response::no_content(),
-            Ok(zitadel_db::DomainDeleteOutcome::NotFound) => {
-                response::not_found("domain not found")
+        Ok(true) => {
+            let ctx = response::build_actor_context(&identity);
+            match s.app.runner.run_fn(&ctx, "instance.remove_domain", || s.app.remove_domain.execute(&ctx, &id, &domain)).await {
+                Ok(zitadel_app::repo::DomainRemoveResult::Deleted) => response::no_content(),
+                Ok(zitadel_app::repo::DomainRemoveResult::NotFound) => {
+                    response::not_found("domain not found")
+                }
+                Ok(zitadel_app::repo::DomainRemoveResult::PrimaryDomain) => {
+                    response::bad_request("cannot remove primary domain")
+                }
+                Err(e) => response::app_error(e),
             }
-            Ok(zitadel_db::DomainDeleteOutcome::PrimaryDomain) => {
-                response::bad_request("cannot remove primary domain")
-            }
-            Err(error) => response::internal_error(format!("{error}")),
-        },
+        }
         Err(response) => response,
     }
 }
@@ -426,8 +479,8 @@ async fn remove_domain(
 // ── Root management helpers (transport-level authorization) ──
 
 /// Verify that the current request targets the root instance and build
-/// a `ManagementAccess` token. Uses `get_instance` use case to look up
-/// the current instance metadata.
+/// a `ManagementAccess` token. Reconciles FGA hierarchy for non-operator
+/// users so that authorization checks have up-to-date data.
 async fn require_root_management(
     state: &ApiState,
     identity: &Identity,
@@ -448,17 +501,32 @@ async fn require_root_management(
         ));
     }
 
-    state
-        .fga
-        .reconcile_root_hierarchy(&instance.instance_id)
-        .await
-        .map_err(|error| response::internal_error(format!("{error}")))?;
+    // Operator admins bypass FGA entirely, so skip reconcile for them.
+    if !identity.operator_admin {
+        state
+            .fga
+            .reconcile_root_hierarchy(&instance.instance_id)
+            .await
+            .map_err(|error| response::internal_error(format!("{error}")))?;
+    }
 
     Ok(ManagementAccess {
         root_instance_id: instance.instance_id,
         owner_org_id: identity.org_id.clone(),
         operator_admin: identity.operator_admin,
     })
+}
+
+/// Reconcile the FGA hierarchy after a write operation.
+async fn reconcile_after_mutation(
+    state: &ApiState,
+    root_instance_id: &str,
+) -> Result<(), Response> {
+    state
+        .fga
+        .reconcile_root_hierarchy(root_instance_id)
+        .await
+        .map_err(|error| response::internal_error(format!("{error}")))
 }
 
 async fn require_instance_relation(

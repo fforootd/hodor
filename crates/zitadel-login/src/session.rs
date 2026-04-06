@@ -1,8 +1,9 @@
 use crate::LoginState;
-use zitadel_db::{current_instance_id, load_session_user_profile};
+use zitadel_db::current_instance_id;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionUser {
+    pub session_id: String,
     pub user_id: String,
     pub identifier: String,
     pub display_name: String,
@@ -48,12 +49,17 @@ pub(crate) async fn extract_session_user(
                 .await
                 .ok()??;
 
-            // Load user details.
-            let (identifier, display_name) =
-                load_session_user_profile(&state.db, &instance_id, &session.user_id)
-                    .await
-                    .ok()??;
+            // Load user details via repos.
+            let user = state
+                .app
+                .repos
+                .users
+                .get(&instance_id, &session.user_id)
+                .await
+                .ok()??;
+            let (identifier, display_name) = (user.identifier, user.display_name);
             return Some(SessionUser {
+                session_id: session.id,
                 user_id: session.user_id,
                 identifier,
                 display_name,

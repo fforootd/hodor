@@ -1,14 +1,12 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Query, State},
     response::Response,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use zitadel_db::{
-    current_instance_id, list_fingerprints as db_list_fingerprints, upsert_fingerprint,
-};
+use zitadel_app::telemetry::UpsertFingerprintCommand;
 
 /// Authenticated routes (list fingerprints).
 pub fn routes() -> Router<ApiState> {
@@ -42,11 +40,15 @@ struct IngestFingerprintRequest {
 /// GET /v1/telemetry/fingerprints — list device fingerprints with cursor pagination.
 async fn list_fingerprints(
     State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
     Query(p): Query<response::PaginationParams>,
 ) -> Response {
+    let ctx = response::build_actor_context(&identity);
     let cursor = p.cursor.unwrap_or_default();
     let limit = p.limit.min(200);
-    match db_list_fingerprints(&s.db, current_instance_id().as_ref(), &cursor, limit + 1).await {
+    match s.app.runner.run_fn(&ctx, "telemetry.list_fingerprints", || {
+        s.app.list_fingerprints.execute(&ctx, &cursor, limit + 1)
+    }).await {
         Ok(rows) => {
             let has_more = rows.len() as i64 > limit;
             let items: Vec<FingerprintResponse> = rows
@@ -71,7 +73,7 @@ async fn list_fingerprints(
                 total: None,
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
@@ -80,6 +82,25 @@ async fn ingest_fingerprint(
     State(s): State<ApiState>,
     Json(req): Json<IngestFingerprintRequest>,
 ) -> Response {
+    let instance_id = zitadel_db::current_instance_id();
+    let ctx = zitadel_app::ActorContext {
+        auth: zitadel_app::AuthContext {
+            identity: zitadel_app::Identity {
+                user_id: String::new(),
+                session_id: String::new(),
+                token_type: "anonymous".to_string(),
+                org_id: String::new(),
+            },
+            capabilities: vec![],
+        },
+        instance: zitadel_app::InstanceContext {
+            instance_id: instance_id.into_owned(),
+            placement_mode: String::new(),
+            region_key: None,
+            feature_overrides: std::collections::HashMap::new(),
+            host: String::new(),
+        },
+    };
     let id = if req.id.is_empty() {
         uuid::Uuid::new_v4().to_string()
     } else {
@@ -91,16 +112,15 @@ async fn ingest_fingerprint(
         req.type_
     };
     let raw_data = serde_json::to_string(&req.raw_data).unwrap_or_else(|_| "{}".into());
-    match upsert_fingerprint(
-        &s.db,
-        current_instance_id().as_ref(),
-        &id,
-        &type_,
-        &raw_data,
-    )
-    .await
-    {
-        Ok(_) => response::json_created(serde_json::json!({"id": id})),
-        Err(e) => response::bad_request(format!("ingest fingerprint: {e}")),
+    let cmd = UpsertFingerprintCommand {
+        id: id.clone(),
+        type_,
+        raw_data,
+    };
+    match s.app.runner.run_fn(&ctx, "telemetry.upsert_fingerprint", || {
+        s.app.upsert_fingerprint.execute(&ctx, cmd)
+    }).await {
+        Ok(()) => response::json_created(serde_json::json!({"id": id})),
+        Err(e) => response::app_error(e),
     }
 }

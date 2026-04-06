@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-04-04
-**Depends-on:** ADR-021 (Multi-Tenancy via Instance Boundaries), ADR-026 (Cloud Deployment Architecture — Control-Plane Routing and Regional Backends), ADR-029 (Control Plane, Auth Data Plane, and Bounded Eventual Consistency)
+**Depends-on:** ADR-034 (Multi-Tenancy via Instance Boundaries), ADR-026 (Cloud Deployment Architecture — Control-Plane Routing and Regional Backends), ADR-029 (Control Plane, Auth Data Plane, and Bounded Eventual Consistency)
 **Related:** [Architecture Overview](../architecture/overview.md), [Storage Architecture](../design/storage-architecture.md)
 
 ## Context

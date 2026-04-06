@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-04-05
-**Depends-on:** ADR-005 (Unified Data Model), ADR-010 (Three-Tier Data Architecture), ADR-019 (Server-Driven Login), ADR-020 (Authorization Model), ADR-021 (Multi-Tenancy via Instance Boundaries), ADR-029 (Control Plane and Auth Data Plane)
+**Depends-on:** ADR-005 (Unified Data Model), ADR-010 (Three-Tier Data Architecture), ADR-019 (Server-Driven Login), ADR-020 (Authorization Model), ADR-034 (Multi-Tenancy via Instance Boundaries), ADR-029 (Control Plane and Auth Data Plane)
 **Related:** [Architecture Overview](../architecture/overview.md), [Storage Architecture](../design/storage-architecture.md)
 
 ## Context

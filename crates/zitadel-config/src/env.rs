@@ -21,6 +21,13 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             Value::String(v),
         );
     }
+    if let Ok(v) = env::var("ZITADEL_PUBLIC_ORIGIN") {
+        merge_path(
+            &mut overrides,
+            &["server", "public_origin"],
+            Value::String(v),
+        );
+    }
     if let Ok(v) = env::var("ZITADEL_MANAGEMENT_SECRET") {
         merge_path(
             &mut overrides,
@@ -96,6 +103,34 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
             &["storage", "stateful", "bootstrap"],
             Value::String(v),
         );
+    }
+
+    // Cloud
+    if let Ok(v) = env::var("ZITADEL_CLOUD_ENABLED")
+        && let Some(value) = parse_boolish(&v)
+    {
+        merge_path(&mut overrides, &["cloud", "enabled"], Value::Bool(value));
+    }
+    if let Ok(v) = env::var("ZITADEL_CLOUD_CONTROL_PLANE_URL") {
+        merge_path(
+            &mut overrides,
+            &["cloud", "control_plane", "url"],
+            Value::String(v),
+        );
+    }
+
+    // Encryption
+    if let Ok(v) = env::var("ZITADEL_ENCRYPTION_ACTIVE_KEY_ID") {
+        merge_path(
+            &mut overrides,
+            &["encryption", "active_key_id"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_ENCRYPTION_KEYS")
+        && let Ok(keys) = serde_json::from_str::<Value>(&v)
+    {
+        merge_path(&mut overrides, &["encryption", "keys"], keys);
     }
 
     // Observability

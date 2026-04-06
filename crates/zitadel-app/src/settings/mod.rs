@@ -39,6 +39,58 @@ pub struct UpdateSettingsCommand {
     pub data: serde_json::Value,
 }
 
+pub struct DeleteSettings {
+    repos: Arc<Repositories>,
+}
+
+impl DeleteSettings {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(
+        name = "use_case.delete_settings",
+        skip_all,
+        fields(event_type = "settings.deleted", category = "settings")
+    )]
+    pub async fn execute(
+        &self,
+        ctx: &ActorContext,
+        settings_type: &str,
+    ) -> Result<(), AppError> {
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("instance:{}", ctx.instance_id()),
+        )
+        .await?;
+
+        self.repos
+            .settings
+            .delete(ctx.instance_id(), settings_type)
+            .await
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::SettingsDeleted {
+                    settings_type: settings_type.to_string(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(())
+    }
+}
+
 impl UpdateSettings {
     pub fn new(repos: Arc<Repositories>) -> Self {
         Self { repos }
@@ -54,6 +106,9 @@ impl UpdateSettings {
         ctx: &ActorContext,
         cmd: UpdateSettingsCommand,
     ) -> Result<(), AppError> {
+        // Authz: caller must be admin on the current instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+
         let record = SettingsRecord {
             settings_type: cmd.settings_type.clone(),
             scope: cmd.scope.clone(),

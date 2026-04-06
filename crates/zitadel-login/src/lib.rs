@@ -1,5 +1,9 @@
+pub mod bot;
 pub mod conformance;
+pub mod cookie;
 pub mod legacy;
+pub mod oidc_completion;
+pub mod password;
 pub mod redirect;
 pub mod session;
 pub mod sso;
@@ -10,10 +14,11 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use std::borrow::Cow;
 use std::sync::Arc;
 use zitadel_app::ApplicationServices;
 use zitadel_authn::password::Swapper;
-use zitadel_db::Db;
+use zitadel_db::current_request_origin_or;
 use zitadel_storage::{DefaultStatefulStorage, DefaultTransientStorage};
 
 pub(crate) type DefaultRpService = zitadel_oidc::rp::RpService<
@@ -23,18 +28,28 @@ pub(crate) type DefaultRpService = zitadel_oidc::rp::RpService<
 
 #[derive(Clone)]
 pub struct LoginState {
-    pub db: Db,
     pub stateful: Arc<DefaultStatefulStorage>,
     pub transient: Arc<DefaultTransientStorage>,
     pub passwords: Arc<Swapper>,
     pub cookie_config: Arc<zitadel_authn::cookie::CookieConfig>,
     pub public_origin: Arc<String>,
+    pub public_origin_override: Option<Arc<String>>,
     pub conformance_login_html: bool,
     pub rp: Arc<DefaultRpService>,
     /// Secret key for POW challenge HMAC signatures.
     pub pow_secret: String,
     /// Application services (ADR-032 use cases).
     pub app: Arc<ApplicationServices>,
+}
+
+impl LoginState {
+    pub fn effective_public_origin(&self) -> Cow<'_, str> {
+        if let Some(public_origin_override) = self.public_origin_override.as_deref() {
+            Cow::Borrowed(public_origin_override.as_str())
+        } else {
+            current_request_origin_or(self.public_origin.as_str())
+        }
+    }
 }
 
 pub fn routes(state: LoginState) -> Router {
@@ -62,6 +77,7 @@ pub fn routes(state: LoginState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
     use axum::http::StatusCode;
     use steps::{FlowSubmitRequest, handle_identifier_step, handle_password_step};
     use tokio::time::{Duration, sleep};
@@ -71,7 +87,7 @@ mod tests {
         cookie::CookieConfig,
         password::{Swapper, encode_credential_json},
     };
-    use zitadel_db::DEFAULT_INSTANCE_ID;
+    use zitadel_db::{DEFAULT_INSTANCE_ID, Db, InstanceContext, with_instance_context};
     use zitadel_fga::FgaService;
     use zitadel_storage::NewLoginFlowState;
 
@@ -92,7 +108,6 @@ mod tests {
         let fga = Arc::new(FgaService::new(db.clone()));
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
             db.clone(),
-            storage.stateful.clone(),
             storage.transient.clone(),
             fga,
         ));
@@ -101,7 +116,6 @@ mod tests {
             Arc::new(HookPipeline::empty()),
         ));
         LoginState {
-            db,
             stateful: storage.stateful.clone(),
             transient: storage.transient.clone(),
             passwords: Arc::new(Swapper::dev()),
@@ -111,6 +125,7 @@ mod tests {
                 false,
             )),
             public_origin: Arc::new("http://localhost:8080".into()),
+            public_origin_override: Some(Arc::new("http://localhost:8080".into())),
             conformance_login_html: false,
             rp: Arc::new(zitadel_oidc::rp::RpService::new(
                 zitadel_oidc::rp::ReqwestHttpClient::new(),
@@ -129,7 +144,7 @@ mod tests {
         identifier: &str,
         password: &str,
     ) {
-        let scoped = state.db.scoped(instance_id.to_string());
+        let scoped = state.stateful.db().scoped(instance_id.to_string());
         // Ensure the instance row exists (no-op if it's "default" which is seeded by migration).
         // Managed children need (parent_instance_id, owner_org_id) pointing to an
         // existing org in the parent — bootstrap creates org "1" in "default".
@@ -198,7 +213,7 @@ mod tests {
     }
 
     async fn wait_for_session_count(state: &LoginState, user_id: &str, expected: i64) {
-        let scoped = state.db.scoped_default();
+        let scoped = state.stateful.db().scoped_default();
         for _ in 0..40 {
             let count: (i64,) = sqlx::query_as(
                 "SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2",
@@ -303,14 +318,15 @@ mod tests {
         // Session should exist in the stateful store once the local sink flushes.
         wait_for_session_count(&state, "u1", 1).await;
 
-        // Flow should be complete.
-        let completed = state
-            .transient
-            .load_login_flow(DEFAULT_INSTANCE_ID, &flow_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(completed.step, "complete");
+        // Completed flows are now consume-once and should no longer be readable.
+        assert!(
+            state
+                .transient
+                .load_login_flow(DEFAULT_INSTANCE_ID, &flow_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     // ─── Rejection Cases ──────────────────────────────────
@@ -355,7 +371,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
 
         // No session should be created.
-        let scoped = state.db.scoped_default();
+        let scoped = state.stateful.db().scoped_default();
         let count: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2")
                 .bind(scoped.instance_id())
@@ -406,7 +422,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK); // returns error in UI nodes
 
         // No session.
-        let scoped = state.db.scoped_default();
+        let scoped = state.stateful.db().scoped_default();
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1")
             .bind(scoped.instance_id())
             .fetch_one(scoped.pool())
@@ -485,7 +501,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK); // error in nodes
 
         // No session in default instance.
-        let scoped = state.db.scoped_default();
+        let scoped = state.stateful.db().scoped_default();
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1")
             .bind(scoped.instance_id())
             .fetch_one(scoped.pool())
@@ -501,8 +517,8 @@ mod tests {
         let state = test_state().await;
         insert_user(&state, "default", "user-1", "org-1", "alice", "secret").await;
 
-        let flow_scoped = state.db.scoped_default();
-        let foreign_scoped = state.db.scoped("other".to_string());
+        let flow_scoped = state.stateful.db().scoped_default();
+        let foreign_scoped = state.stateful.db().scoped("other".to_string());
 
         let flow_data = serde_json::json!({
             "identifier": "alice",
@@ -567,5 +583,104 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(session_count.0, 0);
+    }
+
+    #[tokio::test]
+    async fn password_step_redirects_using_preloaded_auth_request() {
+        let state = test_state().await;
+        insert_user(&state, "default", "user-1", "org-1", "alice", "secret").await;
+
+        let scoped = state.stateful.db().scoped_default();
+        let flow_data = serde_json::json!({
+            "identifier": "alice",
+            "auth_request_id": "auth-1",
+        });
+        let flow_sql = format!(
+            "INSERT INTO auth_states (id, instance_id, type, redirect_uri, data, step) \
+             VALUES ($1, $2, 'login_flow', $3, {}, 'password')",
+            scoped.json_bind(4),
+        );
+        sqlx::query(&flow_sql)
+            .bind("flow-1")
+            .bind(scoped.instance_id())
+            .bind("/console")
+            .bind(flow_data.to_string())
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO oidc_auth_requests (id, instance_id, client_id, redirect_uri, state, prompt) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind("auth-1")
+        .bind(scoped.instance_id())
+        .bind("client-1")
+        .bind("https://rp.example/callback")
+        .bind("state-1")
+        .bind("[]")
+        .execute(scoped.pool())
+        .await
+        .unwrap();
+
+        let req = FlowSubmitRequest {
+            action: "password".into(),
+            identifier: String::new(),
+            password: "secret".into(),
+            _extra: serde_json::Value::Null,
+        };
+
+        let response = handle_password_step(&state, "flow-1", &req, &flow_data, "/console").await;
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let redirect_uri = json["redirect_uri"].as_str().unwrap_or_default();
+        assert!(redirect_uri.starts_with("https://rp.example/callback?"));
+        assert!(redirect_uri.contains("state=state-1"));
+        assert!(redirect_uri.contains("code="));
+
+        let auth_row: (String, String, i64) = sqlx::query_as(&format!(
+            "SELECT COALESCE(user_id, ''), COALESCE(code, ''), {} FROM oidc_auth_requests WHERE instance_id = $1 AND id = $2",
+            scoped.bool_as_int("done"),
+        ))
+        .bind(scoped.instance_id())
+        .bind("auth-1")
+        .fetch_one(scoped.pool())
+        .await
+        .unwrap();
+        assert_eq!(auth_row.0, "user-1");
+        assert!(!auth_row.1.is_empty());
+        assert_eq!(auth_row.2, 1);
+        assert!(
+            state
+                .transient
+                .load_auth_request_redirect(DEFAULT_INSTANCE_ID, "auth-1")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn effective_public_origin_uses_request_origin_when_unpinned() {
+        let mut state = test_state().await;
+        state.public_origin = Arc::new("http://localhost:8080".into());
+        state.public_origin_override = None;
+
+        let origin = with_instance_context(
+            InstanceContext {
+                instance_id: DEFAULT_INSTANCE_ID.to_string(),
+                resolved_org_id: None,
+                placement_mode: "global".into(),
+                region_key: None,
+                scheme: "https".into(),
+                host: "demo.example.com".into(),
+                source: "host".into(),
+            },
+            async { state.effective_public_origin().into_owned() },
+        )
+        .await;
+
+        assert_eq!(origin, "https://demo.example.com");
     }
 }

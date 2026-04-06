@@ -182,7 +182,7 @@ def overall_status(run_status: str, requested_surface: str, surfaces: list[Surfa
 
 def render_markdown(run_status: str, requested_surface: str, overall: str, surfaces: list[SurfaceSummary]) -> str:
     lines = [
-        "## Compliance OIDC",
+        "## OIDC Protocol Compliance",
         f"- Overall: `{overall}`",
         f"- Surface: `{requested_surface}`",
         f"- Runner outcome: `{run_status}`",

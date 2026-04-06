@@ -3,7 +3,7 @@
   "private": true,
   "workspaces": [
     "web",
-    "e2e",
+    "browser-tests",
     "packages/client-js",
     "packages/console-kit"
   ],
@@ -11,6 +11,10 @@
     "build": "npm run build -w web",
     "dev": "npm run dev -w web",
     "test": "npm test -w web",
-    "test:e2e": "npm test -w e2e"
+    "test:journeys": "npm run test:journeys -w browser-tests",
+    "test:journeys:oidc": "npm run test:journeys:oidc -w browser-tests",
+    "test:ui": "sh -c 'echo \"warning: npm run test:ui is deprecated; use npm run test:journeys:admin\" >&2; npm run test:journeys:admin -w browser-tests'",
+    "test:acceptance:oidc": "sh -c 'echo \"warning: npm run test:acceptance:oidc is deprecated; use npm run test:journeys:oidc\" >&2; npm run test:journeys:oidc -w browser-tests'",
+    "test:e2e": "sh -c 'echo \"warning: npm run test:e2e is deprecated; use npm run test:journeys:admin\" >&2; npm run test:journeys:admin -w browser-tests'"
   }
 }

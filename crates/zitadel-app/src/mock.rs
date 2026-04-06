@@ -113,6 +113,14 @@ impl UserRepository for MockUserRepository {
             Ok(())
         })
     }
+
+    fn delete(&self, instance_id: &str, user_id: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        let key = (instance_id.to_string(), user_id.to_string());
+        Box::pin(async move {
+            self.store.lock().unwrap().remove(&key);
+            Ok(())
+        })
+    }
 }
 
 // ─── MockOrgRepository ───────────────────────────────────
@@ -194,6 +202,11 @@ impl OrgRepository for MockOrgRepository {
         })
     }
 
+    fn delete(&self, instance_id: &str, org_id: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let key = (instance_id.to_string(), org_id.to_string());
+        Box::pin(async move { Ok(self.store.lock().unwrap().remove(&key).is_some()) })
+    }
+
     fn first_org_id(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Option<String>>> {
         let instance_id = instance_id.to_string();
         Box::pin(async move {
@@ -258,21 +271,6 @@ impl EventRepository for MockEventRepository {
             })
         })
     }
-}
-
-// ─── Noop implementations for repos not tested in use case unit tests ─────
-
-macro_rules! noop_repo {
-    ($name:ident, $trait:ident { $($method:ident ( $($arg:ident : $ty:ty),* ) -> $ret:ty;)* }) => {
-        pub struct $name;
-        impl $trait for $name {
-            $(
-                fn $method(&self, $($arg: $ty),*) -> BoxFuture<'_, anyhow::Result<$ret>> {
-                    Box::pin(async move { anyhow::bail!(concat!(stringify!($name), "::", stringify!($method), " not implemented in mock")) })
-                }
-            )*
-        }
-    };
 }
 
 // Credential
@@ -351,6 +349,17 @@ impl CredentialRepository for MockCredentialRepository {
     ) -> BoxFuture<'_, anyhow::Result<Option<LinkedIdentityRecord>>> {
         Box::pin(async { Ok(None) })
     }
+
+    fn touch_linked_identity(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 // Session
@@ -383,6 +392,10 @@ impl SessionRepository for MockSessionRepository {
     fn revoke(&self, _instance_id: &str, _session_id: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
         Box::pin(async { Ok(true) })
     }
+
+    fn update_metadata(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 // FGA
@@ -408,31 +421,26 @@ impl FgaRepository for MockFgaRepository {
         Box::pin(async move { Ok(allowed) })
     }
 
-    fn write_tuple(
+    fn write(
         &self,
         _instance_id: &str,
-        _user: &str,
-        _relation: &str,
-        _object: &str,
+        _writes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
-    fn delete_tuple(
+    fn delete(
         &self,
         _instance_id: &str,
-        _user: &str,
-        _relation: &str,
-        _object: &str,
+        _deletes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
-    fn list_relations(
+    fn read(
         &self,
         _instance_id: &str,
-        _user: &str,
-        _object_type: &str,
+        _filter: Option<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<Vec<FgaRelation>>> {
         Box::pin(async { Ok(vec![]) })
     }
@@ -474,6 +482,10 @@ impl InstanceRepository for NoopInstanceRepository {
     }
     fn set_domain(&self, _: &str, _: &DomainRecord) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn remove_domain(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>> {
+        Box::pin(async { anyhow::bail!("noop") })
     }
 }
 
@@ -519,6 +531,9 @@ impl LoginFlowRepository for NoopLoginFlowRepository {
     }
     fn delete_flow(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
+    }
+    fn set_state(&self, _: &str, _: &str, _: &str, _: bool) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(true) })
     }
 }
 
@@ -567,6 +582,9 @@ impl SettingsRepository for NoopSettingsRepository {
     fn set(&self, _: &str, _: &SettingsRecord) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
+    fn delete(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
     fn resolve(
         &self,
         _: &str,
@@ -610,6 +628,14 @@ impl SchemaRepository for NoopSchemaRepository {
         })
     }
     fn update(&self, _: &str, _: &SchemaRecord) -> BoxFuture<'_, anyhow::Result<SchemaRecord>> {
+        Box::pin(async { anyhow::bail!("noop") })
+    }
+
+    fn promote(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { anyhow::bail!("noop") })
+    }
+
+    fn count_by_schema(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<i64>> {
         Box::pin(async { anyhow::bail!("noop") })
     }
 }
@@ -715,6 +741,134 @@ impl ActionRepository for NoopActionRepository {
     }
 }
 
+// ─── MockUnitOfWorkFactory ──────────────────────────────
+
+pub struct MockUnitOfWorkFactory;
+
+impl UnitOfWorkFactory for MockUnitOfWorkFactory {
+    fn begin<'a>(
+        &'a self,
+        _instance_id: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<Box<dyn UnitOfWork>>> {
+        Box::pin(async {
+            Ok(Box::new(MockUnitOfWork { events: Vec::new() }) as Box<dyn UnitOfWork>)
+        })
+    }
+}
+
+struct MockUnitOfWork {
+    events: Vec<DomainEvent>,
+}
+
+impl UnitOfWork for MockUnitOfWork {
+    fn buffer_event(
+        &mut self,
+        event: DomainEvent,
+        _: Option<String>,
+        _: Option<String>,
+        _: Option<String>,
+    ) {
+        self.events.push(event);
+    }
+
+    fn commit(self: Box<Self>) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+pub struct NoopRawQueryRepository;
+impl RawQueryRepository for NoopRawQueryRepository {
+    fn create_named_resource(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>> {
+        Box::pin(async { anyhow::bail!("noop") })
+    }
+    fn get_named_resource(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn list_named_resources(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+    fn update_named_resource_name(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn delete_named_resource(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn load_console_bootstrap(
+        &self,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<ConsoleBootstrapData>> {
+        Box::pin(async { anyhow::bail!("noop") })
+    }
+    fn load_entity_counts(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+    fn list_fingerprints(
+        &self,
+        _: &str,
+        _: &str,
+        _: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<FingerprintRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+    fn upsert_fingerprint(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn list_jobs(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<JobRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+    fn list_saved_queries(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<SavedQueryRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+    fn create_saved_query(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<SavedQueryRecord>> {
+        Box::pin(async { anyhow::bail!("noop") })
+    }
+    fn delete_saved_query(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+}
+
 /// Build a `Repositories` container with all mock implementations.
 /// Useful for use case unit tests.
 pub fn mock_repositories() -> Repositories {
@@ -735,5 +889,7 @@ pub fn mock_repositories() -> Repositories {
         pats: std::sync::Arc::new(NoopPatRepository),
         search: std::sync::Arc::new(NoopSearchRepository),
         actions: std::sync::Arc::new(NoopActionRepository),
+        raw: std::sync::Arc::new(NoopRawQueryRepository),
+        uow: std::sync::Arc::new(MockUnitOfWorkFactory),
     }
 }

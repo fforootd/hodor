@@ -8,6 +8,10 @@ use zitadel_db::{Db, Dialect};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
     pub sql: String,
+    /// Bind parameters for `$1, $2, ...` placeholders in the SQL.
+    /// All values are bound as strings — the DB engine handles type coercion.
+    #[serde(default)]
+    pub params: Vec<String>,
     pub limit: Option<i64>,
 }
 
@@ -73,7 +77,11 @@ impl AnalyticsQueryBackend for SqlAnalyticsQueryBackend {
             format!("{trimmed} LIMIT {limit}")
         };
 
-        let rows = match sqlx::query(&sql).fetch_all(self.db.pool()).await {
+        let mut q = sqlx::query(&sql);
+        for p in &query.params {
+            q = q.bind(p);
+        }
+        let rows = match q.fetch_all(self.db.pool()).await {
             Ok(rows) => rows,
             Err(error) => {
                 return Ok(AnalyticsQueryResult {
@@ -185,16 +193,21 @@ impl AnalyticsQueryBackend for SpannerAnalyticsQueryBackend {
         }
 
         let limit = query.limit.unwrap_or(1000).min(10000);
+        let rewritten = rewrite_spanner_placeholders(trimmed);
         let wrapped = format!(
-            "SELECT TO_JSON_STRING(row_data) AS row_json FROM ({trimmed}) AS row_data LIMIT {limit}"
+            "SELECT TO_JSON_STRING(row_data) AS row_json FROM ({rewritten}) AS row_data LIMIT {limit}"
         );
         let client = self
             .db
             .spanner()
             .expect("spanner analytics backend requires native spanner client")
             .client();
+        let mut stmt = Statement::new(wrapped);
+        for (i, p) in query.params.iter().enumerate() {
+            stmt.add_param(&format!("p{}", i + 1), p);
+        }
         let mut tx = client.single().await?;
-        let mut rows = match tx.query(Statement::new(wrapped)).await {
+        let mut rows = match tx.query(stmt).await {
             Ok(rows) => rows,
             Err(error) => {
                 return Ok(AnalyticsQueryResult {
@@ -385,6 +398,51 @@ fn values_to_tabular_rows(rows: &[Value]) -> (Vec<String>, Vec<Vec<Value>>) {
     )
 }
 
+fn rewrite_spanner_placeholders(query: &str) -> String {
+    let mut rewritten = String::with_capacity(query.len());
+    let chars: Vec<char> = query.chars().collect();
+    let mut index = 0;
+    let mut in_string = false;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '\'' {
+            rewritten.push(ch);
+            if in_string && chars.get(index + 1) == Some(&'\'') {
+                rewritten.push('\'');
+                index += 2;
+                continue;
+            }
+            in_string = !in_string;
+            index += 1;
+            continue;
+        }
+
+        if !in_string && ch == '$' {
+            let start = index + 1;
+            let mut end = start;
+            while end < chars.len() && chars[end].is_ascii_digit() {
+                end += 1;
+            }
+
+            if end > start {
+                rewritten.push('@');
+                rewritten.push('p');
+                for digit in &chars[start..end] {
+                    rewritten.push(*digit);
+                }
+                index = end;
+                continue;
+            }
+        }
+
+        rewritten.push(ch);
+        index += 1;
+    }
+
+    rewritten
+}
+
 fn extract_value(row: &sqlx::any::AnyRow, idx: usize) -> Value {
     use sqlx::{Column, Row, TypeInfo, ValueRef};
 
@@ -502,6 +560,16 @@ impl DefaultAnalyticsStorage {
 mod tests {
     use super::*;
 
+    #[test]
+    fn rewrites_spanner_placeholders_without_touching_strings() {
+        assert_eq!(
+            rewrite_spanner_placeholders(
+                "SELECT * FROM events WHERE category = $1 AND note = '$2 literal' AND seq = $10"
+            ),
+            "SELECT * FROM events WHERE category = @p1 AND note = '$2 literal' AND seq = @p10"
+        );
+    }
+
     #[tokio::test]
     async fn query_and_schema_work_for_sqlite_backend() {
         let db = Db::open("").await.unwrap();
@@ -512,6 +580,7 @@ mod tests {
         let result = storage
             .query(&AnalyticsQuery {
                 sql: "SELECT COUNT(*) AS count FROM users".into(),
+                params: vec![],
                 limit: None,
             })
             .await

@@ -1,16 +1,13 @@
-use crate::{ApiState, middleware::Identity, response};
+use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
 use axum::{
     Extension, Json, Router,
-    extract::{Path, State},
+    extract::State,
     response::Response,
     routing::{delete, get},
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use zitadel_db::{
-    create_pat as db_create_pat, current_instance_id, list_pats_for_instance,
-    revoke_pat as db_revoke_pat,
-};
+use zitadel_app::pats::{CreatePatCommand, CreatePatResult};
+use zitadel_app::repo::PatRecord;
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -36,50 +33,51 @@ pub struct PatResponse {
     pub created_at: String,
 }
 
-// TODO(CLAUDE-4): Call PAT create use case when available
+impl From<CreatePatResult> for PatResponse {
+    fn from(r: CreatePatResult) -> Self {
+        Self {
+            id: r.pat_id,
+            user_id: String::new(),
+            name: String::new(),
+            token: r.token,
+            created_at: String::new(),
+        }
+    }
+}
+
 async fn create_pat(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
     Json(req): Json<CreatePatRequest>,
 ) -> Response {
-    let _ctx = response::build_actor_context(&identity);
-    let id = Uuid::new_v4().to_string();
-    let token = format!("zit_pat_{}", zitadel_crypto::random_hex(24));
-    let token_hash = zitadel_authn::session::hash_token(&token);
-    let scopes = serde_json::to_string(&req.scopes).unwrap_or_else(|_| "[]".to_string());
-    match db_create_pat(
-        &s.db,
-        current_instance_id().as_ref(),
-        &id,
-        &req.user_id,
-        &req.name,
-        &token_hash,
-        &scopes,
-    )
-    .await
-    {
-        Ok(_) => response::json_created(PatResponse {
-            id,
+    let ctx = response::build_actor_context(&identity);
+    let cmd = CreatePatCommand {
+        user_id: req.user_id.clone(),
+        name: req.name.clone(),
+        scopes: req.scopes,
+    };
+    match s.app.runner.run_fn(&ctx, "pat.create", || s.app.create_pat.execute(&ctx, cmd)).await {
+        Ok(result) => response::json_created(PatResponse {
+            id: result.pat_id,
             user_id: req.user_id,
             name: req.name,
-            token,
+            token: result.token,
             created_at: String::new(),
         }),
-        Err(e) => response::bad_request(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-// TODO(CLAUDE-4): Call PAT list use case when available
 async fn list_pats(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
 ) -> Response {
-    let _ctx = response::build_actor_context(&identity);
-    match list_pats_for_instance(&s.db, current_instance_id().as_ref()).await {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.runner.run_fn(&ctx, "pat.list", || s.app.list_pats.execute(&ctx, &identity.user_id)).await {
         Ok(rows) => {
             let items: Vec<serde_json::Value> = rows
                 .into_iter()
-                .map(|r| serde_json::json!({"id": r.id, "user_id": r.user_id, "name": r.name, "created_at": r.created_at}))
+                .map(|r: PatRecord| serde_json::json!({"id": r.id, "user_id": r.user_id, "name": r.name, "created_at": r.created_at}))
                 .collect();
             response::json_ok(response::ListResponse {
                 items,
@@ -87,20 +85,18 @@ async fn list_pats(
                 total: None,
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-// TODO(CLAUDE-4): Call PAT revoke use case when available
 async fn revoke_pat(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
 ) -> Response {
-    let _ctx = response::build_actor_context(&identity);
-    match db_revoke_pat(&s.db, current_instance_id().as_ref(), &id).await {
-        Ok(false) => response::not_found("pat not found"),
-        Ok(true) => response::no_content(),
-        Err(e) => response::internal_error(format!("{e}")),
+    let ctx = response::build_actor_context(&identity);
+    match s.app.runner.run_fn(&ctx, "pat.revoke", || s.app.revoke_pat.execute(&ctx, &id)).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }

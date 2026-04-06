@@ -1,7 +1,7 @@
 use crate::context::ActorContext;
 use crate::error::AppError;
 use crate::event::DomainEvent;
-use crate::repo::{InstanceRecord, ListParams, ListResult, Repositories};
+use crate::repo::{DomainRecord, DomainRemoveResult, InstanceRecord, ListParams, ListResult, Repositories};
 use std::sync::Arc;
 
 pub struct CreateInstance {
@@ -32,21 +32,14 @@ impl CreateInstance {
         ctx: &ActorContext,
         cmd: CreateInstanceCommand,
     ) -> Result<InstanceRecord, AppError> {
-        // Verify caller has permission (operator_admin or parent instance owner)
-        if !ctx.is_operator_admin() {
-            // Check if the owner_org_id belongs to the caller in the current instance
-            let org = self
-                .repos
-                .orgs
-                .get(ctx.instance_id(), &cmd.owner_org_id)
-                .await
-                .map_err(AppError::Internal)?;
-            if org.is_none() {
-                return Err(AppError::PermissionDenied {
-                    reason: "owner_org_id not found in current instance".to_string(),
-                });
-            }
-        }
+        let owner_org_id = cmd.owner_org_id.clone();
+
+        // Authz: operator admins can always create instances.
+        // Non-operators must be admin on the owner org.
+        crate::authz::require_permission(
+            &self.repos, ctx, "admin", &format!("org:{}", owner_org_id),
+        )
+        .await?;
 
         let instance_id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
@@ -57,7 +50,7 @@ impl CreateInstance {
             kind: cmd.kind,
             placement_mode: cmd.placement_mode,
             region_key: cmd.region_key,
-            owner_org_id: cmd.owner_org_id,
+            owner_org_id: Some(cmd.owner_org_id),
             feature_overrides: cmd.feature_overrides,
             primary_domain: cmd.primary_domain,
             created_at: now.clone(),
@@ -78,7 +71,7 @@ impl CreateInstance {
                 &DomainEvent::InstanceCreated {
                     instance_id: instance_id.clone(),
                     parent_instance_id: Some(ctx.instance_id().to_string()),
-                    owner_org_id: created.owner_org_id.clone(),
+                    owner_org_id,
                     kind: created.kind.clone(),
                     actor_id: ctx.user_id().to_string(),
                 },
@@ -166,6 +159,9 @@ impl UpdateInstance {
         ctx: &ActorContext,
         cmd: UpdateInstanceCommand,
     ) -> Result<InstanceRecord, AppError> {
+        // Authz: caller must be admin on the target instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", cmd.instance_id)).await?;
+
         let mut instance = self
             .repos
             .instances
@@ -236,6 +232,9 @@ impl DeprovisionInstance {
         fields(event_type = "instance.deprovisioned", category = "instance")
     )]
     pub async fn execute(&self, ctx: &ActorContext, instance_id: &str) -> Result<(), AppError> {
+        // Authz: only operator admins can deprovision instances
+        crate::authz::require_operator_admin(ctx)?;
+
         let instance = self
             .repos
             .instances
@@ -275,5 +274,149 @@ impl DeprovisionInstance {
             .map_err(AppError::Internal)?;
 
         Ok(())
+    }
+}
+
+// ─── Domain management ─────────────────────────────────────
+
+pub struct ListDomains {
+    repos: Arc<Repositories>,
+}
+
+impl ListDomains {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(name = "use_case.list_domains", skip_all)]
+    pub async fn execute(
+        &self,
+        _ctx: &ActorContext,
+        instance_id: &str,
+    ) -> Result<Vec<DomainRecord>, AppError> {
+        self.repos
+            .instances
+            .list_domains(instance_id)
+            .await
+            .map_err(AppError::Internal)
+    }
+}
+
+pub struct AddDomain {
+    repos: Arc<Repositories>,
+}
+
+pub struct AddDomainCommand {
+    pub instance_id: String,
+    pub domain: String,
+}
+
+impl AddDomain {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(
+        name = "use_case.add_domain",
+        skip_all,
+        fields(event_type = "instance.updated", category = "instance")
+    )]
+    pub async fn execute(
+        &self,
+        ctx: &ActorContext,
+        cmd: AddDomainCommand,
+    ) -> Result<DomainRecord, AppError> {
+        if cmd.domain.is_empty() {
+            return Err(AppError::validation("domain is required"));
+        }
+
+        // Authz: caller must be admin on the target instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", cmd.instance_id)).await?;
+
+        let now = crate::users::chrono_now();
+        let record = DomainRecord {
+            domain: cmd.domain.clone(),
+            is_primary: false,
+            state: "active".to_string(),
+            verified: false,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+
+        self.repos
+            .instances
+            .set_domain(&cmd.instance_id, &record)
+            .await
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::InstanceUpdated {
+                    instance_id: cmd.instance_id,
+                    fields_changed: vec!["domain_added".to_string()],
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(record)
+    }
+}
+
+pub struct RemoveDomain {
+    repos: Arc<Repositories>,
+}
+
+impl RemoveDomain {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(
+        name = "use_case.remove_domain",
+        skip_all,
+        fields(event_type = "instance.updated", category = "instance")
+    )]
+    pub async fn execute(
+        &self,
+        ctx: &ActorContext,
+        instance_id: &str,
+        domain: &str,
+    ) -> Result<DomainRemoveResult, AppError> {
+        // Authz: caller must be admin on the target instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", instance_id)).await?;
+
+        let result = self
+            .repos
+            .instances
+            .remove_domain(instance_id, domain)
+            .await
+            .map_err(AppError::Internal)?;
+
+        if result == DomainRemoveResult::Deleted {
+            self.repos
+                .events
+                .append(
+                    ctx.instance_id(),
+                    &DomainEvent::InstanceUpdated {
+                        instance_id: instance_id.to_string(),
+                        fields_changed: vec!["domain_removed".to_string()],
+                        actor_id: ctx.user_id().to_string(),
+                    },
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(AppError::Internal)?;
+        }
+
+        Ok(result)
     }
 }

@@ -29,7 +29,7 @@ async fn get_settings(
     Path(type_): Path<String>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.get_settings.execute(&ctx, &type_, None, None).await {
+    match s.app.runner.run_fn(&ctx, "settings.get", || s.app.get_settings.execute(&ctx, &type_, None, None)).await {
         Ok(record) => response::json_ok(SettingsResponse {
             type_: record.settings_type,
             scope: record.scope,
@@ -51,7 +51,7 @@ async fn put_settings(
         scope: "instance".to_string(),
         data: data.clone(),
     };
-    match s.app.update_settings.execute(&ctx, cmd).await {
+    match s.app.runner.run_fn(&ctx, "settings.update", || s.app.update_settings.execute(&ctx, cmd)).await {
         Ok(()) => response::json_ok(SettingsResponse {
             type_,
             scope: "instance".into(),
@@ -61,17 +61,21 @@ async fn put_settings(
     }
 }
 
-async fn delete_settings(State(s): State<ApiState>, Path(type_): Path<String>) -> Response {
-    // No delete_settings use case — keep direct DB call.
-    // TODO(CLAUDE-4): Add DeleteSettings use case.
-    match zitadel_db::delete_settings_record(
-        &s.db,
-        zitadel_db::current_instance_id().as_ref(),
-        &type_,
-    )
-    .await
+async fn delete_settings(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Path(type_): Path<String>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s
+        .app
+        .runner
+        .run_fn(&ctx, "settings.delete", || {
+            s.app.delete_settings.execute(&ctx, &type_)
+        })
+        .await
     {
-        Ok(_) => response::no_content(),
-        Err(e) => response::internal_error(format!("{e}")),
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }

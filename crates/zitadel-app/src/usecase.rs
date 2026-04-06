@@ -79,6 +79,51 @@ impl UseCaseRunner {
 
         Ok(result)
     }
+
+    /// Run a closure-based use case with the full hook pipeline.
+    ///
+    /// This avoids requiring use cases to implement the formal `UseCase` trait,
+    /// while still running interceptors and effects at the correct phases.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// state.app.runner.run_fn(&ctx, "user.create", || {
+    ///     state.app.create_user.execute(&ctx, cmd)
+    /// }).await
+    /// ```
+    pub async fn run_fn<F, Fut, R>(
+        &self,
+        ctx: &ActorContext,
+        operation: &str,
+        f: F,
+    ) -> Result<R, AppError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<R, AppError>> + Send,
+    {
+        let hook_ctx = HookContext {
+            instance_id: ctx.instance_id().to_string(),
+            actor_id: ctx.user_id().to_string(),
+            org_id: ctx.org_id().to_string(),
+            operation: operation.to_string(),
+            metadata: serde_json::Value::Null,
+        };
+
+        // Phase: PreValidate interceptors
+        run_interceptors(&self.pre_validate, HookPhase::PreValidate, &hook_ctx).await?;
+
+        // Phase: PreCommit interceptors
+        run_interceptors(&self.pre_commit, HookPhase::PreCommit, &hook_ctx).await?;
+
+        // Execute the use case
+        let result = f().await?;
+
+        // Phase: PostCommit effects (fire-and-forget)
+        run_effects(&self.post_commit, HookPhase::PostCommit, &hook_ctx, None).await;
+
+        Ok(result)
+    }
 }
 
 /// Run policy interceptors in priority order. First Deny short-circuits.

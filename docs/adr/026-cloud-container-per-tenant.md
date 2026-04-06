@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-04-04
-**Depends-on:** ADR-021 (Multi-Tenancy via Instance Boundaries)
+**Depends-on:** ADR-034 (Multi-Tenancy via Instance Boundaries)
 **Supersedes:** The earlier container-per-tenant D1 proposal in this file.
 
 ## Context

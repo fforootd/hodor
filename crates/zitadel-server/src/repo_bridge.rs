@@ -1,58 +1,49 @@
-//! Bridge repository implementations for server wiring (ADR-032 CLAUDE-4).
+//! Bridge repository implementations for server wiring (ADR-032).
 //!
-//! Provides stub `Repositories` so `ApplicationServices` can be wired at startup.
-//! The system continues to work through old code paths (handlers call DB directly)
-//! until CLAUDE-1/CLAUDE-2 rewrite handlers to call use cases.
-//!
-//! CODEX-1/CODEX-2 will deliver production-quality repo impls in
-//! `zitadel-db/src/repo_impls/` to replace these stubs.
+//! Builds `Repositories` from production implementations in `zitadel-db/src/repo_impls/`
+//! plus thin wrappers for Session (KvStore), FGA (FgaService), and RawQuery (Db).
 
 use std::sync::Arc;
 use zitadel_app::repo::*;
 use zitadel_db::Db;
-use zitadel_fga::{Evaluator, FgaService};
-use zitadel_storage::{DefaultStatefulStorage, DefaultTransientStorage};
+use zitadel_db::repo_impls::*;
+use zitadel_fga::{
+    CheckRequest, Evaluator, FgaService, ReadRequest, StoreResolver, TupleFilter, TupleKey,
+    TupleKeySet, TupleRepository, WriteRequest,
+};
+use zitadel_storage::DefaultTransientStorage;
 
 /// Build the complete `Repositories` container from existing infrastructure.
-///
-/// Most repositories are stub implementations that `todo!()` on every method.
-/// The Session bridge delegates to `DefaultTransientStorage` and works end-to-end.
-/// The FGA bridge delegates to `FgaService::check()`.
 pub fn build_repositories(
     db: Db,
-    _stateful: Arc<DefaultStatefulStorage>,
     transient: Arc<DefaultTransientStorage>,
     fga: Arc<FgaService>,
 ) -> Repositories {
-    let stub = StubDb(db);
     Repositories {
-        users: Arc::new(StubUserRepo(stub.clone())),
-        orgs: Arc::new(StubOrgRepo(stub.clone())),
-        credentials: Arc::new(StubCredentialRepo(stub.clone())),
-        sessions: Arc::new(KvSessionRepo(transient)),
-        instances: Arc::new(StubInstanceRepo(stub.clone())),
-        providers: Arc::new(StubProviderRepo(stub.clone())),
-        login_flows: Arc::new(StubLoginFlowRepo(stub.clone())),
-        oidc: Arc::new(StubOidcRepo(stub.clone())),
-        events: Arc::new(StubEventRepo(stub.clone())),
-        settings: Arc::new(StubSettingsRepo(stub.clone())),
+        users: Arc::new(SqlUserRepository::new(db.clone())),
+        orgs: Arc::new(SqlOrgRepository::new(db.clone())),
+        credentials: Arc::new(DbCredentialRepository::new(db.clone())),
+        sessions: Arc::new(KvSessionRepo(transient, db.clone())),
+        instances: Arc::new(SqlInstanceRepository::new(db.clone())),
+        providers: Arc::new(SqlProviderRepository::new(db.clone())),
+        login_flows: Arc::new(DbLoginFlowRepository::new(db.clone())),
+        oidc: Arc::new(DbOidcRepository::new(db.clone())),
+        events: Arc::new(DbEventRepository::new(db.clone())),
+        settings: Arc::new(SqlSettingsRepository::new(db.clone())),
         fga: Arc::new(FgaBridge(fga)),
-        schemas: Arc::new(StubSchemaRepo(stub.clone())),
-        groups: Arc::new(StubGroupRepo(stub.clone())),
-        pats: Arc::new(StubPatRepo(stub.clone())),
-        search: Arc::new(StubSearchRepo(stub.clone())),
-        actions: Arc::new(StubActionRepo(stub)),
+        schemas: Arc::new(SqlSchemaRepository::new(db.clone())),
+        groups: Arc::new(SqlGroupRepository::new(db.clone())),
+        pats: Arc::new(DbPatRepository::new(db.clone())),
+        search: Arc::new(SqlSearchRepository::new(db.clone())),
+        actions: Arc::new(DbActionRepository::new(db.clone())),
+        raw: Arc::new(DbRawQueryRepo(db.clone())),
+        uow: Arc::new(SqlUnitOfWorkFactory::new(db)),
     }
 }
 
-// ─── Shared wrapper ──────────────────────────────────────
+// ─── Session (delegates to KvStore + SQL for metadata) ───
 
-#[derive(Clone)]
-struct StubDb(Db);
-
-// ─── Session (live — delegates to KvStore) ───────────────
-
-struct KvSessionRepo(Arc<DefaultTransientStorage>);
+struct KvSessionRepo(Arc<DefaultTransientStorage>, Db);
 
 impl SessionRepository for KvSessionRepo {
     fn create(
@@ -101,9 +92,25 @@ impl SessionRepository for KvSessionRepo {
             Ok(true)
         })
     }
+
+    fn update_metadata(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+        metadata_json: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.1.clone();
+        let iid = instance_id.to_string();
+        let sid = session_id.to_string();
+        let meta = metadata_json.to_string();
+        Box::pin(async move {
+            zitadel_db::update_session_metadata(&db, &iid, &sid, &meta).await?;
+            Ok(())
+        })
+    }
 }
 
-// ─── FGA (live — delegates to FgaService) ────────────────
+// ─── FGA (delegates to FgaService) ───────────────────────
 
 struct FgaBridge(Arc<FgaService>);
 
@@ -116,8 +123,8 @@ impl FgaRepository for FgaBridge {
         object: &str,
     ) -> BoxFuture<'_, anyhow::Result<bool>> {
         let instance_id = instance_id.to_string();
-        let req = zitadel_fga::CheckRequest {
-            tuple_key: zitadel_fga::TupleKey {
+        let req = CheckRequest {
+            tuple_key: TupleKey {
                 user: user.to_string(),
                 relation: relation.to_string(),
                 object: object.to_string(),
@@ -128,421 +135,384 @@ impl FgaRepository for FgaBridge {
             context: None,
         };
         Box::pin(async move {
-            let resp = self.0.check(&instance_id, &instance_id, req).await?;
-            Ok(resp.allowed)
+            let store = self.0.discover_store(&instance_id).await?;
+            Ok(self.0.check(&instance_id, &store.id, req).await?.allowed)
         })
     }
-    fn write_tuple(&self, _: &str, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-2: FGA write") })
-    }
-    fn delete_tuple(
+
+    fn write(
         &self,
-        _: &str,
-        _: &str,
-        _: &str,
-        _: &str,
+        instance_id: &str,
+        writes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-2: FGA delete") })
-    }
-    fn list_relations(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Vec<FgaRelation>>> {
-        Box::pin(async { todo!("CODEX-2: FGA list") })
-    }
-}
-
-// ─── Stub repos (todo! on all methods) ──────────────────
-// These compile and satisfy the type system. Runtime calls panic with
-// a clear message indicating which CODEX stream owns the implementation.
-
-macro_rules! stub_struct {
-    ($name:ident) => {
-        #[allow(dead_code)]
-        struct $name(StubDb);
-    };
-}
-
-stub_struct!(StubUserRepo);
-stub_struct!(StubOrgRepo);
-stub_struct!(StubCredentialRepo);
-stub_struct!(StubInstanceRepo);
-stub_struct!(StubProviderRepo);
-stub_struct!(StubLoginFlowRepo);
-stub_struct!(StubOidcRepo);
-stub_struct!(StubEventRepo);
-stub_struct!(StubSettingsRepo);
-stub_struct!(StubSchemaRepo);
-stub_struct!(StubGroupRepo);
-stub_struct!(StubPatRepo);
-stub_struct!(StubSearchRepo);
-stub_struct!(StubActionRepo);
-
-impl UserRepository for StubUserRepo {
-    fn create(&self, _: &str, _: &UserRecord) -> BoxFuture<'_, anyhow::Result<UserRecord>> {
-        Box::pin(async { todo!("CODEX-1: UserRepository::create") })
-    }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<UserRecord>>> {
-        Box::pin(async { todo!("CODEX-1: UserRepository::get") })
-    }
-    fn find_by_identifier(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<UserRecord>>> {
-        Box::pin(async { todo!("CODEX-1: UserRepository::find_by_identifier") })
-    }
-    fn list(
-        &self,
-        _: &str,
-        _: Option<&str>,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<UserRecord>>> {
-        Box::pin(async { todo!("CODEX-1: UserRepository::list") })
-    }
-    fn update(&self, _: &str, _: &UserRecord) -> BoxFuture<'_, anyhow::Result<UserRecord>> {
-        Box::pin(async { todo!("CODEX-1: UserRepository::update") })
-    }
-    fn deactivate(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-1: UserRepository::deactivate") })
-    }
-}
-
-impl OrgRepository for StubOrgRepo {
-    fn create(&self, _: &str, _: &OrgRecord) -> BoxFuture<'_, anyhow::Result<OrgRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<OrgRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn list(
-        &self,
-        _: &str,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<OrgRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn update(&self, _: &str, _: &OrgRecord) -> BoxFuture<'_, anyhow::Result<OrgRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn first_org_id(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Option<String>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-}
-
-impl CredentialRepository for StubCredentialRepo {
-    fn set_password(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn get_password_hash(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<String>>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn link_identity(
-        &self,
-        _: &str,
-        _: &LinkedIdentityRecord,
-    ) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn unlink_identity(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn list_linked_identities(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Vec<LinkedIdentityRecord>>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn find_by_external_sub(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<LinkedIdentityRecord>>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-}
-
-impl InstanceRepository for StubInstanceRepo {
-    fn create(&self, _: &str, _: &InstanceRecord) -> BoxFuture<'_, anyhow::Result<InstanceRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn get(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Option<InstanceRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn list(
-        &self,
-        _: &str,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<InstanceRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn update(&self, _: &InstanceRecord) -> BoxFuture<'_, anyhow::Result<InstanceRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn deprovision(&self, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn resolve_domain(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Option<RouteResolution>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn list_domains(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn set_domain(&self, _: &str, _: &DomainRecord) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-}
-
-impl ProviderRepository for StubProviderRepo {
-    fn create(&self, _: &str, _: &ProviderRecord) -> BoxFuture<'_, anyhow::Result<ProviderRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<ProviderRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn list(
-        &self,
-        _: &str,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<ProviderRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn update(&self, _: &str, _: &ProviderRecord) -> BoxFuture<'_, anyhow::Result<ProviderRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn delete(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-}
-
-impl LoginFlowRepository for StubLoginFlowRepo {
-    fn get_flow(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<LoginFlowRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn list_flows(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<LoginFlowRecord>>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn upsert_flow(&self, _: &str, _: &LoginFlowRecord) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn delete_flow(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-}
-
-impl OidcRepository for StubOidcRepo {
-    fn find_client(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<OidcClientInfo>>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn create_auth_request(
-        &self,
-        _: &str,
-        _: &OidcAuthRequest,
-    ) -> BoxFuture<'_, anyhow::Result<String>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn consume_auth_code(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<OidcAuthRequest>>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn load_user_claims(
-        &self,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<UserClaims>>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-}
-
-impl EventRepository for StubEventRepo {
-    fn append(
-        &self,
-        _: &str,
-        _: &zitadel_app::DomainEvent,
-        _: Option<&str>,
-        _: Option<&str>,
-        _: Option<&str>,
-    ) -> BoxFuture<'_, anyhow::Result<()>> {
-        // Events are fire-and-forget for now; silently succeed rather than panicking.
-        Box::pin(async { Ok(()) })
-    }
-    fn list(
-        &self,
-        _: &str,
-        _: &EventQueryParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<EventRecord>>> {
-        Box::pin(async {
-            Ok(ListResult {
-                items: vec![],
-                next_cursor: None,
-                total_count: None,
-            })
-        })
-    }
-}
-
-impl SettingsRepository for StubSettingsRepo {
-    fn get(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<SettingsRecord>>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn set(&self, _: &str, _: &SettingsRecord) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn resolve(
-        &self,
-        _: &str,
-        st: &str,
-        _: Option<&str>,
-        _: Option<&str>,
-    ) -> BoxFuture<'_, anyhow::Result<SettingsRecord>> {
-        let st = st.to_string();
+        let instance_id = instance_id.to_string();
+        let tuples = TupleKeySet {
+            tuple_keys: writes
+                .into_iter()
+                .map(|(user, relation, object)| TupleKey {
+                    user,
+                    relation,
+                    object,
+                    condition: None,
+                })
+                .collect(),
+        };
+        let req = WriteRequest {
+            writes: tuples,
+            deletes: TupleKeySet::default(),
+            authorization_model_id: None,
+        };
         Box::pin(async move {
-            Ok(SettingsRecord {
-                settings_type: st,
-                scope: "instance".into(),
-                data: serde_json::json!({}),
-            })
+            let store = self.0.discover_store(&instance_id).await?;
+            self.0.write_tuples(&instance_id, &store.id, req).await?;
+            Ok(())
+        })
+    }
+
+    fn delete(
+        &self,
+        instance_id: &str,
+        deletes: Vec<(String, String, String)>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let instance_id = instance_id.to_string();
+        let tuples = TupleKeySet {
+            tuple_keys: deletes
+                .into_iter()
+                .map(|(user, relation, object)| TupleKey {
+                    user,
+                    relation,
+                    object,
+                    condition: None,
+                })
+                .collect(),
+        };
+        let req = WriteRequest {
+            writes: TupleKeySet::default(),
+            deletes: tuples,
+            authorization_model_id: None,
+        };
+        Box::pin(async move {
+            let store = self.0.discover_store(&instance_id).await?;
+            self.0.write_tuples(&instance_id, &store.id, req).await?;
+            Ok(())
+        })
+    }
+
+    fn read(
+        &self,
+        instance_id: &str,
+        filter: Option<(String, String, String)>,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<FgaRelation>>> {
+        let instance_id = instance_id.to_string();
+        let tuple_filter = filter.map(|(user, relation, object)| TupleFilter {
+            user: if user.is_empty() { None } else { Some(user) },
+            relation: if relation.is_empty() {
+                None
+            } else {
+                Some(relation)
+            },
+            object: if object.is_empty() {
+                None
+            } else {
+                Some(object)
+            },
+        });
+        Box::pin(async move {
+            let store = self.0.discover_store(&instance_id).await?;
+            let req = ReadRequest {
+                tuple_key: tuple_filter,
+                page_size: None,
+                continuation_token: None,
+            };
+            let resp = self.0.read_tuples(&instance_id, &store.id, req).await?;
+            Ok(resp
+                .tuples
+                .into_iter()
+                .map(|t| FgaRelation {
+                    user: t.key.user,
+                    relation: t.key.relation,
+                    object: t.key.object,
+                })
+                .collect())
         })
     }
 }
 
-impl SchemaRepository for StubSchemaRepo {
-    fn register(&self, _: &str, _: &SchemaRecord) -> BoxFuture<'_, anyhow::Result<SchemaRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
+// ─── Raw Query (delegates to zitadel_db functions) ──────
+
+struct DbRawQueryRepo(Db);
+
+fn static_table(table: &str) -> &'static str {
+    match table {
+        "apps" => "apps",
+        "projects" => "projects",
+        "groups" => "groups",
+        "orgs" => "orgs",
+        "users" => "users",
+        "schemas" => "schemas",
+        other => panic!("unknown table for named resource: {other}"),
     }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<SchemaRecord>>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn get_by_type(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<SchemaRecord>>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn list(
+}
+
+impl RawQueryRepository for DbRawQueryRepo {
+    fn create_named_resource(
         &self,
-        _: &str,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<SchemaRecord>>> {
-        Box::pin(async {
-            Ok(ListResult {
-                items: vec![],
-                next_cursor: None,
-                total_count: None,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+        name: &str,
+        org_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let tbl = static_table(table);
+        let id = id.to_string();
+        let name = name.to_string();
+        let oid = org_id.to_string();
+        Box::pin(async move {
+            let r = zitadel_db::create_named_resource(&db, &iid, tbl, &id, &name, &oid).await?;
+            Ok(NamedResourceRecord {
+                id: r.id,
+                name: r.name,
+                state: r.state,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
             })
         })
     }
-    fn update(&self, _: &str, _: &SchemaRecord) -> BoxFuture<'_, anyhow::Result<SchemaRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-}
-
-impl GroupRepository for StubGroupRepo {
-    fn create(&self, _: &str, _: &GroupRecord) -> BoxFuture<'_, anyhow::Result<GroupRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<GroupRecord>>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn list(
+    fn get_named_resource(
         &self,
-        _: &str,
-        _: Option<&str>,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<GroupRecord>>> {
-        Box::pin(async {
-            Ok(ListResult {
-                items: vec![],
-                next_cursor: None,
-                total_count: None,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let tbl = static_table(table);
+        let id = id.to_string();
+        Box::pin(async move {
+            let r = zitadel_db::get_named_resource(&db, &iid, tbl, &id).await?;
+            Ok(r.map(|r| NamedResourceRecord {
+                id: r.id,
+                name: r.name,
+                state: r.state,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            }))
+        })
+    }
+    fn list_named_resources(
+        &self,
+        instance_id: &str,
+        table: &str,
+        cursor: &str,
+        limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let tbl = static_table(table);
+        let cur = cursor.to_string();
+        Box::pin(async move {
+            let rows = zitadel_db::list_named_resources(&db, &iid, tbl, &cur, limit).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| NamedResourceRecord {
+                    id: r.id,
+                    name: r.name,
+                    state: r.state,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                })
+                .collect())
+        })
+    }
+    fn update_named_resource_name(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+        name: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let tbl = static_table(table);
+        let id = id.to_string();
+        let name = name.to_string();
+        Box::pin(
+            async move { zitadel_db::update_named_resource_name(&db, &iid, tbl, &id, &name).await },
+        )
+    }
+    fn delete_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let tbl = static_table(table);
+        let id = id.to_string();
+        Box::pin(async move { zitadel_db::delete_instance_row(&db, &iid, tbl, &id).await })
+    }
+    fn load_console_bootstrap(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<ConsoleBootstrapData>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        Box::pin(async move {
+            let data = zitadel_db::load_console_bootstrap_data(&db, &iid).await?;
+            Ok(ConsoleBootstrapData {
+                counts: data.counts.into_iter().collect(),
+                orgs: data
+                    .orgs
+                    .into_iter()
+                    .map(|o| OrgSummary {
+                        id: o.id,
+                        name: o.name,
+                        state: o.state,
+                    })
+                    .collect(),
+                instance: InstanceInfo {
+                    instance_id: data.instance.instance_id,
+                    kind: data.instance.kind,
+                    feature_overrides_json: data.instance.feature_overrides_json,
+                    parent_instance_id: data.instance.parent_instance_id,
+                },
             })
         })
     }
-    fn update(&self, _: &str, _: &GroupRecord) -> BoxFuture<'_, anyhow::Result<GroupRecord>> {
-        Box::pin(async { todo!("CODEX-1") })
-    }
-    fn delete(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn add_member(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn remove_member(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-impl PatRepository for StubPatRepo {
-    fn create(&self, _: &str, _: &PatRecord, _: &str) -> BoxFuture<'_, anyhow::Result<String>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<PatRecord>>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn list(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Vec<PatRecord>>> {
-        Box::pin(async { Ok(vec![]) })
-    }
-    fn revoke(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn resolve_token(
+    fn load_entity_counts(
         &self,
-        _: &str,
-        _: &str,
-    ) -> BoxFuture<'_, anyhow::Result<Option<ResolvedPat>>> {
-        Box::pin(async { Ok(None) })
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        Box::pin(async move {
+            let map = zitadel_db::load_entity_counts(&db, &iid).await?;
+            Ok(map.into_iter().collect())
+        })
     }
-}
-
-impl SearchRepository for StubSearchRepo {
-    fn search(
+    fn list_fingerprints(
         &self,
-        _: &str,
-        _: &str,
-        _: Option<&[&str]>,
-        _: Option<u32>,
-    ) -> BoxFuture<'_, anyhow::Result<Vec<SearchResult>>> {
-        Box::pin(async { Ok(vec![]) })
+        instance_id: &str,
+        cursor: &str,
+        limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<FingerprintRecord>>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let cur = cursor.to_string();
+        Box::pin(async move {
+            let rows = zitadel_db::list_fingerprints(&db, &iid, &cur, limit).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| FingerprintRecord {
+                    id: r.id,
+                    type_: r.type_,
+                    raw_data_json: r.raw_data_json,
+                    created_at: r.created_at,
+                })
+                .collect())
+        })
     }
-}
-
-impl ActionRepository for StubActionRepo {
-    fn list(
+    fn upsert_fingerprint(
         &self,
-        _: &str,
-        _: &ListParams,
-    ) -> BoxFuture<'_, anyhow::Result<ListResult<ActionRecord>>> {
-        Box::pin(async {
-            Ok(ListResult {
-                items: vec![],
-                next_cursor: None,
-                total_count: None,
+        instance_id: &str,
+        id: &str,
+        type_: &str,
+        raw_data: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let id = id.to_string();
+        let t = type_.to_string();
+        let rd = raw_data.to_string();
+        Box::pin(async move {
+            zitadel_db::upsert_fingerprint(&db, &iid, &id, &t, &rd)
+                .await
+                .map(|_| ())
+        })
+    }
+    fn list_jobs(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<JobRecord>>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        Box::pin(async move {
+            let rows = zitadel_db::list_jobs_for_instance(&db, &iid).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| JobRecord {
+                    name: r.name,
+                    display_name: r.display_name,
+                    description: r.description,
+                    cron: r.cron,
+                    enabled: r.enabled,
+                    last_status: r.last_status,
+                    last_error: r.last_error,
+                    run_count: r.run_count,
+                    last_rows_removed: r.last_rows_removed,
+                    last_run_at: r.last_run_at,
+                    next_run_at: r.next_run_at,
+                    lease_expires_at: r.lease_expires_at,
+                    config_json: r.config_json,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                })
+                .collect())
+        })
+    }
+    fn list_saved_queries(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SavedQueryRecord>>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        Box::pin(async move {
+            let rows = zitadel_db::list_saved_queries(&db, &iid).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| SavedQueryRecord {
+                    id: r.id,
+                    name: r.name,
+                    description: r.description,
+                    sql: r.sql,
+                    created_at: r.created_at,
+                })
+                .collect())
+        })
+    }
+    fn create_saved_query(
+        &self,
+        instance_id: &str,
+        id: &str,
+        name: &str,
+        description: &str,
+        sql: &str,
+    ) -> BoxFuture<'_, anyhow::Result<SavedQueryRecord>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let id = id.to_string();
+        let name = name.to_string();
+        let desc = description.to_string();
+        let sql = sql.to_string();
+        Box::pin(async move {
+            let r = zitadel_db::create_saved_query(&db, &iid, &id, &name, &desc, &sql).await?;
+            Ok(SavedQueryRecord {
+                id: r.id,
+                name: r.name,
+                description: r.description,
+                sql: r.sql,
+                created_at: r.created_at,
             })
         })
     }
-    fn get(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<Option<ActionRecord>>> {
-        Box::pin(async { Ok(None) })
-    }
-    fn create(&self, _: &str, _: &ActionRecord) -> BoxFuture<'_, anyhow::Result<ActionRecord>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn update(&self, _: &str, _: &ActionRecord) -> BoxFuture<'_, anyhow::Result<ActionRecord>> {
-        Box::pin(async { todo!("CODEX-2") })
-    }
-    fn delete(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
+    fn delete_saved_query(
+        &self,
+        instance_id: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let db = self.0.clone();
+        let iid = instance_id.to_string();
+        let id = id.to_string();
+        Box::pin(async move { zitadel_db::delete_saved_query(&db, &iid, &id).await })
     }
 }

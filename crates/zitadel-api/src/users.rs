@@ -1,6 +1,6 @@
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::Response,
     routing::{get, post},
 };
@@ -11,7 +11,7 @@ use zitadel_app::{
     users::{CreateUserCommand, UpdateUserCommand},
 };
 
-use crate::{ApiState, middleware::Identity, response};
+use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -108,7 +108,7 @@ async fn create_user(
         org_id: None,
         metadata: req.metadata,
     };
-    match state.app.create_user.execute(&ctx, cmd).await {
+    match state.app.runner.run_fn(&ctx, "user.create", || state.app.create_user.execute(&ctx, cmd)).await {
         Ok(user) => response::json_created(UserResponse::from(user)),
         Err(e) => response::app_error(e),
     }
@@ -117,10 +117,10 @@ async fn create_user(
 async fn get_user(
     State(state): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match state.app.get_user.execute(&ctx, &id).await {
+    match state.app.runner.run_fn(&ctx, "user.get", || state.app.get_user.execute(&ctx, &id)).await {
         Ok(user) => response::json_ok(UserResponse::from(user)),
         Err(e) => response::app_error(e),
     }
@@ -137,11 +137,9 @@ async fn list_users(
         cursor: params.cursor,
         search: None,
     };
-    match state
-        .app
-        .list_users
-        .execute(&ctx, params.org_id.as_deref(), &app_params)
-        .await
+    match state.app.runner.run_fn(&ctx, "user.list", || {
+        state.app.list_users.execute(&ctx, params.org_id.as_deref(), &app_params)
+    }).await
     {
         Ok(result) => {
             let items: Vec<UserResponse> =
@@ -159,7 +157,7 @@ async fn list_users(
 async fn update_user(
     State(state): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
     Json(req): Json<UserRequest>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
@@ -176,7 +174,7 @@ async fn update_user(
             Some(req.metadata)
         },
     };
-    match state.app.update_user.execute(&ctx, cmd).await {
+    match state.app.runner.run_fn(&ctx, "user.update", || state.app.update_user.execute(&ctx, cmd)).await {
         Ok(user) => response::json_ok(UserResponse::from(user)),
         Err(e) => response::app_error(e),
     }
@@ -185,10 +183,10 @@ async fn update_user(
 async fn delete_user(
     State(state): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match state.app.deactivate_user.execute(&ctx, &id).await {
+    match state.app.runner.run_fn(&ctx, "user.delete", || state.app.delete_user.execute(&ctx, &id)).await {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }
@@ -197,7 +195,7 @@ async fn delete_user(
 async fn set_password(
     State(state): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
     Json(req): Json<PasswordRequest>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
@@ -211,7 +209,7 @@ async fn set_password(
         user_id: id,
         password_hash: cred_json,
     };
-    match state.app.set_password.execute(&ctx, cmd).await {
+    match state.app.runner.run_fn(&ctx, "user.set_password", || state.app.set_password.execute(&ctx, cmd)).await {
         Ok(()) => response::no_content(),
         Err(e) => response::app_error(e),
     }

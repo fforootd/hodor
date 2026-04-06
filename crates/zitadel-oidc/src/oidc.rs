@@ -54,9 +54,11 @@ pub struct JsonWebKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientMetadata {
+    pub app_id: String,
     pub client_id: String,
     pub client_secret: String,
     pub redirect_uris: Vec<String>,
+    pub post_logout_redirect_uris: Vec<String>,
     pub grant_types: Vec<String>,
     pub response_types: Vec<String>,
     pub state: String,
@@ -81,11 +83,18 @@ pub struct NewAuthRequest {
 pub struct ConsumedAuthRequest {
     pub auth_request_id: String,
     pub user_id: String,
+    pub session_id: String,
     pub client_id: String,
     pub redirect_uri: String,
     pub scope: String,
+    pub state: String,
     pub nonce: String,
+    pub response_type: String,
     pub code_challenge: String,
+    pub code_challenge_method: String,
+    pub prompt: Vec<String>,
+    pub login_hint: String,
+    pub max_age: Option<u64>,
     pub auth_time: Option<u64>,
 }
 
@@ -183,16 +192,22 @@ impl ProtocolError {
 
 pub struct SigningKeys {
     pub kid: String,
+    pub alg: String,
     pub encoding: EncodingKey,
     pub decoding: DecodingKey,
+    pub private_pem: Vec<u8>,
+    pub public_pem: Vec<u8>,
     pub n: String,
     pub e: String,
 }
 
 impl SigningKeys {
     pub fn generate() -> anyhow::Result<Self> {
-        let bits = 2048;
-        let private_key = rsa::RsaPrivateKey::new(&mut OsRng, bits)
+        Self::generate_with_rsa_bits(2048)
+    }
+
+    pub fn generate_with_rsa_bits(bits: u32) -> anyhow::Result<Self> {
+        let private_key = rsa::RsaPrivateKey::new(&mut OsRng, bits as usize)
             .map_err(|error| anyhow::anyhow!("generate RSA key: {error}"))?;
         let public_key = private_key.to_public_key();
 
@@ -213,10 +228,57 @@ impl SigningKeys {
         let e =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
 
-        Ok(Self {
-            kid: uuid::Uuid::new_v4().to_string(),
+        Self::from_components(
+            uuid::Uuid::new_v4().to_string(),
+            "RS256".to_string(),
+            private_pem.as_bytes().to_vec(),
+            public_pem.as_bytes().to_vec(),
             encoding,
             decoding,
+            n,
+            e,
+        )
+    }
+
+    pub fn from_pems(
+        kid: String,
+        alg: String,
+        private_pem: Vec<u8>,
+        public_pem: Vec<u8>,
+    ) -> anyhow::Result<Self> {
+        let encoding = EncodingKey::from_rsa_pem(&private_pem)
+            .map_err(|error| anyhow::anyhow!("create encoding key: {error}"))?;
+        let decoding = DecodingKey::from_rsa_pem(&public_pem)
+            .map_err(|error| anyhow::anyhow!("create decoding key: {error}"))?;
+        let public_key: rsa::RsaPublicKey = rsa::pkcs8::DecodePublicKey::from_public_key_pem(
+            std::str::from_utf8(&public_pem)
+                .map_err(|error| anyhow::anyhow!("decode public key pem: {error}"))?,
+        )
+        .map_err(|error| anyhow::anyhow!("decode public key: {error}"))?;
+        let n =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
+        let e =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
+        Self::from_components(kid, alg, private_pem, public_pem, encoding, decoding, n, e)
+    }
+
+    fn from_components(
+        kid: String,
+        alg: String,
+        private_pem: Vec<u8>,
+        public_pem: Vec<u8>,
+        encoding: EncodingKey,
+        decoding: DecodingKey,
+        n: String,
+        e: String,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            kid,
+            alg,
+            encoding,
+            decoding,
+            private_pem,
+            public_pem,
             n,
             e,
         })
@@ -227,7 +289,7 @@ impl SigningKeys {
             kty: "RSA".to_string(),
             use_: "sig".to_string(),
             kid: self.kid.clone(),
-            alg: "RS256".to_string(),
+            alg: self.alg.clone(),
             n: self.n.clone(),
             e: self.e.clone(),
         }
@@ -245,8 +307,11 @@ pub struct IdTokenClaims {
     pub aud: String,
     pub exp: u64,
     pub iat: u64,
+    pub jti: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub nonce: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -262,6 +327,9 @@ pub struct AccessTokenClaims {
     pub aud: String,
     pub exp: u64,
     pub iat: u64,
+    pub jti: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
     pub scope: String,
     pub client_id: String,
 }
@@ -273,6 +341,9 @@ pub struct RefreshTokenClaims {
     pub aud: String,
     pub exp: u64,
     pub iat: u64,
+    pub jti: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
     pub scope: String,
     pub client_id: String,
 }

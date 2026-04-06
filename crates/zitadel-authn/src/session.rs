@@ -67,7 +67,7 @@ impl SessionStore {
         let token = Uuid::new_v4().to_string();
         let token_hash = hash_token(&token);
 
-        let org = if org_id.is_empty() { "_global" } else { org_id };
+        let org: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
         let expires_expr = match scoped.dialect() {
             zitadel_db::Dialect::Postgres => {
                 format!("CURRENT_TIMESTAMP + INTERVAL '{max_age_secs} seconds'")
@@ -112,7 +112,7 @@ impl SessionStore {
         let expires_at = scoped.as_text("expires_at");
         let revoked_at = scoped.as_text("revoked_at");
         let sql = format!(
-            "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
+            "SELECT id, user_id, COALESCE(org_id, ''), token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
              FROM sessions \
              WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
@@ -162,7 +162,7 @@ impl SessionStore {
         let expires_at = scoped.as_text("expires_at");
         let revoked_at = scoped.as_text("revoked_at");
         let sql = format!(
-            "SELECT id, user_id, org_id, token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
+            "SELECT id, user_id, COALESCE(org_id, ''), token_hash, user_agent, ip_address, {created_at}, {created_at_epoch}, {expires_at}, {revoked_at} \
              FROM sessions \
              WHERE instance_id = $1 AND user_id = $2 AND revoked_at IS NULL \
              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) \

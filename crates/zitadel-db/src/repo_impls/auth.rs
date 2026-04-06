@@ -3,7 +3,7 @@ use google_cloud_spanner::{
     client::Error as SpannerError, row::Row as SpannerRow, statement::Statement,
 };
 use serde_json::Value;
-use sqlx::{Any, QueryBuilder};
+use sqlx::{Any, Executor, QueryBuilder};
 use uuid::Uuid;
 use zitadel_app::{
     event::DomainEvent,
@@ -12,7 +12,7 @@ use zitadel_app::{
         EventQueryParams, EventRecord, EventRepository, FgaRelation, FgaRepository,
         LinkedIdentityRecord, ListParams, ListResult, LoginFlowRecord, LoginFlowRepository,
         OidcAuthRequest, OidcClientInfo, OidcRepository, PatRecord, PatRepository, ResolvedPat,
-        SessionInfo, SessionRepository, UserClaims,
+        SessionInfo, SessionRepository, UnitOfWork, UnitOfWorkFactory, UserClaims,
     },
 };
 use zitadel_crypto::token_hash;
@@ -20,7 +20,7 @@ use zitadel_crypto::token_hash;
 use crate::{
     Db, Dialect, delete_instance_row, find_linked_identity, get_action, get_login_flow_record,
     get_oidc_client_record, list_actions, list_login_flow_records, load_user_claims_record,
-    replace_password_credential,
+    replace_password_credential, set_login_flow_state,
 };
 
 const DEFAULT_SESSION_MAX_AGE_SECS: u64 = 86_400;
@@ -142,6 +142,32 @@ impl DbActionRepository {
     }
 }
 
+// ─── Unit of Work ──────────────────────────────────────────
+
+pub struct SqlUnitOfWorkFactory {
+    pub(super) db: Db,
+}
+
+impl SqlUnitOfWorkFactory {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+}
+
+struct BufferedEvent {
+    instance_id: String,
+    event: DomainEvent,
+    request_id: Option<String>,
+    session_id: Option<String>,
+    flow_id: Option<String>,
+}
+
+pub struct SqlUnitOfWork {
+    db: Db,
+    instance_id: String,
+    events: Vec<BufferedEvent>,
+}
+
 impl CredentialRepository for DbCredentialRepository {
     fn set_password(
         &self,
@@ -239,6 +265,34 @@ impl CredentialRepository for DbCredentialRepository {
                     .await?
                     .map(linked_identity_from_retained),
             )
+        })
+    }
+
+    fn touch_linked_identity(
+        &self,
+        instance_id: &str,
+        provider_id: &str,
+        external_sub: &str,
+        external_email: &str,
+        raw_claims: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let provider_id = provider_id.to_string();
+        let external_sub = external_sub.to_string();
+        let external_email = external_email.to_string();
+        let raw_claims = raw_claims.to_string();
+        Box::pin(async move {
+            crate::touch_linked_identity(
+                &db,
+                &instance_id,
+                &provider_id,
+                &external_sub,
+                &external_email,
+                &raw_claims,
+            )
+            .await?;
+            Ok(())
         })
     }
 }
@@ -348,6 +402,22 @@ impl SessionRepository for DbSessionRepository {
         let session_id = session_id.to_string();
         Box::pin(async move { revoke_session_record(&db, &instance_id, &session_id).await })
     }
+
+    fn update_metadata(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+        metadata_json: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let session_id = session_id.to_string();
+        let metadata_json = metadata_json.to_string();
+        Box::pin(async move {
+            crate::update_session_metadata(&db, &instance_id, &session_id, &metadata_json).await?;
+            Ok(())
+        })
+    }
 }
 
 impl LoginFlowRepository for DbLoginFlowRepository {
@@ -398,6 +468,22 @@ impl LoginFlowRepository for DbLoginFlowRepository {
             Ok(())
         })
     }
+
+    fn set_state(
+        &self,
+        instance_id: &str,
+        flow_id: &str,
+        state: &str,
+        enabled: bool,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let flow_id = flow_id.to_string();
+        let state = state.to_string();
+        Box::pin(
+            async move { set_login_flow_state(&db, &instance_id, &flow_id, &state, enabled).await },
+        )
+    }
 }
 
 impl OidcRepository for DbOidcRepository {
@@ -413,9 +499,13 @@ impl OidcRepository for DbOidcRepository {
             Ok(get_oidc_client_record(&db, &instance_id, &client_id)
                 .await?
                 .map(|record| OidcClientInfo {
+                    app_id: record.app_id,
                     client_id,
                     client_secret: non_empty(Some(record.client_secret)),
                     redirect_uris: parse_string_list(&record.redirect_uris_json),
+                    post_logout_redirect_uris: parse_string_list(
+                        &record.post_logout_redirect_uris_json,
+                    ),
                     grant_types: parse_string_list(&record.grant_types_json),
                     response_types: parse_string_list(&record.response_types_json),
                     state: record.state,
@@ -522,49 +612,51 @@ impl FgaRepository for DbFgaRepository {
         Box::pin(async move { fga_check(&db, &instance_id, &user, &relation, &object).await })
     }
 
-    fn write_tuple(
+    fn write(
         &self,
         instance_id: &str,
-        user: &str,
-        relation: &str,
-        object: &str,
+        writes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
-        let user = user.to_string();
-        let relation = relation.to_string();
-        let object = object.to_string();
-        Box::pin(async move { write_fga_tuple(&db, &instance_id, &user, &relation, &object).await })
+        Box::pin(async move {
+            for (user, relation, object) in writes {
+                write_fga_tuple(&db, &instance_id, &user, &relation, &object).await?;
+            }
+            Ok(())
+        })
     }
 
-    fn delete_tuple(
+    fn delete(
         &self,
         instance_id: &str,
-        user: &str,
-        relation: &str,
-        object: &str,
+        deletes: Vec<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
-        let user = user.to_string();
-        let relation = relation.to_string();
-        let object = object.to_string();
-        Box::pin(
-            async move { delete_fga_tuple(&db, &instance_id, &user, &relation, &object).await },
-        )
+        Box::pin(async move {
+            for (user, relation, object) in deletes {
+                delete_fga_tuple(&db, &instance_id, &user, &relation, &object).await?;
+            }
+            Ok(())
+        })
     }
 
-    fn list_relations(
+    fn read(
         &self,
         instance_id: &str,
-        user: &str,
-        object_type: &str,
+        filter: Option<(String, String, String)>,
     ) -> BoxFuture<'_, anyhow::Result<Vec<FgaRelation>>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
-        let user = user.to_string();
-        let object_type = object_type.to_string();
-        Box::pin(async move { list_fga_relations(&db, &instance_id, &user, &object_type).await })
+        Box::pin(async move {
+            match filter {
+                Some((user, _relation, object_type)) => {
+                    list_fga_relations(&db, &instance_id, &user, &object_type).await
+                }
+                None => list_fga_relations(&db, &instance_id, "", "").await,
+            }
+        })
     }
 }
 
@@ -1024,7 +1116,7 @@ async fn resolve_pat(
                 "SELECT t.user_id, t.session_id, COALESCE(u.org_id, '') \
                  FROM tokens t \
                  JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
-                 WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.type = 'pat' AND t.revoked_at IS NULL \
+                 WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active' \
                  LIMIT 1",
             )
             .bind(scoped.instance_id())
@@ -1042,7 +1134,7 @@ async fn resolve_pat(
                 "SELECT t.user_id, t.session_id, u.org_id \
                  FROM tokens t \
                  JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
-                 WHERE t.instance_id = @instance_id AND t.token_hash = @token_hash AND t.type = 'pat' AND t.revoked_at IS NULL \
+                 WHERE t.instance_id = @instance_id AND t.token_hash = @token_hash AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active' \
                  LIMIT 1",
             );
             stmt.add_param("instance_id", &instance_id);
@@ -1072,7 +1164,7 @@ async fn create_session_record(
     let session_id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let hashed_token = token_hash(&token);
-    let org_id = if org_id.is_empty() { "_global" } else { org_id };
+    let org_id: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
 
     match db {
         Db::Sql(_) => {
@@ -1151,10 +1243,12 @@ async fn find_session_by_token(
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
             let row: Option<(String, String, String)> = sqlx::query_as(
-                "SELECT id, user_id, org_id \
-                 FROM sessions \
-                 WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
-                   AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) \
+                "SELECT s.id, s.user_id, COALESCE(s.org_id, '') \
+                 FROM sessions s \
+                 JOIN users u ON u.instance_id = s.instance_id AND u.id = s.user_id \
+                 WHERE s.instance_id = $1 AND s.token_hash = $2 AND s.revoked_at IS NULL \
+                   AND (s.expires_at IS NULL OR s.expires_at > CURRENT_TIMESTAMP) \
+                   AND u.state = 'active' \
                  LIMIT 1",
             )
             .bind(scoped.instance_id())
@@ -1170,10 +1264,12 @@ async fn find_session_by_token(
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                "SELECT id, user_id, org_id \
-                 FROM sessions \
-                 WHERE instance_id = @instance_id AND token_hash = @token_hash AND revoked_at IS NULL \
-                   AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP()) \
+                "SELECT s.id, s.user_id, IFNULL(s.org_id, '') AS org_id \
+                 FROM sessions s \
+                 JOIN users u ON u.instance_id = s.instance_id AND u.id = s.user_id \
+                 WHERE s.instance_id = @instance_id AND s.token_hash = @token_hash AND s.revoked_at IS NULL \
+                   AND (s.expires_at IS NULL OR s.expires_at > CURRENT_TIMESTAMP()) \
+                   AND u.state = 'active' \
                  LIMIT 1",
             );
             stmt.add_param("instance_id", &instance_id);
@@ -1367,57 +1463,23 @@ async fn create_oidc_auth_request(
     } else {
         request.id.clone()
     };
-    let user_id = request.user_id.clone().unwrap_or_default();
-    let nonce = request.nonce.clone().unwrap_or_default();
-    let code_challenge = request.code_challenge.clone().unwrap_or_default();
-    match db {
-        Db::Sql(_) => {
-            let scoped = db.scoped(instance_id.to_string());
-            sqlx::query(
-                "INSERT INTO oidc_auth_requests \
-                 (id, instance_id, user_id, client_id, redirect_uri, scope, nonce, response_type, code_challenge, code_challenge_method, prompt, done, auth_time) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'code', $8, '', '[]', 0, $9)",
-            )
-            .bind(&request_id)
-            .bind(scoped.instance_id())
-            .bind(&user_id)
-            .bind(&request.client_id)
-            .bind(&request.redirect_uri)
-            .bind(&request.scope)
-            .bind(&nonce)
-            .bind(&code_challenge)
-            .bind(request.auth_time.as_deref())
-            .execute(scoped.pool())
-            .await?;
-        }
-        Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(
-                "INSERT INTO oidc_auth_requests \
-                 (id, instance_id, user_id, client_id, redirect_uri, scope, nonce, response_type, code_challenge, code_challenge_method, prompt, done, auth_time) \
-                 VALUES \
-                 (@id, @instance_id, @user_id, @client_id, @redirect_uri, @scope, @nonce, 'code', @code_challenge, '', '[]', FALSE, @auth_time)",
-            );
-            stmt.add_param("id", &request_id);
-            stmt.add_param("instance_id", &instance_id);
-            stmt.add_param("user_id", &user_id);
-            stmt.add_param("client_id", &request.client_id);
-            stmt.add_param("redirect_uri", &request.redirect_uri);
-            stmt.add_param("scope", &request.scope);
-            stmt.add_param("nonce", &nonce);
-            stmt.add_param("code_challenge", &code_challenge);
-            stmt.add_param("auth_time", &request.auth_time);
-            let _ = spanner
-                .client()
-                .read_write_transaction(|tx| {
-                    let stmt = stmt.clone();
-                    Box::pin(async move {
-                        tx.update(stmt).await?;
-                        Ok::<(), SpannerError>(())
-                    })
-                })
-                .await?;
-        }
-    }
+    crate::create_oidc_auth_request_record(
+        db,
+        instance_id,
+        &request_id,
+        &request.client_id,
+        &request.redirect_uri,
+        &request.scope,
+        &request.state,
+        request.nonce.as_deref().unwrap_or_default(),
+        &request.response_type,
+        request.code_challenge.as_deref().unwrap_or_default(),
+        request.code_challenge_method.as_deref().unwrap_or_default(),
+        &serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_string()),
+        request.login_hint.as_deref().unwrap_or_default(),
+        request.max_age.and_then(|value| i64::try_from(value).ok()),
+    )
+    .await?;
     Ok(request_id)
 }
 
@@ -1430,9 +1492,12 @@ async fn consume_oidc_auth_code(
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
             let auth_time = scoped.as_text("auth_time");
+            let prompt = scoped.as_text("prompt");
             let mut tx = scoped.pool().begin().await?;
             let sql = format!(
-                "SELECT id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, {auth_time} \
+                "SELECT id, user_id, COALESCE(session_id, ''), client_id, redirect_uri, scope, COALESCE(state, ''), nonce, \
+                        response_type, code_challenge, code_challenge_method, COALESCE({prompt}, '[]'), \
+                        COALESCE(login_hint, ''), max_age, {auth_time} \
                  FROM oidc_auth_requests \
                  WHERE instance_id = $1 AND code = $2 AND done = 1 \
                  LIMIT 1"
@@ -1445,6 +1510,13 @@ async fn consume_oidc_auth_code(
                 String,
                 String,
                 String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                Option<i64>,
                 Option<String>,
             )> = sqlx::query_as(&sql)
                 .bind(scoped.instance_id())
@@ -1464,17 +1536,26 @@ async fn consume_oidc_auth_code(
             Ok(Some(OidcAuthRequest {
                 id: row.0,
                 user_id: non_empty(Some(row.1)),
-                client_id: row.2,
-                redirect_uri: row.3,
-                scope: row.4,
-                nonce: non_empty(Some(row.5)),
-                code_challenge: non_empty(Some(row.6)),
-                auth_time: row.7,
+                session_id: non_empty(Some(row.2)),
+                client_id: row.3,
+                redirect_uri: row.4,
+                scope: row.5,
+                state: row.6,
+                nonce: non_empty(Some(row.7)),
+                response_type: row.8,
+                code_challenge: non_empty(Some(row.9)),
+                code_challenge_method: non_empty(Some(row.10)),
+                prompt: parse_string_list(&row.11),
+                login_hint: non_empty(Some(row.12)),
+                max_age: row.13.and_then(|value| u64::try_from(value).ok()),
+                auth_time: row.14,
             }))
         }
         Db::Spanner(spanner) => {
             let mut stmt = Statement::new(
-                "SELECT id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, CAST(auth_time AS STRING) AS auth_time \
+                "SELECT id, user_id, IFNULL(session_id, '') AS session_id, client_id, redirect_uri, scope, IFNULL(state, '') AS state, nonce, \
+                        response_type, code_challenge, code_challenge_method, IFNULL(prompt, '[]') AS prompt, \
+                        IFNULL(login_hint, '') AS login_hint, max_age, CAST(auth_time AS STRING) AS auth_time \
                  FROM oidc_auth_requests \
                  WHERE instance_id = @instance_id AND code = @code AND done = TRUE \
                  LIMIT 1",
@@ -1488,11 +1569,22 @@ async fn consume_oidc_auth_code(
             let record = OidcAuthRequest {
                 id: auth_request_id.clone(),
                 user_id: non_empty(row.column_by_name::<String>("user_id").ok()),
+                session_id: non_empty(row.column_by_name::<String>("session_id").ok()),
                 client_id: row.column_by_name::<String>("client_id")?,
                 redirect_uri: row.column_by_name::<String>("redirect_uri")?,
                 scope: row.column_by_name::<String>("scope")?,
+                state: row.column_by_name::<String>("state")?,
                 nonce: non_empty(row.column_by_name::<String>("nonce").ok()),
+                response_type: row.column_by_name::<String>("response_type")?,
                 code_challenge: non_empty(row.column_by_name::<String>("code_challenge").ok()),
+                code_challenge_method: non_empty(
+                    row.column_by_name::<String>("code_challenge_method").ok(),
+                ),
+                prompt: parse_string_list(&row.column_by_name::<String>("prompt")?),
+                login_hint: non_empty(row.column_by_name::<String>("login_hint").ok()),
+                max_age: row
+                    .column_by_name::<Option<i64>>("max_age")?
+                    .and_then(|value| u64::try_from(value).ok()),
                 auth_time: row.column_by_name::<Option<String>>("auth_time")?,
             };
             let mut delete_stmt = Statement::new(
@@ -2279,4 +2371,131 @@ async fn spanner_query_all(
         out.push(row);
     }
     Ok(out)
+}
+
+// ─── UnitOfWork trait impls ────────────────────────────────
+
+impl UnitOfWorkFactory for SqlUnitOfWorkFactory {
+    fn begin<'a>(
+        &'a self,
+        instance_id: &'a str,
+    ) -> BoxFuture<'a, anyhow::Result<Box<dyn UnitOfWork>>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        Box::pin(async move {
+            Ok(Box::new(SqlUnitOfWork {
+                db,
+                instance_id,
+                events: Vec::new(),
+            }) as Box<dyn UnitOfWork>)
+        })
+    }
+}
+
+impl UnitOfWork for SqlUnitOfWork {
+    fn buffer_event(
+        &mut self,
+        event: DomainEvent,
+        request_id: Option<String>,
+        session_id: Option<String>,
+        flow_id: Option<String>,
+    ) {
+        self.events.push(BufferedEvent {
+            instance_id: self.instance_id.clone(),
+            event,
+            request_id,
+            session_id,
+            flow_id,
+        });
+    }
+
+    fn commit(self: Box<Self>) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async move {
+            if self.events.is_empty() {
+                return Ok(());
+            }
+            match &self.db {
+                Db::Sql(_) => {
+                    let scoped = self.db.scoped(self.instance_id.clone());
+                    let mut tx = scoped.pool().begin().await?;
+                    for buffered in &self.events {
+                        append_domain_event_with_executor(
+                            &mut *tx,
+                            &scoped,
+                            &buffered.instance_id,
+                            &buffered.event,
+                            buffered.request_id.as_deref(),
+                            buffered.session_id.as_deref(),
+                            buffered.flow_id.as_deref(),
+                        )
+                        .await?;
+                    }
+                    tx.commit().await?;
+                }
+                Db::Spanner(_) => {
+                    // For Spanner, each event is its own transaction (existing behavior)
+                    for buffered in &self.events {
+                        append_domain_event(
+                            &self.db,
+                            &buffered.instance_id,
+                            &buffered.event,
+                            buffered.request_id.as_deref(),
+                            buffered.session_id.as_deref(),
+                            buffered.flow_id.as_deref(),
+                        )
+                        .await?;
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Like [`append_domain_event`] but accepts an explicit sqlx executor (e.g. a
+/// transaction) instead of pulling one from the pool.  SQL path only.
+async fn append_domain_event_with_executor<'e>(
+    executor: impl Executor<'e, Database = Any>,
+    scoped: &crate::scoped::ScopedDb,
+    instance_id: &str,
+    event: &DomainEvent,
+    request_id: Option<&str>,
+    session_id: Option<&str>,
+    flow_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let event_id = Uuid::now_v7().to_string();
+    let org_id = event_org_id(event);
+    let actor_id = non_empty(Some(event.actor_id().to_string()));
+    let aggregate_id = non_empty(Some(event.aggregate_id().to_string()));
+    let aggregate_type = Some(event.category().to_string());
+    let resource_type = aggregate_type.clone();
+    let payload_json = serde_json::to_string(event).context("serialize domain event payload")?;
+
+    let sql = format!(
+        "INSERT INTO events \
+         (id, instance_id, event_type, category, org_id, actor_id, aggregate_id, aggregate_type, resource_type, payload, metadata, request_id, session_id, flow_id, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, {}, {}, $10, $11, $12, {})",
+        scoped.json_bind(13),
+        scoped.json_bind(14),
+        scoped.timestamp_now(),
+    );
+    sqlx::query(&sql)
+        .bind(&event_id)
+        .bind(instance_id)
+        .bind(event.event_type())
+        .bind(event.category())
+        .bind(&org_id)
+        .bind(actor_id)
+        .bind(aggregate_id)
+        .bind(aggregate_type)
+        .bind(resource_type)
+        .bind(request_id)
+        .bind(session_id)
+        .bind(flow_id)
+        .bind(payload_json)
+        .bind("{}")
+        .execute(executor)
+        .await?;
+
+    Ok(())
 }

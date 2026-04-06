@@ -33,6 +33,9 @@ impl CreateProvider {
             return Err(AppError::validation("name is required"));
         }
 
+        // Authz: caller must be admin on the current instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+
         let id = uuid::Uuid::now_v7().to_string();
         let now = crate::users::chrono_now();
 
@@ -145,6 +148,9 @@ impl UpdateProvider {
         ctx: &ActorContext,
         cmd: UpdateProviderCommand,
     ) -> Result<ProviderRecord, AppError> {
+        // Authz: caller must be admin on the current instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+
         let mut provider = self
             .repos
             .providers
@@ -204,6 +210,9 @@ impl DeleteProvider {
         fields(event_type = "provider.removed", category = "provider")
     )]
     pub async fn execute(&self, ctx: &ActorContext, provider_id: &str) -> Result<(), AppError> {
+        // Authz: caller must be admin on the current instance
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", ctx.instance_id())).await?;
+
         self.repos
             .providers
             .delete(ctx.instance_id(), provider_id)

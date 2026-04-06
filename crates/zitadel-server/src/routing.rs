@@ -48,6 +48,7 @@ struct CacheEntry {
 
 #[derive(Clone, Debug)]
 struct RequestRoutingInput {
+    scheme: String,
     host: String,
     trusted_instance_id: Option<String>,
     path_instance_id: Option<String>,
@@ -87,6 +88,7 @@ impl InstanceResolver {
 
     fn request_input<B>(&self, req: &Request<B>) -> RequestRoutingInput {
         RequestRoutingInput {
+            scheme: forwarded_scheme(req).unwrap_or_default(),
             host: normalized_host(req),
             trusted_instance_id: trusted_instance_override(req, &self.trusted_proxies),
             path_instance_id: extract_path_instance_id(req.uri().path()),
@@ -95,6 +97,7 @@ impl InstanceResolver {
 
     async fn resolve(&self, input: RequestRoutingInput) -> anyhow::Result<InstanceContext> {
         let RequestRoutingInput {
+            scheme,
             host,
             trusted_instance_id,
             path_instance_id,
@@ -105,23 +108,20 @@ impl InstanceResolver {
         if let Some(instance_id) = path_instance_id {
             let cache_key = format!("instance:{instance_id}");
             if let Some(cached) = self.cached(&cache_key) {
-                return cached;
+                return cached.map(|ctx| hydrate_request_context(ctx, &scheme, &host, "path_param"));
             }
 
             let resolved = self
                 .load_by_instance_id(&instance_id)
                 .await?
-                .map(|mut ctx| {
-                    ctx.source = "path_param".into();
-                    ctx.host = host.clone();
-                    ctx
-                });
+                .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "path_param"));
             self.remember(cache_key, resolved.clone());
             return resolved.ok_or_else(|| anyhow::anyhow!("instance not found"));
         }
 
         if !self.cloud_enabled {
             let mut ctx = InstanceContext::new(DEFAULT_INSTANCE_ID);
+            ctx.scheme = scheme;
             ctx.host = host;
             ctx.source = "self_host_default".into();
             return Ok(ctx);
@@ -130,17 +130,15 @@ impl InstanceResolver {
         if let Some(instance_id) = trusted_instance_id {
             let cache_key = format!("instance:{instance_id}");
             if let Some(cached) = self.cached(&cache_key) {
-                return cached;
+                return cached.map(|ctx| {
+                    hydrate_request_context(ctx, &scheme, &host, "trusted_header")
+                });
             }
 
             let resolved = self
                 .load_by_instance_id(&instance_id)
                 .await?
-                .map(|mut ctx| {
-                    ctx.source = "trusted_header".into();
-                    ctx.host = host.clone();
-                    ctx
-                });
+                .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "trusted_header"));
             self.remember(cache_key, resolved.clone());
             return resolved.ok_or_else(|| anyhow::anyhow!("instance not found"));
         }
@@ -151,14 +149,13 @@ impl InstanceResolver {
 
         let cache_key = format!("host:{host}");
         if let Some(cached) = self.cached(&cache_key) {
-            return cached;
+            return cached.map(|ctx| hydrate_request_context(ctx, &scheme, &host, "host"));
         }
 
-        let resolved = self.load_by_host(&host).await?.map(|mut ctx| {
-            ctx.host = host.clone();
-            ctx.source = "host".into();
-            ctx
-        });
+        let resolved = self
+            .load_by_host(&host)
+            .await?
+            .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "host"));
         self.remember(cache_key, resolved.clone());
         resolved.ok_or_else(|| anyhow::anyhow!("instance not found"))
     }
@@ -200,6 +197,7 @@ impl InstanceResolver {
             resolved_org_id: row.resolved_org_id,
             placement_mode: row.placement_mode,
             region_key: row.region_key,
+            scheme: String::new(),
             host: host.into(),
             source: "host".into(),
         }))
@@ -215,6 +213,7 @@ impl InstanceResolver {
             resolved_org_id: None,
             placement_mode: row.placement_mode,
             region_key: row.region_key,
+            scheme: String::new(),
             host: String::new(),
             source: "trusted_header".into(),
         }))
@@ -293,6 +292,38 @@ fn normalized_host<B>(req: &Request<B>) -> String {
         .unwrap_or_default()
 }
 
+fn forwarded_scheme<B>(req: &Request<B>) -> Option<String> {
+    req.headers()
+        .get(header::FORWARDED)
+        .and_then(|value| value.to_str().ok())
+        .and_then(parse_forwarded_proto)
+        .or_else(|| {
+            req.headers()
+                .get("X-Forwarded-Proto")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split(',').next())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_ascii_lowercase())
+        })
+}
+
+fn parse_forwarded_proto(value: &str) -> Option<String> {
+    value
+        .split(',')
+        .next()
+        .and_then(|entry| {
+            entry.split(';').find_map(|part| {
+                let (key, raw_value) = part.trim().split_once('=')?;
+                if !key.eq_ignore_ascii_case("proto") {
+                    return None;
+                }
+                let proto = raw_value.trim().trim_matches('"');
+                (!proto.is_empty()).then(|| proto.to_ascii_lowercase())
+            })
+        })
+}
+
 fn normalize_host(value: &str) -> String {
     value
         .trim()
@@ -307,6 +338,18 @@ fn normalize_host(value: &str) -> String {
         })
         .unwrap_or(value)
         .to_ascii_lowercase()
+}
+
+fn hydrate_request_context(
+    mut ctx: InstanceContext,
+    scheme: &str,
+    host: &str,
+    source: &str,
+) -> InstanceContext {
+    ctx.scheme = scheme.to_string();
+    ctx.host = host.to_string();
+    ctx.source = source.to_string();
+    ctx
 }
 
 /// Extract instance ID from URL path: `/v1/instances/{id}/...` → `Some(id)`.
@@ -382,6 +425,7 @@ mod tests {
     async fn resolves_cloud_instance_by_host() {
         let resolver = seeded_resolver().await;
         let req = Request::builder()
+            .header("X-Forwarded-Proto", "https")
             .header(header::HOST, "login.example.com")
             .body(Body::empty())
             .unwrap();
@@ -394,6 +438,7 @@ mod tests {
         assert_eq!(ctx.resolved_org_id, None);
         assert_eq!(ctx.region_key.as_deref(), Some("europe-west1"));
         assert_eq!(ctx.placement_mode, "regional");
+        assert_eq!(ctx.scheme, "https");
     }
 
     #[tokio::test]
@@ -464,6 +509,48 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second.region_key.as_deref(), Some("europe-west1"));
+    }
+
+    #[tokio::test]
+    async fn resolves_default_instance_when_root_domain_mapping_exists() {
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
+             VALUES ('root.example.com', 'default', NULL, 1, 'active', 1)",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let mut config = Config::default();
+        config.cloud.enabled = true;
+        let resolver = InstanceResolver::new(&config, db);
+        let req = Request::builder()
+            .header(header::HOST, "root.example.com")
+            .header("X-Forwarded-Proto", "https")
+            .body(Body::empty())
+            .unwrap();
+
+        let ctx = resolver
+            .resolve(resolver.request_input(&req))
+            .await
+            .unwrap();
+        assert_eq!(ctx.instance_id, DEFAULT_INSTANCE_ID);
+        assert_eq!(ctx.host, "root.example.com");
+        assert_eq!(ctx.scheme, "https");
+    }
+
+    #[test]
+    fn forwarded_header_proto_takes_precedence() {
+        let req = Request::builder()
+            .header(header::FORWARDED, "for=192.0.2.60;proto=https;host=demo.example.com")
+            .header("X-Forwarded-Proto", "http")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(forwarded_scheme(&req).as_deref(), Some("https"));
     }
 
     #[tokio::test]

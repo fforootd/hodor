@@ -45,6 +45,15 @@ pub async fn document(db: &Db, public_origin: &str) -> anyhow::Result<Value> {
             {"name": "authorization"},
             {"name": "users"},
             {"name": "schemas"},
+            {"name": "orgs"},
+            {"name": "groups"},
+            {"name": "projects"},
+            {"name": "apps"},
+            {"name": "sessions"},
+            {"name": "instances"},
+            {"name": "providers"},
+            {"name": "account"},
+            {"name": "events"},
         ],
         "paths": paths(),
         "components": {
@@ -889,7 +898,87 @@ fn list_schema_ref(item_component: &str) -> Value {
     })
 }
 
+/// Merge a set of path contributions into a single object.
+fn merge_paths(contributions: Vec<Value>) -> Value {
+    let mut merged = Map::new();
+    for contribution in contributions {
+        if let Value::Object(map) = contribution {
+            for (k, v) in map {
+                merged.insert(k, v);
+            }
+        }
+    }
+    Value::Object(merged)
+}
+
+/// Standard CRUD paths for a named resource (used by apps, projects, etc.).
+pub(crate) fn named_resource_paths(
+    tag: &str,
+    singular: &str,
+    plural: &str,
+) -> Value {
+    let cap_singular = capitalize(singular);
+    json!({
+        format!("/v1/{plural}"): {
+            "get": operation(tag, &format!("list{cap_singular}s"), &format!("List {plural}"), generic_object_response(&format!("{cap_singular} list"))),
+            "post": operation_with_body(tag, &format!("create{cap_singular}"), &format!("Create {singular}"), &format!("{cap_singular}Request"), json_response_with_status(201, &format!("{cap_singular}Response"), "Created"))
+        },
+        format!("/v1/{plural}/{{id}}"): {
+            "get": operation(tag, &format!("get{cap_singular}"), &format!("Get {singular} by id"), json_response(&format!("{cap_singular}Response"))),
+            "patch": operation_with_body(tag, &format!("update{cap_singular}"), &format!("Update {singular}"), &format!("{cap_singular}Request"), json_response(&format!("{cap_singular}Response"))),
+            "delete": operation(tag, &format!("delete{cap_singular}"), &format!("Delete {singular}"), empty_response(204, "Deleted"))
+        }
+    })
+}
+
+/// Standard membership sub-resource paths.
+pub(crate) fn membership_paths(
+    tag: &str,
+    parent_plural: &str,
+    parent_id_param: &str,
+) -> Value {
+    json!({
+        format!("/v1/{parent_plural}/{{{parent_id_param}}}/members"): {
+            "get": operation(tag, &format!("list{parent_plural}Members"), &format!("List {parent_plural} members"), generic_object_response("Member list")),
+            "post": operation_with_body(tag, &format!("add{parent_plural}Member"), &format!("Add member to {parent_plural}"), "AddMemberRequest", json_response_with_status(201, "MemberResponse", "Added"))
+        },
+        format!("/v1/{parent_plural}/{{{parent_id_param}}}/members/{{user_id}}"): {
+            "delete": operation(tag, &format!("remove{parent_plural}Member"), &format!("Remove member from {parent_plural}"), empty_response(204, "Removed"))
+        }
+    })
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
 fn paths() -> Value {
+    merge_paths(vec![
+        oidc_paths(),
+        auth_paths(),
+        fga_paths(),
+        user_paths(),
+        schema_paths(),
+        // — Previously missing families, now included —
+        named_resource_paths("orgs", "org", "orgs"),
+        membership_paths("orgs", "orgs", "org_id"),
+        named_resource_paths("groups", "group", "groups"),
+        membership_paths("groups", "groups", "group_id"),
+        named_resource_paths("projects", "project", "projects"),
+        named_resource_paths("apps", "app", "apps"),
+        session_paths(),
+        instance_paths(),
+        provider_paths(),
+        account_paths(),
+        events_paths(),
+    ])
+}
+
+fn oidc_paths() -> Value {
     json!({
         "/.well-known/openid-configuration": {
             "get": operation("oidc", "getOpenIdConfiguration", "OIDC discovery document", json_response("OpenIdConfiguration"))
@@ -907,10 +996,20 @@ fn paths() -> Value {
         },
         "/keys": {
             "get": operation("oidc", "jwks", "OIDC JWKS endpoint", json_response("JsonWebKeySet"))
-        },
+        }
+    })
+}
+
+fn auth_paths() -> Value {
+    json!({
         "/v1/auth/whoami": {
             "get": operation("auth", "whoami", "Return the current authenticated identity", json_response("WhoAmIResponse"))
-        },
+        }
+    })
+}
+
+fn fga_paths() -> Value {
+    json!({
         "/v1/fga/store": {
             "get": operation("authorization", "fgaDiscoverStore", "Discover the singleton OpenFGA store for this instance", json_response("FGAStoreResponse"))
         },
@@ -998,7 +1097,12 @@ fn paths() -> Value {
                 path_parameter("store_id", json!({"type": "string"})),
                 path_parameter("model_id", json!({"type": "string"})),
             ])
-        },
+        }
+    })
+}
+
+fn user_paths() -> Value {
+    json!({
         "/v1/users": {
             "get": operation("users", "listUsers", "List users", json_response("UserListResponse")),
             "post": operation_with_body("users", "createUser", "Create user", "UserRequest", json_response_with_status(201, "UserResponse", "Created"))
@@ -1010,7 +1114,12 @@ fn paths() -> Value {
         },
         "/v1/users/{id}/password": {
             "post": operation_with_body("users", "setUserPassword", "Set a user password", "PasswordRequest", generic_object_response("Mutation result"))
-        },
+        }
+    })
+}
+
+fn schema_paths() -> Value {
+    json!({
         "/v1/schemas/$meta": {
             "get": operation("schemas", "getMetaSchema", "Return the embedded entity meta-schema catalog", json_response("EntityMetaSchema"))
         },
@@ -1031,7 +1140,75 @@ fn paths() -> Value {
     })
 }
 
-fn operation(tag: &str, operation_id: &str, summary: &str, success: Value) -> Value {
+fn session_paths() -> Value {
+    json!({
+        "/v1/sessions": {
+            "get": operation("sessions", "listSessions", "List active sessions", generic_object_response("Session list"))
+        },
+        "/v1/sessions/{id}": {
+            "get": operation("sessions", "getSession", "Get session by id", generic_object_response("Session")),
+            "delete": operation("sessions", "revokeSession", "Revoke a session", empty_response(204, "Revoked"))
+        }
+    })
+}
+
+fn instance_paths() -> Value {
+    json!({
+        "/v1/instances": {
+            "get": operation("instances", "listInstances", "List child instances", generic_object_response("Instance list")),
+            "post": operation_with_body("instances", "createInstance", "Create child instance", "CreateInstanceRequest", json_response_with_status(201, "InstanceResponse", "Created"))
+        },
+        "/v1/instances/{id}": {
+            "get": operation("instances", "getInstance", "Get instance by id", generic_object_response("Instance")),
+            "patch": operation_with_body("instances", "updateInstance", "Update instance", "UpdateInstanceRequest", generic_object_response("Instance")),
+            "delete": operation("instances", "deprovisionInstance", "Deprovision instance", empty_response(204, "Deprovisioned"))
+        },
+        "/v1/instances/{id}/domains": {
+            "get": operation("instances", "listInstanceDomains", "List instance domains", generic_object_response("Domain list")),
+            "post": operation_with_body("instances", "addInstanceDomain", "Add domain to instance", "AddDomainRequest", json_response_with_status(201, "DomainResponse", "Created"))
+        },
+        "/v1/instances/{id}/domains/{domain}": {
+            "delete": operation("instances", "removeInstanceDomain", "Remove domain from instance", empty_response(204, "Removed"))
+        }
+    })
+}
+
+fn provider_paths() -> Value {
+    json!({
+        "/v1/providers": {
+            "get": operation("providers", "listProviders", "List identity providers", generic_object_response("Provider list")),
+            "post": operation_with_body("providers", "createProvider", "Create identity provider", "ProviderRequest", json_response_with_status(201, "ProviderResponse", "Created"))
+        },
+        "/v1/providers/{id}": {
+            "get": operation("providers", "getProvider", "Get provider by id", generic_object_response("Provider")),
+            "patch": operation_with_body("providers", "updateProvider", "Update provider", "ProviderRequest", generic_object_response("Provider")),
+            "delete": operation("providers", "deleteProvider", "Delete provider", empty_response(204, "Deleted"))
+        }
+    })
+}
+
+fn account_paths() -> Value {
+    json!({
+        "/v1/account/profile": {
+            "get": operation("account", "getAccountProfile", "Get current user profile", generic_object_response("Account profile"))
+        },
+        "/v1/account/sessions": {
+            "get": operation("account", "listAccountSessions", "List current user sessions", generic_object_response("Session list"))
+        }
+    })
+}
+
+fn events_paths() -> Value {
+    json!({
+        "/v1/events": {
+            "get": operation("events", "listEvents", "List domain events", generic_object_response("Event list"))
+        }
+    })
+}
+
+// ─── Helpers (pub(crate) so modules can contribute their own paths) ──
+
+pub(crate) fn operation(tag: &str, operation_id: &str, summary: &str, success: Value) -> Value {
     let mut responses = Map::new();
     responses.insert(success_status_code(&success), strip_status(success));
     responses.extend(default_error_responses(true));
@@ -1044,7 +1221,7 @@ fn operation(tag: &str, operation_id: &str, summary: &str, success: Value) -> Va
     })
 }
 
-fn operation_with_body(
+pub(crate) fn operation_with_body(
     tag: &str,
     operation_id: &str,
     summary: &str,
@@ -1070,7 +1247,7 @@ fn operation_with_body(
     operation
 }
 
-fn operation_with_params(
+pub(crate) fn operation_with_params(
     tag: &str,
     operation_id: &str,
     summary: &str,
@@ -1084,7 +1261,7 @@ fn operation_with_params(
     operation
 }
 
-fn operation_with_body_and_params(
+pub(crate) fn operation_with_body_and_params(
     tag: &str,
     operation_id: &str,
     summary: &str,
@@ -1099,7 +1276,7 @@ fn operation_with_body_and_params(
     operation
 }
 
-fn path_parameter(name: &str, schema: Value) -> Value {
+pub(crate) fn path_parameter(name: &str, schema: Value) -> Value {
     json!({
         "in": "path",
         "name": name,
@@ -1108,7 +1285,7 @@ fn path_parameter(name: &str, schema: Value) -> Value {
     })
 }
 
-fn query_parameter(name: &str, required: bool, schema: Value) -> Value {
+pub(crate) fn query_parameter(name: &str, required: bool, schema: Value) -> Value {
     json!({
         "in": "query",
         "name": name,
@@ -1117,11 +1294,11 @@ fn query_parameter(name: &str, required: bool, schema: Value) -> Value {
     })
 }
 
-fn json_response(component: &str) -> Value {
+pub(crate) fn json_response(component: &str) -> Value {
     json_response_with_status(200, component, "OK")
 }
 
-fn json_response_with_status(status: u16, component: &str, description: &str) -> Value {
+pub(crate) fn json_response_with_status(status: u16, component: &str, description: &str) -> Value {
     json!({
         "status": status,
         "description": description,
@@ -1135,7 +1312,7 @@ fn json_response_with_status(status: u16, component: &str, description: &str) ->
     })
 }
 
-fn generic_object_response(description: &str) -> Value {
+pub(crate) fn generic_object_response(description: &str) -> Value {
     json!({
         "status": 200,
         "description": description,
@@ -1149,7 +1326,7 @@ fn generic_object_response(description: &str) -> Value {
     })
 }
 
-fn empty_response(status: u16, description: &str) -> Value {
+pub(crate) fn empty_response(status: u16, description: &str) -> Value {
     json!({
         "status": status,
         "description": description,

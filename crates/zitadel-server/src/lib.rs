@@ -96,9 +96,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     zitadel_storage::prepare_postgres_role_databases(&config.storage, &db).await?;
 
-    // TODO(CLAUDE-4): Pass Arc<HookPipeline> built from ActionRepository once
-    // repo impls are merged. For now, pass None to disable the event consumer.
-    jobs::start(&config, db.clone(), None).await?;
+    // Jobs start is deferred until after hooks are built (see below).
 
     // Build encryption secret box from config (plaintext passthrough if no keys configured).
     let encryption_keys: std::collections::HashMap<String, String> = config
@@ -132,29 +130,15 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     let passwords = zitadel_authn::password::Swapper::from_config(&hasher_config);
 
     // OIDC provider.
-    let issuer = if config.server.public_origin.is_empty() {
-        format!(
-            "http://{}:{}",
-            config.server.external_domain, config.server.port
-        )
-    } else {
-        config
-            .server
-            .public_origin
-            .trim_end_matches('/')
-            .to_string()
-    };
+    let public_origin_override = (!config.server.public_origin.trim().is_empty())
+        .then(|| config.server.public_origin.trim_end_matches('/').to_string());
+    let public_origin_fallback =
+        format!("http://{}:{}", config.server.external_domain, config.server.port);
     let login_path = if config.dev.conformance_login_html {
         "/conformance/login".to_string()
     } else {
         "/login".to_string()
     };
-    let oidc_state = zitadel_oidc::OidcState::new_with_config(
-        db.clone(),
-        issuer.clone(),
-        login_path,
-        &config.oidc,
-    );
     let storage = zitadel_storage::StorageRuntime::from_config(
         &config.storage,
         db.clone(),
@@ -166,23 +150,43 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     fga.reconcile_root_hierarchy(DEFAULT_INSTANCE_ID).await?;
 
     // ── ADR-032: Build application layer ──
-    // Build repository implementations from existing infrastructure.
     let repos = Arc::new(repo_bridge::build_repositories(
         db.clone(),
-        storage.stateful.clone(),
         storage.transient.clone(),
         fga.clone(),
     ));
 
-    // Build hook pipeline (empty for now — CLAUDE-3 will populate from ActionRepository).
-    let hooks = Arc::new(HookPipeline::empty());
+    // Build hook pipeline from stored action definitions.
+    let hooks = Arc::new(
+        zitadel_app::HookPipelineBuilder::build(repos.actions.as_ref(), DEFAULT_INSTANCE_ID)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to load actions for hook pipeline, starting empty");
+                HookPipeline::empty()
+            }),
+    );
 
-    // Build application services (all use cases wired to repos + hooks).
-    let app = Arc::new(ApplicationServices::new(repos, hooks));
+    let app = Arc::new(ApplicationServices::new(repos.clone(), hooks.clone()));
     tracing::info!("application services initialized (ADR-032)");
 
     let passwords = Arc::new(passwords);
     let cookie_config = Arc::new(cookie_config);
+
+    let oidc_state = zitadel_oidc::OidcState::new_runtime_with_config(
+        repos.oidc.clone(),
+        public_origin_fallback.clone(),
+        login_path,
+        DEFAULT_INSTANCE_ID.to_string(),
+        &config.oidc,
+        db.clone(),
+        secret_box.clone(),
+        storage.transient.clone(),
+        cookie_config.clone(),
+    )
+    .with_public_origin_override(public_origin_override.as_deref().unwrap_or_default());
+
+    // Start background jobs with populated hook pipeline for event consumer.
+    jobs::start(&config, db.clone(), Some(hooks)).await?;
 
     let api_state = zitadel_api::ApiState {
         db: db.clone(),
@@ -198,12 +202,12 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     };
 
     let login_state = zitadel_login::LoginState {
-        db: db.clone(),
         stateful: storage.stateful.clone(),
         transient: storage.transient.clone(),
         passwords: passwords.clone(),
         cookie_config: cookie_config.clone(),
-        public_origin: Arc::new(issuer.clone()),
+        public_origin: Arc::new(public_origin_fallback),
+        public_origin_override: public_origin_override.map(Arc::new),
         conformance_login_html: config.dev.conformance_login_html,
         rp: Arc::new(zitadel_oidc::rp::RpService::new(
             zitadel_oidc::rp::ReqwestHttpClient::new(),

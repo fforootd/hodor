@@ -6,9 +6,11 @@ use crate::oidc::{
     TokenResponse, UserClaims, UserInfoResponse, now_epoch_seconds, s256_challenge,
 };
 use base64::Engine;
-use jsonwebtoken::{Algorithm, Header, Validation};
+use jsonwebtoken::{Algorithm, Header, Validation, decode, decode_header};
 use std::{borrow::Cow, sync::Arc};
-use zitadel_db::current_instance_id_or;
+use url::Url;
+use uuid::Uuid;
+use zitadel_db::{current_instance_id_or, current_request_origin_or};
 
 pub trait ClientStore: Clone + Send + Sync + 'static {
     async fn find_client(
@@ -49,6 +51,62 @@ pub trait ClaimSource: Clone + Send + Sync + 'static {
 
 pub trait KeyStore: Clone + Send + Sync + 'static {
     async fn active_signing_key(&self, instance_id: &str) -> anyhow::Result<Arc<SigningKeys>>;
+    async fn signing_keys(&self, instance_id: &str) -> anyhow::Result<Vec<Arc<SigningKeys>>>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredToken {
+    pub token_id: String,
+    pub token_type: String,
+    pub user_id: Option<String>,
+    pub session_id: Option<String>,
+    pub client_id: String,
+    pub application_id: String,
+    pub scope: String,
+    pub refresh_family_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewStoredToken {
+    pub token_id: String,
+    pub token_type: String,
+    pub raw_token: String,
+    pub user_id: Option<String>,
+    pub session_id: Option<String>,
+    pub client_id: String,
+    pub application_id: String,
+    pub scope: String,
+    pub refresh_family_id: Option<String>,
+    pub auth_method: String,
+    pub expires_in_secs: u64,
+}
+
+pub trait TokenStore: Clone + Send + Sync + 'static {
+    fn enforces_storage(&self) -> bool {
+        true
+    }
+
+    async fn store_token(&self, instance_id: &str, token: &NewStoredToken) -> anyhow::Result<()>;
+
+    async fn lookup_active_token(
+        &self,
+        instance_id: &str,
+        raw_token: &str,
+    ) -> anyhow::Result<Option<StoredToken>>;
+
+    async fn revoke_token_by_id(&self, instance_id: &str, token_id: &str) -> anyhow::Result<()>;
+
+    async fn revoke_refresh_family(
+        &self,
+        instance_id: &str,
+        refresh_family_id: &str,
+    ) -> anyhow::Result<()>;
+
+    async fn revoke_session_tokens(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+    ) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +152,20 @@ pub struct TokenExchangeRequest {
     pub refresh_token: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndSessionRequest {
+    pub client_id: String,
+    pub id_token_hint: String,
+    pub post_logout_redirect_uri: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndSessionOutcome {
+    pub session_id: Option<String>,
+    pub redirect_uri: String,
+}
+
 /// Token lifetime configuration, sourced from `OidcConfig`.
 #[derive(Debug, Clone)]
 pub struct TokenLifetimes {
@@ -123,18 +195,20 @@ impl From<&zitadel_config::oidc::OidcConfig> for TokenLifetimes {
 }
 
 #[derive(Clone)]
-pub struct Provider<C, A, K, U> {
+pub struct Provider<C, A, K, U, T> {
     instance_id: String,
     issuer: String,
+    issuer_override: Option<String>,
     login_path: String,
     clients: C,
     auth_requests: A,
     keys: K,
     claims: U,
+    tokens: T,
     lifetimes: TokenLifetimes,
 }
 
-impl<C, A, K, U> Provider<C, A, K, U> {
+impl<C, A, K, U, T> Provider<C, A, K, U, T> {
     pub fn new(
         instance_id: String,
         issuer: String,
@@ -143,15 +217,18 @@ impl<C, A, K, U> Provider<C, A, K, U> {
         auth_requests: A,
         keys: K,
         claims: U,
+        tokens: T,
     ) -> Self {
         Self {
             instance_id,
             issuer,
+            issuer_override: None,
             login_path,
             clients,
             auth_requests,
             keys,
             claims,
+            tokens,
             lifetimes: TokenLifetimes::default(),
         }
     }
@@ -161,16 +238,29 @@ impl<C, A, K, U> Provider<C, A, K, U> {
         self
     }
 
-    pub fn issuer(&self) -> &str {
-        &self.issuer
+    pub fn with_issuer_override(mut self, issuer_override: Option<String>) -> Self {
+        self.issuer_override = issuer_override.map(|origin| origin.trim_end_matches('/').to_string());
+        self
+    }
+
+    pub fn issuer(&self) -> Cow<'_, str> {
+        self.effective_issuer()
     }
 
     fn effective_instance_id(&self) -> Cow<'_, str> {
         current_instance_id_or(&self.instance_id)
     }
 
+    fn effective_issuer(&self) -> Cow<'_, str> {
+        if let Some(issuer_override) = self.issuer_override.as_deref() {
+            Cow::Borrowed(issuer_override)
+        } else {
+            current_request_origin_or(&self.issuer)
+        }
+    }
+
     pub fn discovery_document(&self) -> OpenIdConfiguration {
-        let issuer = self.issuer.clone();
+        let issuer = self.effective_issuer().into_owned();
         OpenIdConfiguration {
             issuer: issuer.clone(),
             authorization_endpoint: format!("{issuer}/authorize"),
@@ -196,7 +286,6 @@ impl<C, A, K, U> Provider<C, A, K, U> {
             token_endpoint_auth_methods_supported: vec![
                 "client_secret_post".into(),
                 "client_secret_basic".into(),
-                "none".into(),
             ],
             code_challenge_methods_supported: vec!["S256".into()],
             claims_supported: vec![
@@ -214,24 +303,25 @@ impl<C, A, K, U> Provider<C, A, K, U> {
     }
 }
 
-impl<C, A, K, U> Provider<C, A, K, U>
+impl<C, A, K, U, T> Provider<C, A, K, U, T>
 where
     C: ClientStore,
     A: AuthRequestStore,
     K: KeyStore,
     U: ClaimSource,
+    T: TokenStore,
 {
     pub async fn jwks(&self) -> Result<JsonWebKeySet, ProtocolError> {
         let instance_id = self.effective_instance_id();
-        let key = self
+        let keys = self
             .keys
-            .active_signing_key(instance_id.as_ref())
+            .signing_keys(instance_id.as_ref())
             .await
             .map_err(|error| {
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
             })?;
         Ok(JsonWebKeySet {
-            keys: vec![key.jwk()],
+            keys: keys.into_iter().map(|key| key.jwk()).collect(),
         })
     }
 
@@ -345,6 +435,139 @@ where
         }
     }
 
+    pub async fn revoke(
+        &self,
+        token: &str,
+        client_auth: Option<&ClientAuthentication>,
+    ) -> Result<(), ProtocolError> {
+        let instance_id = self.effective_instance_id();
+        let auth = client_auth
+            .ok_or_else(|| ProtocolError::invalid_client("client authentication required"))?;
+        let client = self
+            .clients
+            .find_client(instance_id.as_ref(), &auth.client_id)
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
+        let Some(client) = client else {
+            return Err(ProtocolError::invalid_client("unknown client_id"));
+        };
+        let authenticated = if client.client_secret.is_empty() {
+            auth.client_secret.is_empty()
+        } else {
+            self.clients
+                .authenticate_client_secret(
+                    instance_id.as_ref(),
+                    &auth.client_id,
+                    &auth.client_secret,
+                )
+                .await
+                .map_err(|error| {
+                    ProtocolError::server_error(format!("authenticate client: {error}"))
+                })?
+        };
+        if !authenticated {
+            return Err(ProtocolError::invalid_client("invalid client credentials"));
+        }
+        if token.is_empty() {
+            return Err(ProtocolError::invalid_request("token required"));
+        }
+
+        let Some(stored) = self
+            .tokens
+            .lookup_active_token(instance_id.as_ref(), token)
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("load token record: {error}")))? else {
+            return Ok(());
+        };
+        if stored.client_id != auth.client_id {
+            return Ok(());
+        }
+
+        match stored.token_type.as_str() {
+            "oidc_refresh" => {
+                let family_id = stored
+                    .refresh_family_id
+                    .as_deref()
+                    .unwrap_or(&stored.token_id);
+                self.tokens
+                    .revoke_refresh_family(instance_id.as_ref(), family_id)
+                    .await
+                    .map_err(|error| {
+                        ProtocolError::server_error(format!("revoke refresh family: {error}"))
+                    })?;
+            }
+            "oidc_access" => {
+                self.tokens
+                    .revoke_token_by_id(instance_id.as_ref(), &stored.token_id)
+                    .await
+                    .map_err(|error| {
+                        ProtocolError::server_error(format!("revoke access token: {error}"))
+                    })?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub async fn end_session(
+        &self,
+        request: &EndSessionRequest,
+        current_session_id: Option<&str>,
+    ) -> Result<EndSessionOutcome, ProtocolError> {
+        let instance_id = self.effective_instance_id();
+        let mut client_id = non_empty(request.client_id.clone());
+        let mut session_id = current_session_id.map(ToString::to_string);
+
+        if !request.id_token_hint.is_empty() {
+            let claims = self.validate_id_token_hint(&request.id_token_hint).await?;
+            client_id = Some(claims.aud);
+            session_id = claims.sid;
+        }
+
+        let redirect_uri = if request.post_logout_redirect_uri.is_empty() {
+            "/login?logged_out=1".to_string()
+        } else {
+            let client_id = client_id
+                .clone()
+                .ok_or_else(|| ProtocolError::invalid_request("client_id required"))?;
+            let client = self
+                .clients
+                .find_client(instance_id.as_ref(), &client_id)
+                .await
+                .map_err(|error| ProtocolError::server_error(format!("load client: {error}")))?;
+            let Some(client) = client else {
+                return Err(ProtocolError::invalid_client("unknown client_id"));
+            };
+            if !client
+                .post_logout_redirect_uris
+                .iter()
+                .any(|uri| uri == &request.post_logout_redirect_uri)
+            {
+                return Err(ProtocolError::invalid_request(
+                    "post_logout_redirect_uri is not registered",
+                ));
+            }
+            append_query_param(
+                &request.post_logout_redirect_uri,
+                "state",
+                request.state.as_str(),
+            )
+        };
+
+        Ok(EndSessionOutcome {
+            session_id,
+            redirect_uri,
+        })
+    }
+
+    pub async fn revoke_session_tokens(&self, session_id: &str) -> Result<(), ProtocolError> {
+        let instance_id = self.effective_instance_id();
+        self.tokens
+            .revoke_session_tokens(instance_id.as_ref(), session_id)
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("revoke session tokens: {error}")))
+    }
+
     pub async fn validate_access_token(
         &self,
         access_token: &str,
@@ -354,21 +577,13 @@ where
             return Err(ProtocolError::invalid_request("Bearer token required"));
         }
 
-        let key = self
-            .keys
-            .active_signing_key(instance_id.as_ref())
+        let claims = self
+            .decode_token::<AccessTokenClaims>(instance_id.as_ref(), access_token)
             .await
-            .map_err(|error| {
-                ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
-            })?;
-
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.validate_aud = false;
-        validation.set_issuer(&[&self.issuer]);
-
-        jsonwebtoken::decode::<AccessTokenClaims>(access_token, &key.decoding, &validation)
-            .map(|token| token.claims)
-            .map_err(|_| ProtocolError::invalid_grant("invalid access token"))
+            .map_err(|_| ProtocolError::invalid_grant("invalid access token"))?;
+        self.enforce_token_storage(instance_id.as_ref(), access_token, "oidc_access", &claims.jti)
+            .await?;
+        Ok(claims)
     }
 
     async fn validate_refresh_token(
@@ -380,21 +595,27 @@ where
             return Err(ProtocolError::invalid_request("refresh_token required"));
         }
 
-        let key = self
-            .keys
-            .active_signing_key(instance_id.as_ref())
+        let claims = self
+            .decode_token::<RefreshTokenClaims>(instance_id.as_ref(), refresh_token)
             .await
-            .map_err(|error| {
-                ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
-            })?;
+            .map_err(|_| ProtocolError::invalid_grant("invalid refresh token"))?;
+        self.enforce_token_storage(instance_id.as_ref(), refresh_token, "oidc_refresh", &claims.jti)
+            .await?;
+        Ok(claims)
+    }
 
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.validate_aud = false;
-        validation.set_issuer(&[&self.issuer]);
+    pub async fn validate_id_token_hint(
+        &self,
+        id_token_hint: &str,
+    ) -> Result<IdTokenClaims, ProtocolError> {
+        let instance_id = self.effective_instance_id();
+        if id_token_hint.is_empty() {
+            return Err(ProtocolError::invalid_request("id_token_hint required"));
+        }
 
-        jsonwebtoken::decode::<RefreshTokenClaims>(refresh_token, &key.decoding, &validation)
-            .map(|token| token.claims)
-            .map_err(|_| ProtocolError::invalid_grant("invalid refresh token"))
+        self.decode_token::<IdTokenClaims>(instance_id.as_ref(), id_token_hint)
+            .await
+            .map_err(|_| ProtocolError::invalid_request("invalid id_token_hint"))
     }
 
     pub async fn userinfo(&self, access_token: &str) -> Result<UserInfoResponse, ProtocolError> {
@@ -417,6 +638,63 @@ where
         })
     }
 
+    async fn decode_token<Claims>(
+        &self,
+        instance_id: &str,
+        token: &str,
+    ) -> anyhow::Result<Claims>
+    where
+        Claims: serde::de::DeserializeOwned,
+    {
+        let key = self.find_signing_key(instance_id, token).await?;
+        let issuer = self.effective_issuer();
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.validate_aud = false;
+        validation.set_issuer(&[issuer.as_ref()]);
+        Ok(decode::<Claims>(token, &key.decoding, &validation)?.claims)
+    }
+
+    async fn find_signing_key(
+        &self,
+        instance_id: &str,
+        token: &str,
+    ) -> anyhow::Result<Arc<SigningKeys>> {
+        let header = decode_header(token)?;
+        let keys = self.keys.signing_keys(instance_id).await?;
+        if let Some(kid) = header.kid.as_deref() {
+            if let Some(key) = keys.into_iter().find(|candidate| candidate.kid == kid) {
+                return Ok(key);
+            }
+            anyhow::bail!("unknown signing key");
+        }
+        self.keys.active_signing_key(instance_id).await
+    }
+
+    async fn enforce_token_storage(
+        &self,
+        instance_id: &str,
+        raw_token: &str,
+        expected_type: &str,
+        expected_token_id: &str,
+    ) -> Result<(), ProtocolError> {
+        if !self.tokens.enforces_storage() {
+            return Ok(());
+        }
+
+        let stored = self
+            .tokens
+            .lookup_active_token(instance_id, raw_token)
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("load token record: {error}")))?;
+        let Some(stored) = stored else {
+            return Err(ProtocolError::invalid_grant("invalid token"));
+        };
+        if stored.token_type != expected_type || stored.token_id != expected_token_id {
+            return Err(ProtocolError::invalid_grant("invalid token"));
+        }
+        Ok(())
+    }
+
     async fn issue_id_token(
         &self,
         key: &SigningKeys,
@@ -424,27 +702,30 @@ where
         client_id: &str,
         nonce: &str,
         auth_time: Option<u64>,
-    ) -> Result<String, ProtocolError> {
+        sid: Option<&str>,
+    ) -> Result<(String, IdTokenClaims), ProtocolError> {
         let now = now_epoch_seconds();
+        let issuer = self.effective_issuer().into_owned();
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(key.kid.clone());
 
-        jsonwebtoken::encode(
-            &header,
-            &IdTokenClaims {
-                iss: self.issuer.clone(),
-                sub: user.subject.clone(),
-                aud: client_id.to_string(),
-                exp: now + self.lifetimes.id_token_secs,
-                iat: now,
-                auth_time,
-                nonce: nonce.to_string(),
-                name: user.name.clone(),
-                email: user.email.clone(),
-            },
-            &key.encoding,
-        )
-        .map_err(|error| ProtocolError::server_error(format!("id_token: {error}")))
+        let claims = IdTokenClaims {
+            iss: issuer,
+            sub: user.subject.clone(),
+            aud: client_id.to_string(),
+            exp: now + self.lifetimes.id_token_secs,
+            iat: now,
+            jti: Uuid::new_v4().to_string(),
+            auth_time,
+            sid: sid.map(str::to_string),
+            nonce: nonce.to_string(),
+            name: user.name.clone(),
+            email: user.email.clone(),
+        };
+
+        let token = jsonwebtoken::encode(&header, &claims, &key.encoding)
+            .map_err(|error| ProtocolError::server_error(format!("id_token: {error}")))?;
+        Ok((token, claims))
     }
 
     async fn issue_access_token(
@@ -453,25 +734,27 @@ where
         subject: &str,
         client_id: &str,
         scope: &str,
-    ) -> Result<String, ProtocolError> {
+        sid: Option<&str>,
+    ) -> Result<(String, AccessTokenClaims), ProtocolError> {
         let now = now_epoch_seconds();
+        let issuer = self.effective_issuer().into_owned();
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(key.kid.clone());
 
-        jsonwebtoken::encode(
-            &header,
-            &AccessTokenClaims {
-                iss: self.issuer.clone(),
-                sub: subject.to_string(),
-                aud: client_id.to_string(),
-                exp: now + self.lifetimes.access_token_secs,
-                iat: now,
-                scope: scope.to_string(),
-                client_id: client_id.to_string(),
-            },
-            &key.encoding,
-        )
-        .map_err(|error| ProtocolError::server_error(format!("access_token: {error}")))
+        let claims = AccessTokenClaims {
+            iss: issuer,
+            sub: subject.to_string(),
+            aud: client_id.to_string(),
+            exp: now + self.lifetimes.access_token_secs,
+            iat: now,
+            jti: Uuid::new_v4().to_string(),
+            sid: sid.map(str::to_string),
+            scope: scope.to_string(),
+            client_id: client_id.to_string(),
+        };
+        let token = jsonwebtoken::encode(&header, &claims, &key.encoding)
+            .map_err(|error| ProtocolError::server_error(format!("access_token: {error}")))?;
+        Ok((token, claims))
     }
 
     async fn issue_refresh_token(
@@ -480,25 +763,27 @@ where
         subject: &str,
         client_id: &str,
         scope: &str,
-    ) -> Result<String, ProtocolError> {
+        sid: Option<&str>,
+    ) -> Result<(String, RefreshTokenClaims), ProtocolError> {
         let now = now_epoch_seconds();
+        let issuer = self.effective_issuer().into_owned();
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(key.kid.clone());
 
-        jsonwebtoken::encode(
-            &header,
-            &RefreshTokenClaims {
-                iss: self.issuer.clone(),
-                sub: subject.to_string(),
-                aud: client_id.to_string(),
-                exp: now + self.lifetimes.refresh_token_secs,
-                iat: now,
-                scope: scope.to_string(),
-                client_id: client_id.to_string(),
-            },
-            &key.encoding,
-        )
-        .map_err(|error| ProtocolError::server_error(format!("refresh_token: {error}")))
+        let claims = RefreshTokenClaims {
+            iss: issuer,
+            sub: subject.to_string(),
+            aud: client_id.to_string(),
+            exp: now + self.lifetimes.refresh_token_secs,
+            iat: now,
+            jti: Uuid::new_v4().to_string(),
+            sid: sid.map(str::to_string),
+            scope: scope.to_string(),
+            client_id: client_id.to_string(),
+        };
+        let token = jsonwebtoken::encode(&header, &claims, &key.encoding)
+            .map_err(|error| ProtocolError::server_error(format!("refresh_token: {error}")))?;
+        Ok((token, claims))
     }
 
     async fn exchange_authorization_code(
@@ -596,38 +881,97 @@ where
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
             })?;
 
-        let id_token = self
+        let session_id = (!granted.session_id.is_empty()).then_some(granted.session_id.clone());
+        let (id_token, _) = self
             .issue_id_token(
                 &key,
                 &user,
                 &auth.client_id,
                 &granted.nonce,
                 granted.auth_time,
+                session_id.as_deref(),
             )
             .await?;
-        let access_token = self
-            .issue_access_token(&key, &user.subject, &auth.client_id, &granted.scope)
-            .await?;
-        let refresh_token = if client
+        let refresh_bundle = if client
             .grant_types
             .iter()
             .any(|grant| grant == "refresh_token")
             && scope_contains(&granted.scope, "offline_access")
         {
             Some(
-                self.issue_refresh_token(&key, &user.subject, &auth.client_id, &granted.scope)
+                self.issue_refresh_token(
+                    &key,
+                    &user.subject,
+                    &auth.client_id,
+                    &granted.scope,
+                    session_id.as_deref(),
+                )
                     .await?,
             )
         } else {
             None
         };
+        let refresh_family_id = refresh_bundle
+            .as_ref()
+            .map(|(_, claims)| claims.jti.clone());
+        let (access_token, access_claims) = self
+            .issue_access_token(
+                &key,
+                &user.subject,
+                &auth.client_id,
+                &granted.scope,
+                session_id.as_deref(),
+            )
+            .await?;
+        self.tokens
+            .store_token(
+                instance_id.as_ref(),
+                &NewStoredToken {
+                    token_id: access_claims.jti.clone(),
+                    token_type: "oidc_access".to_string(),
+                    raw_token: access_token.clone(),
+                    user_id: Some(user.subject.clone()),
+                    session_id: session_id.clone(),
+                    client_id: auth.client_id.clone(),
+                    application_id: client.app_id.clone(),
+                    scope: granted.scope.clone(),
+                    refresh_family_id: refresh_family_id.clone(),
+                    auth_method: "authorization_code".to_string(),
+                    expires_in_secs: self.lifetimes.access_token_secs,
+                },
+            )
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("store access token: {error}")))?;
+        if let Some((refresh_token, refresh_claims)) = refresh_bundle.as_ref() {
+            self.tokens
+                .store_token(
+                    instance_id.as_ref(),
+                    &NewStoredToken {
+                        token_id: refresh_claims.jti.clone(),
+                        token_type: "oidc_refresh".to_string(),
+                        raw_token: refresh_token.clone(),
+                        user_id: Some(user.subject.clone()),
+                        session_id: session_id.clone(),
+                        client_id: auth.client_id.clone(),
+                        application_id: client.app_id.clone(),
+                        scope: granted.scope.clone(),
+                        refresh_family_id: Some(refresh_claims.jti.clone()),
+                        auth_method: "authorization_code".to_string(),
+                        expires_in_secs: self.lifetimes.refresh_token_secs,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    ProtocolError::server_error(format!("store refresh token: {error}"))
+                })?;
+        }
 
         Ok(TokenResponse {
             access_token,
             token_type: "Bearer".to_string(),
             expires_in: self.lifetimes.access_token_secs,
             id_token: Some(id_token),
-            refresh_token,
+            refresh_token: refresh_bundle.map(|(token, _)| token),
             scope: granted.scope,
         })
     }
@@ -678,9 +1022,28 @@ where
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
             })?;
 
-        let access_token = self
-            .issue_access_token(&key, &auth.client_id, &auth.client_id, "openid")
+        let (access_token, access_claims) = self
+            .issue_access_token(&key, &auth.client_id, &auth.client_id, "openid", None)
             .await?;
+        self.tokens
+            .store_token(
+                instance_id.as_ref(),
+                &NewStoredToken {
+                    token_id: access_claims.jti.clone(),
+                    token_type: "oidc_access".to_string(),
+                    raw_token: access_token.clone(),
+                    user_id: None,
+                    session_id: None,
+                    client_id: auth.client_id.clone(),
+                    application_id: client.app_id.clone(),
+                    scope: "openid".to_string(),
+                    refresh_family_id: None,
+                    auth_method: "client_credentials".to_string(),
+                    expires_in_secs: self.lifetimes.access_token_secs,
+                },
+            )
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("store access token: {error}")))?;
 
         Ok(TokenResponse {
             access_token,
@@ -738,6 +1101,12 @@ where
         }
 
         let refresh = self.validate_refresh_token(&request.refresh_token).await?;
+        let stored_refresh = self
+            .tokens
+            .lookup_active_token(instance_id.as_ref(), &request.refresh_token)
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("load refresh token: {error}")))?
+            .ok_or_else(|| ProtocolError::invalid_grant("refresh token not found"))?;
         if refresh.client_id != auth.client_id {
             return Err(ProtocolError::invalid_grant(
                 "refresh token client mismatch",
@@ -759,24 +1128,87 @@ where
                 ProtocolError::temporarily_unavailable(format!("signing keys: {error}"))
             })?;
 
-        let access_token = self
-            .issue_access_token(&key, &user.subject, &auth.client_id, &refresh.scope)
-            .await?;
-        let refresh_token = if scope_contains(&refresh.scope, "offline_access") {
+        let refresh_family_id = stored_refresh
+            .refresh_family_id
+            .clone()
+            .or_else(|| Some(stored_refresh.token_id.clone()));
+        let session_id = stored_refresh.session_id.clone();
+        let refresh_bundle = if scope_contains(&refresh.scope, "offline_access") {
             Some(
-                self.issue_refresh_token(&key, &user.subject, &auth.client_id, &refresh.scope)
+                self.issue_refresh_token(
+                    &key,
+                    &user.subject,
+                    &auth.client_id,
+                    &refresh.scope,
+                    session_id.as_deref(),
+                )
                     .await?,
             )
         } else {
             None
         };
+        let (access_token, access_claims) = self
+            .issue_access_token(
+                &key,
+                &user.subject,
+                &auth.client_id,
+                &refresh.scope,
+                session_id.as_deref(),
+            )
+            .await?;
+        self.tokens
+            .store_token(
+                instance_id.as_ref(),
+                &NewStoredToken {
+                    token_id: access_claims.jti.clone(),
+                    token_type: "oidc_access".to_string(),
+                    raw_token: access_token.clone(),
+                    user_id: Some(user.subject.clone()),
+                    session_id: session_id.clone(),
+                    client_id: auth.client_id.clone(),
+                    application_id: client.app_id.clone(),
+                    scope: refresh.scope.clone(),
+                    refresh_family_id: refresh_family_id.clone(),
+                    auth_method: "refresh_token".to_string(),
+                    expires_in_secs: self.lifetimes.access_token_secs,
+                },
+            )
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("store access token: {error}")))?;
+        if let Some((refresh_token, refresh_claims)) = refresh_bundle.as_ref() {
+            self.tokens
+                .store_token(
+                    instance_id.as_ref(),
+                    &NewStoredToken {
+                        token_id: refresh_claims.jti.clone(),
+                        token_type: "oidc_refresh".to_string(),
+                        raw_token: refresh_token.clone(),
+                        user_id: Some(user.subject.clone()),
+                        session_id: session_id.clone(),
+                        client_id: auth.client_id.clone(),
+                        application_id: client.app_id.clone(),
+                        scope: refresh.scope.clone(),
+                        refresh_family_id: refresh_family_id.clone(),
+                        auth_method: "refresh_token".to_string(),
+                        expires_in_secs: self.lifetimes.refresh_token_secs,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    ProtocolError::server_error(format!("store refresh token: {error}"))
+                })?;
+        }
+        self.tokens
+            .revoke_token_by_id(instance_id.as_ref(), &stored_refresh.token_id)
+            .await
+            .map_err(|error| ProtocolError::server_error(format!("revoke refresh token: {error}")))?;
 
         Ok(TokenResponse {
             access_token,
             token_type: "Bearer".to_string(),
             expires_in: self.lifetimes.access_token_secs,
             id_token: None,
-            refresh_token,
+            refresh_token: refresh_bundle.map(|(token, _)| token),
             scope: refresh.scope,
         })
     }
@@ -784,6 +1216,22 @@ where
 
 fn scope_contains(scope: &str, needle: &str) -> bool {
     scope.split_whitespace().any(|part| part == needle)
+}
+
+fn append_query_param(base: &str, key: &str, value: &str) -> String {
+    if value.is_empty() {
+        return base.to_string();
+    }
+    if let Ok(mut url) = Url::parse(base) {
+        url.query_pairs_mut().append_pair(key, value);
+        return url.to_string();
+    }
+    let separator = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{separator}{key}={value}")
+}
+
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
 }
 
 pub fn resolve_client_auth(
@@ -833,9 +1281,11 @@ mod tests {
     use crate::oidc::{
         ClientMetadata, ConsumedAuthRequest, IdTokenClaims, SigningKeys, UserClaims,
     };
+    use crate::stores::NoopTokenStore;
     use base64::Engine;
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
     use std::sync::{Arc, Mutex};
+    use zitadel_db::{InstanceContext, with_instance_context};
 
     #[derive(Clone, Default)]
     struct FakeClientStore {
@@ -902,6 +1352,10 @@ mod tests {
         async fn active_signing_key(&self, _instance_id: &str) -> anyhow::Result<Arc<SigningKeys>> {
             Ok(self.key.clone())
         }
+
+        async fn signing_keys(&self, _instance_id: &str) -> anyhow::Result<Vec<Arc<SigningKeys>>> {
+            Ok(vec![self.key.clone()])
+        }
     }
 
     #[derive(Clone, Default)]
@@ -919,18 +1373,86 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct RecordingTokenStore {
+        stored_by_raw: Arc<Mutex<HashMap<String, StoredToken>>>,
+        stored_specs: Arc<Mutex<Vec<NewStoredToken>>>,
+        revoked_ids: Arc<Mutex<Vec<String>>>,
+        revoked_families: Arc<Mutex<Vec<String>>>,
+        revoked_sessions: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl TokenStore for RecordingTokenStore {
+        async fn store_token(&self, _instance_id: &str, token: &NewStoredToken) -> anyhow::Result<()> {
+            self.stored_specs.lock().unwrap().push(token.clone());
+            self.stored_by_raw.lock().unwrap().insert(
+                token.raw_token.clone(),
+                StoredToken {
+                    token_id: token.token_id.clone(),
+                    token_type: token.token_type.clone(),
+                    user_id: token.user_id.clone(),
+                    session_id: token.session_id.clone(),
+                    client_id: token.client_id.clone(),
+                    application_id: token.application_id.clone(),
+                    scope: token.scope.clone(),
+                    refresh_family_id: token.refresh_family_id.clone(),
+                },
+            );
+            Ok(())
+        }
+
+        async fn lookup_active_token(
+            &self,
+            _instance_id: &str,
+            raw_token: &str,
+        ) -> anyhow::Result<Option<StoredToken>> {
+            Ok(self.stored_by_raw.lock().unwrap().get(raw_token).cloned())
+        }
+
+        async fn revoke_token_by_id(&self, _instance_id: &str, token_id: &str) -> anyhow::Result<()> {
+            self.revoked_ids.lock().unwrap().push(token_id.to_string());
+            Ok(())
+        }
+
+        async fn revoke_refresh_family(
+            &self,
+            _instance_id: &str,
+            refresh_family_id: &str,
+        ) -> anyhow::Result<()> {
+            self.revoked_families
+                .lock()
+                .unwrap()
+                .push(refresh_family_id.to_string());
+            Ok(())
+        }
+
+        async fn revoke_session_tokens(
+            &self,
+            _instance_id: &str,
+            session_id: &str,
+        ) -> anyhow::Result<()> {
+            self.revoked_sessions
+                .lock()
+                .unwrap()
+                .push(session_id.to_string());
+            Ok(())
+        }
+    }
+
     fn test_provider(
         consumed: Option<ConsumedAuthRequest>,
-    ) -> Provider<FakeClientStore, FakeAuthRequestStore, StaticKeyStore, FakeClaimSource> {
+    ) -> Provider<FakeClientStore, FakeAuthRequestStore, StaticKeyStore, FakeClaimSource, NoopTokenStore> {
         Provider::new(
             "default".to_string(),
             "http://issuer.example".to_string(),
             "/login".to_string(),
             FakeClientStore {
                 client: Some(ClientMetadata {
+                    app_id: "app-1".to_string(),
                     client_id: "client".to_string(),
                     client_secret: "secret".to_string(),
                     redirect_uris: vec!["https://app.example/callback".to_string()],
+                    post_logout_redirect_uris: vec!["https://app.example/logout".to_string()],
                     grant_types: vec![
                         "authorization_code".to_string(),
                         "client_credentials".to_string(),
@@ -955,7 +1477,69 @@ mod tests {
                     email_verified: true,
                 }),
             },
+            NoopTokenStore,
         )
+    }
+
+    fn test_provider_with_tokens(
+        consumed: Option<ConsumedAuthRequest>,
+        tokens: RecordingTokenStore,
+    ) -> Provider<
+        FakeClientStore,
+        FakeAuthRequestStore,
+        StaticKeyStore,
+        FakeClaimSource,
+        RecordingTokenStore,
+    > {
+        Provider::new(
+            "default".to_string(),
+            "http://issuer.example".to_string(),
+            "/login".to_string(),
+            FakeClientStore {
+                client: Some(ClientMetadata {
+                    app_id: "app-1".to_string(),
+                    client_id: "client".to_string(),
+                    client_secret: "secret".to_string(),
+                    redirect_uris: vec!["https://app.example/callback".to_string()],
+                    post_logout_redirect_uris: vec!["https://app.example/logout".to_string()],
+                    grant_types: vec![
+                        "authorization_code".to_string(),
+                        "client_credentials".to_string(),
+                        "refresh_token".to_string(),
+                    ],
+                    response_types: vec!["code".to_string()],
+                    state: "active".to_string(),
+                }),
+            },
+            FakeAuthRequestStore {
+                created_ids: Arc::default(),
+                consumed: Arc::new(Mutex::new(consumed.into_iter().collect::<VecDeque<_>>())),
+            },
+            StaticKeyStore {
+                key: SigningKeys::generate().unwrap().shared(),
+            },
+            FakeClaimSource {
+                claims: Some(UserClaims {
+                    subject: "user-1".to_string(),
+                    name: "Alice".to_string(),
+                    email: "alice@example.com".to_string(),
+                    email_verified: true,
+                }),
+            },
+            tokens,
+        )
+    }
+
+    fn request_context(host: &str) -> InstanceContext {
+        InstanceContext {
+            instance_id: "default".to_string(),
+            resolved_org_id: None,
+            placement_mode: "global".to_string(),
+            region_key: None,
+            scheme: "https".to_string(),
+            host: host.to_string(),
+            source: "host".to_string(),
+        }
     }
 
     #[tokio::test]
@@ -986,11 +1570,18 @@ mod tests {
         let provider = test_provider(Some(ConsumedAuthRequest {
             auth_request_id: "auth-1".to_string(),
             user_id: "user-1".to_string(),
+            session_id: "session-1".to_string(),
             client_id: "client".to_string(),
             redirect_uri: "https://app.example/callback".to_string(),
             scope: "openid profile".to_string(),
+            state: "state".to_string(),
             nonce: "nonce".to_string(),
+            response_type: "code".to_string(),
             code_challenge: s256_challenge("expected"),
+            code_challenge_method: "S256".to_string(),
+            prompt: Vec::new(),
+            login_hint: String::new(),
+            max_age: None,
             auth_time: Some(1_700_000_000),
         }));
 
@@ -1018,11 +1609,18 @@ mod tests {
         let provider = test_provider(Some(ConsumedAuthRequest {
             auth_request_id: "auth-1".to_string(),
             user_id: "user-1".to_string(),
+            session_id: "session-1".to_string(),
             client_id: "client".to_string(),
             redirect_uri: "https://app.example/callback".to_string(),
             scope: "openid".to_string(),
+            state: "state".to_string(),
             nonce: "nonce".to_string(),
+            response_type: "code".to_string(),
             code_challenge: String::new(),
+            code_challenge_method: String::new(),
+            prompt: Vec::new(),
+            login_hint: String::new(),
+            max_age: None,
             auth_time: Some(1_700_000_123),
         }));
 
@@ -1056,6 +1654,274 @@ mod tests {
             .claims;
 
         assert_eq!(claims.auth_time, Some(1_700_000_123));
+    }
+
+    #[tokio::test]
+    async fn discovery_document_uses_request_origin_when_unpinned() {
+        let provider = test_provider(None);
+
+        let discovery = with_instance_context(request_context("demo.example.com"), async {
+            provider.discovery_document()
+        })
+        .await;
+
+        assert_eq!(discovery.issuer, "https://demo.example.com");
+        assert_eq!(
+            discovery.authorization_endpoint,
+            "https://demo.example.com/authorize"
+        );
+    }
+
+    #[tokio::test]
+    async fn token_claims_use_request_origin_when_unpinned() {
+        let provider = test_provider(Some(ConsumedAuthRequest {
+            auth_request_id: "auth-1".to_string(),
+            user_id: "user-1".to_string(),
+            session_id: "session-1".to_string(),
+            client_id: "client".to_string(),
+            redirect_uri: "https://app.example/callback".to_string(),
+            scope: "openid".to_string(),
+            state: "state".to_string(),
+            nonce: "nonce".to_string(),
+            response_type: "code".to_string(),
+            code_challenge: String::new(),
+            code_challenge_method: String::new(),
+            prompt: Vec::new(),
+            login_hint: String::new(),
+            max_age: None,
+            auth_time: Some(1_700_000_123),
+        }));
+
+        let response = with_instance_context(request_context("demo.example.com"), async {
+            provider
+                .token(&TokenExchangeRequest {
+                    grant_type: "authorization_code".to_string(),
+                    code: "code".to_string(),
+                    redirect_uri: "https://app.example/callback".to_string(),
+                    client_auth: Some(ClientAuthentication {
+                        client_id: "client".to_string(),
+                        client_secret: "secret".to_string(),
+                        method: ClientAuthMethod::ClientSecretPost,
+                    }),
+                    code_verifier: String::new(),
+                    refresh_token: String::new(),
+                })
+                .await
+                .unwrap()
+        })
+        .await;
+
+        let id_token = response.id_token.expect("id token");
+        let key = provider
+            .keys
+            .active_signing_key(&provider.instance_id)
+            .await
+            .unwrap();
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.validate_aud = false;
+        validation.set_issuer(&["https://demo.example.com"]);
+        let claims = jsonwebtoken::decode::<IdTokenClaims>(&id_token, &key.decoding, &validation)
+            .unwrap()
+            .claims;
+
+        assert_eq!(claims.iss, "https://demo.example.com");
+    }
+
+    #[tokio::test]
+    async fn explicit_issuer_override_beats_request_origin() {
+        let provider =
+            test_provider(None).with_issuer_override(Some("https://login.example.com".into()));
+
+        let discovery = with_instance_context(request_context("demo.example.com"), async {
+            provider.discovery_document()
+        })
+        .await;
+
+        assert_eq!(discovery.issuer, "https://login.example.com");
+    }
+
+    #[tokio::test]
+    async fn token_exchange_persists_session_linked_tokens() {
+        let tokens = RecordingTokenStore::default();
+        let provider = test_provider_with_tokens(
+            Some(ConsumedAuthRequest {
+                auth_request_id: "auth-1".to_string(),
+                user_id: "user-1".to_string(),
+                session_id: "session-1".to_string(),
+                client_id: "client".to_string(),
+                redirect_uri: "https://app.example/callback".to_string(),
+                scope: "openid offline_access".to_string(),
+                state: "state".to_string(),
+                nonce: "nonce".to_string(),
+                response_type: "code".to_string(),
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                prompt: Vec::new(),
+                login_hint: String::new(),
+                max_age: None,
+                auth_time: Some(1_700_000_123),
+            }),
+            tokens.clone(),
+        );
+
+        let response = provider
+            .token(&TokenExchangeRequest {
+                grant_type: "authorization_code".to_string(),
+                code: "code".to_string(),
+                redirect_uri: "https://app.example/callback".to_string(),
+                client_auth: Some(ClientAuthentication {
+                    client_id: "client".to_string(),
+                    client_secret: "secret".to_string(),
+                    method: ClientAuthMethod::ClientSecretPost,
+                }),
+                code_verifier: String::new(),
+                refresh_token: String::new(),
+            })
+            .await
+            .unwrap();
+
+        assert!(!response.access_token.is_empty());
+        assert!(response.refresh_token.is_some());
+
+        let stored = tokens.stored_specs.lock().unwrap().clone();
+        assert_eq!(stored.len(), 2);
+        let access = stored
+            .iter()
+            .find(|token| token.token_type == "oidc_access")
+            .unwrap();
+        let refresh = stored
+            .iter()
+            .find(|token| token.token_type == "oidc_refresh")
+            .unwrap();
+        assert_eq!(access.session_id.as_deref(), Some("session-1"));
+        assert_eq!(refresh.session_id.as_deref(), Some("session-1"));
+        assert_eq!(
+            access.refresh_family_id.as_deref(),
+            Some(refresh.token_id.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_refresh_token_revokes_entire_family() {
+        let tokens = RecordingTokenStore::default();
+        let provider = test_provider_with_tokens(
+            Some(ConsumedAuthRequest {
+                auth_request_id: "auth-1".to_string(),
+                user_id: "user-1".to_string(),
+                session_id: "session-1".to_string(),
+                client_id: "client".to_string(),
+                redirect_uri: "https://app.example/callback".to_string(),
+                scope: "openid offline_access".to_string(),
+                state: "state".to_string(),
+                nonce: "nonce".to_string(),
+                response_type: "code".to_string(),
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                prompt: Vec::new(),
+                login_hint: String::new(),
+                max_age: None,
+                auth_time: Some(1_700_000_123),
+            }),
+            tokens.clone(),
+        );
+
+        let response = provider
+            .token(&TokenExchangeRequest {
+                grant_type: "authorization_code".to_string(),
+                code: "code".to_string(),
+                redirect_uri: "https://app.example/callback".to_string(),
+                client_auth: Some(ClientAuthentication {
+                    client_id: "client".to_string(),
+                    client_secret: "secret".to_string(),
+                    method: ClientAuthMethod::ClientSecretPost,
+                }),
+                code_verifier: String::new(),
+                refresh_token: String::new(),
+            })
+            .await
+            .unwrap();
+
+        provider
+            .revoke(
+                response.refresh_token.as_deref().unwrap(),
+                Some(&ClientAuthentication {
+                    client_id: "client".to_string(),
+                    client_secret: "secret".to_string(),
+                    method: ClientAuthMethod::ClientSecretPost,
+                }),
+            )
+            .await
+            .unwrap();
+
+        let stored = tokens.stored_specs.lock().unwrap().clone();
+        let refresh = stored
+            .iter()
+            .find(|token| token.token_type == "oidc_refresh")
+            .unwrap();
+        assert_eq!(
+            tokens.revoked_families.lock().unwrap().as_slice(),
+            &[refresh.token_id.clone()]
+        );
+    }
+
+    #[tokio::test]
+    async fn end_session_uses_id_token_hint_for_redirect_validation() {
+        let tokens = RecordingTokenStore::default();
+        let provider = test_provider_with_tokens(
+            Some(ConsumedAuthRequest {
+                auth_request_id: "auth-1".to_string(),
+                user_id: "user-1".to_string(),
+                session_id: "session-1".to_string(),
+                client_id: "client".to_string(),
+                redirect_uri: "https://app.example/callback".to_string(),
+                scope: "openid".to_string(),
+                state: "state".to_string(),
+                nonce: "nonce".to_string(),
+                response_type: "code".to_string(),
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                prompt: Vec::new(),
+                login_hint: String::new(),
+                max_age: None,
+                auth_time: Some(1_700_000_123),
+            }),
+            tokens,
+        );
+
+        let response = provider
+            .token(&TokenExchangeRequest {
+                grant_type: "authorization_code".to_string(),
+                code: "code".to_string(),
+                redirect_uri: "https://app.example/callback".to_string(),
+                client_auth: Some(ClientAuthentication {
+                    client_id: "client".to_string(),
+                    client_secret: "secret".to_string(),
+                    method: ClientAuthMethod::ClientSecretPost,
+                }),
+                code_verifier: String::new(),
+                refresh_token: String::new(),
+            })
+            .await
+            .unwrap();
+
+        let outcome = provider
+            .end_session(
+                &EndSessionRequest {
+                    client_id: String::new(),
+                    id_token_hint: response.id_token.unwrap(),
+                    post_logout_redirect_uri: "https://app.example/logout".to_string(),
+                    state: "logout-state".to_string(),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.session_id.as_deref(), Some("session-1"));
+        assert_eq!(
+            outcome.redirect_uri,
+            "https://app.example/logout?state=logout-state"
+        );
     }
 
     #[test]

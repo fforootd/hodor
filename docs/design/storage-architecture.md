@@ -1,7 +1,7 @@
 # Storage Architecture — Role-Based Runtime, Database-First Defaults
 
 **Date**: 2026-04-02  
-**Builds on**: ADR-010 (Three-Tier Data), ADR-017 (Process Cache Semantics), ADR-021 (Multi-Tenancy)  
+**Builds on**: ADR-010 (Three-Tier Data), ADR-017 (Process Cache Semantics), ADR-034 (Multi-Tenancy)  
 **Related**: [Storage Implementation Status](storage-implementation-status.md), [Architecture Overview](../architecture/overview.md)
 
 This document is the canonical storage design for the current Rust prototype.

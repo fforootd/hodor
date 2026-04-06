@@ -285,10 +285,13 @@ fn derive_kv_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Re
     }
 
     match config.kv.backend.as_str() {
-        "memory" => Ok("memory".into()),
+        "memory" if backend != BackendKind::Spanner => Ok("memory".into()),
         "postgres_unlogged" if backend == BackendKind::Postgres => Ok("postgres_unlogged".into()),
         "shared_sql" if backend != BackendKind::Sqlite => Ok("shared_sql".into()),
         "redis" => Ok("redis".into()),
+        "memory" => anyhow::bail!(
+            "storage.kv.backend = \"memory\" is not supported for native Spanner; use \"shared_sql\""
+        ),
         other => anyhow::bail!("unsupported storage.kv.backend: {other}"),
     }
 }
@@ -304,10 +307,13 @@ fn derive_sink_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::
     }
 
     match config.sink.backend.as_str() {
-        "channel" => Ok("channel".into()),
+        "channel" if backend != BackendKind::Spanner => Ok("channel".into()),
         "postgres" if backend == BackendKind::Postgres => Ok("postgres".into()),
         "redis" => Ok("redis".into()),
         "noop" => Ok("noop".into()),
+        "channel" => anyhow::bail!(
+            "storage.sink.backend = \"channel\" is not supported for native Spanner; use \"noop\""
+        ),
         other => anyhow::bail!("unsupported storage.sink.backend: {other}"),
     }
 }
@@ -429,6 +435,46 @@ mod tests {
         assert_eq!(roles.read, "same_primary");
         assert_eq!(roles.kv, "shared_sql");
         assert_eq!(roles.sink, "noop");
+    }
+
+    #[test]
+    fn spanner_rejects_memory_kv_override() {
+        let config = StorageConfig {
+            kv: zitadel_config::KvStoreConfig {
+                backend: "memory".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = derive_kv_backend(&config, BackendKind::Spanner)
+            .err()
+            .unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("storage.kv.backend = \"memory\" is not supported for native Spanner")
+        );
+    }
+
+    #[test]
+    fn spanner_rejects_channel_sink_override() {
+        let config = StorageConfig {
+            sink: zitadel_config::SinkConfig {
+                backend: "channel".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = derive_sink_backend(&config, BackendKind::Spanner)
+            .err()
+            .unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("storage.sink.backend = \"channel\" is not supported for native Spanner")
+        );
     }
 
     #[tokio::test]

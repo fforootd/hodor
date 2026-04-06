@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::{Router, extract::State, response::Response, routing::get};
+use zitadel_db::current_request_origin_or;
 
 use crate::AppState;
 
@@ -11,18 +12,14 @@ pub fn routes(state: Arc<AppState>) -> Router {
 }
 
 async fn openapi_json(State(state): State<Arc<AppState>>) -> Response {
-    let public_origin = if !state.config.server.public_origin.is_empty() {
-        state
-            .config
-            .server
-            .public_origin
-            .trim_end_matches('/')
-            .to_string()
+    let public_origin = if !state.config.server.public_origin.trim().is_empty() {
+        state.config.server.public_origin.trim_end_matches('/').to_string()
     } else {
-        format!(
+        current_request_origin_or(&format!(
             "http://{}:{}",
             state.config.server.external_domain, state.config.server.port
-        )
+        ))
+        .into_owned()
     };
 
     match zitadel_api::openapi::document(&state.db, &public_origin).await {

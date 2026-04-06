@@ -1,7 +1,6 @@
-// Events use analytics storage (columnar SQL queries), not use cases.
-// TODO(ADR-032): list_events should eventually call EventRepository::list() via
-//   ApplicationServices once an events use case is added.  For the POC the
-//   analytics-based query is kept because it is optimised for large result sets.
+// TODO(ADR-032): Event listing uses s.analytics for columnar queries.
+// This should migrate to a ListEvents use case once analytics storage
+// is exposed through Repositories.
 use crate::{ApiState, middleware::Identity, response};
 use axum::{
     Extension, Router,
@@ -16,9 +15,8 @@ use zitadel_db::current_instance_id;
 use zitadel_storage::{AnalyticsQuery, AnalyticsQueryResult};
 
 pub fn routes() -> Router<ApiState> {
-    Router::new()
-        .route("/events", get(list_events))
-        .route("/events/stream", get(stream_events))
+    Router::new().route("/events", get(list_events))
+    // TODO: SSE event stream removed — will be re-implemented when event consumption worker is ready.
 }
 
 #[derive(Deserialize)]
@@ -68,33 +66,42 @@ async fn list_events(
     Extension(identity): Extension<Identity>,
     Query(p): Query<EventParams>,
 ) -> Response {
-    let _ctx = response::build_actor_context(&identity);
+    let ctx = response::build_actor_context(&identity);
+    tracing::debug!(actor = %ctx.user_id(), "list_events");
     let cursor = decode_cursor(p.cursor.as_deref());
 
-    let mut conditions = vec![format!(
-        "instance_id = {}",
-        sql_string_literal(current_instance_id().as_ref())
-    )];
+    // Build parameterized WHERE clause — all user-supplied values use $N bind params.
+    let mut conditions = Vec::new();
+    let mut params: Vec<String> = Vec::new();
+
+    params.push(current_instance_id().to_string());
+    conditions.push(format!("instance_id = ${}", params.len()));
 
     if let Some(ref et) = p.event_type {
-        conditions.push(format!("event_type = {}", sql_string_literal(et)));
+        params.push(et.clone());
+        conditions.push(format!("event_type = ${}", params.len()));
     } else {
         conditions.push("event_type NOT LIKE 'log.%'".to_string());
     }
     if let Some(ref sid) = p.session_id {
-        conditions.push(format!("session_id = {}", sql_string_literal(sid)));
+        params.push(sid.clone());
+        conditions.push(format!("session_id = ${}", params.len()));
     }
     if let Some(ref fp) = p.fingerprint {
-        conditions.push(format!("fingerprint = {}", sql_string_literal(fp)));
+        params.push(fp.clone());
+        conditions.push(format!("fingerprint = ${}", params.len()));
     }
     if let Some(ref aid) = p.aggregate_id {
-        conditions.push(format!("aggregate_id = {}", sql_string_literal(aid)));
+        params.push(aid.clone());
+        conditions.push(format!("aggregate_id = ${}", params.len()));
     }
     if let Some((cursor_created_at, cursor_id)) = &cursor {
-        let cursor_ts_expr = timestamp_literal(s.db.dialect(), cursor_created_at);
+        params.push(cursor_created_at.clone());
+        let ts_idx = params.len();
+        params.push(cursor_id.clone());
+        let id_idx = params.len();
         conditions.push(format!(
-            "(created_at < {cursor_ts_expr} OR (created_at = {cursor_ts_expr} AND id < {}))",
-            sql_string_literal(cursor_id)
+            "(created_at < ${ts_idx} OR (created_at = ${ts_idx} AND id < ${id_idx}))"
         ));
     }
 
@@ -112,6 +119,7 @@ async fn list_events(
         .analytics
         .query(&AnalyticsQuery {
             sql,
+            params,
             limit: Some(p.limit.min(500)),
         })
         .await
@@ -147,32 +155,6 @@ fn decode_cursor(cursor: Option<&str>) -> Option<(String, String)> {
     }
     let (created_at, id) = raw.split_once('|')?;
     Some((created_at.to_string(), id.to_string()))
-}
-
-/// SSE event stream -- polls for new events every 2 seconds.
-// TODO(ADR-032): Add Identity extraction + FGA check for stream access
-async fn stream_events(
-    State(_s): State<ApiState>,
-    Extension(_identity): Extension<Identity>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
-    let stream = tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(
-        std::time::Duration::from_secs(2),
-    ))
-    .map(move |_| {
-        let event = SseEvent::default()
-            .event("ping")
-            .data(format!("{{\"ts\":\"{}\"}}", chrono_now()));
-        Ok::<_, Infallible>(event)
-    });
-    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
-}
-
-fn chrono_now() -> String {
-    // Simple UTC timestamp without chrono dependency.
-    let d = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap();
-    format!("{}", d.as_secs())
 }
 
 fn event_from_analytics_row(
@@ -261,19 +243,5 @@ fn row_json(
         }
         Some(other) => other.clone(),
         None => serde_json::Value::Null,
-    }
-}
-
-fn sql_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-fn timestamp_literal(dialect: zitadel_db::Dialect, value: &str) -> String {
-    match dialect {
-        zitadel_db::Dialect::Sqlite => format!("datetime({})", sql_string_literal(value)),
-        zitadel_db::Dialect::Postgres => {
-            format!("CAST({} AS TIMESTAMPTZ)", sql_string_literal(value))
-        }
-        zitadel_db::Dialect::Spanner => format!("TIMESTAMP({})", sql_string_literal(value)),
     }
 }

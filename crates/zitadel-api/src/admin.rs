@@ -9,6 +9,10 @@ use axum::{
 use serde::Serialize;
 use zitadel_db::{list_admin_instances, load_instance_metadata};
 
+// TODO(ADR-032): list_instances and whoami_admin call zitadel_db directly.
+// These need dedicated use cases (ListAdminInstances, AdminWhoami) that route
+// through Repositories. The operator_admin check should move to the use case.
+
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/admin/instances", get(list_instances))

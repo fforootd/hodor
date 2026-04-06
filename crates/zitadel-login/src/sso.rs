@@ -8,14 +8,63 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
+use zitadel_app::credentials::LinkIdentityCommand;
+use zitadel_app::users::CreateUserCommand;
 use zitadel_db::{
-    create_linked_identity_record, create_user, current_instance_id,
-    find_active_user_by_identifier, find_linked_identity, first_org_id, get_schema_record,
-    list_schema_registry,
-    provider::{self, ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
-    touch_linked_identity, update_session_metadata,
+    current_instance_id,
+    provider::{ProviderLinkingMode, ProviderMatchBy, ProviderPayload, ProviderRecord},
 };
+
+/// Load a provider via repos and reconstruct the DB-typed ProviderRecord
+/// with its full ProviderPayload. This bridges the app repo's simplified
+/// `config: Value` back into the structured type the SSO flow requires.
+async fn load_provider_via_repos(
+    repos: &zitadel_app::repo::Repositories,
+    instance_id: &str,
+    provider_id: &str,
+) -> anyhow::Result<Option<ProviderRecord>> {
+    let record = repos.providers.get(instance_id, provider_id).await?;
+    record
+        .map(|r| {
+            let mut payload: ProviderPayload = if r
+                .config
+                .as_object()
+                .is_some_and(|map| map.contains_key("connection") || map.contains_key("mapping"))
+            {
+                let mut raw = r.config.clone();
+                if let serde_json::Value::Object(map) = &mut raw {
+                    map.entry("display_name".to_string())
+                        .or_insert_with(|| serde_json::Value::String(r.name.clone()));
+                    map.entry("protocol".to_string())
+                        .or_insert_with(|| serde_json::Value::String(r.protocol.clone()));
+                }
+                serde_json::from_value(raw).unwrap_or_default()
+            } else {
+                let connection = serde_json::from_value(r.config.clone()).unwrap_or_default();
+                ProviderPayload {
+                    connection,
+                    ..ProviderPayload::default()
+                }
+            };
+            payload.display_name = r.name.clone();
+            payload.protocol = r.protocol.clone();
+            payload.enabled = r.state == "active";
+            let org_id = r
+                .config
+                .get("org_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            Ok(ProviderRecord {
+                id: r.id,
+                org_id,
+                payload,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            })
+        })
+        .transpose()
+}
 use zitadel_oidc::rp::{
     RpAuthState, RpCallbackRequest, RpProviderSpec, RpStartRequest, StateStore,
 };
@@ -89,7 +138,8 @@ async fn sso_start(
     Query(params): Query<SsoStartParams>,
 ) -> Response {
     let instance_id = current_instance_id();
-    let provider = match provider::get_provider_for(&state.db, &instance_id, &provider_id).await {
+    let provider = match load_provider_via_repos(&state.app.repos, &instance_id, &provider_id).await
+    {
         Ok(Some(provider)) => provider,
         Ok(None) => {
             return (
@@ -135,10 +185,7 @@ async fn sso_start(
         }
     };
 
-    let callback_uri = format!(
-        "{}/v1/auth/sso/callback",
-        state.public_origin.trim_end_matches('/')
-    );
+    let callback_uri = sso_callback_uri(&state);
     let store = TransientRpStateStore {
         transient: state.transient.clone(),
     };
@@ -168,6 +215,13 @@ async fn sso_start(
     };
 
     Redirect::temporary(&result.authorization_url).into_response()
+}
+
+fn sso_callback_uri(state: &LoginState) -> String {
+    format!(
+        "{}/v1/auth/sso/callback",
+        state.effective_public_origin().trim_end_matches('/')
+    )
 }
 
 #[derive(Deserialize)]
@@ -211,8 +265,8 @@ async fn sso_callback(
         }
     };
 
-    let provider = match provider::get_provider_for(
-        &state.db,
+    let provider = match load_provider_via_repos(
+        &state.app.repos,
         &instance_id,
         &stored_state.provider_id,
     )
@@ -312,7 +366,8 @@ async fn complete_federated_login(
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<Response> {
     let instance_id = current_instance_id();
-    let schema = load_target_schema(&state.db, &provider.payload).await?;
+    let repos = &state.app.repos;
+    let schema = load_target_schema(repos, instance_id.as_ref(), &provider.payload).await?;
     let defaults = schema
         .as_ref()
         .map(zitadel_schema::claim_defaults)
@@ -322,14 +377,8 @@ async fn complete_federated_login(
         &provider.payload.mapping.claims,
         &identity.claims,
     );
-    // TODO(CLAUDE-2): Replace find_or_create_identity with use case calls:
-    //   - state.app.create_user.execute() for user provisioning
-    //   - state.app.link_identity.execute() for identity linking
-    //   - user lookup via repos for matching existing users
-    // Currently kept as direct DB calls because the SSO linking/matching logic
-    // (match_by strategies, link_only mode) is not yet modelled in use cases.
     let user_id = find_or_create_identity(
-        &state.db,
+        &state.app,
         instance_id.as_ref(),
         provider,
         identity,
@@ -363,13 +412,10 @@ async fn complete_federated_login(
         }
     });
     let metadata_json = serde_json::to_string(&metadata)?;
-    let _ = update_session_metadata(
-        &state.db,
-        instance_id.as_ref(),
-        &created.session_id,
-        &metadata_json,
-    )
-    .await?;
+    let _ = repos
+        .sessions
+        .update_metadata(instance_id.as_ref(), &created.session_id, &metadata_json)
+        .await?;
 
     let signed = zitadel_authn::cookie::sign(&created.token, &state.cookie_config.secrets[0]);
     let cookie_name = state.cookie_config.cookie_name();
@@ -393,26 +439,28 @@ async fn complete_federated_login(
 }
 
 async fn load_target_schema(
-    db: &zitadel_db::Db,
+    repos: &zitadel_app::repo::Repositories,
+    instance_id: &str,
     provider: &ProviderPayload,
 ) -> anyhow::Result<Option<serde_json::Value>> {
     let schema_json = if !provider.target.schema_id.is_empty() {
-        get_schema_record(db, &provider.target.schema_id)
+        repos
+            .schemas
+            .get(instance_id, &provider.target.schema_id)
             .await?
             .map(|record| record.schema_json)
     } else if !provider.target.schema_type.is_empty() {
-        let schemas = list_schema_registry(db, "", Some(&provider.target.schema_type), 50).await?;
-        schemas
-            .iter()
-            .find(|schema| schema.is_default)
-            .or_else(|| schemas.first())
-            .map(|schema| schema.schema_json.clone())
+        repos
+            .schemas
+            .get_by_type(instance_id, &provider.target.schema_type)
+            .await?
+            .map(|record| record.schema_json)
     } else {
         None
     };
 
     if let Some(schema_json) = schema_json {
-        return Ok(serde_json::from_str(&schema_json).ok());
+        return Ok(Some(schema_json));
     }
 
     Ok(zitadel_schema::bundled_schema(
@@ -424,40 +472,40 @@ async fn load_target_schema(
     ))
 }
 
-// TODO(CLAUDE-2): Migrate to use case calls once the identity-linking strategy
-// logic is modelled in zitadel-app:
-//   - find_linked_identity  → repos.identities or a dedicated FindLinkedIdentity use case
-//   - touch_linked_identity → same repo, update path
-//   - match_existing_user   → repos.users.find_by_identifier (already exists)
-//   - create_user           → state.app.create_user.execute()
-//   - create_linked_identity → state.app.link_identity.execute()
 async fn find_or_create_identity(
-    db: &zitadel_db::Db,
+    app: &zitadel_app::ApplicationServices,
     instance_id: &str,
     provider: &ProviderRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
     profile: &HashMap<String, serde_json::Value>,
 ) -> anyhow::Result<String> {
-    if let Some(linked) =
-        find_linked_identity(db, instance_id, &provider.id, &identity.subject).await?
+    let repos = &app.repos;
+
+    // Check if this external identity is already linked to a user.
+    if let Some(linked) = repos
+        .credentials
+        .find_by_external_sub(instance_id, &provider.id, &identity.subject)
+        .await?
     {
         let raw_claims = serde_json::to_string(&identity.claims)?;
-        let _ = touch_linked_identity(
-            db,
-            instance_id,
-            &provider.id,
-            &identity.subject,
-            &identity.email,
-            &raw_claims,
-        )
-        .await?;
+        let _ = repos
+            .credentials
+            .touch_linked_identity(
+                instance_id,
+                &provider.id,
+                &identity.subject,
+                &identity.email,
+                &raw_claims,
+            )
+            .await?;
         return Ok(linked.user_id);
     }
 
+    // Try to match an existing user by identifier strategy.
     if let Some(existing_user_id) =
-        match_existing_user(db, instance_id, provider, identity, profile).await?
+        match_existing_user(repos, instance_id, provider, identity, profile).await?
     {
-        create_linked_identity(db, instance_id, &existing_user_id, provider, identity).await?;
+        create_linked_identity(app, instance_id, &existing_user_id, provider, identity).await?;
         return Ok(existing_user_id);
     }
 
@@ -465,7 +513,8 @@ async fn find_or_create_identity(
         anyhow::bail!("no linked account found and provider is link_only");
     }
 
-    let schema_id = resolve_target_schema_id(db, &provider.payload).await?;
+    // Create a new user and link the identity.
+    let schema_id = resolve_target_schema_id(repos, instance_id, &provider.payload).await?;
     let identifier = profile_string(profile, "email")
         .or_else(|| profile_string(profile, "username"))
         .unwrap_or_else(|| {
@@ -477,29 +526,30 @@ async fn find_or_create_identity(
         });
     let display_name =
         profile_string(profile, "display_name").unwrap_or_else(|| identifier.clone());
-    let org_id = first_org_id(db, instance_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("no org found"))?;
-    let user_id = Uuid::new_v4().to_string();
 
-    let _ = create_user(
-        db,
-        instance_id,
-        &user_id,
-        &org_id,
-        &identifier,
-        &display_name,
-        &schema_id,
-        "{}",
-    )
-    .await?;
+    let actor = login_actor_context();
+    let created_user = app
+        .create_user
+        .execute(
+            &actor,
+            CreateUserCommand {
+                identifier: identifier.clone(),
+                display_name,
+                user_type: "human_user".to_string(),
+                schema_id,
+                org_id: None,
+                metadata: serde_json::json!({}),
+            },
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("create_user use case failed: {e}"))?;
 
-    create_linked_identity(db, instance_id, &user_id, provider, identity).await?;
-    Ok(user_id)
+    create_linked_identity(app, instance_id, &created_user.id, provider, identity).await?;
+    Ok(created_user.id)
 }
 
 async fn match_existing_user(
-    db: &zitadel_db::Db,
+    repos: &zitadel_app::repo::Repositories,
     instance_id: &str,
     provider: &ProviderRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
@@ -529,35 +579,42 @@ async fn match_existing_user(
         return Ok(None);
     };
 
-    Ok(find_active_user_by_identifier(db, instance_id, &identifier)
+    Ok(repos
+        .users
+        .find_by_identifier(instance_id, &identifier)
         .await?
         .map(|user| user.id))
 }
 
 async fn create_linked_identity(
-    db: &zitadel_db::Db,
-    instance_id: &str,
+    app: &zitadel_app::ApplicationServices,
+    _instance_id: &str,
     user_id: &str,
     provider: &ProviderRecord,
     identity: &zitadel_oidc::rp::VerifiedExternalIdentity,
 ) -> anyhow::Result<()> {
-    let raw_claims = serde_json::to_string(&identity.claims)?;
-    create_linked_identity_record(
-        db,
-        instance_id,
-        &Uuid::new_v4().to_string(),
-        user_id,
-        &provider.id,
-        &identity.subject,
-        &identity.email,
-        &raw_claims,
-    )
-    .await?;
+    let raw_claims: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&identity.claims)?)?;
+    let actor = login_actor_context();
+    app.link_identity
+        .execute(
+            &actor,
+            LinkIdentityCommand {
+                user_id: user_id.to_string(),
+                provider_id: provider.id.clone(),
+                external_sub: identity.subject.clone(),
+                external_email: Some(identity.email.clone()).filter(|e| !e.is_empty()),
+                raw_claims,
+            },
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("link_identity use case failed: {e}"))?;
     Ok(())
 }
 
 async fn resolve_target_schema_id(
-    db: &zitadel_db::Db,
+    repos: &zitadel_app::repo::Repositories,
+    instance_id: &str,
     provider: &ProviderPayload,
 ) -> anyhow::Result<String> {
     if !provider.target.schema_id.is_empty() {
@@ -567,12 +624,11 @@ async fn resolve_target_schema_id(
         return Ok(String::new());
     }
 
-    let schemas = list_schema_registry(db, "", Some(&provider.target.schema_type), 50).await?;
-    Ok(schemas
-        .iter()
-        .find(|schema| schema.is_default)
-        .or_else(|| schemas.first())
-        .map(|schema| schema.id.clone())
+    Ok(repos
+        .schemas
+        .get_by_type(instance_id, &provider.target.schema_type)
+        .await?
+        .map(|s| s.id)
         .unwrap_or_default())
 }
 
@@ -603,6 +659,7 @@ mod tests {
     use crate::DefaultRpService;
     use zitadel_app::{ApplicationServices, HookPipeline};
     use zitadel_authn::{cookie::CookieConfig, password::Swapper};
+    use zitadel_db::{DEFAULT_INSTANCE_ID, InstanceContext, provider, with_instance_context};
     use zitadel_fga::FgaService;
     use zitadel_storage::StorageRuntime;
 
@@ -627,7 +684,6 @@ mod tests {
         let fga = Arc::new(FgaService::new(db.clone()));
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
             db.clone(),
-            storage.stateful.clone(),
             storage.transient.clone(),
             fga,
         ));
@@ -637,7 +693,6 @@ mod tests {
         ));
 
         LoginState {
-            db: db.clone(),
             stateful: storage.stateful.clone(),
             transient: storage.transient.clone(),
             passwords: Arc::new(Swapper::dev()),
@@ -647,6 +702,7 @@ mod tests {
                 false,
             )),
             public_origin: Arc::new("http://localhost:8080".into()),
+            public_origin_override: Some(Arc::new("http://localhost:8080".into())),
             conformance_login_html: false,
             rp: Arc::new(DefaultRpService::new(
                 zitadel_oidc::rp::ReqwestHttpClient::new(),
@@ -688,9 +744,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn callback_uri_uses_request_origin_when_unpinned() {
+        let mut state = test_state().await;
+        state.public_origin_override = None;
+
+        let callback_uri = with_instance_context(
+            InstanceContext {
+                instance_id: DEFAULT_INSTANCE_ID.to_string(),
+                resolved_org_id: None,
+                placement_mode: "global".into(),
+                region_key: None,
+                scheme: "https".into(),
+                host: "demo.example.com".into(),
+                source: "host".into(),
+            },
+            async { sso_callback_uri(&state) },
+        )
+        .await;
+
+        assert_eq!(callback_uri, "https://demo.example.com/v1/auth/sso/callback");
+    }
+
+    #[tokio::test]
     async fn link_only_rejects_unknown_user() {
         let state = test_state().await;
-        let scoped = state.db.scoped_default();
+        let scoped = state.stateful.db().scoped_default();
         provider::insert_provider(
             &scoped,
             "provider-1",

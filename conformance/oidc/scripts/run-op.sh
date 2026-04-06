@@ -113,7 +113,10 @@ docker compose -p "$PROJECT_NAME" -f "$SUITE_COMPOSE" up -d nginx
 wait_for_url "http://127.0.0.1:18081/healthz" "zitadel"
 wait_for_url "https://127.0.0.1:8443/api/runner/available" "conformance suite" 1
 
-mapfile -t plan_lines < <(grep -Ev '^\s*(#|$)' "$PLAN_FILE")
+plan_lines=()
+while IFS= read -r line; do
+  plan_lines+=("$line")
+done < <(grep -Ev '^\s*(#|$)' "$PLAN_FILE")
 if [[ "${#plan_lines[@]}" -eq 0 ]]; then
   echo "No OIDC provider plans configured in $PLAN_FILE" >&2
   exit 1

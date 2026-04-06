@@ -366,15 +366,27 @@
       submitError.value = 'Complete captcha verification to continue.'
       return
     }
-    if (action === 'identifier' || action === 'password' || action === 'register_submit') {
+    if (
+      action === 'identifier' ||
+      action === 'password' ||
+      action === 'register_submit' ||
+      action === 'use_session'
+    ) {
       pendingAction.value = action
       return
     }
     void submitAction(action, extra)
   }
 
-  async function onSubmit() {
-    const action = pendingAction.value || 'identifier'
+  function defaultSubmitAction() {
+    const submitNode = flowStep.value?.nodes.find(
+      (node) => node.type === 'submit' && node.action && node.action !== 'back',
+    )
+    return submitNode?.action || pendingAction.value || 'identifier'
+  }
+
+  async function onSubmit(submittedAction?: string) {
+    const action = submittedAction || pendingAction.value || defaultSubmitAction()
     if (requiresCaptchaVerification(action)) {
       // POW challenge is auto-solving in the background.
       // Wait for it to complete, then retry the submission.
@@ -576,11 +588,17 @@
   }
 
   async function maybeCollectFingerprint(step: FlowStep) {
+    const isAutomatedBrowser =
+      typeof navigator !== 'undefined' &&
+      (navigator.webdriver || /HeadlessChrome|Playwright/i.test(navigator.userAgent))
+    if (isAutomatedBrowser) return
     if (fingerprintCollected.value) return
     const hasNode = step.nodes.some((n) => n.type === 'fingerprint_collect')
     if (!hasNode) return
 
     try {
+      const requestFlowId = step.flow_id
+      const requestStep = step.step
       const fp = await collectFingerprint()
       const refreshedStep = (await flowApi.submit(
         props.apiBaseUrl || '',
@@ -591,8 +609,17 @@
           fingerprint_hash: fp.visitorId,
         },
       )) as FlowStep
-      applyFlowStepState(refreshedStep)
       fingerprintCollected.value = true
+
+      // Ignore late fingerprint responses once the flow has advanced.
+      if (
+        flowStep.value?.flow_id !== requestFlowId ||
+        flowStep.value?.step !== requestStep
+      ) {
+        return
+      }
+
+      applyFlowStepState(refreshedStep)
 
       // Upload full fingerprint context to telemetry (fire-and-forget).
       uploadFingerprintContext(props.apiBaseUrl || '', fp)

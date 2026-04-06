@@ -1,6 +1,6 @@
 #![allow(async_fn_in_trait)]
 
-use crate::oidc::{JsonWebKeySet, OpenIdConfiguration, s256_challenge};
+use crate::oidc::{JsonWebKeySet, OpenIdConfiguration, now_epoch_seconds, s256_challenge};
 use anyhow::Context;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -68,6 +68,7 @@ pub struct VerifiedExternalIdentity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedIssuerMetadata {
+    pub cached_at_epoch: u64,
     pub config: OpenIdConfiguration,
     pub jwks: JsonWebKeySet,
 }
@@ -99,6 +100,7 @@ pub trait HttpClient: Clone + Send + Sync + 'static {
 pub trait IssuerMetadataCache: Clone + Send + Sync + 'static {
     async fn get(&self, issuer: &str) -> anyhow::Result<Option<CachedIssuerMetadata>>;
     async fn put(&self, issuer: &str, metadata: &CachedIssuerMetadata) -> anyhow::Result<()>;
+    async fn invalidate(&self, issuer: &str) -> anyhow::Result<()>;
 }
 
 #[derive(Clone)]
@@ -183,6 +185,11 @@ impl IssuerMetadataCache for InMemoryIssuerMetadataCache {
             .insert(issuer.to_string(), metadata.clone());
         Ok(())
     }
+
+    async fn invalidate(&self, issuer: &str) -> anyhow::Result<()> {
+        self.entries.write().await.remove(issuer);
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -202,6 +209,8 @@ where
     H: HttpClient,
     C: IssuerMetadataCache,
 {
+    const CACHE_TTL_SECS: u64 = 300;
+
     pub async fn start(&self, request: &RpStartRequest) -> anyhow::Result<RpStartResult> {
         let metadata = self.issuer_metadata(&request.provider.issuer).await?;
 
@@ -284,13 +293,28 @@ where
             .await?;
 
         let mut claims = if let Some(id_token) = token_response.id_token.as_ref() {
-            verify_id_token(
-                id_token,
-                &metadata.jwks,
-                &request.provider.client_id,
-                &request.stored_state.expected_issuer,
-                &request.stored_state.nonce,
-            )?
+            let (claims, refreshed_metadata) = self
+                .verify_id_token_with_retry(
+                    id_token,
+                    &request.provider.client_id,
+                    &request.stored_state.expected_issuer,
+                    &request.stored_state.nonce,
+                )
+                .await?;
+            let metadata = refreshed_metadata;
+            let mut claims = claims;
+            if !metadata.config.userinfo_endpoint.is_empty() && should_enrich_from_userinfo(&claims)
+            {
+                let userinfo = self
+                    .http
+                    .get_json_with_bearer::<Value>(
+                        &metadata.config.userinfo_endpoint,
+                        &token_response.access_token,
+                    )
+                    .await?;
+                claims = merge_claims(claims, userinfo);
+            }
+            claims
         } else if !metadata.config.userinfo_endpoint.is_empty() {
             self.http
                 .get_json_with_bearer::<Value>(
@@ -302,7 +326,10 @@ where
             anyhow::bail!("provider did not return id_token or userinfo endpoint");
         };
 
-        if !metadata.config.userinfo_endpoint.is_empty() && should_enrich_from_userinfo(&claims) {
+        if token_response.id_token.is_none()
+            && !metadata.config.userinfo_endpoint.is_empty()
+            && should_enrich_from_userinfo(&claims)
+        {
             let userinfo = self
                 .http
                 .get_json_with_bearer::<Value>(
@@ -364,19 +391,55 @@ where
     }
 
     async fn issuer_metadata(&self, issuer: &str) -> anyhow::Result<CachedIssuerMetadata> {
-        if let Some(metadata) = self.cache.get(issuer).await? {
+        if let Some(metadata) = self.cache.get(issuer).await?
+            && now_epoch_seconds().saturating_sub(metadata.cached_at_epoch) < Self::CACHE_TTL_SECS
+        {
             return Ok(metadata);
         }
+        self.cache.invalidate(issuer).await?;
+        self.refresh_issuer_metadata(issuer).await
+    }
 
+    async fn refresh_issuer_metadata(&self, issuer: &str) -> anyhow::Result<CachedIssuerMetadata> {
         let metadata_url = format!(
             "{}/.well-known/openid-configuration",
             issuer.trim_end_matches('/')
         );
         let config: OpenIdConfiguration = self.http.get_json(&metadata_url).await?;
+        if config.issuer != issuer {
+            anyhow::bail!(
+                "issuer mismatch: expected {issuer}, got {}",
+                config.issuer
+            );
+        }
         let jwks: JsonWebKeySet = self.http.get_json(&config.jwks_uri).await?;
-        let cached = CachedIssuerMetadata { config, jwks };
+        let cached = CachedIssuerMetadata {
+            cached_at_epoch: now_epoch_seconds(),
+            config,
+            jwks,
+        };
         self.cache.put(issuer, &cached).await?;
         Ok(cached)
+    }
+
+    async fn verify_id_token_with_retry(
+        &self,
+        token: &str,
+        audience: &str,
+        issuer: &str,
+        expected_nonce: &str,
+    ) -> anyhow::Result<(Value, CachedIssuerMetadata)> {
+        let metadata = self.issuer_metadata(issuer).await?;
+        match verify_id_token(token, &metadata.jwks, audience, issuer, expected_nonce) {
+            Ok(claims) => Ok((claims, metadata)),
+            Err(_) => {
+                self.cache.invalidate(issuer).await?;
+                let refreshed = self.refresh_issuer_metadata(issuer).await?;
+                let claims =
+                    verify_id_token(token, &refreshed.jwks, audience, issuer, expected_nonce)?;
+                Ok((claims, refreshed))
+            }
+        }
     }
 
     async fn exchange_code(
@@ -470,15 +533,17 @@ fn verify_id_token(
 }
 
 fn resolve_decoding_key(jwks: &JsonWebKeySet, kid: Option<&str>) -> anyhow::Result<DecodingKey> {
-    let jwk = if let Some(kid) = kid {
-        jwks.keys
+    let jwk = match kid {
+        Some(kid) => jwks
+            .keys
             .iter()
             .find(|candidate| candidate.kid == kid)
-            .or_else(|| jwks.keys.first())
-    } else {
-        jwks.keys.first()
-    }
-    .ok_or_else(|| anyhow::anyhow!("no signing keys available"))?;
+            .ok_or_else(|| anyhow::anyhow!("no matching signing key for kid {kid}"))?,
+        None => jwks
+            .keys
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("no signing keys available"))?,
+    };
 
     Ok(DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?)
 }
@@ -592,6 +657,32 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn start_rejects_discovery_issuer_mismatch() {
+        let mut metadata = test_metadata();
+        metadata.issuer = "https://different-issuer.example".into();
+        let service = RpService::new(
+            MockHttpClient {
+                metadata: Some(metadata),
+                jwks: Some(JsonWebKeySet { keys: vec![] }),
+                ..MockHttpClient::default()
+            },
+            InMemoryIssuerMetadataCache::default(),
+        );
+
+        let error = service
+            .start(&RpStartRequest {
+                provider: test_provider(),
+                flow_id: "flow-1".into(),
+                redirect_uri: "/console".into(),
+                callback_uri: "http://localhost:8080/v1/auth/sso/callback".into(),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("issuer mismatch"));
     }
 
     #[tokio::test]

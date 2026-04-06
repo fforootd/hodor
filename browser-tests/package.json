@@ -1,0 +1,34 @@
+{
+  "name": "@zitadel/browser-tests",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "preflight": "node ./scripts/preflight.cjs",
+    "test": "playwright test",
+    "test:journeys": "playwright test --project=journeys-admin --project=journeys-login-oidc",
+    "test:journeys:smoke": "playwright test --project=journeys-admin --project=journeys-login-oidc --grep @smoke",
+    "test:journeys:admin": "playwright test --project=journeys-admin",
+    "test:journeys:admin:smoke": "playwright test --project=journeys-admin --grep @smoke",
+    "test:journeys:oidc": "playwright test --project=journeys-login-oidc",
+    "test:journeys:oidc:op": "playwright test --project=journeys-login-oidc journeys/login/oidc-code-pkce.spec.ts",
+    "test:journeys:oidc:rp": "playwright test --project=journeys-login-oidc journeys/login/oidc-rp.spec.ts",
+    "test:ui": "node -e \"console.error('warning: npm run test:ui is deprecated; use npm run test:journeys:admin')\" && npm run test:journeys:admin",
+    "test:ui:smoke": "node -e \"console.error('warning: npm run test:ui:smoke is deprecated; use npm run test:journeys:admin:smoke')\" && npm run test:journeys:admin:smoke",
+    "test:acceptance:oidc": "node -e \"console.error('warning: npm run test:acceptance:oidc is deprecated; use npm run test:journeys:oidc')\" && npm run test:journeys:oidc",
+    "test:acceptance:oidc:op": "node -e \"console.error('warning: npm run test:acceptance:oidc:op is deprecated; use npm run test:journeys:oidc:op')\" && npm run test:journeys:oidc:op",
+    "test:acceptance:oidc:rp": "node -e \"console.error('warning: npm run test:acceptance:oidc:rp is deprecated; use npm run test:journeys:oidc:rp')\" && npm run test:journeys:oidc:rp",
+    "test:op": "node -e \"console.error('warning: npm run test:op is deprecated; use npm run test:journeys:oidc:op')\" && npm run test:journeys:oidc:op",
+    "test:rp": "node -e \"console.error('warning: npm run test:rp is deprecated; use npm run test:journeys:oidc:rp')\" && npm run test:journeys:oidc:rp",
+    "test:smoke": "node -e \"console.error('warning: npm run test:smoke is deprecated; use npm run test:journeys:smoke')\" && npm run test:journeys:smoke",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "mock-oidc": "node support/mock-oidc-server.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  },
+  "dependencies": {
+    "oidc-provider": "^9.7.1",
+    "openid-client": "^6.8.2"
+  }
+}

@@ -6,10 +6,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zitadel_db::{Db, append_event, current_instance_id, get_settings_record};
+use zitadel_db::current_instance_id;
 use zitadel_storage::{LoginFlowRuntimeState, NewLoginFlowState};
 
 use crate::LoginState;
+use crate::bot;
+use crate::cookie;
+use crate::oidc_completion;
+use crate::password;
 use crate::redirect::{build_auth_error_redirect, build_auth_redirect};
 use crate::session::{extract_session_user, now_epoch_seconds, session_satisfies_max_age};
 use crate::ui::{
@@ -17,7 +21,6 @@ use crate::ui::{
 };
 
 use zitadel_app::auth::IssueSessionCommand;
-use zitadel_app::credentials::{SetPasswordCommand, VerifyPasswordCommand};
 
 /// Build an ActorContext for unauthenticated login flows.
 /// The user isn't authenticated yet, so we use empty identity fields
@@ -41,140 +44,6 @@ fn login_actor_context() -> zitadel_app::ActorContext {
             feature_overrides: Default::default(),
             host: String::new(),
         },
-    }
-}
-
-/// Bot protection setting loaded from the settings table.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct BotProtectionSetting {
-    #[serde(default)]
-    mode: String,
-    #[serde(default = "default_threshold")]
-    risk_threshold: f64,
-    #[serde(default = "default_action")]
-    action: String,
-    #[serde(default = "default_provider")]
-    provider: String,
-    #[serde(default)]
-    provider_config: serde_json::Value,
-}
-
-fn default_threshold() -> f64 {
-    0.5
-}
-fn default_action() -> String {
-    "challenge".into()
-}
-fn default_provider() -> String {
-    "pow".into()
-}
-
-impl Default for BotProtectionSetting {
-    fn default() -> Self {
-        Self {
-            mode: "disabled".into(),
-            risk_threshold: 0.5,
-            action: "challenge".into(),
-            provider: "pow".into(),
-            provider_config: serde_json::Value::Object(Default::default()),
-        }
-    }
-}
-
-#[allow(dead_code)]
-impl BotProtectionSetting {
-    fn is_disabled(&self) -> bool {
-        self.mode.is_empty() || self.mode == "disabled"
-    }
-    fn is_observe(&self) -> bool {
-        self.mode == "observe"
-    }
-    fn is_enforce(&self) -> bool {
-        self.mode == "enforce"
-    }
-}
-
-/// Load bot protection setting from the settings table.
-async fn load_bot_protection(db: &Db, instance_id: &str) -> BotProtectionSetting {
-    match get_settings_record(db, instance_id, "bot_protection").await {
-        Ok(Some(record)) => serde_json::from_str(&record.data_json).unwrap_or_default(),
-        Ok(None) | Err(_) => BotProtectionSetting::default(),
-    }
-}
-
-/// Emit a bot_detection event to the events table.
-async fn emit_bot_detection_event(
-    db: &Db,
-    instance_id: &str,
-    flow_id: &str,
-    fingerprint: &str,
-    risk: &zitadel_botdetect::RiskScore,
-    bp: &BotProtectionSetting,
-    action_taken: &str,
-) {
-    let event_id = Uuid::new_v4().to_string();
-    let payload = serde_json::json!({
-        "risk_score": risk.score,
-        "signals": risk.signals,
-        "recommendation": format!("{:?}", risk.recommendation),
-        "action_taken": action_taken,
-        "provider": bp.provider,
-    });
-    let metadata = serde_json::json!({
-        "mode": bp.mode,
-        "threshold": bp.risk_threshold,
-    });
-    let _ = append_event(
-        db,
-        instance_id,
-        &event_id,
-        "bot_detection",
-        "security",
-        flow_id,
-        fingerprint,
-        &serde_json::to_string(&payload).unwrap_or_default(),
-        &serde_json::to_string(&metadata).unwrap_or_default(),
-    )
-    .await;
-}
-
-/// Extract bot-detection signals from HTTP request headers.
-fn extract_request_signals(headers: &axum::http::HeaderMap) -> zitadel_botdetect::RequestSignals {
-    let header_keys: Vec<&str> = headers.keys().map(|k| k.as_str()).collect();
-    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
-    zitadel_botdetect::RequestSignals {
-        header_order_hash: zitadel_botdetect::signals::hash_header_order(&header_keys),
-        accept_language: headers
-            .get("accept-language")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_string(),
-        accept_encoding: headers
-            .get("accept-encoding")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_string(),
-        user_agent: headers
-            .get("user-agent")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_string(),
-        http_version: String::new(), // not available from HeaderMap alone
-        has_private_access_token: zitadel_botdetect::has_private_access_token(auth_header),
-        ..Default::default()
-    }
-}
-
-/// Build a POW challenge node for the login flow.
-fn build_challenge_node(secret: &str, risk_score: f64) -> UINode {
-    let difficulty = zitadel_botdetect::Difficulty::from_risk_score(risk_score);
-    let challenge = zitadel_botdetect::generate_challenge(secret.as_bytes(), difficulty);
-    UINode::CaptchaChallenge {
-        algorithm: challenge.algorithm,
-        salt: challenge.salt,
-        challenge: challenge.challenge,
-        maxnumber: challenge.maxnumber,
-        signature: challenge.signature,
     }
 }
 
@@ -231,7 +100,7 @@ pub(crate) struct FlowStepResponse {
 }
 
 impl FlowStepResponse {
-    fn new(flow_id: String, step: String, nodes: Vec<UINode>) -> Self {
+    pub(crate) fn new(flow_id: String, step: String, nodes: Vec<UINode>) -> Self {
         Self {
             flow_id,
             step,
@@ -312,21 +181,20 @@ pub(crate) async fn flow_create(
             // prompt=none: silently reuse session, complete the OIDC request immediately.
             if !req.auth_request_id.is_empty() {
                 let code = Uuid::new_v4().to_string();
-                let _ = state
+                let auth_request = state
                     .transient
                     .complete_auth_request(
                         &instance_id,
                         &req.auth_request_id,
                         &trusted_user.user_id,
+                        Some(&trusted_user.session_id),
                         &code,
                         Some(&trusted_user.authenticated_at),
                     )
-                    .await;
-                if let Ok(Some(auth_req)) = state
-                    .transient
-                    .load_auth_request_redirect(&instance_id, &req.auth_request_id)
                     .await
-                {
+                    .ok()
+                    .flatten();
+                if let Some(auth_req) = auth_request {
                     let redirect =
                         build_auth_redirect(&auth_req.redirect_uri, &auth_req.state, &code);
                     return (
@@ -439,44 +307,17 @@ pub(crate) async fn flow_create(
 
     let initial_step_str = initial_step.as_str().to_string();
 
-    // Load bot protection setting from DB.
-    let bp = load_bot_protection(&state.db, &instance_id).await;
-
-    // Conditionally score request based on bot protection mode.
-    let (risk_score, risk_signals) = if !bp.is_disabled() {
-        let signals = extract_request_signals(&headers);
-        let risk = zitadel_botdetect::score_request(&signals);
-        tracing::debug!(
-            mode = bp.mode,
-            risk_score = risk.score,
-            signals = ?risk.signals,
-            recommendation = ?risk.recommendation,
-            "login flow risk assessment"
-        );
-
-        // Emit bot_detection event in observe + enforce modes.
-        let action_taken = if bp.is_observe() {
-            "observe"
-        } else if risk.score >= bp.risk_threshold {
-            &bp.action
-        } else {
-            "allow"
-        };
-        emit_bot_detection_event(
-            &state.db,
-            &instance_id,
-            &flow_id,
-            &req.fingerprint,
-            &risk,
-            &bp,
-            action_taken,
-        )
-        .await;
-
-        (risk.score, risk.signals)
-    } else {
-        (0.0, vec![])
-    };
+    // Load bot protection setting from DB and score the request.
+    let bp = bot::load_bot_protection(&state.app.repos, &instance_id).await;
+    let (risk_score, risk_signals) = bot::score_and_record(
+        &state.app.repos,
+        &instance_id,
+        &flow_id,
+        &req.fingerprint,
+        &headers,
+        &bp,
+    )
+    .await;
 
     let mut data = serde_json::json!({
         "step": initial_step_str,
@@ -729,47 +570,10 @@ pub(crate) async fn handle_identifier_step(
         }
     }
 
-    // Check if captcha is required based on bot protection setting + risk score.
-    let bp_mode = data
-        .get("bot_protection_mode")
-        .and_then(|v| v.as_str())
-        .unwrap_or("disabled");
-    let risk_score = data
-        .get("risk_score")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let threshold = data
-        .get("bot_protection_threshold")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.5);
-    let bp_action = data
-        .get("bot_protection_action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("challenge");
-    let bp_provider = data
-        .get("bot_protection_provider")
-        .and_then(|v| v.as_str())
-        .unwrap_or("pow");
-    let captcha_verified = data
-        .get("captcha_verified")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let needs_captcha = bp_mode == "enforce"
-        && risk_score >= threshold
-        && !captcha_verified
-        && bp_action == "challenge";
-
-    // Block mode: reject outright if score exceeds threshold.
-    if bp_mode == "enforce" && risk_score >= threshold && bp_action == "block" {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "error": "request_blocked",
-                "error_description": "Request blocked by bot protection",
-            })),
-        )
-            .into_response();
+    // Check bot enforcement (block / captcha challenge).
+    let (needs_captcha, blocked) = bot::check_bot_enforcement(data);
+    if let Some(block_response) = blocked {
+        return block_response;
     }
 
     let mut resp = FlowStepResponse {
@@ -782,26 +586,7 @@ pub(crate) async fn handle_identifier_step(
     };
 
     if needs_captcha {
-        resp.captcha_required = Some(true);
-        match bp_provider {
-            "pow" => {
-                resp.nodes
-                    .push(build_challenge_node(&state.pow_secret, risk_score));
-            }
-            provider @ ("recaptcha" | "hcaptcha" | "turnstile") => {
-                // Load site_key from provider_config stored in flow data.
-                let site_key = data
-                    .get("bot_protection_provider_config")
-                    .and_then(|c| c.get("site_key"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                resp.nodes.push(UINode::CaptchaWidget {
-                    provider: provider.into(),
-                    site_key: site_key.into(),
-                });
-            }
-            _ => {}
-        }
+        bot::append_captcha_nodes(&mut resp, data, &state.pow_secret);
     }
 
     Json(resp).into_response()
@@ -856,88 +641,25 @@ pub(crate) async fn handle_password_step(
         }
     };
 
-    // Use the verify_password use case to load the password hash from the repository.
+    // Verify password and transparently migrate hash if needed.
     let ctx = login_actor_context();
-    let uc_result = state
-        .app
-        .verify_password
-        .execute(
-            &ctx,
-            VerifyPasswordCommand {
-                user_id: user.user_id.clone(),
-                password: req.password.clone(),
-            },
-        )
-        .await;
-
-    let hash = match uc_result {
-        Ok(result) => result.new_hash,
-        Err(_) => None,
-    };
-
-    // The use case returns the stored hash for the transport adapter to verify
-    // via the password Swapper (which handles argon2id, bcrypt, etc).
-    let verify_result = match hash.as_deref() {
-        Some(h) => state.passwords.verify(h, &req.password).ok(),
-        None => None,
-    };
-
-    let verify_result = match verify_result {
-        Some(result) => result,
-        None => {
-            return Json(FlowStepResponse {
-                flow_id: flow_id.to_string(),
-                step: LoginStep::Password.as_str().into(),
-                nodes: {
-                    let mut n = vec![UINode::Error {
-                        message: "Invalid credentials".into(),
-                    }];
-                    n.extend(password_step_nodes(identifier));
-                    n
-                },
-                redirect_uri: None,
-                branding: Some(default_branding()),
-                ..Default::default()
-            })
-            .into_response();
-        }
-    };
-
-    // Transparent hash migration: if the stored hash uses an outdated algorithm,
-    // re-hash and persist the updated credential via the set_password use case.
-    if let zitadel_authn::password::VerifyResult::NeedUpdate(new_hash) = verify_result {
-        let cred_json = zitadel_authn::password::encode_credential_json(&new_hash);
-        let _ = state
-            .app
-            .set_password
-            .execute(
-                &ctx,
-                SetPasswordCommand {
-                    user_id: user.user_id.clone(),
-                    password_hash: cred_json,
-                },
-            )
-            .await;
+    if let Err(resp) = password::verify_and_migrate(
+        state,
+        &ctx,
+        &user.user_id,
+        &req.password,
+        identifier,
+        flow_id,
+    )
+    .await
+    {
+        return resp;
     }
 
     let auth_request_id = data
         .get("auth_request_id")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let auth_request = match state
-        .transient
-        .load_auth_request_redirect(&instance_id, auth_request_id)
-        .await
-    {
-        Ok(auth_request) => auth_request,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load auth request: {e}")})),
-            )
-                .into_response();
-        }
-    };
 
     // Issue a new session via the use case instead of direct transient storage.
     let created_session = match state
@@ -962,29 +684,21 @@ pub(crate) async fn handle_password_step(
         }
     };
 
-    let mut redirect_uri = if !flow_redirect.is_empty() {
-        flow_redirect.to_string()
-    } else {
-        "/console".to_string()
+    // Complete OIDC auth request if present, or use flow redirect.
+    let redirect_uri = match oidc_completion::complete_auth_request(
+        state,
+        &instance_id,
+        flow_redirect,
+        &user.user_id,
+        &created_session.session_id,
+        None,
+        auth_request_id,
+    )
+    .await
+    {
+        Ok((uri, _code)) => uri,
+        Err(resp) => return resp,
     };
-
-    if let Some(auth_request) = auth_request {
-        let code = Uuid::new_v4().to_string();
-        // The use case's CreatedSession doesn't carry a created_at timestamp,
-        // so we pass None and let the storage layer use the current time.
-        if let Err(e) = state
-            .transient
-            .complete_auth_request(&instance_id, auth_request_id, &user.user_id, &code, None)
-            .await
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("complete auth request: {e}")})),
-            )
-                .into_response();
-        }
-        redirect_uri = build_auth_redirect(&auth_request.redirect_uri, &auth_request.state, &code);
-    }
 
     match state
         .transient
@@ -1008,18 +722,7 @@ pub(crate) async fn handle_password_step(
         }
     }
 
-    let signed =
-        zitadel_authn::cookie::sign(&created_session.token, &state.cookie_config.secrets[0]);
-    let cookie_name = state.cookie_config.cookie_name();
-    let secure_flag = if state.cookie_config.secure {
-        "; Secure"
-    } else {
-        ""
-    };
-    let cookie_value = format!(
-        "{cookie_name}={signed}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}{secure_flag}",
-        state.cookie_config.max_age,
-    );
+    let cookie_value = cookie::build_session_cookie(&state.cookie_config, &created_session.token);
 
     let mut response = Json(FlowStepResponse {
         flow_id: flow_id.to_string(),
@@ -1098,138 +801,14 @@ async fn handle_fingerprint_submit(
     .into_response()
 }
 
-/// Handle "captcha_submit" action: verify POW proof and mark flow as verified.
+/// Handle "captcha_submit" action: delegates to bot::verify_captcha.
 async fn handle_captcha_submit(
     state: &LoginState,
     flow_id: &str,
     flow: &LoginFlowRuntimeState,
     req: &FlowSubmitRequest,
 ) -> Response {
-    let instance_id = current_instance_id();
-    // Accept altcha_payload (PoW solution).
-    let altcha = req._extra.get("altcha_payload");
-    let has_token = req
-        ._extra
-        .get("captcha_token")
-        .and_then(|v| v.as_str())
-        .is_some_and(|s| !s.is_empty());
-
-    if altcha.is_none() && !has_token {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "altcha_payload or captcha_token is required"})),
-        )
-            .into_response();
-    }
-
-    // Verify the POW solution using HMAC + SHA-256.
-    if let Some(payload) = altcha {
-        let solution: zitadel_botdetect::Solution = match serde_json::from_value(payload.clone()) {
-            Ok(s) => s,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": format!("invalid altcha_payload: {e}")})),
-                )
-                    .into_response();
-            }
-        };
-
-        // Use the server's cookie secret as the HMAC key for POW challenges.
-        let secret_key = state.pow_secret.as_bytes();
-        if !zitadel_botdetect::verify_solution(secret_key, &solution) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid proof-of-work solution"})),
-            )
-                .into_response();
-        }
-    }
-
-    // Third-party captcha provider verification.
-    if has_token {
-        let token = req
-            ._extra
-            .get("captcha_token")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        let provider = flow
-            .data
-            .get("bot_protection_provider")
-            .and_then(|v| v.as_str())
-            .unwrap_or("pow");
-        let secret_key = flow
-            .data
-            .get("bot_protection_provider_config")
-            .and_then(|c| c.get("secret_key"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-
-        if matches!(provider, "recaptcha" | "hcaptcha" | "turnstile") && !secret_key.is_empty() {
-            let verify_url = match provider {
-                "recaptcha" => "https://www.google.com/recaptcha/api/siteverify",
-                "hcaptcha" => "https://api.hcaptcha.com/siteverify",
-                "turnstile" => "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                _ => "",
-            };
-            if !verify_url.is_empty() {
-                let client = reqwest::Client::new();
-                let resp = client
-                    .post(verify_url)
-                    .form(&[("secret", secret_key), ("response", token)])
-                    .send()
-                    .await;
-                let verified: bool = match resp {
-                    Ok(r) => {
-                        let body: serde_json::Value = r.json().await.unwrap_or_default();
-                        body.get("success")
-                            .and_then(|s| s.as_bool())
-                            .unwrap_or(false)
-                    }
-                    Err(e) => {
-                        tracing::warn!(provider, %e, "captcha provider verification failed");
-                        false
-                    }
-                };
-                if !verified {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({"error": "captcha verification failed"})),
-                    )
-                        .into_response();
-                }
-            }
-        }
-    }
-
-    let mut data = flow.data.clone();
-    data["captcha_verified"] = serde_json::Value::Bool(true);
-
-    if let Err(e) = state
-        .transient
-        .update_login_flow_data(&instance_id, flow_id, &data)
-        .await
-    {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("update flow data: {e}")})),
-        )
-            .into_response();
-    }
-
-    let nodes = match flow.step.as_str() {
-        "password" => {
-            let identifier = data
-                .get("identifier")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            password_step_nodes(identifier)
-        }
-        _ => identifier_step_nodes(),
-    };
-    let mut resp = FlowStepResponse::new(flow_id.to_string(), flow.step.clone(), nodes);
-    resp.captcha_verified = Some(true);
-    Json(resp).into_response()
+    bot::verify_captcha(state, flow_id, flow, req).await
 }
 
 /// Handle "use_session" action: reuse the existing trusted session to complete OIDC.
@@ -1318,32 +897,19 @@ pub(crate) async fn handle_use_session(
     }
 
     // Complete the OIDC auth request with the trusted user.
-    let code = Uuid::new_v4().to_string();
-    if let Err(e) = state
-        .transient
-        .complete_auth_request(
-            &instance_id,
-            auth_request_id,
-            trusted_user_id,
-            &code,
-            Some(&current_user.authenticated_at),
-        )
-        .await
+    let redirect = match oidc_completion::complete_auth_request(
+        state,
+        &instance_id,
+        "",
+        trusted_user_id,
+        &current_user.session_id,
+        Some(&current_user.authenticated_at),
+        auth_request_id,
+    )
+    .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("complete auth: {e}")})),
-        )
-            .into_response();
-    }
-
-    let redirect = match state
-        .transient
-        .load_auth_request_redirect(&instance_id, auth_request_id)
-        .await
-    {
-        Ok(Some(auth_req)) => build_auth_redirect(&auth_req.redirect_uri, &auth_req.state, &code),
-        _ => "/console".to_string(),
+        Ok((uri, _code)) => uri,
+        Err(resp) => return resp,
     };
 
     Json(FlowStepResponse {

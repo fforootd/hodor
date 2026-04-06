@@ -1,19 +1,9 @@
-name: Compliance OIDC Daily
+name: Nightly / Conformance / OIDC
 
 on:
   schedule:
     - cron: '17 4 * * *'
   workflow_dispatch:
-    inputs:
-      surface:
-        description: Which OIDC surface to run
-        required: true
-        default: both
-        type: choice
-        options:
-          - op
-          - rp
-          - both
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,22 +13,11 @@ permissions:
   contents: read
 
 env:
-  OIDC_CONFORMANCE_SURFACE: ${{ github.event_name == 'workflow_dispatch' && inputs.surface || 'both' }}
+  OIDC_CONFORMANCE_SURFACE: op
 
 jobs:
-  prepare-compliance-browser-artifacts:
-    name: Prepare Compliance Browser Artifacts
-    uses: ./.github/workflows/reusable-ci.yml
-    with:
-      run_docs: false
-      run_fast_rust: false
-      run_fast_web: false
-      run_extended_e2e: false
-      run_browser_artifacts: ${{ github.event_name != 'workflow_dispatch' || inputs.surface != 'op' }}
-      artifact_prefix: compliance-oidc
-
   prepare-conformance-image:
-    name: Prepare Conformance Image
+    name: Nightly / Prepare / Conformance Image
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.image_meta.outputs.image_tag }}
@@ -50,47 +29,40 @@ jobs:
         run: echo "image_tag=zitadel-oidc-conformance:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Create CI temp directory
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
         run: mkdir -p "$GITHUB_WORKSPACE/.ci-tmp"
 
       - uses: docker/setup-buildx-action@v3
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
 
       - name: Build conformance image
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           tags: ${{ steps.image_meta.outputs.image_tag }}
           outputs: type=docker,dest=${{ github.workspace }}/.ci-tmp/zitadel-oidc-conformance.tar
-          cache-from: type=gha,scope=compliance-oidc-image
-          cache-to: type=gha,mode=max,scope=compliance-oidc-image
+          cache-from: type=gha,scope=oidc-protocol-compliance-image
+          cache-to: type=gha,mode=max,scope=oidc-protocol-compliance-image
 
       - name: Compress conformance image
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
         run: gzip -1 "$GITHUB_WORKSPACE/.ci-tmp/zitadel-oidc-conformance.tar"
 
       - name: Upload conformance image artifact
-        if: ${{ env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: compliance-oidc-image
+          name: oidc-protocol-compliance-image
           path: ${{ github.workspace }}/.ci-tmp/zitadel-oidc-conformance.tar.gz
           retention-days: 1
 
-  compliance-oidc:
-    name: Compliance OIDC
+  oidc-protocol-compliance:
+    name: Nightly / Conformance / OIDC
     runs-on: ubuntu-latest
     needs:
-      - prepare-compliance-browser-artifacts
       - prepare-conformance-image
     env:
       OIDC_CONFORMANCE_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/oidc-conformance
       OIDC_CONFORMANCE_SUMMARY_MD: ${{ github.workspace }}/artifacts/oidc-conformance/summary.md
       OIDC_CONFORMANCE_SUMMARY_JSON: ${{ github.workspace }}/artifacts/oidc-conformance/summary.json
       CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_E2E_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
       OIDC_CONFORMANCE_ZITADEL_IMAGE: ${{ needs.prepare-conformance-image.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v6.0.2
@@ -103,62 +75,24 @@ jobs:
         id: preflight
         continue-on-error: true
         run: |
-          test "${{ needs.prepare-compliance-browser-artifacts.result }}" = "success"
           test "${{ needs.prepare-conformance-image.result }}" = "success"
 
-      - name: Restore prepared zitadel binary
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: compliance-oidc-zitadel-binary
-          path: .
-
-      - name: Extract prepared zitadel binary
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-        run: |
-          mkdir -p "$CI_TMP_DIR/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
-
       - name: Restore prepared conformance image
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        if: steps.preflight.outcome == 'success'
         uses: actions/download-artifact@v4.3.0
         with:
-          name: compliance-oidc-image
+          name: oidc-protocol-compliance-image
           path: ${{ github.workspace }}/.ci-tmp/compliance-image
 
       - name: Load prepared conformance image
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'rp' }}
+        if: steps.preflight.outcome == 'success'
         run: gunzip -c "$CI_TMP_DIR/compliance-image/zitadel-oidc-conformance.tar.gz" | docker load
 
-      - uses: actions/setup-node@v6.3.0
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-        run: npm ci --prefer-offline
-
-      - name: Cache Playwright browsers
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install Chromium
-        if: ${{ steps.preflight.outcome == 'success' && env.OIDC_CONFORMANCE_SURFACE != 'op' }}
-        run: npx playwright install --with-deps chromium
-
-      - name: Run Compliance OIDC
+      - name: Run OIDC Protocol Compliance
         id: run_conformance
         if: steps.preflight.outcome == 'success'
         continue-on-error: true
-        run: just oidc-conformance
+        run: just conformance-oidc
 
       - name: Resolve compliance run status
         if: always()
@@ -170,7 +104,7 @@ jobs:
           fi
           echo "value=$status" >> "$GITHUB_OUTPUT"
 
-      - name: Summarize Compliance OIDC
+      - name: Summarize OIDC Protocol Compliance
         if: always()
         id: summarize
         run: |
@@ -182,18 +116,18 @@ jobs:
             --json-out "$OIDC_CONFORMANCE_SUMMARY_JSON" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Upload Compliance OIDC artifacts
+      - name: Upload OIDC Protocol Compliance artifacts
         if: always()
         id: upload_artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: compliance-oidc-${{ env.OIDC_CONFORMANCE_SURFACE }}
+          name: nightly-conformance-oidc-${{ env.OIDC_CONFORMANCE_SURFACE }}
           path: |
             artifacts/oidc-conformance
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Publish Compliance OIDC summary
+      - name: Publish OIDC Protocol Compliance summary
         if: always()
         env:
           ARTIFACT_URL: ${{ steps.upload_artifact.outputs.artifact-url }}
@@ -204,6 +138,6 @@ jobs:
           fi
           cat "$RUNNER_TEMP/oidc-daily-summary.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Fail if Compliance OIDC failed
+      - name: Fail if OIDC Protocol Compliance failed
         if: always() && (steps.preflight.outcome != 'success' || steps.run_conformance.outcome != 'success')
         run: exit 1

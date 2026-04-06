@@ -43,10 +43,13 @@ pub(crate) async fn consume_provider_auth_state_impl(
         String,
         String,
         String,
+        String,
     );
     let row: Option<ProviderAuthRow> = sqlx::query_as(
-            "SELECT provider_id, state, nonce, pkce_verifier, flow_id, redirect_uri, expected_issuer, callback_uri \
-             FROM oidc_rp_auth_states WHERE instance_id = $1 AND state = $2",
+            "SELECT id, provider_id, state, nonce, pkce_verifier, flow_id, redirect_uri, expected_issuer, callback_uri \
+             FROM oidc_rp_auth_states \
+             WHERE instance_id = $1 AND state = $2 \
+               AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
         )
         .bind(scoped.instance_id())
         .bind(state)
@@ -58,21 +61,21 @@ pub(crate) async fn consume_provider_auth_state_impl(
         return Ok(None);
     };
 
-    sqlx::query("DELETE FROM oidc_rp_auth_states WHERE instance_id = $1 AND state = $2")
+    sqlx::query("DELETE FROM oidc_rp_auth_states WHERE instance_id = $1 AND id = $2")
         .bind(scoped.instance_id())
-        .bind(state)
+        .bind(&row.0)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
 
     Ok(Some(ProviderAuthState {
-        provider_id: row.0,
-        state: row.1,
-        nonce: row.2,
-        pkce_verifier: row.3,
-        flow_id: row.4,
-        redirect_uri: row.5,
-        expected_issuer: row.6,
-        callback_uri: row.7,
+        provider_id: row.1,
+        state: row.2,
+        nonce: row.3,
+        pkce_verifier: row.4,
+        flow_id: row.5,
+        redirect_uri: row.6,
+        expected_issuer: row.7,
+        callback_uri: row.8,
     }))
 }

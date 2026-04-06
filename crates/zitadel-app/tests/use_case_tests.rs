@@ -3,13 +3,13 @@
 //! These tests verify business logic in isolation — no database, no HTTP.
 
 use std::sync::Arc;
+use zitadel_app::ApplicationServices;
 use zitadel_app::context::{ActorContext, AuthContext, Capability, Identity, InstanceContext};
 use zitadel_app::error::AppError;
 use zitadel_app::hook::HookPipeline;
 use zitadel_app::mock::{MockEventRepository, MockOrgRepository, MockUserRepository};
 use zitadel_app::repo::Repositories;
 use zitadel_app::users::{CreateUser, CreateUserCommand};
-use zitadel_app::ApplicationServices;
 
 fn test_ctx() -> ActorContext {
     ActorContext {
@@ -152,11 +152,7 @@ async fn get_user_not_found() {
     let (app, _) = test_services();
     let ctx = test_ctx();
 
-    let err = app
-        .get_user
-        .execute(&ctx, "nonexistent")
-        .await
-        .unwrap_err();
+    let err = app.get_user.execute(&ctx, "nonexistent").await.unwrap_err();
     assert!(matches!(err, AppError::NotFound { .. }));
     assert_eq!(err.status_code(), 404);
 }
@@ -266,10 +262,12 @@ async fn deactivate_nonexistent_user_fails() {
 // execute methods but don't implement the trait directly. Test the interceptor
 // pipeline by creating a trivial inline use case.
 
-use zitadel_app::hook::{DenyReason, HookContext, HookPhase, InterceptResult, PolicyInterceptor, StepUpKind};
-use zitadel_app::usecase::UseCase;
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
+use zitadel_app::hook::{
+    DenyReason, HookContext, HookPhase, InterceptResult, PolicyInterceptor, StepUpKind,
+};
+use zitadel_app::usecase::UseCase;
 
 struct NoopUseCase;
 
@@ -278,7 +276,11 @@ impl UseCase for NoopUseCase {
     type Result = String;
     type Error = AppError;
 
-    fn execute(&self, _ctx: &ActorContext, _cmd: ()) -> impl Future<Output = Result<String, AppError>> + Send {
+    fn execute(
+        &self,
+        _ctx: &ActorContext,
+        _cmd: (),
+    ) -> impl Future<Output = Result<String, AppError>> + Send {
         async { Ok("ok".to_string()) }
     }
 }
@@ -296,7 +298,11 @@ async fn hook_pipeline_empty_runs_use_case() {
 async fn hook_pipeline_deny_interceptor_blocks() {
     struct AlwaysDeny;
     impl PolicyInterceptor for AlwaysDeny {
-        fn intercept(&self, _phase: HookPhase, _ctx: &HookContext) -> Pin<Box<dyn Future<Output = InterceptResult> + Send + '_>> {
+        fn intercept(
+            &self,
+            _phase: HookPhase,
+            _ctx: &HookContext,
+        ) -> Pin<Box<dyn Future<Output = InterceptResult> + Send + '_>> {
             Box::pin(async {
                 InterceptResult::Deny(DenyReason {
                     code: "test.denied".into(),
@@ -308,10 +314,14 @@ async fn hook_pipeline_deny_interceptor_blocks() {
 
     let runner = zitadel_app::UseCaseRunner::new(
         vec![Arc::new(AlwaysDeny) as Arc<dyn PolicyInterceptor>],
-        vec![], vec![],
+        vec![],
+        vec![],
     );
     let ctx = test_ctx();
-    let err = runner.run(&NoopUseCase, &ctx, (), "test.noop").await.unwrap_err();
+    let err = runner
+        .run(&NoopUseCase, &ctx, (), "test.noop")
+        .await
+        .unwrap_err();
     assert!(matches!(err, AppError::PolicyDenied { .. }));
     assert_eq!(err.status_code(), 403);
 }
@@ -320,16 +330,25 @@ async fn hook_pipeline_deny_interceptor_blocks() {
 async fn hook_pipeline_step_up_interceptor() {
     struct RequireMfa;
     impl PolicyInterceptor for RequireMfa {
-        fn intercept(&self, _phase: HookPhase, _ctx: &HookContext) -> Pin<Box<dyn Future<Output = InterceptResult> + Send + '_>> {
+        fn intercept(
+            &self,
+            _phase: HookPhase,
+            _ctx: &HookContext,
+        ) -> Pin<Box<dyn Future<Output = InterceptResult> + Send + '_>> {
             Box::pin(async { InterceptResult::RequireStepUp(StepUpKind::Otp) })
         }
     }
 
     let runner = zitadel_app::UseCaseRunner::new(
-        vec![], vec![Arc::new(RequireMfa) as Arc<dyn PolicyInterceptor>], vec![],
+        vec![],
+        vec![Arc::new(RequireMfa) as Arc<dyn PolicyInterceptor>],
+        vec![],
     );
     let ctx = test_ctx();
-    let err = runner.run(&NoopUseCase, &ctx, (), "test.noop").await.unwrap_err();
+    let err = runner
+        .run(&NoopUseCase, &ctx, (), "test.noop")
+        .await
+        .unwrap_err();
     assert!(matches!(err, AppError::StepUpRequired { .. }));
 }
 
@@ -339,9 +358,15 @@ async fn hook_pipeline_interceptor_ordering() {
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-    struct OrderedInterceptor { expected_order: usize }
+    struct OrderedInterceptor {
+        expected_order: usize,
+    }
     impl PolicyInterceptor for OrderedInterceptor {
-        fn intercept(&self, _phase: HookPhase, _ctx: &HookContext) -> Pin<Box<dyn Future<Output = InterceptResult> + Send + '_>> {
+        fn intercept(
+            &self,
+            _phase: HookPhase,
+            _ctx: &HookContext,
+        ) -> Pin<Box<dyn Future<Output = InterceptResult> + Send + '_>> {
             let expected = self.expected_order;
             Box::pin(async move {
                 let actual = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -357,15 +382,167 @@ async fn hook_pipeline_interceptor_ordering() {
             Arc::new(OrderedInterceptor { expected_order: 0 }) as Arc<dyn PolicyInterceptor>,
             Arc::new(OrderedInterceptor { expected_order: 1 }),
         ],
-        vec![
-            Arc::new(OrderedInterceptor { expected_order: 2 }),
-        ],
+        vec![Arc::new(OrderedInterceptor { expected_order: 2 })],
         vec![],
     );
     let ctx = test_ctx();
     let result = runner.run(&NoopUseCase, &ctx, (), "test.order").await;
     assert!(result.is_ok());
     assert_eq!(COUNTER.load(Ordering::SeqCst), 3);
+}
+
+// ─── DeleteOrg tests ────────────────────────────────────
+
+#[tokio::test]
+async fn delete_org_does_not_delete_users() {
+    let (app, repos) = test_services();
+    let ctx = test_ctx();
+
+    // Create an org and a user in it.
+    repos
+        .orgs
+        .create(
+            "test-instance",
+            &zitadel_app::repo::OrgRecord {
+                id: "org-1".into(),
+                name: "Default".into(),
+                state: "active".into(),
+                metadata: serde_json::Value::Null,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let user = app
+        .create_user
+        .execute(
+            &ctx,
+            CreateUserCommand {
+                identifier: "admin".into(),
+                display_name: "Admin".into(),
+                user_type: "human".into(),
+                schema_id: "default".into(),
+                org_id: Some("org-1".into()),
+                metadata: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Delete the org.
+    app.delete_org.execute(&ctx, "org-1").await.unwrap();
+
+    // Org should be gone.
+    let err = app.get_org.execute(&ctx, "org-1").await.unwrap_err();
+    assert!(matches!(err, AppError::NotFound { .. }));
+
+    // User must still exist (the mock does not cascade — the DB migration
+    // changes the FK from CASCADE to SET NULL so the real DB behaves the same).
+    let fetched = app.get_user.execute(&ctx, &user.id).await.unwrap();
+    assert_eq!(fetched.identifier, "admin");
+}
+
+#[tokio::test]
+async fn delete_org_success() {
+    let (app, repos) = test_services();
+    let ctx = test_ctx();
+
+    repos
+        .orgs
+        .create(
+            "test-instance",
+            &zitadel_app::repo::OrgRecord {
+                id: "org-a".into(),
+                name: "Org A".into(),
+                state: "active".into(),
+                metadata: serde_json::Value::Null,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    repos
+        .orgs
+        .create(
+            "test-instance",
+            &zitadel_app::repo::OrgRecord {
+                id: "org-b".into(),
+                name: "Org B".into(),
+                state: "active".into(),
+                metadata: serde_json::Value::Null,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Delete org-a — should succeed.
+    app.delete_org.execute(&ctx, "org-a").await.unwrap();
+
+    // org-a gone, org-b still around.
+    assert!(matches!(
+        app.get_org.execute(&ctx, "org-a").await,
+        Err(AppError::NotFound { .. })
+    ));
+    assert!(app.get_org.execute(&ctx, "org-b").await.is_ok());
+}
+
+#[tokio::test]
+async fn delete_org_not_found() {
+    let (app, _) = test_services();
+    let ctx = test_ctx();
+
+    let err = app.delete_org.execute(&ctx, "nonexistent").await.unwrap_err();
+    assert!(matches!(err, AppError::NotFound { .. }));
+}
+
+#[tokio::test]
+async fn delete_org_requires_operator_admin() {
+    let (app, repos) = test_services();
+
+    // Create a context without operator admin capability.
+    let ctx = ActorContext {
+        auth: AuthContext {
+            identity: Identity {
+                user_id: "actor-1".into(),
+                session_id: "sess-1".into(),
+                token_type: "session".into(),
+                org_id: "org-1".into(),
+            },
+            capabilities: vec![], // no operator admin
+        },
+        instance: InstanceContext {
+            instance_id: "test-instance".into(),
+            placement_mode: "global".into(),
+            region_key: None,
+            feature_overrides: Default::default(),
+            host: "localhost".into(),
+        },
+    };
+
+    repos
+        .orgs
+        .create(
+            "test-instance",
+            &zitadel_app::repo::OrgRecord {
+                id: "org-1".into(),
+                name: "Default".into(),
+                state: "active".into(),
+                metadata: serde_json::Value::Null,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let err = app.delete_org.execute(&ctx, "org-1").await.unwrap_err();
+    assert!(matches!(err, AppError::OperatorAdminRequired));
 }
 
 // ─── ApplicationServices wiring test ─────────────────────
@@ -394,6 +571,7 @@ async fn application_services_wired_correctly() {
     let _ = &app.get_org;
     let _ = &app.list_orgs;
     let _ = &app.update_org;
+    let _ = &app.delete_org;
     let _ = &app.create_group;
     let _ = &app.get_group;
     let _ = &app.list_groups;

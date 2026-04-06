@@ -1,7 +1,10 @@
+pub mod account;
 pub mod actions;
 pub mod admin;
 pub mod analytics;
 pub mod apps;
+pub mod extractors;
+pub mod generic_named_resource;
 pub mod auth;
 pub mod catalog;
 pub mod console;
@@ -76,14 +79,22 @@ pub fn routes(state: ApiState) -> Router {
         .merge(telemetry::routes())
         .merge(catalog::routes());
 
+    let scoped_product_handlers = product_handlers
+        .clone()
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::require_scoped_instance_access,
+        ));
+
     let authed = Router::new()
         // Instance-scoped: /v1/instances/{instanceId}/users, etc.
-        .nest("/instances/{instanceId}", product_handlers.clone())
+        .nest("/instances/{instanceId}", scoped_product_handlers)
         // Instance management CRUD (operates on parent)
         .merge(instances::routes())
         // Root/admin APIs
         .merge(admin::routes())
         .merge(auth::routes())
+        .merge(account::routes())
         .merge(pats::routes())
         .merge(jobs::routes())
         .merge(settings::routes())

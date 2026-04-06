@@ -1,14 +1,14 @@
-use crate::{ApiState, middleware::Identity, response};
+use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::Response,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
 use zitadel_app::{
     repo::{ListParams as AppListParams, SchemaRecord},
-    schemas::RegisterSchemaCommand,
+    schemas::{RegisterSchemaCommand, UpdateSchemaCommand},
 };
 
 /// Embedded meta-schema JSON (the console's source of truth for navigation + types).
@@ -21,6 +21,8 @@ pub fn routes() -> Router<ApiState> {
         .route("/schemas/{id}", get(get_schema).patch(update_schema))
         .route("/schemas/{id}/promote", axum::routing::post(promote_schema))
         .route("/schemas/{id}/identity-count", get(schema_identity_count))
+        .route("/schemas/{id}/diff", get(schema_diff))
+        .route("/schemas/{id}/preview", axum::routing::post(schema_preview))
 }
 
 /// GET /v1/schemas/$meta -- returns the full meta-schema catalog.
@@ -85,7 +87,7 @@ async fn list_schemas(
         cursor: p.cursor,
         search: p.type_filter,
     };
-    match s.app.list_schemas.execute(&ctx, &params).await {
+    match s.app.runner.run_fn(&ctx, "schema.list", || s.app.list_schemas.execute(&ctx, &params)).await {
         Ok(result) => {
             let items: Vec<SchemaResponse> = result
                 .items
@@ -105,10 +107,10 @@ async fn list_schemas(
 async fn get_schema(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match s.app.get_schema.execute(&ctx, &id).await {
+    match s.app.runner.run_fn(&ctx, "schema.get", || s.app.get_schema.execute(&ctx, &id)).await {
         Ok(schema) => response::json_ok(SchemaResponse::from_record(schema, true)),
         Err(e) => response::app_error(e),
     }
@@ -139,7 +141,7 @@ async fn create_schema(
         schema_json: req.schema,
         visibility: vis,
     };
-    match s.app.register_schema.execute(&ctx, cmd).await {
+    match s.app.runner.run_fn(&ctx, "schema.register", || s.app.register_schema.execute(&ctx, cmd)).await {
         Ok(schema) => response::json_created(SchemaResponse::from_record(schema, true)),
         Err(e) => response::app_error(e),
     }
@@ -147,36 +149,109 @@ async fn create_schema(
 
 async fn update_schema(
     State(s): State<ApiState>,
-    Path(id): Path<String>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
     Json(req): Json<CreateSchemaRequest>,
 ) -> Response {
-    // No update_schema use case — keep direct DB call.
-    // TODO(CLAUDE-4): Add UpdateSchema use case.
-    let schema_str = response::to_json_string(&req.schema);
-    match zitadel_db::update_schema_record(&s.db, &id, &schema_str).await {
-        Ok(false) => response::not_found("schema not found"),
-        Ok(_) => response::json_ok(serde_json::json!({"id": id, "updated": true})),
-        Err(e) => response::internal_error(format!("{e}")),
+    let ctx = response::build_actor_context(&identity);
+    let cmd = UpdateSchemaCommand {
+        schema_id: id,
+        schema_json: req.schema,
+    };
+    match s.app.runner.run_fn(&ctx, "schema.update", || s.app.update_schema.execute(&ctx, cmd)).await {
+        Ok(schema) => response::json_ok(SchemaResponse::from_record(schema, false)),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn promote_schema(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    // No promote_schema use case — keep direct DB call.
-    // TODO(CLAUDE-4): Add PromoteSchema use case.
-    match zitadel_db::promote_schema_record(&s.db, &id).await {
+async fn promote_schema(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.runner.run_fn(&ctx, "schema.promote", || s.app.promote_schema.execute(&ctx, &id)).await {
         Ok(true) => response::json_ok(serde_json::json!({"id": id, "promoted": true})),
         Ok(false) => response::not_found("schema not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-async fn schema_identity_count(State(s): State<ApiState>, Path(id): Path<String>) -> Response {
-    // No identity_count use case — keep direct DB call.
-    // TODO(CLAUDE-4): Add SchemaIdentityCount query.
-    match zitadel_db::count_users_for_schema(&s.db, zitadel_db::current_instance_id().as_ref(), &id)
-        .await
-    {
+async fn schema_identity_count(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.runner.run_fn(&ctx, "schema.count_users", || s.app.count_schema_users.execute(&ctx, &id)).await {
         Ok(count) => response::json_ok(serde_json::json!({"count": count})),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
+}
+
+// ─── Diff ───
+
+#[derive(Deserialize)]
+struct DiffParams {
+    compare: Option<String>,
+}
+
+async fn schema_diff(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+    Query(params): Query<DiffParams>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let left = match s.app.get_schema.execute(&ctx, &id).await {
+        Ok(schema) => schema,
+        Err(e) => return response::app_error(e),
+    };
+
+    let right = match &params.compare {
+        Some(compare_id) => match s.app.get_schema.execute(&ctx, compare_id).await {
+            Ok(schema) => Some(schema),
+            Err(e) => return response::app_error(e),
+        },
+        None => None,
+    };
+
+    response::json_ok(serde_json::json!({
+        "left": left.schema_json,
+        "right": right.map(|r| r.schema_json),
+        "changes": [],
+    }))
+}
+
+// ─── Preview ───
+
+#[derive(Deserialize)]
+struct PreviewRequest {
+    entity_id: String,
+}
+
+async fn schema_preview(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+    Json(req): Json<PreviewRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    let schema = match s.app.get_schema.execute(&ctx, &id).await {
+        Ok(schema) => schema,
+        Err(e) => return response::app_error(e),
+    };
+
+    // Load the entity to preview the schema against.
+    let entity = match s.app.get_user.execute(&ctx, &req.entity_id).await {
+        Ok(user) => user,
+        Err(e) => return response::app_error(e),
+    };
+
+    response::json_ok(serde_json::json!({
+        "entity": entity.id,
+        "current_claims": entity.metadata,
+        "draft_claims": schema.schema_json,
+        "changes": [],
+    }))
 }

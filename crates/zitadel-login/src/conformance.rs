@@ -85,6 +85,7 @@ pub(crate) async fn login_get(
                 &state,
                 &query.auth_request_id,
                 &session_user.user_id,
+                Some(&session_user.session_id),
                 Some(&session_user.authenticated_at),
             )
             .await;
@@ -163,6 +164,7 @@ pub(crate) async fn login_post(
             &state,
             &form.auth_request_id,
             &session_user.user_id,
+            Some(&session_user.session_id),
             Some(&session_user.authenticated_at),
         )
         .await;
@@ -252,6 +254,7 @@ pub(crate) async fn login_post(
         &state,
         &form.auth_request_id,
         &user.user_id,
+        Some(&created_session.session_id),
         Some(&created_session.created_at),
     )
     .await
@@ -267,9 +270,12 @@ async fn complete_auth_request_redirect(
     state: &LoginState,
     auth_request_id: &str,
     user_id: &str,
+    session_id: Option<&str>,
     auth_time: Option<&str>,
 ) -> Response {
-    match complete_auth_request_location(state, auth_request_id, user_id, auth_time).await {
+    match complete_auth_request_location(state, auth_request_id, user_id, session_id, auth_time)
+        .await
+    {
         Ok(redirect) => Redirect::temporary(&redirect).into_response(),
         Err(response) => response,
     }
@@ -279,42 +285,45 @@ async fn complete_auth_request_location(
     state: &LoginState,
     auth_request_id: &str,
     user_id: &str,
+    session_id: Option<&str>,
     auth_time: Option<&str>,
 ) -> Result<String, Response> {
     let instance_id = current_instance_id();
     let code = Uuid::new_v4().to_string();
-    if let Err(error) = state
+    let auth_request = match state
         .transient
-        .complete_auth_request(&instance_id, auth_request_id, user_id, &code, auth_time)
-        .await
-    {
-        return Err(html_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            render_error_page(&format!(
-                "Failed to complete authorization request: {error}"
-            )),
-        ));
-    }
-
-    match state
-        .transient
-        .load_auth_request_redirect(&instance_id, auth_request_id)
-        .await
-    {
-        Ok(Some(auth_req)) => Ok(build_auth_redirect(
-            &auth_req.redirect_uri,
-            &auth_req.state,
+        .complete_auth_request(
+            &instance_id,
+            auth_request_id,
+            user_id,
+            session_id,
             &code,
-        )),
-        Ok(None) => Err(html_response(
-            StatusCode::BAD_REQUEST,
-            render_error_page("Authorization request no longer exists"),
-        )),
-        Err(error) => Err(html_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            render_error_page(&format!("Failed to load authorization redirect: {error}")),
-        )),
-    }
+            auth_time,
+        )
+        .await
+    {
+        Ok(Some(auth_req)) => auth_req,
+        Ok(None) => {
+            return Err(html_response(
+                StatusCode::BAD_REQUEST,
+                render_error_page("Authorization request no longer exists"),
+            ));
+        }
+        Err(error) => {
+            return Err(html_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                render_error_page(&format!(
+                    "Failed to complete authorization request: {error}"
+                )),
+            ));
+        }
+    };
+
+    Ok(build_auth_redirect(
+        &auth_request.redirect_uri,
+        &auth_request.state,
+        &code,
+    ))
 }
 
 async fn auth_error_redirect_response(

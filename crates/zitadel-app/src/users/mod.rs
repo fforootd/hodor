@@ -66,6 +66,9 @@ impl CreateUser {
                 .unwrap_or_default(),
         };
 
+        // Authz: caller must be admin on the target org
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("org:{}", org_id)).await?;
+
         let id = uuid::Uuid::now_v7().to_string();
         let now = chrono_now();
 
@@ -182,6 +185,9 @@ impl UpdateUser {
         ctx: &ActorContext,
         cmd: UpdateUserCommand,
     ) -> Result<UserRecord, AppError> {
+        // Authz: caller must be admin on the target user
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", cmd.user_id)).await?;
+
         let mut user = self
             .repos
             .users
@@ -234,6 +240,59 @@ impl UpdateUser {
     }
 }
 
+// ─── DeleteUser ───
+
+pub struct DeleteUser {
+    repos: Arc<Repositories>,
+}
+
+impl DeleteUser {
+    pub fn new(repos: Arc<Repositories>) -> Self {
+        Self { repos }
+    }
+
+    #[tracing::instrument(
+        name = "use_case.delete_user",
+        skip_all,
+        fields(event_type = "user.deleted", category = "user")
+    )]
+    pub async fn execute(&self, ctx: &ActorContext, user_id: &str) -> Result<(), AppError> {
+        // Authz: caller must be admin on the target user
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
+
+        let _user = self
+            .repos
+            .users
+            .get(ctx.instance_id(), user_id)
+            .await
+            .map_err(AppError::Internal)?
+            .ok_or_else(|| AppError::not_found("user", user_id))?;
+
+        self.repos
+            .users
+            .delete(ctx.instance_id(), user_id)
+            .await
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::UserDeleted {
+                    user_id: user_id.to_string(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(())
+    }
+}
+
 // ─── DeactivateUser ───
 
 pub struct DeactivateUser {
@@ -251,6 +310,9 @@ impl DeactivateUser {
         fields(event_type = "user.deactivated", category = "user")
     )]
     pub async fn execute(&self, ctx: &ActorContext, user_id: &str) -> Result<(), AppError> {
+        // Authz: caller must be admin on the target user
+        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", user_id)).await?;
+
         // Verify user exists and is active
         let user = self
             .repos

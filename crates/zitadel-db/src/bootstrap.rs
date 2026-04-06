@@ -51,7 +51,7 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
     };
 
     let admin = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM users WHERE instance_id = $1 AND org_id = $2 AND identifier = 'admin' LIMIT 1"
+        "SELECT id FROM users WHERE instance_id = $1 AND identifier = 'admin' AND (org_id = $2 OR org_id IS NULL) LIMIT 1"
     )
     .bind(DEFAULT_INSTANCE_ID)
     .bind(&org_id)
@@ -88,6 +88,28 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
     .execute(&mut *tx)
     .await?;
     if operator_metadata_updated.rows_affected() > 0 {
+        changed = true;
+    }
+
+    let membership_sql = match db.dialect() {
+        crate::Dialect::Postgres => {
+            "INSERT INTO memberships (instance_id, resource_type, resource_id, user_id, role) \
+             VALUES ($1, 'org', $2, $3, 'owner') \
+             ON CONFLICT (instance_id, resource_type, resource_id, user_id) DO NOTHING"
+        }
+        crate::Dialect::Sqlite => {
+            "INSERT OR IGNORE INTO memberships (instance_id, resource_type, resource_id, user_id, role) \
+             VALUES ($1, 'org', $2, $3, 'owner')"
+        }
+        crate::Dialect::Spanner => unreachable!(),
+    };
+    let membership_inserted = sqlx::query(membership_sql)
+        .bind(DEFAULT_INSTANCE_ID)
+        .bind(&org_id)
+        .bind(&admin_id)
+        .execute(&mut *tx)
+        .await?;
+    if membership_inserted.rows_affected() > 0 {
         changed = true;
     }
 
@@ -177,6 +199,23 @@ async fn bootstrap_spanner(spanner: &crate::SpannerDb) -> anyhow::Result<()> {
                 &"human",
                 &"active",
                 &operator_metadata,
+            ],
+        ),
+        insert_or_update(
+            "memberships",
+            &[
+                "instance_id",
+                "resource_type",
+                "resource_id",
+                "user_id",
+                "role",
+            ],
+            &[
+                &DEFAULT_INSTANCE_ID,
+                &"org",
+                &DEFAULT_ORG_ID,
+                &"default-admin",
+                &"owner",
             ],
         ),
         insert_or_update(

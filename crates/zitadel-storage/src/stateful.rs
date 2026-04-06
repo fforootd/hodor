@@ -93,7 +93,7 @@ impl ReadStore for SqlReadStore {
     ) -> anyhow::Result<Option<UserIdentity>> {
         let scoped = self.db.scoped(instance_id.to_string());
         let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT id, org_id FROM users WHERE instance_id = $1 AND identifier = $2 AND state = 'active'",
+            "SELECT id, COALESCE(org_id, '') FROM users WHERE instance_id = $1 AND identifier = $2 AND state = 'active'",
         )
         .bind(scoped.instance_id())
         .bind(identifier)
@@ -141,7 +141,7 @@ impl ReadStore for SqlReadStore {
             "SELECT t.user_id, t.type, t.session_id, COALESCE(u.org_id, '') \
              FROM tokens t \
              JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
-             WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.revoked_at IS NULL",
+             WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active'",
         )
         .bind(scoped.instance_id())
         .bind(token_hash(raw_token))
@@ -182,7 +182,7 @@ impl ReadStore for SpannerReadStore {
             .expect("spanner read store requires native spanner backend")
             .client();
         let mut stmt = Statement::new(
-            "SELECT id, org_id FROM users \
+            "SELECT id, IFNULL(org_id, '') AS org_id FROM users \
              WHERE instance_id = @instance_id AND identifier = @identifier AND state = 'active' \
              LIMIT 1",
         );
@@ -253,7 +253,7 @@ impl ReadStore for SpannerReadStore {
             "SELECT t.user_id, t.type, t.session_id, u.org_id \
              FROM tokens t \
              JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
-             WHERE t.instance_id = @instance_id AND t.token_hash = @token_hash AND t.revoked_at IS NULL \
+             WHERE t.instance_id = @instance_id AND t.token_hash = @token_hash AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active' \
              LIMIT 1",
         );
         stmt.add_param("instance_id", &instance_id);
@@ -483,5 +483,112 @@ mod tests {
             .unwrap();
         assert_eq!(pat.user_id, "user-1");
         assert_eq!(pat.token_type, "pat");
+    }
+
+    #[tokio::test]
+    async fn ignores_non_pat_tokens_when_resolving_pat_identity() {
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let scoped = db.scoped_default();
+
+        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
+            .bind("org-1")
+            .bind(scoped.instance_id())
+            .bind("Default")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state) \
+             VALUES ($1, $2, $3, $4, $5, 'human', 'active')",
+        )
+        .bind("user-1")
+        .bind(scoped.instance_id())
+        .bind("org-1")
+        .bind("admin")
+        .bind("Admin")
+        .execute(scoped.pool())
+        .await
+        .unwrap();
+
+        let token_sql = format!(
+            "INSERT INTO tokens (id, instance_id, type, token_hash, user_id, name, scopes) VALUES ($1, $2, $3, $4, $5, $6, {})",
+            scoped.json_bind(7),
+        );
+        sqlx::query(&token_sql)
+            .bind("token-1")
+            .bind(scoped.instance_id())
+            .bind("access")
+            .bind(token_hash("not-a-pat"))
+            .bind("user-1")
+            .bind("test")
+            .bind("[]")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        let storage = DefaultStatefulStorage::new_sql(
+            SqlStatefulStore::new(db.clone()),
+            SqlReadStore::new(db.clone()),
+        );
+
+        let resolved = storage
+            .resolve_pat_token(zitadel_db::DEFAULT_INSTANCE_ID, "not-a-pat")
+            .await
+            .unwrap();
+        assert!(resolved.is_none());
+    }
+
+    #[tokio::test]
+    async fn ignores_pat_tokens_for_disabled_users() {
+        let db = Db::open("").await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let scoped = db.scoped_default();
+
+        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
+            .bind("org-1")
+            .bind(scoped.instance_id())
+            .bind("Default")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state) \
+             VALUES ($1, $2, $3, $4, $5, 'human', 'disabled')",
+        )
+        .bind("user-1")
+        .bind(scoped.instance_id())
+        .bind("org-1")
+        .bind("admin")
+        .bind("Admin")
+        .execute(scoped.pool())
+        .await
+        .unwrap();
+
+        let pat_sql = format!(
+            "INSERT INTO tokens (id, instance_id, type, token_hash, user_id, name, scopes) VALUES ($1, $2, 'pat', $3, $4, $5, {})",
+            scoped.json_bind(6),
+        );
+        sqlx::query(&pat_sql)
+            .bind("pat-1")
+            .bind(scoped.instance_id())
+            .bind(token_hash("disabled-pat"))
+            .bind("user-1")
+            .bind("test")
+            .bind("[]")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+
+        let storage = DefaultStatefulStorage::new_sql(
+            SqlStatefulStore::new(db.clone()),
+            SqlReadStore::new(db.clone()),
+        );
+
+        let resolved = storage
+            .resolve_pat_token(zitadel_db::DEFAULT_INSTANCE_ID, "disabled-pat")
+            .await
+            .unwrap();
+        assert!(resolved.is_none());
     }
 }

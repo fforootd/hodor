@@ -1,7 +1,7 @@
-use crate::{ApiState, response};
+use crate::{ApiState, extractors::ResourceId, response};
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -62,7 +62,7 @@ async fn list_catalog(Query(q): Query<CatalogListQuery>) -> Response {
 }
 
 /// GET /v1/catalog/{id} — get template detail with variables and payload.
-async fn get_catalog_entry(Path(id): Path<String>) -> Response {
+async fn get_catalog_entry(ResourceId(id): ResourceId) -> Response {
     let catalog = zitadel_catalog::Catalog::embedded();
 
     let (entry, detail) = match catalog.get(&id) {
@@ -93,7 +93,7 @@ struct InstallRequest {
 /// POST /v1/catalog/{id}/install — install a template with variable substitution.
 async fn install_from_catalog(
     State(s): State<ApiState>,
-    Path(id): Path<String>,
+    ResourceId(id): ResourceId,
     Json(req): Json<InstallRequest>,
 ) -> Response {
     let catalog = zitadel_catalog::Catalog::embedded();

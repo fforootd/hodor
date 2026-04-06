@@ -1,4 +1,4 @@
-# ADR-020: Authorization Model — Immutable Core + Marketplace Modules
+# ADR-020: Authorization Model — Immutable Core + Custom Fragment
 
 **Status**: Accepted  
 **Date**: 2026-03-29  
@@ -14,14 +14,13 @@ With OpenFGA embedded (internal/fga), we need to answer three questions:
 
 ## Decision
 
-### One Store. One Graph. Three Layers.
+### One Store. One Graph. Two Active Layers.
 
 Every Zitadel instance gets exactly **one** OpenFGA store. The authorization model
-is composed from three layers using
-[OpenFGA Modular Models](https://openfga.dev/docs/modeling/modular-models):
+is currently composed from two active layers:
 
 ```
-compiled_model = core.fga + [enabled_modules/*.fga] + custom.fga
+compiled_model = core.fga + custom.fga
 ```
 
 ### Layer 1: Immutable Core (ships with binary)
@@ -40,24 +39,18 @@ Customers cannot modify or delete these.
 | `settings` | Cascading policies |
 | `session` | Active sessions |
 
-### Layer 2: Marketplace Modules (opt-in)
-
-Pre-built authorization patterns that customers can install.
-Each module adds FGA type definitions + API routes + Console UI.
-
-| Module | What it adds |
-|---|---|
-| RBAC | `role`, `permission` types; `/v1/modules/rbac/roles` API; token claims |
-| ABAC | `policy` type; condition-based evaluation; expr-lang policies |
-| Teams | `team` type with hierarchical membership inheritance |
-
-Module installation = FGA schema append + feature flag flip. No Go plugins.
-Model is compiled in memory before writing (fail-fast validation).
-
-### Layer 3: Customer Custom Types (user-defined)
+### Layer 2: Customer Custom Types (user-defined)
 
 Customers define their own types via the FGA model API. Custom types
-reference core and module types freely but cannot shadow sealed types.
+reference core types freely but cannot shadow sealed types.
+
+### Future Work: Marketplace Modules
+
+The storage schema still keeps `module_fragments` for forward compatibility, and
+legacy rows containing module fragments are still read and rebuilt. The embedded
+POC runtime does **not** actively author or manage marketplace module layers yet.
+That remains future work once the module lifecycle, API surface, and Console UX
+are implemented end to end.
 
 ### API Compatibility
 
@@ -69,5 +62,5 @@ Official OpenFGA SDKs (JS, Go, Java, .NET, Python) work directly.
 - **Single store**: no sync, no bridging between internal/external
 - **SCIM compliance**: `/Groups` always works — group is a sealed primitive
 - **AI Agent boundary**: locked primitives = stable physics engine across all deployments
-- **Progressive adoption**: startup (defaults) → scale-up (RBAC module) → enterprise (custom ReBAC)
+- **Progressive adoption**: startup (defaults) → enterprise (custom ReBAC), with module layering reserved for future work
 - **Breaking rename**: `entity` FGA type removed, replaced by type-specific primitives
