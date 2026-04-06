@@ -10,8 +10,8 @@ mod users;
 
 pub use auth::{
     DbActionRepository, DbCredentialRepository, DbEventRepository, DbFgaRepository,
-    DbLoginFlowRepository, DbOidcRepository, DbPatRepository, DbSessionRepository,
-    SqlUnitOfWorkFactory,
+    DbLoginFlowRepository, DbOidcKeyRepository, DbOidcRepository, DbOidcTokenRepository,
+    DbPatRepository, DbSessionRepository, SqlUnitOfWorkFactory,
 };
 pub use authorization::DbAuthorizationRepository;
 pub use auxiliary::{

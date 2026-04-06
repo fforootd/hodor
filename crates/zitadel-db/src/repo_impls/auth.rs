@@ -11,8 +11,10 @@ use zitadel_app::{
         ActionRecord, ActionRepository, BoxFuture, CreatedSession, CredentialRepository,
         EventQueryParams, EventRecord, EventRepository, FgaRelation, FgaRepository,
         LinkedIdentityRecord, ListParams, ListResult, LoginFlowRecord, LoginFlowRepository,
-        OidcAuthRequest, OidcClientInfo, OidcRepository, PatRecord, PatRepository, ResolvedPat,
-        SessionDetail, SessionInfo, SessionRepository, UnitOfWork, UnitOfWorkFactory, UserClaims,
+        OidcAuthRequest, OidcClientInfo, OidcKeyRepository, OidcNewSigningKey, OidcNewToken,
+        OidcRepository, OidcSigningKeyRecord, OidcStoredToken, OidcTokenRepository, PatRecord,
+        PatRepository, ResolvedPat, SessionDetail, SessionInfo, SessionRepository, UnitOfWork,
+        UnitOfWorkFactory, UserClaims,
     },
 };
 use zitadel_crypto::token_hash;
@@ -115,6 +117,28 @@ pub struct DbOidcRepository {
 }
 
 impl DbOidcRepository {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+}
+
+#[derive(Clone)]
+pub struct DbOidcTokenRepository {
+    db: Db,
+}
+
+impl DbOidcTokenRepository {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+}
+
+#[derive(Clone)]
+pub struct DbOidcKeyRepository {
+    db: Db,
+}
+
+impl DbOidcKeyRepository {
     pub fn new(db: Db) -> Self {
         Self { db }
     }
@@ -585,6 +609,452 @@ impl OidcRepository for DbOidcRepository {
     }
 }
 
+impl OidcTokenRepository for DbOidcTokenRepository {
+    fn store_token(
+        &self,
+        instance_id: &str,
+        token: &OidcNewToken,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let token = token.clone();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    let expires_at_expr = sql_expiry_expr(scoped.dialect(), 12);
+                    let sql = format!(
+                        "INSERT INTO tokens \
+                         (id, instance_id, type, token_hash, user_id, session_id, name, scopes, audience, application_id, auth_method, refresh_token_id, expires_at, auth_time) \
+                         VALUES \
+                         ($1, $2, $3, $4, $5, $6, '', {}, $8, $9, $10, $11, {expires_at_expr}, {})",
+                        scoped.json_bind(7),
+                        scoped.timestamp_now(),
+                    );
+                    sqlx::query(&sql)
+                        .bind(&token.token_id)
+                        .bind(&instance_id)
+                        .bind(&token.token_type)
+                        .bind(&token.token_hash)
+                        .bind(token.user_id.as_deref())
+                        .bind(token.session_id.as_deref())
+                        .bind(&token.scope_json)
+                        .bind(&token.client_id)
+                        .bind(&token.application_id)
+                        .bind(&token.auth_method)
+                        .bind(token.refresh_family_id.as_deref().unwrap_or_default())
+                        .bind(token.expires_in_secs as i64)
+                        .execute(scoped.pool())
+                        .await?;
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "INSERT INTO tokens \
+                         (id, instance_id, type, token_hash, user_id, session_id, name, scopes, audience, application_id, auth_method, refresh_token_id, expires_at, auth_time) \
+                         VALUES \
+                         (@id, @instance_id, @type, @token_hash, @user_id, @session_id, '', @scopes, @audience, @application_id, @auth_method, @refresh_token_id, \
+                          TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL @expires_in_secs SECOND), CURRENT_TIMESTAMP())",
+                    );
+                    stmt.add_param("id", &token.token_id);
+                    stmt.add_param("instance_id", &instance_id);
+                    stmt.add_param("type", &token.token_type);
+                    stmt.add_param("token_hash", &token.token_hash);
+                    stmt.add_param("user_id", &token.user_id);
+                    stmt.add_param("session_id", &token.session_id);
+                    stmt.add_param("scopes", &token.scope_json);
+                    stmt.add_param("audience", &token.client_id);
+                    stmt.add_param("application_id", &token.application_id);
+                    stmt.add_param("auth_method", &token.auth_method);
+                    stmt.add_param(
+                        "refresh_token_id",
+                        &token.refresh_family_id.as_deref().unwrap_or_default(),
+                    );
+                    stmt.add_param("expires_in_secs", &(token.expires_in_secs as i64));
+                    let _ = spanner
+                        .client()
+                        .read_write_transaction(|tx| {
+                            let stmt = stmt.clone();
+                            Box::pin(async move {
+                                tx.update(stmt).await?;
+                                Ok::<(), SpannerError>(())
+                            })
+                        })
+                        .await?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn lookup_active_token(
+        &self,
+        instance_id: &str,
+        token_hash: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<OidcStoredToken>>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let token_hash = token_hash.to_string();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    let scopes = scoped.as_text("scopes");
+                    let sql = format!(
+                        "SELECT id, type, user_id, session_id, COALESCE(audience, ''), COALESCE(application_id, ''), COALESCE({scopes}, '[]'), COALESCE(refresh_token_id, '') \
+                         FROM tokens \
+                         WHERE instance_id = $1 AND token_hash = $2 AND revoked_at IS NULL \
+                           AND (expires_at IS NULL OR expires_at > {}) \
+                         LIMIT 1",
+                        scoped.timestamp_now(),
+                    );
+                    let row: Option<(
+                        String,
+                        String,
+                        Option<String>,
+                        Option<String>,
+                        String,
+                        String,
+                        String,
+                        String,
+                    )> = sqlx::query_as(&sql)
+                        .bind(&instance_id)
+                        .bind(&token_hash)
+                        .fetch_optional(scoped.pool())
+                        .await?;
+                    Ok(row.map(|row| OidcStoredToken {
+                        token_id: row.0,
+                        token_type: row.1,
+                        user_id: row.2,
+                        session_id: row.3,
+                        client_id: row.4,
+                        application_id: row.5,
+                        scope: scope_from_json(&row.6),
+                        refresh_family_id: non_empty(Some(row.7)),
+                    }))
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "SELECT id, type, user_id, session_id, IFNULL(audience, '') AS audience, \
+                                IFNULL(application_id, '') AS application_id, IFNULL(scopes, '[]') AS scopes, \
+                                IFNULL(refresh_token_id, '') AS refresh_token_id \
+                         FROM tokens \
+                         WHERE instance_id = @instance_id AND token_hash = @token_hash AND revoked_at IS NULL \
+                           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP()) \
+                         LIMIT 1",
+                    );
+                    stmt.add_param("instance_id", &instance_id);
+                    stmt.add_param("token_hash", &token_hash);
+                    Ok(spanner_query_optional(spanner, stmt)
+                        .await?
+                        .map(|row| OidcStoredToken {
+                            token_id: row.column_by_name::<String>("id").unwrap_or_default(),
+                            token_type: row.column_by_name::<String>("type").unwrap_or_default(),
+                            user_id: non_empty(row.column_by_name::<String>("user_id").ok()),
+                            session_id: non_empty(row.column_by_name::<String>("session_id").ok()),
+                            client_id: row.column_by_name::<String>("audience").unwrap_or_default(),
+                            application_id: row
+                                .column_by_name::<String>("application_id")
+                                .unwrap_or_default(),
+                            scope: scope_from_json(
+                                &row.column_by_name::<String>("scopes").unwrap_or_default(),
+                            ),
+                            refresh_family_id: non_empty(
+                                row.column_by_name::<String>("refresh_token_id").ok(),
+                            ),
+                        }))
+                }
+            }
+        })
+    }
+
+    fn revoke_token_by_id(
+        &self,
+        instance_id: &str,
+        token_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let token_id = token_id.to_string();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    sqlx::query(
+                        "UPDATE tokens SET revoked_at = CURRENT_TIMESTAMP \
+                         WHERE instance_id = $1 AND id = $2 AND revoked_at IS NULL",
+                    )
+                    .bind(&instance_id)
+                    .bind(&token_id)
+                    .execute(scoped.pool())
+                    .await?;
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "UPDATE tokens SET revoked_at = CURRENT_TIMESTAMP() \
+                         WHERE instance_id = @instance_id AND id = @id AND revoked_at IS NULL",
+                    );
+                    stmt.add_param("instance_id", &instance_id);
+                    stmt.add_param("id", &token_id);
+                    let _ = spanner
+                        .client()
+                        .read_write_transaction(|tx| {
+                            let stmt = stmt.clone();
+                            Box::pin(async move {
+                                tx.update(stmt).await?;
+                                Ok::<(), SpannerError>(())
+                            })
+                        })
+                        .await?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn revoke_refresh_family(
+        &self,
+        instance_id: &str,
+        refresh_family_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let refresh_family_id = refresh_family_id.to_string();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    sqlx::query(
+                        "UPDATE tokens SET revoked_at = CURRENT_TIMESTAMP \
+                         WHERE instance_id = $1 AND revoked_at IS NULL AND (refresh_token_id = $2 OR id = $2)",
+                    )
+                    .bind(&instance_id)
+                    .bind(&refresh_family_id)
+                    .execute(scoped.pool())
+                    .await?;
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "UPDATE tokens SET revoked_at = CURRENT_TIMESTAMP() \
+                         WHERE instance_id = @instance_id AND revoked_at IS NULL \
+                           AND (refresh_token_id = @refresh_token_id OR id = @refresh_token_id)",
+                    );
+                    stmt.add_param("instance_id", &instance_id);
+                    stmt.add_param("refresh_token_id", &refresh_family_id);
+                    let _ = spanner
+                        .client()
+                        .read_write_transaction(|tx| {
+                            let stmt = stmt.clone();
+                            Box::pin(async move {
+                                tx.update(stmt).await?;
+                                Ok::<(), SpannerError>(())
+                            })
+                        })
+                        .await?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn revoke_session_tokens(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let session_id = session_id.to_string();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    sqlx::query(
+                        "UPDATE tokens SET revoked_at = CURRENT_TIMESTAMP \
+                         WHERE instance_id = $1 AND session_id = $2 AND revoked_at IS NULL \
+                           AND type IN ('oidc_access', 'oidc_refresh')",
+                    )
+                    .bind(&instance_id)
+                    .bind(&session_id)
+                    .execute(scoped.pool())
+                    .await?;
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "UPDATE tokens SET revoked_at = CURRENT_TIMESTAMP() \
+                         WHERE instance_id = @instance_id AND session_id = @session_id AND revoked_at IS NULL \
+                           AND type IN ('oidc_access', 'oidc_refresh')",
+                    );
+                    stmt.add_param("instance_id", &instance_id);
+                    stmt.add_param("session_id", &session_id);
+                    let _ = spanner
+                        .client()
+                        .read_write_transaction(|tx| {
+                            let stmt = stmt.clone();
+                            Box::pin(async move {
+                                tx.update(stmt).await?;
+                                Ok::<(), SpannerError>(())
+                            })
+                        })
+                        .await?;
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+impl OidcKeyRepository for DbOidcKeyRepository {
+    fn list_active_keys(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<OidcSigningKeyRecord>>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    let created_at_epoch = scoped.epoch_seconds("created_at");
+                    let sql = format!(
+                        "SELECT id, COALESCE(algorithm, 'RS256'), COALESCE(encryption_key_id, ''), ciphertext, nonce, public_key, {created_at_epoch} \
+                         FROM secrets \
+                         WHERE instance_id = $1 AND secret_type = 'oidc_signing_key' \
+                           AND (expires_at IS NULL OR expires_at > {}) \
+                         ORDER BY created_at DESC",
+                        scoped.timestamp_now(),
+                    );
+                    let rows: Vec<(
+                        String,
+                        String,
+                        String,
+                        Vec<u8>,
+                        Option<Vec<u8>>,
+                        Option<Vec<u8>>,
+                        i64,
+                    )> = sqlx::query_as(&sql)
+                        .bind(&instance_id)
+                        .fetch_all(scoped.pool())
+                        .await?;
+                    Ok(rows
+                        .into_iter()
+                        .map(|row| OidcSigningKeyRecord {
+                            kid: row.0,
+                            algorithm: row.1,
+                            encryption_key_id: row.2,
+                            ciphertext: row.3,
+                            nonce: row.4.unwrap_or_default(),
+                            public_key: row.5.unwrap_or_default(),
+                            created_at_epoch: row.6.max(0) as u64,
+                        })
+                        .collect())
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "SELECT id, IFNULL(algorithm, 'RS256') AS algorithm, IFNULL(encryption_key_id, '') AS encryption_key_id, \
+                                ciphertext, nonce, public_key, UNIX_SECONDS(created_at) AS created_at_epoch \
+                         FROM secrets \
+                         WHERE instance_id = @instance_id AND secret_type = 'oidc_signing_key' \
+                           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP()) \
+                         ORDER BY created_at DESC",
+                    );
+                    stmt.add_param("instance_id", &instance_id);
+                    Ok(spanner_query_all(spanner, stmt)
+                        .await?
+                        .into_iter()
+                        .map(|row| OidcSigningKeyRecord {
+                            kid: row.column_by_name::<String>("id").unwrap_or_default(),
+                            algorithm: row
+                                .column_by_name::<String>("algorithm")
+                                .unwrap_or_default(),
+                            encryption_key_id: row
+                                .column_by_name::<String>("encryption_key_id")
+                                .unwrap_or_default(),
+                            ciphertext: row
+                                .column_by_name::<Vec<u8>>("ciphertext")
+                                .unwrap_or_default(),
+                            nonce: row
+                                .column_by_name::<Option<Vec<u8>>>("nonce")
+                                .unwrap_or(None)
+                                .unwrap_or_default(),
+                            public_key: row
+                                .column_by_name::<Option<Vec<u8>>>("public_key")
+                                .unwrap_or(None)
+                                .unwrap_or_default(),
+                            created_at_epoch: row
+                                .column_by_name::<i64>("created_at_epoch")
+                                .unwrap_or_default()
+                                .max(0) as u64,
+                        })
+                        .collect())
+                }
+            }
+        })
+    }
+
+    fn create_signing_key(
+        &self,
+        instance_id: &str,
+        key: &OidcNewSigningKey,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let key = key.clone();
+        Box::pin(async move {
+            match &db {
+                Db::Sql(_) => {
+                    let scoped = db.scoped(instance_id.clone());
+                    let expires_at_expr = sql_expiry_expr(scoped.dialect(), 8);
+                    let sql = format!(
+                        "INSERT INTO secrets \
+                         (id, instance_id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at) \
+                         VALUES \
+                         ($1, $2, 'oidc_signing_key', $3, $4, $5, $6, $7, {expires_at_expr})"
+                    );
+                    sqlx::query(&sql)
+                        .bind(&key.kid)
+                        .bind(&instance_id)
+                        .bind(&key.algorithm)
+                        .bind(&key.encryption_key_id)
+                        .bind(&key.ciphertext)
+                        .bind(&key.nonce)
+                        .bind(&key.public_key)
+                        .bind(key.expires_in_secs as i64)
+                        .execute(scoped.pool())
+                        .await?;
+                }
+                Db::Spanner(spanner) => {
+                    let mut stmt = Statement::new(
+                        "INSERT INTO secrets \
+                         (id, instance_id, secret_type, algorithm, encryption_key_id, ciphertext, nonce, public_key, expires_at) \
+                         VALUES \
+                         (@id, @instance_id, 'oidc_signing_key', @algorithm, @encryption_key_id, @ciphertext, @nonce, @public_key, \
+                          TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL @expires_in_secs SECOND))",
+                    );
+                    stmt.add_param("id", &key.kid);
+                    stmt.add_param("instance_id", &instance_id);
+                    stmt.add_param("algorithm", &key.algorithm);
+                    stmt.add_param("encryption_key_id", &key.encryption_key_id);
+                    stmt.add_param("ciphertext", &key.ciphertext);
+                    stmt.add_param("nonce", &key.nonce);
+                    stmt.add_param("public_key", &key.public_key);
+                    stmt.add_param("expires_in_secs", &(key.expires_in_secs as i64));
+                    let _ = spanner
+                        .client()
+                        .read_write_transaction(|tx| {
+                            let stmt = stmt.clone();
+                            Box::pin(async move {
+                                tx.update(stmt).await?;
+                                Ok::<(), SpannerError>(())
+                            })
+                        })
+                        .await?;
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
 impl EventRepository for DbEventRepository {
     fn append(
         &self,
@@ -783,12 +1253,28 @@ fn parse_string_list(raw: &str) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
+fn scope_from_json(scopes_json: &str) -> String {
+    serde_json::from_str::<Vec<String>>(scopes_json)
+        .map(|scopes| scopes.join(" "))
+        .unwrap_or_else(|_| scopes_json.to_string())
+}
+
 fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|raw| !raw.is_empty())
 }
 
 fn clamp_i64_to_i32(value: i64) -> i32 {
     i32::try_from(value).unwrap_or(if value < 0 { i32::MIN } else { i32::MAX })
+}
+
+fn sql_expiry_expr(dialect: Dialect, param_n: usize) -> String {
+    match dialect {
+        Dialect::Postgres => format!("CURRENT_TIMESTAMP + (${param_n} * INTERVAL '1 second')"),
+        Dialect::Sqlite => {
+            format!("datetime(CURRENT_TIMESTAMP, '+' || ${param_n} || ' seconds')")
+        }
+        Dialect::Spanner => unreachable!("spanner does not use sqlx expiry expressions"),
+    }
 }
 
 fn linked_identity_from_retained(

@@ -18,7 +18,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use zitadel_app::repo::OidcRepository;
+use zitadel_app::repo::{OidcKeyRepository, OidcRepository, OidcTokenRepository};
 use zitadel_authn::cookie::CookieConfig;
 use zitadel_config::oidc::OidcConfig;
 use zitadel_db::DEFAULT_INSTANCE_ID;
@@ -93,7 +93,8 @@ impl OidcState {
         login_path: String,
         instance_id: String,
         oidc_config: &OidcConfig,
-        db: zitadel_db::Db,
+        oidc_token_repo: Arc<dyn OidcTokenRepository>,
+        oidc_key_repo: Arc<dyn OidcKeyRepository>,
         secret_box: Arc<zitadel_crypto::SecretBox>,
         transient: Arc<DefaultTransientStorage>,
         cookie_config: Arc<CookieConfig>,
@@ -106,9 +107,9 @@ impl OidcState {
             login_path,
             store.clone(),
             store.clone(),
-            stores::PersistentKeyStore::new(db.clone(), secret_box, oidc_config.clone()),
+            stores::PersistentKeyStore::new(oidc_key_repo, secret_box, oidc_config.clone()),
             store.clone(),
-            stores::PersistentTokenStore::new(db),
+            stores::PersistentTokenStore::new(oidc_token_repo),
         )
         .with_lifetimes(lifetimes);
 

@@ -44,6 +44,8 @@ pub struct Repositories {
     pub catalog: Arc<dyn CatalogRepository>,
     pub observability: Arc<dyn ObservabilityRepository>,
     pub schema_registry: Arc<dyn SchemaRegistryRepository>,
+    pub oidc_tokens: Arc<dyn OidcTokenRepository>,
+    pub oidc_keys: Arc<dyn OidcKeyRepository>,
     pub uow: Arc<dyn UnitOfWorkFactory>,
 }
 
@@ -1372,9 +1374,7 @@ pub trait FgaAdminRepository: Send + Sync {
     ) -> BoxFuture<'_, Result<FgaStoreInfo, FgaAdminError>>;
 
     /// Discover the platform store.
-    fn discover_platform_store(
-        &self,
-    ) -> BoxFuture<'_, Result<FgaStoreInfo, FgaAdminError>>;
+    fn discover_platform_store(&self) -> BoxFuture<'_, Result<FgaStoreInfo, FgaAdminError>>;
 
     /// Check a single authorization tuple.
     fn check(
@@ -1478,9 +1478,7 @@ pub trait FgaAdminRepository: Send + Sync {
     ) -> BoxFuture<'_, Result<serde_json::Value, FgaAdminError>>;
 
     /// Rebuild the platform store (called after membership/user changes).
-    fn rebuild_platform_store(
-        &self,
-    ) -> BoxFuture<'_, Result<(), FgaAdminError>>;
+    fn rebuild_platform_store(&self) -> BoxFuture<'_, Result<(), FgaAdminError>>;
 }
 
 // ─── Catalog ──────────────────────────────────────────────
@@ -1563,4 +1561,108 @@ pub trait SchemaRegistryRepository: Send + Sync {
         type_filter: Option<&str>,
         limit: i64,
     ) -> BoxFuture<'_, anyhow::Result<Vec<SchemaRegistryEntry>>>;
+}
+
+// ─── OIDC Token Storage ──────────────────────────────────
+
+/// Stored token record for OIDC token persistence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OidcStoredToken {
+    pub token_id: String,
+    pub token_type: String,
+    pub user_id: Option<String>,
+    pub session_id: Option<String>,
+    pub client_id: String,
+    pub application_id: String,
+    pub scope: String,
+    pub refresh_family_id: Option<String>,
+}
+
+/// New token to be persisted.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OidcNewToken {
+    pub token_id: String,
+    pub token_type: String,
+    pub token_hash: String,
+    pub user_id: Option<String>,
+    pub session_id: Option<String>,
+    pub client_id: String,
+    pub application_id: String,
+    pub scope_json: String,
+    pub auth_method: String,
+    pub refresh_family_id: Option<String>,
+    pub expires_in_secs: u64,
+}
+
+/// Repository for OIDC token persistence.
+pub trait OidcTokenRepository: Send + Sync {
+    fn store_token(
+        &self,
+        instance_id: &str,
+        token: &OidcNewToken,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn lookup_active_token(
+        &self,
+        instance_id: &str,
+        token_hash: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<OidcStoredToken>>>;
+
+    fn revoke_token_by_id(
+        &self,
+        instance_id: &str,
+        token_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn revoke_refresh_family(
+        &self,
+        instance_id: &str,
+        refresh_family_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn revoke_session_tokens(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+}
+
+// ─── OIDC Key Storage ────────────────────────────────────
+
+/// Stored signing key record.
+#[derive(Clone, Debug)]
+pub struct OidcSigningKeyRecord {
+    pub kid: String,
+    pub algorithm: String,
+    pub encryption_key_id: String,
+    pub ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub public_key: Vec<u8>,
+    pub created_at_epoch: u64,
+}
+
+/// New signing key to be persisted.
+#[derive(Clone, Debug)]
+pub struct OidcNewSigningKey {
+    pub kid: String,
+    pub algorithm: String,
+    pub encryption_key_id: String,
+    pub ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub public_key: Vec<u8>,
+    pub expires_in_secs: u64,
+}
+
+/// Repository for OIDC signing key persistence.
+pub trait OidcKeyRepository: Send + Sync {
+    fn list_active_keys(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<OidcSigningKeyRecord>>>;
+
+    fn create_signing_key(
+        &self,
+        instance_id: &str,
+        key: &OidcNewSigningKey,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
 }

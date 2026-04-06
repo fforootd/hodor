@@ -178,7 +178,12 @@ fn validate_customer_store_id(instance_id: &str, store_id: &str) -> Result<(), F
 async fn current_customer_store(state: &ApiState) -> Result<(String, String), FgaAdminError> {
     let instance_id = current_instance_id().into_owned();
     validate_customer_target_instance(&instance_id)?;
-    let store = state.app.repos.fga_admin.discover_store(&instance_id).await?;
+    let store = state
+        .app
+        .repos
+        .fga_admin
+        .discover_store(&instance_id)
+        .await?;
     validate_customer_store_id(&instance_id, &store.id)?;
     Ok((instance_id, store.id))
 }
@@ -464,7 +469,13 @@ async fn legacy_model_graph(
     if let Err(error) = validate_customer_target_instance(&instance_id) {
         return fga_error_response(error);
     }
-    match state.app.repos.fga_admin.legacy_model_graph(&instance_id).await {
+    match state
+        .app
+        .repos
+        .fga_admin
+        .legacy_model_graph(&instance_id)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }
@@ -558,8 +569,7 @@ async fn legacy_batch_test(
                             let allowed = result_map
                                 .iter()
                                 .find(|r| {
-                                    r.get("correlation_id")
-                                        .and_then(|v| v.as_str())
+                                    r.get("correlation_id").and_then(|v| v.as_str())
                                         == Some(&idx.to_string())
                                 })
                                 .and_then(|r| r.get("allowed"))
@@ -826,7 +836,13 @@ async fn read_authorization_models_store(
     if let Err(error) = validate_customer_store_id(&instance_id, &store_id) {
         return fga_error_response(error);
     }
-    match state.app.repos.fga_admin.read_models(&instance_id, &store_id).await {
+    match state
+        .app
+        .repos
+        .fga_admin
+        .read_models(&instance_id, &store_id)
+        .await
+    {
         Ok(result) => response::json_ok(result),
         Err(error) => fga_error_response(error),
     }

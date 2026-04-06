@@ -4,7 +4,10 @@ use zitadel_app::repo::SchemaRegistryRepository;
 
 const META_SCHEMA: &str = include_str!("meta_schema.json");
 
-pub async fn document(schema_registry_repo: &dyn SchemaRegistryRepository, public_origin: &str) -> anyhow::Result<Value> {
+pub async fn document(
+    schema_registry_repo: &dyn SchemaRegistryRepository,
+    public_origin: &str,
+) -> anyhow::Result<Value> {
     let meta_schema: Value = serde_json::from_str(META_SCHEMA).context("parse meta schema")?;
     let schema_registry = match load_schema_registry(schema_registry_repo).await {
         Ok(registry) => registry,
@@ -76,12 +79,16 @@ struct SchemaRegistryEntry {
     schema: Value,
 }
 
-async fn load_schema_registry(repo: &dyn SchemaRegistryRepository) -> anyhow::Result<Vec<SchemaRegistryEntry>> {
-    let entries = repo.list_registry("", "", None, i64::MAX)
+async fn load_schema_registry(
+    repo: &dyn SchemaRegistryRepository,
+) -> anyhow::Result<Vec<SchemaRegistryEntry>> {
+    let entries = repo
+        .list_registry("", "", None, i64::MAX)
         .await
         .context("query schema registry")?;
 
-    entries.into_iter()
+    entries
+        .into_iter()
         .map(|entry| {
             let schema = serde_json::from_str(&entry.schema_json)
                 .with_context(|| format!("parse schema registry entry {}", entry.id))?;

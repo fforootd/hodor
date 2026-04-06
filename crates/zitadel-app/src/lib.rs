@@ -54,8 +54,10 @@ pub use context::{
     ActorContext, AuthContext, Capability, Identity, InstanceContext, RequestContext,
 };
 pub use error::AppError;
-pub use features::{FeatureMap, feature_enabled, merge_feature_overrides, validate_feature_overrides};
 pub use event::DomainEvent;
+pub use features::{
+    FeatureMap, feature_enabled, merge_feature_overrides, validate_feature_overrides,
+};
 pub use hook::{EffectHook, HookContext, HookPhase, HookPipeline, PolicyInterceptor};
 pub use hook_engine::HookPipelineBuilder;
 pub use repo::Repositories;

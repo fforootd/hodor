@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::{
     Db, SpannerDb, add_instance_domain, get_org, get_schema_record, get_user,
-    list_instance_domains, list_schema_registry, provider, resolve_domain_route,
+    list_instance_domains, provider,
 };
 use zitadel_app::repo::{
     DomainRecord, GroupRecord, InstanceRecord, ListParams, OrgRecord, ProviderDefinitionRecord,

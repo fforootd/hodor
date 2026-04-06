@@ -122,7 +122,13 @@ async fn install_from_catalog(
     let instance_id = current_instance_id();
 
     match entry.entry_type.as_str() {
-        "provider" => match s.app.repos.catalog.install_provider(&instance_id, &id, &vars_value).await {
+        "provider" => match s
+            .app
+            .repos
+            .catalog
+            .install_provider(&instance_id, &id, &vars_value)
+            .await
+        {
             Ok(provider_id) => (
                 StatusCode::CREATED,
                 Json(serde_json::json!({
@@ -135,7 +141,13 @@ async fn install_from_catalog(
                 .into_response(),
             Err(e) => response::internal(e),
         },
-        "action" => match s.app.repos.catalog.install_action(&instance_id, &id, &vars_value).await {
+        "action" => match s
+            .app
+            .repos
+            .catalog
+            .install_action(&instance_id, &id, &vars_value)
+            .await
+        {
             Ok(action_id) => (
                 StatusCode::CREATED,
                 Json(serde_json::json!({

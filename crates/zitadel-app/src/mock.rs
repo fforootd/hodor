@@ -984,6 +984,8 @@ pub fn mock_repositories() -> Repositories {
         catalog: std::sync::Arc::new(NoopCatalogRepository),
         observability: std::sync::Arc::new(NoopObservabilityRepository),
         schema_registry: std::sync::Arc::new(NoopSchemaRegistryRepository),
+        oidc_tokens: std::sync::Arc::new(NoopOidcTokenRepository),
+        oidc_keys: std::sync::Arc::new(NoopOidcKeyRepository),
         uow: std::sync::Arc::new(MockUnitOfWorkFactory),
     }
 }
@@ -1076,6 +1078,50 @@ impl crate::repo::ObservabilityRepository for NoopObservabilityRepository {
     }
 }
 
+// ─── Noop OIDC Token Repository ─────────────────────────
+
+struct NoopOidcTokenRepository;
+impl OidcTokenRepository for NoopOidcTokenRepository {
+    fn store_token(&self, _: &str, _: &OidcNewToken) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn lookup_active_token(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<OidcStoredToken>>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn revoke_token_by_id(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn revoke_refresh_family(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn revoke_session_tokens(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+// ─── Noop OIDC Key Repository ───────────────────────────
+
+struct NoopOidcKeyRepository;
+impl OidcKeyRepository for NoopOidcKeyRepository {
+    fn list_active_keys(
+        &self,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<OidcSigningKeyRecord>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn create_signing_key(
+        &self,
+        _: &str,
+        _: &OidcNewSigningKey,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 // ─── Noop Schema Registry Repository ─────────────────────
 
 struct NoopSchemaRegistryRepository;
@@ -1101,17 +1147,13 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         &self,
         _instance_id: &str,
     ) -> BoxFuture<'_, Result<crate::repo::FgaStoreInfo, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn discover_platform_store(
         &self,
     ) -> BoxFuture<'_, Result<crate::repo::FgaStoreInfo, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn check(
@@ -1120,9 +1162,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn batch_check(
@@ -1131,9 +1171,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn read_tuples(
@@ -1142,9 +1180,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn write_tuples(
@@ -1153,9 +1189,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<(), crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn expand(
@@ -1164,9 +1198,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn list_objects(
@@ -1175,9 +1207,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn list_users(
@@ -1186,9 +1216,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn read_model(
@@ -1197,9 +1225,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _model_id: Option<&str>,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn read_models(
@@ -1207,9 +1233,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _instance_id: &str,
         _store_id: &str,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn write_model(
@@ -1218,9 +1242,7 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _store_id: &str,
         _request: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn read_changes(
@@ -1231,27 +1253,21 @@ impl crate::repo::FgaAdminRepository for NoopFgaAdminRepository {
         _page_size: u32,
         _continuation_token: Option<&str>,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn legacy_model(
         &self,
         _instance_id: &str,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn legacy_model_graph(
         &self,
         _instance_id: &str,
     ) -> BoxFuture<'_, Result<serde_json::Value, crate::repo::FgaAdminError>> {
-        Box::pin(async {
-            Err(crate::repo::FgaAdminError::Unsupported("noop".to_string()))
-        })
+        Box::pin(async { Err(crate::repo::FgaAdminError::Unsupported("noop".to_string())) })
     }
 
     fn rebuild_platform_store(&self) -> BoxFuture<'_, Result<(), crate::repo::FgaAdminError>> {

@@ -7,11 +7,11 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use zitadel_app::{FeatureMap, feature_enabled};
 use zitadel_app::{
     instances::{CreateInstanceCommand, UpdateInstanceCommand},
     repo::{InstanceRecord, ListParams as AppListParams},
 };
-use zitadel_app::{FeatureMap, feature_enabled};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()

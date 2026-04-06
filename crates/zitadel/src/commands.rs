@@ -127,7 +127,8 @@ pub(crate) fn run_openapi_export(args: OpenapiExportArgs) -> anyhow::Result<()> 
         let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
             .await?;
         let schema_registry = zitadel_server::repo_bridge::schema_registry_repo(db.clone());
-        let document = zitadel_api::openapi::document(schema_registry.as_ref(), &public_origin(&cfg)).await?;
+        let document =
+            zitadel_api::openapi::document(schema_registry.as_ref(), &public_origin(&cfg)).await?;
         db.close().await;
         anyhow::Ok(document)
     })?;

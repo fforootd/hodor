@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 use zitadel_app::repo::*;
-use zitadel_db::Db;
 use zitadel_db::repo_impls::*;
+use zitadel_db::{Db, Dialect};
 use zitadel_fga::{
-    AuthorizationModelWriteRequest, BatchCheckRequest, ChangeRepository, CheckRequest,
-    ExpandRequest, Evaluator, FgaApi, FgaError, FgaService, ListObjectsRequest, ListUsersRequest,
+    AuthorizationModelWriteRequest, BatchCheckRequest, ChangeRepository, CheckRequest, Evaluator,
+    ExpandRequest, FgaApi, FgaError, FgaService, ListObjectsRequest, ListUsersRequest,
     ModelRepository, ReadRequest, StoreResolver, TupleFilter, TupleKey, TupleKeySet,
     TupleRepository, WriteRequest,
 };
@@ -49,8 +49,13 @@ pub fn build_repositories(
         authorization: Arc::new(DbAuthorizationRepository::new(db.clone())),
         fga_admin: Arc::new(FgaAdminBridge(fga.clone())),
         catalog: Arc::new(CatalogBridge(db.clone())),
-        observability: Arc::new(ObservabilityBridge { db: db.clone(), analytics }),
+        observability: Arc::new(ObservabilityBridge {
+            db: db.clone(),
+            analytics,
+        }),
         schema_registry: Arc::new(SchemaRegistryBridge(db.clone())),
+        oidc_tokens: Arc::new(DbOidcTokenRepository::new(db.clone())),
+        oidc_keys: Arc::new(DbOidcKeyRepository::new(db.clone())),
         uow: Arc::new(SqlUnitOfWorkFactory::new(db)),
     }
 }
@@ -341,7 +346,11 @@ impl FgaAdminRepository for FgaAdminBridge {
     ) -> BoxFuture<'_, Result<FgaStoreInfo, FgaAdminError>> {
         let iid = instance_id.to_string();
         Box::pin(async move {
-            let store = self.0.discover_store(&iid).await.map_err(fga_to_admin_error)?;
+            let store = self
+                .0
+                .discover_store(&iid)
+                .await
+                .map_err(fga_to_admin_error)?;
             Ok(FgaStoreInfo {
                 id: store.id,
                 name: store.name,
@@ -374,7 +383,11 @@ impl FgaAdminRepository for FgaAdminBridge {
         Box::pin(async move {
             let req: CheckRequest = serde_json::from_value(request)
                 .map_err(|e| FgaAdminError::BadRequest(e.to_string()))?;
-            let result = self.0.check(&iid, &sid, req).await.map_err(fga_to_admin_error)?;
+            let result = self
+                .0
+                .check(&iid, &sid, req)
+                .await
+                .map_err(fga_to_admin_error)?;
             serde_json::to_value(result).map_err(|e| FgaAdminError::Internal(e.into()))
         })
     }
@@ -608,7 +621,10 @@ impl FgaAdminRepository for FgaAdminBridge {
 
     fn rebuild_platform_store(&self) -> BoxFuture<'_, Result<(), FgaAdminError>> {
         Box::pin(async move {
-            self.0.rebuild_platform_store().await.map_err(fga_to_admin_error)
+            self.0
+                .rebuild_platform_store()
+                .await
+                .map_err(fga_to_admin_error)
         })
     }
 }
@@ -699,8 +715,12 @@ impl ObservabilityRepository for ObservabilityBridge {
                 "SELECT COUNT(*) AS total FROM sessions \
                  WHERE instance_id = {instance} AND revoked_at IS NULL AND {prev_window}"
             );
-            let sessions_current = obs_scalar_i64(&analytics, sessions_current_sql).await.unwrap_or(0);
-            let sessions_previous = obs_scalar_i64(&analytics, sessions_prev_sql).await.unwrap_or(0);
+            let sessions_current = obs_scalar_i64(&analytics, sessions_current_sql)
+                .await
+                .unwrap_or(0);
+            let sessions_previous = obs_scalar_i64(&analytics, sessions_prev_sql)
+                .await
+                .unwrap_or(0);
 
             // ── Timeseries ──
             let auth_ts = obs_fetch_timestamps(
@@ -804,8 +824,6 @@ impl ObservabilityRepository for ObservabilityBridge {
 
 // ── Observability helper functions ──────────────────────────
 
-use zitadel_db::Dialect;
-
 async fn obs_row_map(
     analytics: &DefaultAnalyticsStorage,
     sql: String,
@@ -831,10 +849,7 @@ async fn obs_row_map(
         .collect())
 }
 
-async fn obs_scalar_i64(
-    analytics: &DefaultAnalyticsStorage,
-    sql: String,
-) -> anyhow::Result<i64> {
+async fn obs_scalar_i64(analytics: &DefaultAnalyticsStorage, sql: String) -> anyhow::Result<i64> {
     let map = obs_row_map(analytics, sql).await?;
     Ok(map.get("total").and_then(obs_value_as_i64).unwrap_or(0))
 }
@@ -894,7 +909,10 @@ async fn obs_fetch_breakdown(
         .rows
         .into_iter()
         .map(|row| {
-            let name = row.get(name_idx).and_then(obs_value_as_string).unwrap_or_default();
+            let name = row
+                .get(name_idx)
+                .and_then(obs_value_as_string)
+                .unwrap_or_default();
             let count = row.get(count_idx).and_then(obs_value_as_i64).unwrap_or(0);
             (name, count)
         })
@@ -972,7 +990,16 @@ fn obs_parse_ts_ms(ts: &str) -> Option<i64> {
         } else {
             28
         },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     for m in 0..(mo - 1) as usize {
         days += month_days.get(m).copied().unwrap_or(30) as i64;
@@ -1003,8 +1030,7 @@ impl SchemaRegistryRepository for SchemaRegistryBridge {
         let after = after_id.to_string();
         let tf = type_filter.map(|s| s.to_string());
         Box::pin(async move {
-            let rows =
-                zitadel_db::list_schema_registry(&db, &after, tf.as_deref(), limit).await?;
+            let rows = zitadel_db::list_schema_registry(&db, &after, tf.as_deref(), limit).await?;
             Ok(rows
                 .into_iter()
                 .map(|r| SchemaRegistryEntry {
