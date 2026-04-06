@@ -1,6 +1,7 @@
 pub mod auth;
 mod authorization;
 mod auxiliary;
+pub mod effects;
 pub mod entities;
 mod instances;
 mod orgs_groups;
@@ -18,6 +19,7 @@ pub use auxiliary::{
     DbAppRepository, DbConsoleQueryRepository, DbJobRepository, DbMembershipRepository,
     DbProjectRepository, DbSavedQueryRepository, DbTelemetryRepository,
 };
+pub use effects::DbEffectRepository;
 pub use entities::{
     SqlGroupRepository, SqlInstanceRepository, SqlOrgRepository, SqlProviderRepository,
     SqlSchemaRepository, SqlSearchRepository, SqlSettingsRepository, SqlUserRepository,

@@ -4,6 +4,7 @@
 //! Implementations are provided by storage drivers (SQLite, Postgres, Spanner)
 //! and selected at startup based on the storage runtime configuration.
 
+use crate::effect::Effect;
 use crate::event::DomainEvent;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -46,6 +47,7 @@ pub struct Repositories {
     pub schema_registry: Arc<dyn SchemaRegistryRepository>,
     pub oidc_tokens: Arc<dyn OidcTokenRepository>,
     pub oidc_keys: Arc<dyn OidcKeyRepository>,
+    pub effects: Arc<dyn EffectRepository>,
     pub uow: Arc<dyn UnitOfWorkFactory>,
 }
 
@@ -64,9 +66,9 @@ pub trait UnitOfWorkFactory: Send + Sync {
     ) -> BoxFuture<'a, anyhow::Result<Box<dyn UnitOfWork>>>;
 }
 
-/// A transactional scope that buffers domain events and commits them
-/// atomically. Use cases call `buffer_event()` instead of
-/// `repos.events.append()`, then `commit()` at the end.
+/// A transactional scope that buffers domain events and effects, then commits
+/// them atomically. Use cases call `buffer_event()` and optionally
+/// `buffer_effect()`, then `commit()` at the end.
 pub trait UnitOfWork: Send {
     /// Buffer an event for atomic commit.
     fn buffer_event(
@@ -77,7 +79,11 @@ pub trait UnitOfWork: Send {
         flow_id: Option<String>,
     );
 
-    /// Commit all buffered events in a single transaction.
+    /// Buffer a durable side-effect for atomic commit alongside events.
+    /// Default implementation is a no-op for backward compatibility.
+    fn buffer_effect(&mut self, _effect: Effect) {}
+
+    /// Commit all buffered events and effects in a single transaction.
     /// After this call, the UnitOfWork is consumed.
     fn commit(self: Box<Self>) -> BoxFuture<'static, anyhow::Result<()>>;
 }
@@ -1665,4 +1671,55 @@ pub trait OidcKeyRepository: Send + Sync {
         instance_id: &str,
         key: &OidcNewSigningKey,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
+}
+
+// ─── Effects ──────────────────────────────────────────────
+
+/// Repository for durable side-effects with retry semantics.
+pub trait EffectRepository: Send + Sync {
+    /// Insert effects (typically in the same transaction as events).
+    fn create_batch(
+        &self,
+        instance_id: &str,
+        effects: &[Effect],
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Fetch pending/failed effects ready for dispatch (next_retry_at <= now).
+    fn fetch_pending(
+        &self,
+        instance_id: &str,
+        limit: u32,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<Effect>>>;
+
+    /// Mark an effect as successfully delivered.
+    fn mark_completed(
+        &self,
+        instance_id: &str,
+        effect_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Record a failed attempt and schedule retry with backoff.
+    fn record_failure(
+        &self,
+        instance_id: &str,
+        effect_id: &str,
+        error: &str,
+        next_retry_at: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Mark as dead (max attempts exhausted, will not be retried).
+    fn mark_dead(
+        &self,
+        instance_id: &str,
+        effect_id: &str,
+        error: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Delete completed/dead effects older than the given cutoff.
+    fn cleanup(
+        &self,
+        instance_id: &str,
+        older_than: &str,
+        limit: u32,
+    ) -> BoxFuture<'_, anyhow::Result<u64>>;
 }

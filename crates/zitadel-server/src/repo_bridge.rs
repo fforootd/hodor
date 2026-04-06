@@ -56,6 +56,7 @@ pub fn build_repositories(
         schema_registry: Arc::new(SchemaRegistryBridge(db.clone())),
         oidc_tokens: Arc::new(DbOidcTokenRepository::new(db.clone())),
         oidc_keys: Arc::new(DbOidcKeyRepository::new(db.clone())),
+        effects: Arc::new(DbEffectRepository::new(db.clone())),
         uow: Arc::new(SqlUnitOfWorkFactory::new(db)),
     }
 }

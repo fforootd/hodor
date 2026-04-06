@@ -6,7 +6,9 @@ use google_cloud_spanner::statement::Statement;
 use serde_json::json;
 use tracing::{Instrument, warn};
 use uuid::Uuid;
+use zitadel_app::effect::{Effect, EffectType};
 use zitadel_app::hook::{HookContext, HookPhase, HookPipeline};
+use zitadel_app::repo::EffectRepository;
 use zitadel_app::usecase::run_effects;
 use zitadel_config::{Config, RetentionConfig, WorkersConfig};
 use zitadel_db::{
@@ -16,6 +18,7 @@ use zitadel_db::{
     delete_transient_state_records, due_job_names, ensure_event_partitions, fetch_unshipped_events,
     mark_events_shipped, timestamp_plus_expr, try_acquire_job_lease,
 };
+use zitadel_db::repo_impls::DbEffectRepository;
 
 #[derive(Clone)]
 struct JobSpec {
@@ -108,6 +111,22 @@ pub async fn start(
         });
     }
 
+    // Start the effects worker (durable side-effect delivery with retry).
+    {
+        let effects_repo = DbEffectRepository::new(db.clone());
+        tokio::spawn(async move {
+            let poll_interval = Duration::from_secs(2);
+            loop {
+                if let Err(error) =
+                    process_pending_effects(&effects_repo, DEFAULT_INSTANCE_ID).await
+                {
+                    warn!(%error, "effects worker tick failed");
+                }
+                tokio::time::sleep(poll_interval).await;
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -180,6 +199,17 @@ fn builtins(config: &Config, backend: BackendKind) -> Vec<JobSpec> {
             },
             targets: &["events"],
             retention: config.storage.retention.events.keep_for.clone(),
+        },
+        JobSpec {
+            name: "effects_gc",
+            display_name: "Effects Cleanup",
+            description:
+                "Deletes completed and dead effects older than the retention period.",
+            cron: "0 */6 * * *",
+            cadence: "6h",
+            strategy: "chunked_delete",
+            targets: &["effects"],
+            retention: "7d".to_string(),
         },
     ]
 }
@@ -499,6 +529,210 @@ fn parse_duration_spec(raw: &str) -> Option<Duration> {
             .map(|days| Duration::from_secs(days * 24 * 60 * 60));
     }
     None
+}
+
+// ─── Effects worker ─────────────────────────────────────────
+
+/// Process pending effects with retry and exponential backoff.
+///
+/// Fetches a batch of effects ready for dispatch, attempts delivery,
+/// and records success/failure with appropriate retry scheduling.
+async fn process_pending_effects(
+    repo: &DbEffectRepository,
+    instance_id: &str,
+) -> anyhow::Result<()> {
+    const BATCH_SIZE: u32 = 50;
+    const BASE_BACKOFF_SECS: u64 = 5;
+    const MAX_BACKOFF_SECS: u64 = 480;
+
+    let effects = repo.fetch_pending(instance_id, BATCH_SIZE).await?;
+    if effects.is_empty() {
+        return Ok(());
+    }
+
+    for effect in &effects {
+        let span = tracing::info_span!(
+            "effect_dispatch",
+            effect.id = %effect.id,
+            effect.type_ = %effect.effect_type.as_str(),
+            effect.attempt = effect.attempt,
+        );
+
+        let result = dispatch_effect(effect).instrument(span).await;
+
+        match result {
+            Ok(()) => {
+                repo.mark_completed(instance_id, &effect.id).await?;
+                tracing::debug!(
+                    effect_id = %effect.id,
+                    effect_type = %effect.effect_type.as_str(),
+                    "effect delivered"
+                );
+            }
+            Err(error) => {
+                let next_attempt = effect.attempt + 1;
+                if next_attempt >= effect.max_attempts {
+                    repo.mark_dead(
+                        instance_id,
+                        &effect.id,
+                        &format!("{error:#}"),
+                    )
+                    .await?;
+                    tracing::warn!(
+                        effect_id = %effect.id,
+                        effect_type = %effect.effect_type.as_str(),
+                        attempts = next_attempt,
+                        %error,
+                        "effect dead — max attempts exhausted"
+                    );
+                } else {
+                    let backoff_secs =
+                        (BASE_BACKOFF_SECS * 2u64.pow(next_attempt as u32)).min(MAX_BACKOFF_SECS);
+                    let next_retry_at = chrono_next_retry(backoff_secs);
+                    repo.record_failure(
+                        instance_id,
+                        &effect.id,
+                        &format!("{error:#}"),
+                        &next_retry_at,
+                    )
+                    .await?;
+                    tracing::debug!(
+                        effect_id = %effect.id,
+                        attempt = next_attempt,
+                        retry_in_secs = backoff_secs,
+                        %error,
+                        "effect failed — scheduled retry"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Dispatch a single effect based on its type.
+async fn dispatch_effect(effect: &Effect) -> anyhow::Result<()> {
+    match effect.effect_type {
+        EffectType::Log => {
+            tracing::info!(
+                effect_id = %effect.id,
+                payload = %effect.payload,
+                "log effect"
+            );
+            Ok(())
+        }
+        EffectType::Webhook => {
+            let url = effect
+                .config
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("webhook effect missing 'url' in config"))?;
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()?;
+
+            let mut req = client.post(url).json(&effect.payload);
+
+            // Apply custom headers if present.
+            if let Some(headers) = effect.config.get("headers").and_then(|v| v.as_object()) {
+                for (key, value) in headers {
+                    if let Some(v) = value.as_str() {
+                        req = req.header(key, v);
+                    }
+                }
+            }
+
+            let resp = req.send().await?;
+            if !resp.status().is_success() {
+                anyhow::bail!(
+                    "webhook returned HTTP {}: {}",
+                    resp.status(),
+                    resp.text().await.unwrap_or_default()
+                );
+            }
+            Ok(())
+        }
+        EffectType::Email => {
+            // Stub: log intent, real SMTP integration is a future workstream.
+            let to = effect
+                .config
+                .get("to")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unknown>");
+            let template = effect
+                .config
+                .get("template")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<none>");
+            tracing::info!(
+                effect_id = %effect.id,
+                to = %to,
+                template = %template,
+                "email effect (stub — not yet delivered)"
+            );
+            Ok(())
+        }
+        EffectType::Sms => {
+            // Stub: log intent.
+            let to = effect
+                .config
+                .get("to")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unknown>");
+            tracing::info!(
+                effect_id = %effect.id,
+                to = %to,
+                "sms effect (stub — not yet delivered)"
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Compute a concrete UTC timestamp for retry scheduling.
+fn chrono_next_retry(backoff_secs: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let future = now + Duration::from_secs(backoff_secs);
+    // Format as ISO 8601 compatible with SQLite datetime()
+    let secs = future.as_secs();
+    let dt = time_from_unix_secs(secs);
+    dt
+}
+
+/// Simple UTC datetime string from unix seconds (no external crate needed).
+fn time_from_unix_secs(secs: u64) -> String {
+    // Days since epoch, hours, minutes, seconds
+    const SECS_PER_DAY: u64 = 86400;
+    const SECS_PER_HOUR: u64 = 3600;
+    const SECS_PER_MIN: u64 = 60;
+
+    let days = secs / SECS_PER_DAY;
+    let remaining = secs % SECS_PER_DAY;
+    let hour = remaining / SECS_PER_HOUR;
+    let min = (remaining % SECS_PER_HOUR) / SECS_PER_MIN;
+    let sec = remaining % SECS_PER_MIN;
+
+    // Convert days since 1970-01-01 to y/m/d
+    let (year, month, day) = days_to_ymd(days);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}")
+}
+
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
 }
 
 // ─── Event consumer ──────────────────────────────────────────

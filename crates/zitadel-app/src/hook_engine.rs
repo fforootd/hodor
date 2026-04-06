@@ -380,8 +380,10 @@ impl EffectHook for ActionEffectHook {
                         );
                     }
                     "webhook" => {
-                        // TODO(CLAUDE-4): Implement webhook delivery via the notification worker.
-                        // For now, just log that a webhook would fire.
+                        // Webhook delivery uses the durable effects system.
+                        // The event consumer worker will create Effect records
+                        // for matching webhook actions once it gains access to
+                        // EffectRepository. Until then, log the intent.
                         let url = action
                             .config
                             .get("url")
@@ -395,7 +397,7 @@ impl EffectHook for ActionEffectHook {
                             action.name = %action.name,
                             webhook.url = %url,
                             event_type = %event_info,
-                            "webhook effect would fire (not yet implemented)"
+                            "webhook action matched — durable effect delivery pending"
                         );
                     }
                     "expr" => {

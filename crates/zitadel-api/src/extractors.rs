@@ -1,22 +1,27 @@
-//! Custom path parameter extractors that work for both flat routes
-//! (`/v1/resource/{id}`) and instance-nested routes
-//! (`/v1/instances/{instanceId}/resource/{id}`).
+//! Custom extractors for path parameters and validated JSON payloads.
 //!
-//! When product routes are nested under `/instances/{instanceId}`, axum
-//! includes `instanceId` in the path parameters. The standard `Path<String>`
-//! extractor rejects this because it expects exactly one parameter. These
-//! extractors use `Path<HashMap<...>>` internally and pick the desired
-//! parameter by name, ignoring any extra parameters like `instanceId`.
+//! ## Path Extractors
+//!
+//! Work for both flat routes (`/v1/resource/{id}`) and instance-nested routes
+//! (`/v1/instances/{instanceId}/resource/{id}`). They use `Path<HashMap<...>>`
+//! internally and pick the desired parameter by name.
+//!
+//! ## ValidatedJson
+//!
+//! Validates request bodies against bundled JSON schemas before deserialization.
+//! Requires a `SchemaType` extension on the route to specify which schema to
+//! validate against.
 
 use std::collections::HashMap;
 
 use axum::{
-    extract::{FromRequestParts, Path},
+    extract::{FromRequest, FromRequestParts, Path, Request},
     http::request::Parts,
     response::Response,
 };
+use serde::de::DeserializeOwned;
 
-use crate::response::bad_request;
+use crate::response::{self, bad_request};
 
 // ─── Generic helpers ────────────────────────────────────────
 
@@ -137,5 +142,66 @@ impl<S: Send + Sync> FromRequestParts<S> for StoreModelPath {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let (store_id, model_id) = extract_named_pair(parts, state, "store_id", "model_id").await?;
         Ok(Self { store_id, model_id })
+    }
+}
+
+// ─── Schema-validated JSON ─────────────────────────────────
+
+/// Route-level extension that declares which JSON schema to validate against.
+///
+/// Add this as a layer on routes that accept JSON bodies:
+/// ```ignore
+/// .route("/users", post(create_user).layer(Extension(SchemaType("human_user"))))
+/// ```
+#[derive(Clone, Debug)]
+pub struct SchemaType(pub &'static str);
+
+/// JSON body extractor that validates against a bundled JSON schema.
+///
+/// If a `SchemaType` extension is present on the route, the payload is
+/// validated against the corresponding schema before deserialization.
+/// On validation failure, returns 422 with structured error details.
+///
+/// If no `SchemaType` extension is set, behaves like `Json<T>`.
+pub struct ValidatedJson<T>(pub T);
+
+impl<S, T> FromRequest<S> for ValidatedJson<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        // Extract schema type from extensions (set by route layer).
+        let schema_type = req
+            .extensions()
+            .get::<SchemaType>()
+            .map(|s| s.0);
+
+        let bytes = axum::body::Bytes::from_request(req, state)
+            .await
+            .map_err(|e| bad_request(format!("failed to read body: {e}")))?;
+
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| bad_request(format!("invalid JSON: {e}")))?;
+
+        // Validate against schema if one is specified.
+        if let Some(schema_type) = schema_type {
+            if let Err(errors) = zitadel_schema::validator::SchemaValidator::global()
+                .validate(schema_type, &value)
+            {
+                let details: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+                return Err(response::error(
+                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("schema validation failed: {}", details.join("; ")),
+                ));
+            }
+        }
+
+        let inner: T = serde_json::from_value(value)
+            .map_err(|e| bad_request(format!("deserialization failed: {e}")))?;
+
+        Ok(ValidatedJson(inner))
     }
 }

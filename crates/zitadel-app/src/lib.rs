@@ -16,6 +16,7 @@
 
 pub mod authz;
 pub mod context;
+pub mod effect;
 pub mod error;
 pub mod event;
 pub mod features;
@@ -53,6 +54,7 @@ pub mod users;
 pub use context::{
     ActorContext, AuthContext, Capability, Identity, InstanceContext, RequestContext,
 };
+pub use effect::{Effect, EffectDispatcher, EffectStatus, EffectType};
 pub use error::AppError;
 pub use event::DomainEvent;
 pub use features::{

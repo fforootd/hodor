@@ -27,6 +27,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "00014_fga_scope_cleanup",
         include_str!("../../../migrations/sqlite/00014_fga_scope_cleanup.sql"),
     ),
+    (
+        "00015_effects",
+        include_str!("../../../migrations/sqlite/00015_effects.sql"),
+    ),
 ];
 
 const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
@@ -53,6 +57,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
     (
         "00014_fga_scope_cleanup",
         include_str!("../../../migrations/postgres/00014_fga_scope_cleanup.sql"),
+    ),
+    (
+        "00015_effects",
+        include_str!("../../../migrations/postgres/00015_effects.sql"),
     ),
 ];
 

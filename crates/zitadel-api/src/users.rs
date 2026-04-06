@@ -11,11 +11,19 @@ use zitadel_app::{
     users::{CreateUserCommand, UpdateUserCommand},
 };
 
-use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
+use crate::{
+    ApiState,
+    extractors::{ResourceId, SchemaType, ValidatedJson},
+    middleware::Identity,
+    response,
+};
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
-        .route("/users", get(list_users).post(create_user))
+        .route(
+            "/users",
+            get(list_users).post(create_user).layer(Extension(SchemaType("human_user"))),
+        )
         .route(
             "/users/{id}",
             get(get_user).patch(update_user).delete(delete_user),
@@ -92,7 +100,7 @@ pub struct PasswordRequest {
 async fn create_user(
     State(state): State<ApiState>,
     Extension(identity): Extension<Identity>,
-    Json(req): Json<UserRequest>,
+    ValidatedJson(req): ValidatedJson<UserRequest>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
     let display = if req.display_name.is_empty() {

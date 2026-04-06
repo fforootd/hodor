@@ -44,9 +44,7 @@
       "journeys-quarantine"
     ],
     ".github/workflows/ci-pr.yml": [
-      "ci",
-      "changes",
-      "terraform-gcp-cloud-run"
+      "ci"
     ],
     ".github/workflows/ci-main.yml": [
       "ci"

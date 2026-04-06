@@ -75,6 +75,9 @@ sha2 = "0.10"
 # Auth
 jsonwebtoken = "9"
 
+# Validation
+jsonschema = "0.29"
+
 # Misc
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 anyhow = "1"

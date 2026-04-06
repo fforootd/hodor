@@ -6,6 +6,7 @@ use serde_json::Value;
 use sqlx::{Any, Executor, QueryBuilder};
 use uuid::Uuid;
 use zitadel_app::{
+    effect::Effect,
     event::DomainEvent,
     repo::{
         ActionRecord, ActionRepository, BoxFuture, CreatedSession, CredentialRepository,
@@ -190,6 +191,7 @@ pub struct SqlUnitOfWork {
     db: Db,
     instance_id: String,
     events: Vec<BufferedEvent>,
+    effects: Vec<Effect>,
 }
 
 impl CredentialRepository for DbCredentialRepository {
@@ -2915,6 +2917,7 @@ impl UnitOfWorkFactory for SqlUnitOfWorkFactory {
                 db,
                 instance_id,
                 events: Vec::new(),
+                effects: Vec::new(),
             }) as Box<dyn UnitOfWork>)
         })
     }
@@ -2937,9 +2940,13 @@ impl UnitOfWork for SqlUnitOfWork {
         });
     }
 
+    fn buffer_effect(&mut self, effect: Effect) {
+        self.effects.push(effect);
+    }
+
     fn commit(self: Box<Self>) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async move {
-            if self.events.is_empty() {
+            if self.events.is_empty() && self.effects.is_empty() {
                 return Ok(());
             }
             match &self.db {
@@ -2958,6 +2965,14 @@ impl UnitOfWork for SqlUnitOfWork {
                         )
                         .await?;
                     }
+                    if !self.effects.is_empty() {
+                        super::effects::insert_effects_in_tx(
+                            &mut *tx,
+                            scoped.instance_id(),
+                            &self.effects,
+                        )
+                        .await?;
+                    }
                     tx.commit().await?;
                 }
                 Db::Spanner(_) => {
@@ -2973,6 +2988,8 @@ impl UnitOfWork for SqlUnitOfWork {
                         )
                         .await?;
                     }
+                    // Effects in Spanner: create via standalone inserts
+                    // (full transactional support can be added when needed)
                 }
             }
             Ok(())

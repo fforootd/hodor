@@ -986,6 +986,7 @@ pub fn mock_repositories() -> Repositories {
         schema_registry: std::sync::Arc::new(NoopSchemaRegistryRepository),
         oidc_tokens: std::sync::Arc::new(NoopOidcTokenRepository),
         oidc_keys: std::sync::Arc::new(NoopOidcKeyRepository),
+        effects: std::sync::Arc::new(NoopEffectRepository),
         uow: std::sync::Arc::new(MockUnitOfWorkFactory),
     }
 }
@@ -1135,6 +1136,45 @@ impl crate::repo::SchemaRegistryRepository for NoopSchemaRegistryRepository {
         _limit: i64,
     ) -> BoxFuture<'_, anyhow::Result<Vec<crate::repo::SchemaRegistryEntry>>> {
         Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+// ─── Noop Effect Repository ─────────────────────────────
+
+struct NoopEffectRepository;
+
+impl crate::repo::EffectRepository for NoopEffectRepository {
+    fn create_batch(
+        &self,
+        _: &str,
+        _: &[crate::effect::Effect],
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn fetch_pending(
+        &self,
+        _: &str,
+        _: u32,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<crate::effect::Effect>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn mark_completed(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn record_failure(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn mark_dead(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn cleanup(&self, _: &str, _: &str, _: u32) -> BoxFuture<'_, anyhow::Result<u64>> {
+        Box::pin(async { Ok(0) })
     }
 }
 

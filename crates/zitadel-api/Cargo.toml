@@ -13,6 +13,7 @@ zitadel-authz = { workspace = true }
 zitadel-crypto = { workspace = true }
 zitadel-config = { workspace = true }
 zitadel-catalog = { workspace = true }
+zitadel-schema = { workspace = true }
 zitadel-oidc = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }

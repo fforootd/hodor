@@ -31,6 +31,7 @@ google-cloud-spanner = { workspace = true }
 uuid = { workspace = true }
 lru = { workspace = true }
 ipnet = { workspace = true }
+reqwest = { workspace = true }
 
 [dev-dependencies]
 zitadel-testkit = { workspace = true }
