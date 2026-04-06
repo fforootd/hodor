@@ -378,7 +378,10 @@ impl PersistentKeyStore {
         }
     }
 
-    async fn list_active_records(&self, instance_id: &str) -> anyhow::Result<Vec<StoredSigningKeyRecord>> {
+    async fn list_active_records(
+        &self,
+        instance_id: &str,
+    ) -> anyhow::Result<Vec<StoredSigningKeyRecord>> {
         let Some(db) = self.db.as_ref() else {
             return Ok(Vec::new());
         };
@@ -434,11 +437,15 @@ impl PersistentKeyStore {
                     .into_iter()
                     .map(|row| StoredSigningKeyRecord {
                         kid: row.column_by_name::<String>("id").unwrap_or_default(),
-                        algorithm: row.column_by_name::<String>("algorithm").unwrap_or_default(),
+                        algorithm: row
+                            .column_by_name::<String>("algorithm")
+                            .unwrap_or_default(),
                         encryption_key_id: row
                             .column_by_name::<String>("encryption_key_id")
                             .unwrap_or_default(),
-                        ciphertext: row.column_by_name::<Vec<u8>>("ciphertext").unwrap_or_default(),
+                        ciphertext: row
+                            .column_by_name::<Vec<u8>>("ciphertext")
+                            .unwrap_or_default(),
                         nonce: row
                             .column_by_name::<Option<Vec<u8>>>("nonce")
                             .unwrap_or(None)
@@ -534,19 +541,13 @@ impl PersistentKeyStore {
         self.db.is_some() && self.secret_box.is_some()
     }
 
-    fn load_key(
-        &self,
-        record: &StoredSigningKeyRecord,
-    ) -> anyhow::Result<Arc<SigningKeys>> {
+    fn load_key(&self, record: &StoredSigningKeyRecord) -> anyhow::Result<Arc<SigningKeys>> {
         let secret_box = self
             .secret_box
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("missing secret box"))?;
-        let private_pem = secret_box.open(
-            &record.ciphertext,
-            &record.nonce,
-            &record.encryption_key_id,
-        )?;
+        let private_pem =
+            secret_box.open(&record.ciphertext, &record.nonce, &record.encryption_key_id)?;
         if record.public_key.is_empty() {
             anyhow::bail!("missing public key for {}", record.kid);
         }

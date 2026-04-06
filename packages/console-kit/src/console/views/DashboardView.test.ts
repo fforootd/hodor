@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import DashboardView from './DashboardView.vue'
 
@@ -17,15 +18,41 @@ const stubComponents = {
   TableCell: { template: '<td><slot /></td>' },
 }
 
-// Stub lucide icons as simple spans.
-vi.mock('lucide-vue-next', () => ({
-  Users: { template: '<span class="icon-users" />' },
-  Building2: { template: '<span class="icon-building" />' },
-  AppWindow: { template: '<span class="icon-appwindow" />' },
-  FileJson: { template: '<span class="icon-filejson" />' },
-  Globe: { template: '<span class="icon-globe" />' },
-  Activity: { template: '<span class="icon-activity" />' },
+// Mock vue-router.
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn() }),
 }))
+
+// Mock the API client to prevent real HTTP calls.
+vi.mock('@/api/client', () => ({
+  api: { get: vi.fn().mockRejectedValue(new Error('not available')) },
+  getInstanceContext: vi.fn().mockReturnValue(null),
+}))
+
+// Mock instance context composable.
+vi.mock('@/console/composables/useInstanceContext', () => ({
+  useInstanceContext: () => ({
+    currentInstanceId: ref(null),
+    setInstance: vi.fn(),
+  }),
+}))
+
+// Stub lucide icons as simple spans.
+vi.mock('lucide-vue-next', () => {
+  const Icon = { template: '<span class="icon" />' }
+  return {
+    Users: Icon,
+    Building2: Icon,
+    AppWindow: Icon,
+    FileJson: Icon,
+    Globe: Icon,
+    Activity: Icon,
+    Server: Icon,
+    Plus: Icon,
+    Search: Icon,
+    LayoutGrid: Icon,
+  }
+})
 
 // Mock the resources module — this is the actual import used by DashboardView.
 vi.mock('@/api/resources', () => ({
@@ -73,7 +100,7 @@ describe('DashboardView', () => {
   })
 
   it('loads and displays stats from API', async () => {
-    vi.mocked(countsApi.get).mockResolvedValue({ users: 5, apps: 2 })
+    vi.mocked(countsApi.get).mockResolvedValue({ human_user: 5, service_user: 0, ai_agent: 0, app: 2 })
     vi.mocked(orgApi.list).mockResolvedValue([{ id: 'o1', name: 'Default' }] as any)
     vi.mocked(schemaApi.list).mockResolvedValue([{ id: 's1', type: 'user', schema: {}, message: '', org_id: 'o1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', is_default: false, version: 1 }] as any)
     vi.mocked(providerApi.list).mockResolvedValue([{ id: 'p1', name: 'Google', type: 'oidc', enabled: true, config: {}, created_at: '2026-01-01T00:00:00Z' }, { id: 'p2', name: 'GitHub', type: 'oidc', enabled: true, config: {}, created_at: '2026-01-01T00:00:00Z' }])

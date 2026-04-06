@@ -1,15 +1,12 @@
-use google_cloud_spanner::{
-    client::Error as SpannerError, statement::Statement,
-};
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 
-use crate::Db;
 use super::{
     ActionRecord, FingerprintRecord, JobRecord, MembershipRow, OrgRecord, OrgRoleMembershipRecord,
     OrgUserLinkRecord, PatRecord, SavedQueryRecord, SearchRecord, SettingsRecord,
-    UnshippedEventRecord,
-    action_from_spanner_row, action_from_sql_row,
-    spanner_query_all, spanner_query_optional,
+    UnshippedEventRecord, action_from_spanner_row, action_from_sql_row, spanner_query_all,
+    spanner_query_optional,
 };
+use crate::Db;
 
 // ─── Org CRUD ───
 
@@ -1173,7 +1170,11 @@ pub async fn upsert_catalog_action(
     fail_open: bool,
     metadata_json: &str,
 ) -> anyhow::Result<String> {
-    let org_id_opt: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
+    let org_id_opt: Option<&str> = if org_id.is_empty() {
+        None
+    } else {
+        Some(org_id)
+    };
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());

@@ -150,6 +150,7 @@ async fn auth_request_state(
     })
 }
 
+#[allow(dead_code)]
 async fn update_auth_request(
     scoped: &zitadel_db::scoped::ScopedDb,
     auth_request_id: &str,

@@ -108,7 +108,8 @@ impl InstanceResolver {
         if let Some(instance_id) = path_instance_id {
             let cache_key = format!("instance:{instance_id}");
             if let Some(cached) = self.cached(&cache_key) {
-                return cached.map(|ctx| hydrate_request_context(ctx, &scheme, &host, "path_param"));
+                return cached
+                    .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "path_param"));
             }
 
             let resolved = self
@@ -130,9 +131,8 @@ impl InstanceResolver {
         if let Some(instance_id) = trusted_instance_id {
             let cache_key = format!("instance:{instance_id}");
             if let Some(cached) = self.cached(&cache_key) {
-                return cached.map(|ctx| {
-                    hydrate_request_context(ctx, &scheme, &host, "trusted_header")
-                });
+                return cached
+                    .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "trusted_header"));
             }
 
             let resolved = self
@@ -309,19 +309,16 @@ fn forwarded_scheme<B>(req: &Request<B>) -> Option<String> {
 }
 
 fn parse_forwarded_proto(value: &str) -> Option<String> {
-    value
-        .split(',')
-        .next()
-        .and_then(|entry| {
-            entry.split(';').find_map(|part| {
-                let (key, raw_value) = part.trim().split_once('=')?;
-                if !key.eq_ignore_ascii_case("proto") {
-                    return None;
-                }
-                let proto = raw_value.trim().trim_matches('"');
-                (!proto.is_empty()).then(|| proto.to_ascii_lowercase())
-            })
+    value.split(',').next().and_then(|entry| {
+        entry.split(';').find_map(|part| {
+            let (key, raw_value) = part.trim().split_once('=')?;
+            if !key.eq_ignore_ascii_case("proto") {
+                return None;
+            }
+            let proto = raw_value.trim().trim_matches('"');
+            (!proto.is_empty()).then(|| proto.to_ascii_lowercase())
         })
+    })
 }
 
 fn normalize_host(value: &str) -> String {
@@ -545,7 +542,10 @@ mod tests {
     #[test]
     fn forwarded_header_proto_takes_precedence() {
         let req = Request::builder()
-            .header(header::FORWARDED, "for=192.0.2.60;proto=https;host=demo.example.com")
+            .header(
+                header::FORWARDED,
+                "for=192.0.2.60;proto=https;host=demo.example.com",
+            )
             .header("X-Forwarded-Proto", "http")
             .body(Body::empty())
             .unwrap();

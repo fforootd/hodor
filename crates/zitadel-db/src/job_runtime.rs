@@ -4,7 +4,7 @@ use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 use serde_json::json;
 use sqlx::Row;
 
-use crate::{BackendKind, DEFAULT_INSTANCE_ID, Db, Dialect};
+use crate::{BackendKind, Db, Dialect};
 
 #[derive(Debug, Clone)]
 pub struct JobReconcileSpec {
@@ -716,6 +716,7 @@ fn retention_days(keep_for: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_INSTANCE_ID;
 
     #[test]
     fn retention_duration_rounds_up_to_whole_days() {

@@ -912,11 +912,7 @@ fn merge_paths(contributions: Vec<Value>) -> Value {
 }
 
 /// Standard CRUD paths for a named resource (used by apps, projects, etc.).
-pub(crate) fn named_resource_paths(
-    tag: &str,
-    singular: &str,
-    plural: &str,
-) -> Value {
+pub(crate) fn named_resource_paths(tag: &str, singular: &str, plural: &str) -> Value {
     let cap_singular = capitalize(singular);
     json!({
         format!("/v1/{plural}"): {
@@ -932,11 +928,7 @@ pub(crate) fn named_resource_paths(
 }
 
 /// Standard membership sub-resource paths.
-pub(crate) fn membership_paths(
-    tag: &str,
-    parent_plural: &str,
-    parent_id_param: &str,
-) -> Value {
+pub(crate) fn membership_paths(tag: &str, parent_plural: &str, parent_id_param: &str) -> Value {
     json!({
         format!("/v1/{parent_plural}/{{{parent_id_param}}}/members"): {
             "get": operation(tag, &format!("list{parent_plural}Members"), &format!("List {parent_plural} members"), generic_object_response("Member list")),

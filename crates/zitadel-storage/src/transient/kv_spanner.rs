@@ -70,7 +70,11 @@ impl KvStore for SpannerKvStore {
         let session_id = Uuid::new_v4().to_string();
         let token = Uuid::new_v4().to_string();
         let token_hash = token_hash(&token);
-        let org: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
+        let org: Option<&str> = if org_id.is_empty() {
+            None
+        } else {
+            Some(org_id)
+        };
         let (created_at, created_at_epoch, expires_at) = self.session_timestamps().await?;
         let expires_at_value = expires_at.clone().unwrap_or_default();
         let mut stmt = Statement::new(

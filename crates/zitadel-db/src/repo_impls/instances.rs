@@ -3,10 +3,10 @@ use google_cloud_spanner::statement::Statement;
 
 use super::entities::{
     SqlInstanceRepository, domain_from_retained, instance_from_retained, json_string,
-    limit_from_params, load_instance, next_cursor, upsert_domain,
-    write_spanner_count, write_spanner_many,
+    limit_from_params, load_instance, next_cursor, upsert_domain, write_spanner_count,
+    write_spanner_many,
 };
-use crate::{Db, add_instance_domain, list_instance_domains, list_managed_instances, resolve_domain_route};
+use crate::{Db, list_instance_domains, list_managed_instances, resolve_domain_route};
 use zitadel_app::repo::{
     BoxFuture, DomainRecord, DomainRemoveResult, InstanceRecord, InstanceRepository, ListParams,
     ListResult, RouteResolution,
@@ -119,7 +119,12 @@ impl InstanceRepository for SqlInstanceRepository {
             if let Some(search) = search {
                 items.retain(|item| {
                     item.instance_id.to_lowercase().contains(&search)
-                        || item.owner_org_id.as_deref().unwrap_or_default().to_lowercase().contains(&search)
+                        || item
+                            .owner_org_id
+                            .as_deref()
+                            .unwrap_or_default()
+                            .to_lowercase()
+                            .contains(&search)
                         || item
                             .primary_domain
                             .as_deref()

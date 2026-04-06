@@ -1,12 +1,7 @@
-use google_cloud_spanner::{
-    client::Error as SpannerError, statement::Statement,
-};
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 
+use super::{SchemaRegistryRecord, spanner_query_all};
 use crate::Db;
-use super::{
-    SchemaRegistryRecord,
-    spanner_query_all,
-};
 
 pub async fn list_schema_registry(
     db: &Db,

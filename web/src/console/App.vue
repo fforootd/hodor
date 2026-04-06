@@ -933,8 +933,8 @@
       // Refresh orgs for the current scope.
       // The fetch layer rewrites to /v1/instances/:id/... when inside an instance.
       try {
-        const orgResp = await orgApi.list({ limit: 200 })
-        applyOrgs(orgResp.items ?? [])
+        const orgResp = await orgApi.list()
+        applyOrgs(orgResp)
       } catch {
         applyOrgs([])
       }

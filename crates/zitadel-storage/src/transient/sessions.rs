@@ -58,7 +58,11 @@ pub(crate) async fn create_session_impl(
     let session_id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let hashed_token = token_hash(&token);
-    let org: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
+    let org: Option<&str> = if org_id.is_empty() {
+        None
+    } else {
+        Some(org_id)
+    };
     let max_age_secs = kv.session_max_age_secs().max(1);
     let expires_expr = match scoped.dialect() {
         Dialect::Postgres => format!("CURRENT_TIMESTAMP + INTERVAL '{max_age_secs} seconds'"),

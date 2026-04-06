@@ -1,17 +1,15 @@
 use std::collections::BTreeMap;
 
-use google_cloud_spanner::{
-    client::Error as SpannerError, mutation::insert, statement::Statement,
-};
+use google_cloud_spanner::{client::Error as SpannerError, mutation::insert, statement::Statement};
 
-use crate::Db;
 use super::{
     ChildInstanceOwnershipRecord, ConsoleBootstrapData, CreateManagedInstanceInput,
     DomainDeleteOutcome, DomainRecord, InstanceMetadata, ManagedInstancePatch,
     ManagedInstanceRecord, NamedResourceRecord, OrgSummary, RouteResolutionRecord,
-    instance_from_spanner_row, instance_from_sql_row,
-    spanner_query_all, spanner_query_optional, spanner_query_scalar_i64,
+    instance_from_spanner_row, instance_from_sql_row, spanner_query_all, spanner_query_optional,
+    spanner_query_scalar_i64,
 };
+use crate::Db;
 
 pub async fn load_instance_metadata(
     db: &Db,
@@ -810,7 +808,13 @@ pub async fn create_named_resource(
             .trim()
             .to_lowercase()
             .chars()
-            .map(|char| if char.is_ascii_alphanumeric() { char } else { '-' })
+            .map(|char| {
+                if char.is_ascii_alphanumeric() {
+                    char
+                } else {
+                    '-'
+                }
+            })
             .collect::<String>();
         while slug.contains("--") {
             slug = slug.replace("--", "-");

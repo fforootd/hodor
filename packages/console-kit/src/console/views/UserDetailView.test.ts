@@ -383,8 +383,9 @@ async function mountView(options: {
     {
       id: 'sess-1',
       user_id: identity.id,
+      state: 'active',
       created_at: '2026-03-30T07:00:00Z',
-      expires_at: '2026-04-06T07:00:00Z',
+      expires_at: '2027-04-06T07:00:00Z',
       user_agent: 'Chrome on macOS',
       ip_address: '203.0.113.1',
     },

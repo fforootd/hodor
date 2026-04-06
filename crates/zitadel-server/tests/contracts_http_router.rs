@@ -62,11 +62,12 @@ async fn assert_named_resource_crud(
     created_name: &str,
     updated_name: &str,
 ) -> anyhow::Result<()> {
-    let bad_request = app
-        .post_json(base_path, actor.clone(), &json!({}))
-        .await?;
+    let bad_request = app.post_json(base_path, actor.clone(), &json!({})).await?;
     assert_eq!(bad_request.status, axum::http::StatusCode::BAD_REQUEST);
-    assert_eq!(bad_request.json_value()["code"], serde_json::Value::from(400));
+    assert_eq!(
+        bad_request.json_value()["code"],
+        serde_json::Value::from(400)
+    );
     assert!(
         bad_request.json_value()["error"]
             .as_str()
@@ -482,17 +483,19 @@ async fn canonical_fga_store_routes_support_model_tuple_and_change_queries() -> 
     );
 
     let mut custom_model = core_authorization_model();
-    custom_model.type_definitions.push(serde_json::from_value(json!({
-        "type": "document",
-        "relations": {
-            "viewer": { "this": {} }
-        },
-        "metadata": {
+    custom_model
+        .type_definitions
+        .push(serde_json::from_value(json!({
+            "type": "document",
             "relations": {
-                "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                "viewer": { "this": {} }
+            },
+            "metadata": {
+                "relations": {
+                    "viewer": { "directly_related_user_types": [{ "type": "user" }] }
+                }
             }
-        }
-    }))?);
+        }))?);
     let custom_model_json = serde_json::to_value(&custom_model)?;
 
     let written_model = app
@@ -607,7 +610,10 @@ async fn users_crud_and_validation_work_through_the_router() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(bad_request.status, axum::http::StatusCode::BAD_REQUEST);
-    assert_eq!(bad_request.json_value()["code"], serde_json::Value::from(400));
+    assert_eq!(
+        bad_request.json_value()["code"],
+        serde_json::Value::from(400)
+    );
     assert!(
         bad_request.json_value()["error"]
             .as_str()
@@ -844,7 +850,10 @@ async fn login_flows_create_sessions_and_support_session_reuse() -> anyhow::Resu
 #[tokio::test]
 async fn login_flows_respect_prompt_login_even_with_an_existing_session() -> anyhow::Result<()> {
     let app = build_test_app().await?;
-    let user = app.ctx.create_user("prompt-login@example.com", "password123").await?;
+    let user = app
+        .ctx
+        .create_user("prompt-login@example.com", "password123")
+        .await?;
     let existing_session = app.ctx.create_session(&user).await?;
 
     insert_oidc_auth_request(
@@ -900,9 +909,7 @@ async fn login_flows_respect_prompt_login_even_with_an_existing_session() -> any
     assert_eq!(completed.status, axum::http::StatusCode::OK);
     assert_eq!(completed.json_value()["step"], "complete");
     let completed_json = completed.json_value();
-    let redirect_uri = completed_json["redirect_uri"]
-        .as_str()
-        .unwrap_or_default();
+    let redirect_uri = completed_json["redirect_uri"].as_str().unwrap_or_default();
     assert!(
         redirect_uri.starts_with("https://rp.example/callback?"),
         "prompt=login completion should still finish the OIDC redirect",
@@ -912,9 +919,13 @@ async fn login_flows_respect_prompt_login_even_with_an_existing_session() -> any
 }
 
 #[tokio::test]
-async fn login_flows_reject_foreign_auth_requests_without_creating_a_session() -> anyhow::Result<()> {
+async fn login_flows_reject_foreign_auth_requests_without_creating_a_session() -> anyhow::Result<()>
+{
     let app = build_test_app().await?;
-    let user = app.ctx.create_user("cross-instance-login@example.com", "password123").await?;
+    let user = app
+        .ctx
+        .create_user("cross-instance-login@example.com", "password123")
+        .await?;
 
     insert_oidc_auth_request(
         &app,

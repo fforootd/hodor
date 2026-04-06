@@ -13,10 +13,7 @@ impl LoadConsoleBootstrap {
     }
 
     #[tracing::instrument(name = "use_case.load_console_bootstrap", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-    ) -> Result<ConsoleBootstrapData, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext) -> Result<ConsoleBootstrapData, AppError> {
         self.repos
             .console_queries
             .load_console_bootstrap(ctx.instance_id())
@@ -35,10 +32,7 @@ impl LoadEntityCounts {
     }
 
     #[tracing::instrument(name = "use_case.load_entity_counts", skip_all)]
-    pub async fn execute(
-        &self,
-        ctx: &ActorContext,
-    ) -> Result<Vec<(String, i64)>, AppError> {
+    pub async fn execute(&self, ctx: &ActorContext) -> Result<Vec<(String, i64)>, AppError> {
         self.repos
             .console_queries
             .load_entity_counts(ctx.instance_id())

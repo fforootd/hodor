@@ -50,8 +50,8 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
             let seeded_roles = zitadel_db::seed_builtin_role_definitions(&db).await?;
             zitadel_storage::prepare_postgres_role_databases(&cfg.storage, &db).await?;
             if args.bootstrap {
-                let ext_domain = Some(cfg.server.external_domain.as_str())
-                    .filter(|d| !d.is_empty());
+                let ext_domain =
+                    Some(cfg.server.external_domain.as_str()).filter(|d| !d.is_empty());
                 let changed = zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
                 tracing::info!(bootstrapped = changed, seeded_roles, "migration command completed");
             } else {

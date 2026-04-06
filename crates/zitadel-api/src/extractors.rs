@@ -26,10 +26,9 @@ async fn extract_named<S: Send + Sync>(
     state: &S,
     name: &str,
 ) -> Result<String, Response> {
-    let Path(params): Path<HashMap<String, String>> =
-        Path::from_request_parts(parts, state)
-            .await
-            .map_err(|e| bad_request(format!("{e}")))?;
+    let Path(params): Path<HashMap<String, String>> = Path::from_request_parts(parts, state)
+        .await
+        .map_err(|e| bad_request(format!("{e}")))?;
     params
         .get(name)
         .cloned()
@@ -43,10 +42,9 @@ async fn extract_named_pair<S: Send + Sync>(
     name_a: &str,
     name_b: &str,
 ) -> Result<(String, String), Response> {
-    let Path(params): Path<HashMap<String, String>> =
-        Path::from_request_parts(parts, state)
-            .await
-            .map_err(|e| bad_request(format!("{e}")))?;
+    let Path(params): Path<HashMap<String, String>> = Path::from_request_parts(parts, state)
+        .await
+        .map_err(|e| bad_request(format!("{e}")))?;
     let a = params
         .get(name_a)
         .cloned()
@@ -123,8 +121,7 @@ pub struct GroupMemberPath {
 impl<S: Send + Sync> FromRequestParts<S> for GroupMemberPath {
     type Rejection = Response;
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let (group_id, user_id) =
-            extract_named_pair(parts, state, "group_id", "user_id").await?;
+        let (group_id, user_id) = extract_named_pair(parts, state, "group_id", "user_id").await?;
         Ok(Self { group_id, user_id })
     }
 }
@@ -138,11 +135,7 @@ pub struct StoreModelPath {
 impl<S: Send + Sync> FromRequestParts<S> for StoreModelPath {
     type Rejection = Response;
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let (store_id, model_id) =
-            extract_named_pair(parts, state, "store_id", "model_id").await?;
-        Ok(Self {
-            store_id,
-            model_id,
-        })
+        let (store_id, model_id) = extract_named_pair(parts, state, "store_id", "model_id").await?;
+        Ok(Self { store_id, model_id })
     }
 }

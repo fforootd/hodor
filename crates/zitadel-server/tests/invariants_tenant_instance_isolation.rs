@@ -13,9 +13,9 @@ use zitadel_testkit::{AuthActor, TestResponse};
 
 use support::{
     CHILD_HOST, CHILD_INSTANCE_ID, CHILD_ORG_ID, ROOT_HOST, build_cloud_test_app,
-    create_root_user_in_org, create_session_for_instance, delete_on_host, extract_ids,
-    get_on_host, insert_child_instance, insert_oidc_auth_request, insert_user_with_password,
-    patch_json_on_host, post_json_on_host, setup_child,
+    create_root_user_in_org, create_session_for_instance, delete_on_host, extract_ids, get_on_host,
+    insert_child_instance, insert_oidc_auth_request, insert_user_with_password, patch_json_on_host,
+    post_json_on_host, setup_child,
 };
 
 const SIBLING_INSTANCE_ID: &str = "child-b";
@@ -43,7 +43,13 @@ async fn create_named_resource_on_host(
         let client_id = name
             .to_lowercase()
             .chars()
-            .map(|char| if char.is_ascii_alphanumeric() { char } else { '-' })
+            .map(|char| {
+                if char.is_ascii_alphanumeric() {
+                    char
+                } else {
+                    '-'
+                }
+            })
             .collect::<String>();
         json!({
             "name": name,
@@ -110,11 +116,21 @@ async fn assert_named_resource_isolation(
     assert!(!sibling_ids.contains(&root_id));
     assert!(!sibling_ids.contains(&child_id));
 
-    let cross_root_get =
-        get_on_host(&app, &format!("{base_path}/{child_id}"), admin_pat.actor(), ROOT_HOST).await?;
+    let cross_root_get = get_on_host(
+        &app,
+        &format!("{base_path}/{child_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
     assert_eq!(cross_root_get.status, StatusCode::NOT_FOUND);
-    let cross_child_get =
-        get_on_host(&app, &format!("{base_path}/{root_id}"), child_pat.actor(), CHILD_HOST).await?;
+    let cross_child_get = get_on_host(
+        &app,
+        &format!("{base_path}/{root_id}"),
+        child_pat.actor(),
+        CHILD_HOST,
+    )
+    .await?;
     assert_eq!(cross_child_get.status, StatusCode::NOT_FOUND);
     let cross_sibling_get = get_on_host(
         &app,
@@ -145,9 +161,13 @@ async fn assert_named_resource_isolation(
     .await?;
     assert_eq!(cross_sibling_update.status, StatusCode::NOT_FOUND);
 
-    let cross_root_delete =
-        delete_on_host(&app, &format!("{base_path}/{child_id}"), admin_pat.actor(), ROOT_HOST)
-            .await?;
+    let cross_root_delete = delete_on_host(
+        &app,
+        &format!("{base_path}/{child_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
     assert_eq!(cross_root_delete.status, StatusCode::NOT_FOUND);
 
     let cross_sibling_delete = delete_on_host(
@@ -185,8 +205,13 @@ async fn assert_named_resource_isolation(
         "path-scoped update should confirm the mutation or return the updated resource",
     );
 
-    let reloaded_child =
-        get_on_host(&app, &format!("{base_path}/{child_id}"), child_pat.actor(), CHILD_HOST).await?;
+    let reloaded_child = get_on_host(
+        &app,
+        &format!("{base_path}/{child_id}"),
+        child_pat.actor(),
+        CHILD_HOST,
+    )
+    .await?;
     assert_eq!(reloaded_child.status, StatusCode::OK);
     assert_eq!(reloaded_child.json_value()["name"], updated_name);
 
@@ -199,8 +224,13 @@ async fn assert_named_resource_isolation(
     .await?;
     assert_eq!(path_scoped_delete.status, StatusCode::NO_CONTENT);
 
-    let child_missing =
-        get_on_host(&app, &format!("{base_path}/{child_id}"), child_pat.actor(), CHILD_HOST).await?;
+    let child_missing = get_on_host(
+        &app,
+        &format!("{base_path}/{child_id}"),
+        child_pat.actor(),
+        CHILD_HOST,
+    )
+    .await?;
     assert_eq!(child_missing.status, StatusCode::NOT_FOUND);
 
     let child_list_after = get_on_host(&app, base_path, child_pat.actor(), CHILD_HOST).await?;
@@ -213,9 +243,13 @@ async fn assert_named_resource_isolation(
     assert!(!root_ids_after.contains(&child_id));
     assert!(!root_ids_after.contains(&sibling_id));
 
-    let sibling_still_visible =
-        get_on_host(&app, &format!("{base_path}/{sibling_id}"), sibling_pat.actor(), SIBLING_HOST)
-            .await?;
+    let sibling_still_visible = get_on_host(
+        &app,
+        &format!("{base_path}/{sibling_id}"),
+        sibling_pat.actor(),
+        SIBLING_HOST,
+    )
+    .await?;
     assert_eq!(sibling_still_visible.status, StatusCode::OK);
 
     Ok(())
@@ -240,7 +274,10 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     )
     .await?;
     assert_eq!(root_created.status, StatusCode::CREATED);
-    let root_user_id = root_created.json_value()["id"].as_str().unwrap().to_string();
+    let root_user_id = root_created.json_value()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let child_created = post_json_on_host(
         &app,
@@ -251,7 +288,10 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     )
     .await?;
     assert_eq!(child_created.status, StatusCode::CREATED);
-    let child_user_id = child_created.json_value()["id"].as_str().unwrap().to_string();
+    let child_user_id = child_created.json_value()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let sibling_created = post_json_on_host(
         &app,
@@ -262,7 +302,10 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     )
     .await?;
     assert_eq!(sibling_created.status, StatusCode::CREATED);
-    let sibling_user_id = sibling_created.json_value()["id"].as_str().unwrap().to_string();
+    let sibling_user_id = sibling_created.json_value()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let root_list = get_on_host(&app, "/v1/users", admin_pat.actor(), ROOT_HOST).await?;
     let root_ids = extract_ids(&root_list.json_value());
@@ -282,14 +325,22 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     assert!(!sibling_ids.contains(&root_user_id));
     assert!(!sibling_ids.contains(&child_user_id));
 
-    let cross_root_get =
-        get_on_host(&app, &format!("/v1/users/{child_user_id}"), admin_pat.actor(), ROOT_HOST)
-            .await?;
+    let cross_root_get = get_on_host(
+        &app,
+        &format!("/v1/users/{child_user_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
     assert_eq!(cross_root_get.status, StatusCode::NOT_FOUND);
 
-    let cross_child_get =
-        get_on_host(&app, &format!("/v1/users/{root_user_id}"), child_pat.actor(), CHILD_HOST)
-            .await?;
+    let cross_child_get = get_on_host(
+        &app,
+        &format!("/v1/users/{root_user_id}"),
+        child_pat.actor(),
+        CHILD_HOST,
+    )
+    .await?;
     assert_eq!(cross_child_get.status, StatusCode::NOT_FOUND);
 
     let cross_sibling_get = get_on_host(
@@ -321,9 +372,13 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     .await?;
     assert_eq!(cross_sibling_update.status, StatusCode::NOT_FOUND);
 
-    let cross_root_delete =
-        delete_on_host(&app, &format!("/v1/users/{child_user_id}"), admin_pat.actor(), ROOT_HOST)
-            .await?;
+    let cross_root_delete = delete_on_host(
+        &app,
+        &format!("/v1/users/{child_user_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
     assert_eq!(cross_root_delete.status, StatusCode::NOT_FOUND);
 
     let cross_sibling_delete = delete_on_host(
@@ -343,7 +398,10 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     )
     .await?;
     assert_eq!(path_scoped_get.status, StatusCode::OK);
-    assert_eq!(path_scoped_get.json_value()["identifier"], "child-user@example.com");
+    assert_eq!(
+        path_scoped_get.json_value()["identifier"],
+        "child-user@example.com"
+    );
 
     let path_scoped_update = patch_json_on_host(
         &app,
@@ -354,13 +412,23 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     )
     .await?;
     assert_eq!(path_scoped_update.status, StatusCode::OK);
-    assert_eq!(path_scoped_update.json_value()["display_name"], "Updated Path User");
+    assert_eq!(
+        path_scoped_update.json_value()["display_name"],
+        "Updated Path User"
+    );
 
-    let updated_child =
-        get_on_host(&app, &format!("/v1/users/{child_user_id}"), child_pat.actor(), CHILD_HOST)
-            .await?;
+    let updated_child = get_on_host(
+        &app,
+        &format!("/v1/users/{child_user_id}"),
+        child_pat.actor(),
+        CHILD_HOST,
+    )
+    .await?;
     assert_eq!(updated_child.status, StatusCode::OK);
-    assert_eq!(updated_child.json_value()["display_name"], "Updated Path User");
+    assert_eq!(
+        updated_child.json_value()["display_name"],
+        "Updated Path User"
+    );
 
     let path_scoped_delete = delete_on_host(
         &app,
@@ -371,9 +439,13 @@ async fn users_crud_isolated_between_root_child_and_sibling_instances() -> anyho
     .await?;
     assert_eq!(path_scoped_delete.status, StatusCode::NO_CONTENT);
 
-    let deleted_child =
-        get_on_host(&app, &format!("/v1/users/{child_user_id}"), child_pat.actor(), CHILD_HOST)
-            .await?;
+    let deleted_child = get_on_host(
+        &app,
+        &format!("/v1/users/{child_user_id}"),
+        child_pat.actor(),
+        CHILD_HOST,
+    )
+    .await?;
     assert_eq!(deleted_child.status, StatusCode::NOT_FOUND);
 
     let child_list_after = get_on_host(&app, "/v1/users", child_pat.actor(), CHILD_HOST).await?;
@@ -477,8 +549,7 @@ async fn orgs_crud_isolated_between_instances() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn groups_crud_isolated_between_root_child_and_sibling_instances()
--> anyhow::Result<()> {
+async fn groups_crud_isolated_between_root_child_and_sibling_instances() -> anyhow::Result<()> {
     assert_named_resource_isolation(
         "/v1/groups",
         "Root Engineers",
@@ -490,8 +561,7 @@ async fn groups_crud_isolated_between_root_child_and_sibling_instances()
 }
 
 #[tokio::test]
-async fn projects_crud_isolated_between_root_child_and_sibling_instances()
--> anyhow::Result<()> {
+async fn projects_crud_isolated_between_root_child_and_sibling_instances() -> anyhow::Result<()> {
     assert_named_resource_isolation(
         "/v1/projects",
         "Root Project",
@@ -527,7 +597,8 @@ async fn instance_management_blocks_child_and_outsider_contexts() -> anyhow::Res
         "instance-outsider@example.com",
     )
     .await?;
-    let outsider_session = create_session_for_instance(&app, DEFAULT_INSTANCE_ID, &outsider).await?;
+    let outsider_session =
+        create_session_for_instance(&app, DEFAULT_INSTANCE_ID, &outsider).await?;
 
     insert_child_instance(
         &app,
@@ -612,8 +683,7 @@ async fn instance_management_blocks_child_and_outsider_contexts() -> anyhow::Res
 }
 
 #[tokio::test]
-async fn login_is_host_scoped_when_identifiers_overlap_between_instances()
--> anyhow::Result<()> {
+async fn login_is_host_scoped_when_identifiers_overlap_between_instances() -> anyhow::Result<()> {
     let app = build_cloud_test_app().await?;
     setup_child(&app, CHILD_INSTANCE_ID, CHILD_HOST, CHILD_ORG_ID).await?;
 
@@ -647,7 +717,10 @@ async fn login_is_host_scoped_when_identifiers_overlap_between_instances()
     .await?;
     assert_eq!(root_flow.status, StatusCode::CREATED);
     assert_eq!(root_flow.json_value()["step"], "identifier");
-    let root_flow_id = root_flow.json_value()["flow_id"].as_str().unwrap().to_string();
+    let root_flow_id = root_flow.json_value()["flow_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let root_identifier = post_json_on_host(
         &app,
@@ -691,16 +764,13 @@ async fn login_is_host_scoped_when_identifiers_overlap_between_instances()
         get_on_host(&app, "/v1/auth/whoami", root_cookie.clone(), CHILD_HOST).await?;
     assert_eq!(root_cookie_on_child.status, StatusCode::UNAUTHORIZED);
 
-    let child_flow_from_root_cookie = post_json_on_host(
-        &app,
-        "/v1/login/flows",
-        root_cookie,
-        CHILD_HOST,
-        &json!({}),
-    )
-    .await?;
+    let child_flow_from_root_cookie =
+        post_json_on_host(&app, "/v1/login/flows", root_cookie, CHILD_HOST, &json!({})).await?;
     assert_eq!(child_flow_from_root_cookie.status, StatusCode::CREATED);
-    assert_eq!(child_flow_from_root_cookie.json_value()["step"], "identifier");
+    assert_eq!(
+        child_flow_from_root_cookie.json_value()["step"],
+        "identifier"
+    );
 
     let child_flow = post_json_on_host(
         &app,
@@ -712,7 +782,10 @@ async fn login_is_host_scoped_when_identifiers_overlap_between_instances()
     .await?;
     assert_eq!(child_flow.status, StatusCode::CREATED);
     assert_eq!(child_flow.json_value()["step"], "identifier");
-    let child_flow_id = child_flow.json_value()["flow_id"].as_str().unwrap().to_string();
+    let child_flow_id = child_flow.json_value()["flow_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let child_identifier = post_json_on_host(
         &app,
@@ -757,16 +830,13 @@ async fn login_is_host_scoped_when_identifiers_overlap_between_instances()
         get_on_host(&app, "/v1/auth/whoami", child_cookie.clone(), ROOT_HOST).await?;
     assert_eq!(child_cookie_on_root.status, StatusCode::UNAUTHORIZED);
 
-    let root_flow_from_child_cookie = post_json_on_host(
-        &app,
-        "/v1/login/flows",
-        child_cookie,
-        ROOT_HOST,
-        &json!({}),
-    )
-    .await?;
+    let root_flow_from_child_cookie =
+        post_json_on_host(&app, "/v1/login/flows", child_cookie, ROOT_HOST, &json!({})).await?;
     assert_eq!(root_flow_from_child_cookie.status, StatusCode::CREATED);
-    assert_eq!(root_flow_from_child_cookie.json_value()["step"], "identifier");
+    assert_eq!(
+        root_flow_from_child_cookie.json_value()["step"],
+        "identifier"
+    );
 
     Ok(())
 }
@@ -812,7 +882,10 @@ async fn cross_instance_session_reuse_does_not_complete_root_oidc_auth_requests(
     .await?;
     assert_eq!(oidc_flow.status, StatusCode::CREATED);
     assert_eq!(oidc_flow.json_value()["step"], "identifier");
-    let oidc_flow_id = oidc_flow.json_value()["flow_id"].as_str().unwrap().to_string();
+    let oidc_flow_id = oidc_flow.json_value()["flow_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let rejected_reuse = post_json_on_host(
         &app,

@@ -1,4 +1,5 @@
 #![allow(async_fn_in_trait)]
+#![allow(clippy::large_enum_variant)]
 
 pub mod analytics;
 pub mod runtime;

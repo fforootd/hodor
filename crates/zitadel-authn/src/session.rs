@@ -67,7 +67,11 @@ impl SessionStore {
         let token = Uuid::new_v4().to_string();
         let token_hash = hash_token(&token);
 
-        let org: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
+        let org: Option<&str> = if org_id.is_empty() {
+            None
+        } else {
+            Some(org_id)
+        };
         let expires_expr = match scoped.dialect() {
             zitadel_db::Dialect::Postgres => {
                 format!("CURRENT_TIMESTAMP + INTERVAL '{max_age_secs} seconds'")

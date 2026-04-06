@@ -3,8 +3,8 @@ use zitadel_db::Db;
 
 use super::{
     AuthRequestRedirect, AuthRequestRequirements, CreatedSession, KvStore, LoginFlowRuntimeState,
-    NewLoginFlowState, ProviderAuthState, SessionRecord,
-    auth_request, login_flow, provider, sessions,
+    NewLoginFlowState, ProviderAuthState, SessionRecord, auth_request, login_flow, provider,
+    sessions,
 };
 
 #[derive(Clone)]

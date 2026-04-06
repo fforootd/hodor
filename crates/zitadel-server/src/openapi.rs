@@ -13,7 +13,12 @@ pub fn routes(state: Arc<AppState>) -> Router {
 
 async fn openapi_json(State(state): State<Arc<AppState>>) -> Response {
     let public_origin = if !state.config.server.public_origin.trim().is_empty() {
-        state.config.server.public_origin.trim_end_matches('/').to_string()
+        state
+            .config
+            .server
+            .public_origin
+            .trim_end_matches('/')
+            .to_string()
     } else {
         current_request_origin_or(&format!(
             "http://{}:{}",

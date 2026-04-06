@@ -302,7 +302,9 @@ impl TupleRepository for FgaService {
                         zitadel_db::Dialect::Postgres => {
                             "INSERT INTO fga_tuples (instance_id, store_id, object_type, object_id, relation, user_type, user_id, user_relation, raw_object, raw_user) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING"
                         }
-                        zitadel_db::Dialect::Spanner => unreachable!("native Spanner does not use ScopedDb"),
+                        zitadel_db::Dialect::Spanner => {
+                            unreachable!("native Spanner does not use ScopedDb")
+                        }
                     };
                     let result = sqlx::query(insert)
                         .bind(scoped.instance_id())

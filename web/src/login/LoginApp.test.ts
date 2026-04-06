@@ -53,6 +53,8 @@ const branding = {
 describe('LoginApp adaptive captcha refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Ensure fingerprint collection is not skipped in the test environment.
+    Object.defineProperty(navigator, 'webdriver', { value: false, configurable: true })
   })
 
   it('adopts the refreshed flow after silent fingerprint submission', async () => {

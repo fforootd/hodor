@@ -331,13 +331,11 @@ impl UserRepository for SqlUserRepository {
             match &db {
                 Db::Sql(_) => {
                     let scoped = db.scoped(instance_id.clone());
-                    sqlx::query(
-                        "DELETE FROM users WHERE instance_id = $1 AND id = $2",
-                    )
-                    .bind(&instance_id)
-                    .bind(&user_id)
-                    .execute(scoped.pool())
-                    .await?;
+                    sqlx::query("DELETE FROM users WHERE instance_id = $1 AND id = $2")
+                        .bind(&instance_id)
+                        .bind(&user_id)
+                        .execute(scoped.pool())
+                        .await?;
                 }
                 Db::Spanner(spanner) => {
                     let mut stmt = Statement::new(

@@ -1,13 +1,10 @@
-use google_cloud_spanner::{
-    client::Error as SpannerError, statement::Statement,
-};
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 
-use crate::Db;
 use super::{
-    LoginFlowRecord, OidcAuthRequestRecord, OidcClientRecord,
-    login_flow_from_spanner_row, login_flow_from_sql_row,
-    spanner_query_all, spanner_query_optional,
+    LoginFlowRecord, OidcAuthRequestRecord, OidcClientRecord, login_flow_from_spanner_row,
+    login_flow_from_sql_row, spanner_query_all, spanner_query_optional,
 };
+use crate::Db;
 
 pub async fn update_session_metadata(
     db: &Db,

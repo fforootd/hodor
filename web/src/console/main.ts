@@ -10,9 +10,6 @@ import router from './router'
 // The base URL is injected by the Go server at runtime.
 configureApi({
   baseUrl: (window as any).__ZITADEL_BASE_PATH__ || '',
-  getOrgId: () => {
-    try { return localStorage.getItem('zitadel_org') } catch { return null }
-  },
 })
 
 const app = createApp(App)

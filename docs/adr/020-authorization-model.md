@@ -16,6 +16,12 @@ With OpenFGA embedded (internal/fga), we need to answer three questions:
 
 ### One Store. One Graph. Two Active Layers.
 
+> **Revision (ADR-037):** The "One Store per Instance" model below applies to
+> **customer instances**. Platform authorization (instance hierarchy, org ownership,
+> staff roles) uses a dedicated platform store, separate from any customer instance
+> store. Customers never see or interact with the platform store.
+> See [ADR-037](037-platform-fga-store-separation.md) for details.
+
 Every Zitadel instance gets exactly **one** OpenFGA store. The authorization model
 is currently composed from two active layers:
 

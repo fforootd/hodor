@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 
@@ -113,10 +113,7 @@ fn validate_production(key: &str) -> Result<LicenseClaims> {
 
 /// Check whether a specific feature is included in the license.
 pub fn has_feature(claims: &LicenseClaims, feature: &str) -> bool {
-    claims
-        .features
-        .iter()
-        .any(|f| f == "*" || f == feature)
+    claims.features.iter().any(|f| f == "*" || f == feature)
 }
 
 #[cfg(test)]

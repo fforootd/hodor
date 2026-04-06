@@ -1196,7 +1196,11 @@ async fn create_session_record(
     let session_id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let hashed_token = token_hash(&token);
-    let org_id: Option<&str> = if org_id.is_empty() { None } else { Some(org_id) };
+    let org_id: Option<&str> = if org_id.is_empty() {
+        None
+    } else {
+        Some(org_id)
+    };
 
     match db {
         Db::Sql(_) => {

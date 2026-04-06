@@ -41,10 +41,10 @@ pub(crate) async fn complete_auth_request(
                 .into_response());
         }
         Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load auth request: {e}")})),
-            )
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "load auth request");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response());
         }
     };
@@ -70,10 +70,10 @@ pub(crate) async fn complete_auth_request(
                 .into_response());
         }
         Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("complete auth request: {e}")})),
-            )
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "complete auth request");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response());
         }
     }

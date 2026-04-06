@@ -407,10 +407,7 @@ where
         );
         let config: OpenIdConfiguration = self.http.get_json(&metadata_url).await?;
         if config.issuer != issuer {
-            anyhow::bail!(
-                "issuer mismatch: expected {issuer}, got {}",
-                config.issuer
-            );
+            anyhow::bail!("issuer mismatch: expected {issuer}, got {}", config.issuer);
         }
         let jwks: JsonWebKeySet = self.http.get_json(&config.jwks_uri).await?;
         let cached = CachedIssuerMetadata {

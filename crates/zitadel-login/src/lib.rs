@@ -11,10 +11,10 @@ pub mod steps;
 pub mod ui;
 
 use axum::{
+    Router,
     extract::State,
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    Router,
     routing::{get, post},
 };
 use std::borrow::Cow;
@@ -86,9 +86,10 @@ async fn logout(State(state): State<LoginState>) -> Response {
     );
 
     for cookie_name in state.cookie_config.all_cookie_names() {
-        if let Ok(value) =
-            HeaderValue::from_str(&expired_session_cookie(cookie_name, state.cookie_config.secure))
-        {
+        if let Ok(value) = HeaderValue::from_str(&expired_session_cookie(
+            cookie_name,
+            state.cookie_config.secure,
+        )) {
             response.headers_mut().append(header::SET_COOKIE, value);
         }
     }

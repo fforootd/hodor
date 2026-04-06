@@ -1,8 +1,6 @@
 use google_cloud_spanner::statement::Statement;
 
-use super::entities::{
-    SqlSearchRepository, normalized_resource_types, spanner_query_all,
-};
+use super::entities::{SqlSearchRepository, normalized_resource_types, spanner_query_all};
 use crate::{Db, list_schema_registry, provider};
 use zitadel_app::repo::{BoxFuture, SearchRepository, SearchResult};
 

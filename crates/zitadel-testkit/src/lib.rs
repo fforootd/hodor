@@ -340,6 +340,23 @@ impl TestContext {
         })
     }
 
+    pub async fn grant_operator_admin(&self, user: &UserFixture) -> anyhow::Result<()> {
+        let scoped = self.db.scoped_default();
+        let metadata = r#"{"capabilities":["operator_admin"]}"#;
+        let metadata_bind = scoped.json_bind(1);
+        let sql = format!(
+            "UPDATE users SET metadata = {metadata_bind} WHERE instance_id = $2 AND id = $3"
+        );
+        sqlx::query(&sql)
+            .bind(metadata)
+            .bind(scoped.instance_id())
+            .bind(&user.user_id)
+            .execute(scoped.pool())
+            .await
+            .context("grant operator_admin")?;
+        Ok(())
+    }
+
     pub async fn create_session(&self, user: &UserFixture) -> anyhow::Result<SessionFixture> {
         let session = self
             .login_state

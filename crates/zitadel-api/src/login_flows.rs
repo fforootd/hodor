@@ -262,12 +262,8 @@ async fn resolve(
         })
         .await
     {
-        Ok(Some(f)) => {
-            response::json_ok(serde_json::json!({"flow_id": f.id, "flow_name": f.name}))
-        }
-        Ok(None) => {
-            response::json_ok(serde_json::json!({"flow_id": null, "flow_name": "default"}))
-        }
+        Ok(Some(f)) => response::json_ok(serde_json::json!({"flow_id": f.id, "flow_name": f.name})),
+        Ok(None) => response::json_ok(serde_json::json!({"flow_id": null, "flow_name": "default"})),
         Err(e) => response::app_error(e),
     }
 }

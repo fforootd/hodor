@@ -204,8 +204,16 @@ impl OrgRepository for SqlOrgRepository {
             // SQLite cannot do column-specific ON DELETE SET NULL for composite FKs,
             // so we handle it in application code for all backends.
             const DETACH_TABLES: &[&str] = &[
-                "users", "sessions", "apps", "providers", "login_flows",
-                "login_flow_assets", "groups", "projects", "actions", "domains",
+                "users",
+                "sessions",
+                "apps",
+                "providers",
+                "login_flows",
+                "login_flow_assets",
+                "groups",
+                "projects",
+                "actions",
+                "domains",
             ];
             match &db {
                 Db::Sql(_) => {

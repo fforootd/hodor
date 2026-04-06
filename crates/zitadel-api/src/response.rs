@@ -36,14 +36,14 @@ pub const MAX_NAME_LENGTH: usize = 255;
 
 /// Validate that a name is non-empty and within length limits.
 /// Returns a 400 Response on failure, Ok(()) on success.
-pub fn validate_name(field: &str, value: &str) -> Result<(), Response> {
+pub fn validate_name(field: &str, value: &str) -> Result<(), Box<Response>> {
     if value.trim().is_empty() {
-        return Err(bad_request(format!("{field} is required")));
+        return Err(Box::new(bad_request(format!("{field} is required"))));
     }
     if value.len() > MAX_NAME_LENGTH {
-        return Err(bad_request(format!(
+        return Err(Box::new(bad_request(format!(
             "{field} exceeds maximum length of {MAX_NAME_LENGTH}"
-        )));
+        ))));
     }
     Ok(())
 }

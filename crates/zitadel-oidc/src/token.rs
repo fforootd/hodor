@@ -64,7 +64,9 @@ async fn token_endpoint(
         })
         .await
     {
-        Ok(token) => add_token_cache_headers(Json::<crate::oidc::TokenResponse>(token).into_response()),
+        Ok(token) => {
+            add_token_cache_headers(Json::<crate::oidc::TokenResponse>(token).into_response())
+        }
         Err(error) => add_token_cache_headers(protocol_error_response(error)),
     }
 }
@@ -100,7 +102,11 @@ async fn revoke_endpoint(
         Ok(auth) => auth,
         Err(error) => return add_token_cache_headers(protocol_error_response(error)),
     };
-    match state.provider.revoke(&req.token, client_auth.as_ref()).await {
+    match state
+        .provider
+        .revoke(&req.token, client_auth.as_ref())
+        .await
+    {
         Ok(()) => add_token_cache_headers(StatusCode::OK.into_response()),
         Err(error) => add_token_cache_headers(protocol_error_response(error)),
     }
@@ -154,7 +160,9 @@ async fn end_session(state: OidcState, headers: HeaderMap, req: EndSessionParams
 
     if let Some(session_id) = outcome.session_id.as_deref() {
         if let Some(transient) = state.transient.as_ref()
-            && let Err(error) = transient.revoke_session(&current_instance_id(), session_id).await
+            && let Err(error) = transient
+                .revoke_session(&current_instance_id(), session_id)
+                .await
         {
             return protocol_error_response(crate::oidc::ProtocolError::server_error(format!(
                 "revoke session: {error}"

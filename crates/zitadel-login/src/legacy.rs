@@ -40,10 +40,10 @@ pub(crate) async fn login(
     {
         Ok(user) => user,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("lookup user: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "lookup user");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -64,10 +64,10 @@ pub(crate) async fn login(
     {
         Ok(hash) => hash,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load password: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "load password");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -109,10 +109,10 @@ pub(crate) async fn login(
     {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("session: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "session creation");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -140,10 +140,10 @@ pub(crate) async fn login(
                     .into_response();
             }
             Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": format!("complete auth request: {e}")})),
-                )
+                return (StatusCode::INTERNAL_SERVER_ERROR, {
+                    tracing::error!(%e, "complete auth request");
+                    Json(serde_json::json!({"error": "internal error"}))
+                })
                     .into_response();
             }
         };

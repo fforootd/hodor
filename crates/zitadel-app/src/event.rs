@@ -94,10 +94,7 @@ pub enum DomainEvent {
         actor_id: String,
     },
     #[serde(rename = "org.deleted")]
-    OrgDeleted {
-        org_id: String,
-        actor_id: String,
-    },
+    OrgDeleted { org_id: String, actor_id: String },
 
     // ── Groups ──
     #[serde(rename = "group.created")]
@@ -114,10 +111,7 @@ pub enum DomainEvent {
         actor_id: String,
     },
     #[serde(rename = "group.deleted")]
-    GroupDeleted {
-        group_id: String,
-        actor_id: String,
-    },
+    GroupDeleted { group_id: String, actor_id: String },
 
     // ── Apps ──
     #[serde(rename = "app.created")]
@@ -234,10 +228,7 @@ pub enum DomainEvent {
         actor_id: String,
     },
     #[serde(rename = "action.deleted")]
-    ActionDeleted {
-        action_id: String,
-        actor_id: String,
-    },
+    ActionDeleted { action_id: String, actor_id: String },
 
     // ── Resources (generic named) ──
     #[serde(rename = "resource.created")]
@@ -347,7 +338,9 @@ impl DomainEvent {
             Self::LoginFlowCompleted { .. } | Self::OtpVerified { .. } => "auth",
             Self::TokenIssued { .. } | Self::TokenRevoked { .. } => "token",
             Self::OrgCreated { .. } | Self::OrgUpdated { .. } | Self::OrgDeleted { .. } => "org",
-            Self::GroupCreated { .. } | Self::GroupUpdated { .. } | Self::GroupDeleted { .. } => "group",
+            Self::GroupCreated { .. } | Self::GroupUpdated { .. } | Self::GroupDeleted { .. } => {
+                "group"
+            }
             Self::AppCreated { .. } | Self::AppUpdated { .. } => "app",
             Self::InstanceCreated { .. }
             | Self::InstanceUpdated { .. }

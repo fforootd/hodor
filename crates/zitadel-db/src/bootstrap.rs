@@ -282,13 +282,7 @@ async fn bootstrap_spanner(
     if let Some(domain) = external_domain.filter(|d| !d.is_empty()) {
         mutations.push(insert_or_update(
             "domains",
-            &[
-                "domain",
-                "instance_id",
-                "is_primary",
-                "state",
-                "verified",
-            ],
+            &["domain", "instance_id", "is_primary", "state", "verified"],
             &[&domain, &DEFAULT_INSTANCE_ID, &true, &"active", &true],
         ));
     }

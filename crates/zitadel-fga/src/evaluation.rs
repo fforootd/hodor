@@ -105,7 +105,11 @@ impl UserRef {
     }
 }
 
-pub(crate) fn stored_user_from_parts(user_type: &str, user_id: &str, user_relation: &str) -> UserRef {
+pub(crate) fn stored_user_from_parts(
+    user_type: &str,
+    user_id: &str,
+    user_relation: &str,
+) -> UserRef {
     if user_id == "*" {
         return UserRef::Wildcard {
             object_type: user_type.to_string(),
@@ -226,7 +230,11 @@ impl CompiledModel {
         })
     }
 
-    pub(crate) fn relation_expr(&self, object_type: &str, relation: &str) -> Result<&RelationExpr, FgaError> {
+    pub(crate) fn relation_expr(
+        &self,
+        object_type: &str,
+        relation: &str,
+    ) -> Result<&RelationExpr, FgaError> {
         self.types
             .get(object_type)
             .and_then(|type_def| type_def.relations.get(relation))
@@ -254,7 +262,11 @@ impl CompiledModel {
             })
     }
 
-    pub(crate) fn list_plan(&self, object_type: &str, relation: &str) -> Result<ListPlan, FgaError> {
+    pub(crate) fn list_plan(
+        &self,
+        object_type: &str,
+        relation: &str,
+    ) -> Result<ListPlan, FgaError> {
         Ok(match self.relation_expr(object_type, relation)? {
             RelationExpr::This => ListPlan::Planned {
                 sources: vec![CandidateSource::Direct],
@@ -886,7 +898,9 @@ pub(crate) fn collect_graph_edges(
     }
 }
 
-pub(crate) fn parse_contextual(contextual: Option<ContextualTuples>) -> Result<Vec<ParsedTupleKey>, FgaError> {
+pub(crate) fn parse_contextual(
+    contextual: Option<ContextualTuples>,
+) -> Result<Vec<ParsedTupleKey>, FgaError> {
     contextual
         .map(|tuples| {
             tuples

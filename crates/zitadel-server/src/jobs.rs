@@ -184,6 +184,7 @@ fn builtins(config: &Config, backend: BackendKind) -> Vec<JobSpec> {
     ]
 }
 
+#[allow(dead_code, clippy::needless_borrows_for_generic_args)]
 async fn reconcile_jobs(db: &Db, jobs: &[JobSpec]) -> anyhow::Result<()> {
     match db {
         Db::Sql(_) => {

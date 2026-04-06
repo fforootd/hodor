@@ -131,7 +131,7 @@ pub struct AnalyticsStorageConfig {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RetentionConfig {
     pub events: EventRetentionConfig,
@@ -139,18 +139,6 @@ pub struct RetentionConfig {
     pub tokens: TerminalDataRetentionConfig,
     pub transient_auth_state: ExpiredDataRetentionConfig,
     pub sink_inbox: InboxRetentionConfig,
-}
-
-impl Default for RetentionConfig {
-    fn default() -> Self {
-        Self {
-            events: EventRetentionConfig::default(),
-            sessions: TerminalDataRetentionConfig::default(),
-            tokens: TerminalDataRetentionConfig::default(),
-            transient_auth_state: ExpiredDataRetentionConfig::default(),
-            sink_inbox: InboxRetentionConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

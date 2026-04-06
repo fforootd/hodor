@@ -11,7 +11,7 @@ use std::{
 use anyhow::{Context, bail};
 use axum::{Router, http::StatusCode};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, json};
 use tokio::task::JoinSet;
 use uuid::Uuid;
 use zitadel_authn::{password::encode_credential_json, session::hash_token};
@@ -21,6 +21,7 @@ use zitadel_fga::{
     AuthorizationModelWriteRequest, BatchCheckItem, BatchCheckRequest, BatchCheckResponse,
     CheckRequest, CheckResponse, Evaluator, ModelRepository, ReadRequest, StoreResolver,
     TupleFilter, TupleKey, TupleKeySet, TupleRepository, TypeDefinition, WriteRequest,
+    core_authorization_model,
 };
 use zitadel_testkit::{AuthActor, PatFixture, SessionFixture, TestApp, TestContext, UserFixture};
 
@@ -332,6 +333,7 @@ async fn seed_dataset(
         org_id: org_id.clone(),
         identifier: hot_identifier,
     };
+    ctx.grant_operator_admin(&hot_user).await?;
     let hot_session = ctx.create_session(&hot_user).await?;
     let hot_pat = ctx.create_pat(&hot_user, "perf-admin").await?;
     let (store_id, direct_check_request, nested_check_request, batch_check_request) =
@@ -610,16 +612,7 @@ async fn seed_fga_dataset(
 }
 
 fn perf_authorization_model() -> AuthorizationModelWriteRequest {
-    let mut types = vec![
-        direct_type("user", &[]),
-        direct_type("instance", &["owner", "admin", "viewer", "parent"]),
-        direct_type("org", &["owner", "admin", "member", "viewer"]),
-        direct_type("group", &["member", "admin"]),
-        direct_type("project", &["owner", "admin", "member"]),
-        direct_type("app", &["admin", "viewer"]),
-        direct_type("settings", &["admin", "viewer"]),
-        direct_type("session", &["owner"]),
-    ];
+    let mut types = core_authorization_model().type_definitions;
     types.push(TypeDefinition {
         type_name: "document".into(),
         relations: Map::from_iter([
@@ -650,31 +643,6 @@ fn perf_authorization_model() -> AuthorizationModelWriteRequest {
         schema_version: "1.1".into(),
         type_definitions: types,
         conditions: Map::new(),
-    }
-}
-
-fn direct_type(type_name: &str, relations: &[&str]) -> TypeDefinition {
-    let relation_map = relations
-        .iter()
-        .map(|relation| (relation.to_string(), json!({ "this": {} })))
-        .collect::<Map<String, Value>>();
-    let metadata_relations = relations
-        .iter()
-        .map(|relation| {
-            (
-                relation.to_string(),
-                json!({
-                    "directly_related_user_types": [
-                        { "type": "user" }
-                    ]
-                }),
-            )
-        })
-        .collect::<Map<String, Value>>();
-    TypeDefinition {
-        type_name: type_name.into(),
-        relations: relation_map,
-        metadata: Some(json!({ "relations": metadata_relations })),
     }
 }
 

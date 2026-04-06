@@ -14,11 +14,6 @@ mod semantics;
 mod sessions;
 mod sinks;
 
-use self::semantics::{
-    SessionLookupOutcome, TransientStateMeta, TransientStateOutcome, default_transient_state_meta,
-    session_lookup_outcome, transient_state_outcome,
-};
-
 pub use self::dispatch::{DefaultKvStore, DefaultSink, DefaultTransientStorage};
 pub use self::kv_memory::MemoryKvStore;
 pub use self::kv_spanner::SpannerKvStore;
@@ -626,10 +621,7 @@ fn parse_duration(raw: &str) -> tokio::time::Duration {
     Duration::from_millis(100)
 }
 
-pub(self) async fn apply_channel_batch(
-    db: &Db,
-    pending: &mut Vec<TransientRecord>,
-) -> anyhow::Result<()> {
+async fn apply_channel_batch(db: &Db, pending: &mut Vec<TransientRecord>) -> anyhow::Result<()> {
     if pending.is_empty() {
         return Ok(());
     }
@@ -690,7 +682,7 @@ async fn sql_user_is_active(db: &Db, instance_id: &str, user_id: &str) -> anyhow
     Ok(active.is_some())
 }
 
-pub(self) async fn ensure_sink_inbox_table(db: &Db) -> anyhow::Result<()> {
+async fn ensure_sink_inbox_table(db: &Db) -> anyhow::Result<()> {
     let sql = match db.dialect() {
         zitadel_db::Dialect::Postgres => {
             "CREATE TABLE IF NOT EXISTS storage_sink_inbox (
@@ -843,7 +835,7 @@ fn record_type(record: &TransientRecord) -> &'static str {
     }
 }
 
-pub(self) async fn insert_sink_record(db: &Db, record: &TransientRecord) -> anyhow::Result<()> {
+async fn insert_sink_record(db: &Db, record: &TransientRecord) -> anyhow::Result<()> {
     let payload = serde_json::to_string(record)?;
     sqlx::query("INSERT INTO storage_sink_inbox (id, record_type, payload) VALUES ($1, $2, $3)")
         .bind(Uuid::new_v4().to_string())
@@ -854,11 +846,7 @@ pub(self) async fn insert_sink_record(db: &Db, record: &TransientRecord) -> anyh
     Ok(())
 }
 
-pub(self) async fn drain_sink_inbox(
-    buffer_db: &Db,
-    target_db: &Db,
-    batch_size: usize,
-) -> anyhow::Result<()> {
+async fn drain_sink_inbox(buffer_db: &Db, target_db: &Db, batch_size: usize) -> anyhow::Result<()> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT id, payload FROM storage_sink_inbox ORDER BY created_at ASC LIMIT $1",
     )

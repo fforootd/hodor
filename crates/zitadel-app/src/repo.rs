@@ -898,11 +898,7 @@ pub trait SettingsRepository: Send + Sync {
         settings: &SettingsRecord,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
-    fn delete(
-        &self,
-        instance_id: &str,
-        settings_type: &str,
-    ) -> BoxFuture<'_, anyhow::Result<()>>;
+    fn delete(&self, instance_id: &str, settings_type: &str) -> BoxFuture<'_, anyhow::Result<()>>;
 
     /// Resolve settings with cascade: instance defaults → org overrides → app overrides.
     fn resolve(
@@ -1058,11 +1054,7 @@ pub trait SchemaRepository: Send + Sync {
 
     /// Atomically promote a schema to `is_default = true`, demoting all other
     /// schemas of the same type.
-    fn promote(
-        &self,
-        instance_id: &str,
-        schema_id: &str,
-    ) -> BoxFuture<'_, anyhow::Result<bool>>;
+    fn promote(&self, instance_id: &str, schema_id: &str) -> BoxFuture<'_, anyhow::Result<bool>>;
 
     /// Count users that reference this schema.
     fn count_by_schema(

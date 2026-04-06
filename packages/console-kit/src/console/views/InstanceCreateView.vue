@@ -108,9 +108,9 @@ const regions = [
   { key: 'asia-southeast1', label: 'Asia (Southeast)', description: 'Singapore, APAC data residency' },
 ]
 
-function onIdInput(value: string) {
+function onIdInput(value: string | number) {
   // Slugify: lowercase, letters/digits/hyphens only, no leading hyphens.
-  const slugged = value
+  const slugged = String(value)
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '')
     .replace(/^-+/, '')

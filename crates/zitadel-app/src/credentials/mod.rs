@@ -31,7 +31,14 @@ impl SetPassword {
         cmd: SetPasswordCommand,
     ) -> Result<(), AppError> {
         // Authz: caller must be admin on the target user, or be the user themselves
-        crate::authz::require_permission_or_self(&self.repos, ctx, "admin", &format!("user:{}", cmd.user_id), &cmd.user_id).await?;
+        crate::authz::require_permission_or_self(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("user:{}", cmd.user_id),
+            &cmd.user_id,
+        )
+        .await?;
 
         // Verify user exists
         let user = self
@@ -154,7 +161,13 @@ impl LinkIdentity {
         cmd: LinkIdentityCommand,
     ) -> Result<(), AppError> {
         // Authz: caller must be admin on the target user
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("user:{}", cmd.user_id)).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("user:{}", cmd.user_id),
+        )
+        .await?;
 
         // Verify user exists
         self.repos

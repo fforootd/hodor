@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod adapters;
 pub mod authorize;
 pub mod discovery;
@@ -16,8 +18,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use zitadel_authn::cookie::CookieConfig;
 use zitadel_app::repo::OidcRepository;
+use zitadel_authn::cookie::CookieConfig;
 use zitadel_config::oidc::OidcConfig;
 use zitadel_db::DEFAULT_INSTANCE_ID;
 use zitadel_storage::DefaultTransientStorage;

@@ -224,33 +224,32 @@ pub(crate) async fn flow_create(
                 session_reuse_nodes(&trusted_user.identifier, &trusted_user.display_name),
             )
         } else if silent {
-            if !req.auth_request_id.is_empty() {
-                if let Ok(Some(auth_req)) = state
+            if !req.auth_request_id.is_empty()
+                && let Ok(Some(auth_req)) = state
                     .transient
                     .load_auth_request_redirect(&instance_id, &req.auth_request_id)
                     .await
-                {
-                    let redirect = build_auth_error_redirect(
-                        &auth_req.redirect_uri,
-                        &auth_req.state,
-                        "login_required",
-                        "prompt=none requires a recent session",
-                    );
-                    return (
-                        StatusCode::CREATED,
-                        Json(FlowStepResponse {
-                            flow_id,
-                            step: LoginStep::Complete.as_str().into(),
-                            nodes: vec![UINode::Heading {
-                                text: "Redirecting...".into(),
-                            }],
-                            redirect_uri: Some(redirect),
-                            branding: Some(default_branding()),
-                            ..Default::default()
-                        }),
-                    )
-                        .into_response();
-                }
+            {
+                let redirect = build_auth_error_redirect(
+                    &auth_req.redirect_uri,
+                    &auth_req.state,
+                    "login_required",
+                    "prompt=none requires a recent session",
+                );
+                return (
+                    StatusCode::CREATED,
+                    Json(FlowStepResponse {
+                        flow_id,
+                        step: LoginStep::Complete.as_str().into(),
+                        nodes: vec![UINode::Heading {
+                            text: "Redirecting...".into(),
+                        }],
+                        redirect_uri: Some(redirect),
+                        branding: Some(default_branding()),
+                        ..Default::default()
+                    }),
+                )
+                    .into_response();
             }
 
             (
@@ -266,33 +265,32 @@ pub(crate) async fn flow_create(
     } else {
         // No existing session.
         if prompts.contains(&"none".to_string()) {
-            if !req.auth_request_id.is_empty() {
-                if let Ok(Some(auth_req)) = state
+            if !req.auth_request_id.is_empty()
+                && let Ok(Some(auth_req)) = state
                     .transient
                     .load_auth_request_redirect(&instance_id, &req.auth_request_id)
                     .await
-                {
-                    let redirect = build_auth_error_redirect(
-                        &auth_req.redirect_uri,
-                        &auth_req.state,
-                        "login_required",
-                        "prompt=none requires an existing session",
-                    );
-                    return (
-                        StatusCode::CREATED,
-                        Json(FlowStepResponse {
-                            flow_id,
-                            step: LoginStep::Complete.as_str().into(),
-                            nodes: vec![UINode::Heading {
-                                text: "Redirecting...".into(),
-                            }],
-                            redirect_uri: Some(redirect),
-                            branding: Some(default_branding()),
-                            ..Default::default()
-                        }),
-                    )
-                        .into_response();
-                }
+            {
+                let redirect = build_auth_error_redirect(
+                    &auth_req.redirect_uri,
+                    &auth_req.state,
+                    "login_required",
+                    "prompt=none requires an existing session",
+                );
+                return (
+                    StatusCode::CREATED,
+                    Json(FlowStepResponse {
+                        flow_id,
+                        step: LoginStep::Complete.as_str().into(),
+                        nodes: vec![UINode::Heading {
+                            text: "Redirecting...".into(),
+                        }],
+                        redirect_uri: Some(redirect),
+                        branding: Some(default_branding()),
+                        ..Default::default()
+                    }),
+                )
+                    .into_response();
             }
 
             // prompt=none but no session: error.
@@ -355,10 +353,10 @@ pub(crate) async fn flow_create(
         )
         .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("create flow: {e}")})),
-        )
+        return (StatusCode::INTERNAL_SERVER_ERROR, {
+            tracing::error!(%e, "create flow");
+            Json(serde_json::json!({"error": "internal error"}))
+        })
             .into_response();
     }
 
@@ -389,10 +387,10 @@ pub(crate) async fn flow_get(
     {
         Ok(row) => row,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load flow: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "load flow");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -444,10 +442,10 @@ pub(crate) async fn flow_submit(
     {
         Ok(row) => row,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("load flow: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "load flow");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -483,10 +481,10 @@ pub(crate) async fn flow_submit(
                         .into_response();
                 }
                 Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": format!("rewind flow: {e}")})),
-                    )
+                    return (StatusCode::INTERNAL_SERVER_ERROR, {
+                        tracing::error!(%e, "rewind flow");
+                        Json(serde_json::json!({"error": "internal error"}))
+                    })
                         .into_response();
                 }
             }
@@ -540,10 +538,10 @@ pub(crate) async fn handle_identifier_step(
     {
         Ok(user) => user,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("lookup user: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "lookup user");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -565,10 +563,10 @@ pub(crate) async fn handle_identifier_step(
                 .into_response();
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("advance flow: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "advance flow");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     }
@@ -615,10 +613,10 @@ pub(crate) async fn handle_password_step(
     {
         Ok(user) => user,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("lookup user: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "lookup user");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -682,10 +680,10 @@ pub(crate) async fn handle_password_step(
     {
         Ok(session) => session,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("session: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "session creation");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     };
@@ -720,10 +718,10 @@ pub(crate) async fn handle_password_step(
                 .into_response();
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("complete flow: {e}")})),
-            )
+            return (StatusCode::INTERNAL_SERVER_ERROR, {
+                tracing::error!(%e, "complete flow");
+                Json(serde_json::json!({"error": "internal error"}))
+            })
                 .into_response();
         }
     }
@@ -781,10 +779,10 @@ async fn handle_fingerprint_submit(
         .update_login_flow_data(&instance_id, flow_id, &data)
         .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("update flow data: {e}")})),
-        )
+        return (StatusCode::INTERNAL_SERVER_ERROR, {
+            tracing::error!(%e, "update flow data");
+            Json(serde_json::json!({"error": "internal error"}))
+        })
             .into_response();
     }
 

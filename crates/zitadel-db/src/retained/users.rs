@@ -1,12 +1,10 @@
-use google_cloud_spanner::{
-    client::Error as SpannerError, statement::Statement,
-};
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 
-use crate::Db;
 use super::{
-    IdentityMetadata, LinkedIdentityRecord, UserClaimsRecord, UserRecord,
-    metadata_has_capability, spanner_query_all, spanner_query_optional, spanner_query_scalar_i64,
+    IdentityMetadata, LinkedIdentityRecord, UserClaimsRecord, UserRecord, metadata_has_capability,
+    spanner_query_all, spanner_query_optional, spanner_query_scalar_i64,
 };
+use crate::Db;
 
 pub async fn load_identity_metadata(
     db: &Db,

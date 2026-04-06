@@ -326,21 +326,21 @@ impl EffectHook for ActionEffectHook {
                         });
 
                         // Enrich environment with event data for PostCommit/PostEvent phases
-                        if let Some(event) = event {
-                            if let serde_json::Value::Object(map) = &mut env {
-                                map.insert(
-                                    "event_type".into(),
-                                    serde_json::Value::String(event.event_type().into()),
-                                );
-                                map.insert(
-                                    "category".into(),
-                                    serde_json::Value::String(event.category().into()),
-                                );
-                                map.insert(
-                                    "aggregate_id".into(),
-                                    serde_json::Value::String(event.aggregate_id().into()),
-                                );
-                            }
+                        if let Some(event) = event
+                            && let serde_json::Value::Object(map) = &mut env
+                        {
+                            map.insert(
+                                "event_type".into(),
+                                serde_json::Value::String(event.event_type().into()),
+                            );
+                            map.insert(
+                                "category".into(),
+                                serde_json::Value::String(event.category().into()),
+                            );
+                            map.insert(
+                                "aggregate_id".into(),
+                                serde_json::Value::String(event.aggregate_id().into()),
+                            );
                         }
 
                         match zitadel_expr::eval(&action.trigger_expr, &env) {

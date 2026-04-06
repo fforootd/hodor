@@ -174,8 +174,16 @@ pub(crate) async fn score_and_record(
     } else {
         "allow"
     };
-    emit_bot_detection_event(repos, instance_id, flow_id, fingerprint, &risk, bp, action_taken)
-        .await;
+    emit_bot_detection_event(
+        repos,
+        instance_id,
+        flow_id,
+        fingerprint,
+        &risk,
+        bp,
+        action_taken,
+    )
+    .await;
 
     (risk.score, risk.signals)
 }
@@ -183,9 +191,7 @@ pub(crate) async fn score_and_record(
 /// Check whether bot protection enforcement should block or challenge the
 /// request. Returns `Some(Response)` if the request should be blocked outright,
 /// or `None` to let it proceed (challenge nodes are appended separately).
-pub(crate) fn check_bot_enforcement(
-    data: &serde_json::Value,
-) -> (bool, Option<Response>) {
+pub(crate) fn check_bot_enforcement(data: &serde_json::Value) -> (bool, Option<Response>) {
     let bp_mode = data
         .get("bot_protection_mode")
         .and_then(|v| v.as_str())
@@ -250,7 +256,8 @@ pub(crate) fn append_captcha_nodes(
     resp.captcha_required = Some(true);
     match bp_provider {
         "pow" => {
-            resp.nodes.push(build_challenge_node(pow_secret, risk_score));
+            resp.nodes
+                .push(build_challenge_node(pow_secret, risk_score));
         }
         provider @ ("recaptcha" | "hcaptcha" | "turnstile") => {
             // Load site_key from provider_config stored in flow data.
@@ -297,10 +304,10 @@ pub(crate) async fn verify_captcha(
     if let Some(payload) = altcha {
         let solution: zitadel_botdetect::Solution = match serde_json::from_value(payload.clone()) {
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": format!("invalid altcha_payload: {e}")})),
+                    Json(serde_json::json!({"error": "invalid captcha payload"})),
                 )
                     .into_response();
             }
@@ -381,10 +388,10 @@ pub(crate) async fn verify_captcha(
         .update_login_flow_data(&instance_id, flow_id, &data)
         .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("update flow data: {e}")})),
-        )
+        return (StatusCode::INTERNAL_SERVER_ERROR, {
+            tracing::error!(%e, "update flow data");
+            Json(serde_json::json!({"error": "internal error"}))
+        })
             .into_response();
     }
 

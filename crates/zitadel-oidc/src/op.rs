@@ -239,7 +239,8 @@ impl<C, A, K, U, T> Provider<C, A, K, U, T> {
     }
 
     pub fn with_issuer_override(mut self, issuer_override: Option<String>) -> Self {
-        self.issuer_override = issuer_override.map(|origin| origin.trim_end_matches('/').to_string());
+        self.issuer_override =
+            issuer_override.map(|origin| origin.trim_end_matches('/').to_string());
         self
     }
 
@@ -476,7 +477,8 @@ where
             .tokens
             .lookup_active_token(instance_id.as_ref(), token)
             .await
-            .map_err(|error| ProtocolError::server_error(format!("load token record: {error}")))? else {
+            .map_err(|error| ProtocolError::server_error(format!("load token record: {error}")))?
+        else {
             return Ok(());
         };
         if stored.client_id != auth.client_id {
@@ -581,8 +583,13 @@ where
             .decode_token::<AccessTokenClaims>(instance_id.as_ref(), access_token)
             .await
             .map_err(|_| ProtocolError::invalid_grant("invalid access token"))?;
-        self.enforce_token_storage(instance_id.as_ref(), access_token, "oidc_access", &claims.jti)
-            .await?;
+        self.enforce_token_storage(
+            instance_id.as_ref(),
+            access_token,
+            "oidc_access",
+            &claims.jti,
+        )
+        .await?;
         Ok(claims)
     }
 
@@ -599,8 +606,13 @@ where
             .decode_token::<RefreshTokenClaims>(instance_id.as_ref(), refresh_token)
             .await
             .map_err(|_| ProtocolError::invalid_grant("invalid refresh token"))?;
-        self.enforce_token_storage(instance_id.as_ref(), refresh_token, "oidc_refresh", &claims.jti)
-            .await?;
+        self.enforce_token_storage(
+            instance_id.as_ref(),
+            refresh_token,
+            "oidc_refresh",
+            &claims.jti,
+        )
+        .await?;
         Ok(claims)
     }
 
@@ -638,11 +650,7 @@ where
         })
     }
 
-    async fn decode_token<Claims>(
-        &self,
-        instance_id: &str,
-        token: &str,
-    ) -> anyhow::Result<Claims>
+    async fn decode_token<Claims>(&self, instance_id: &str, token: &str) -> anyhow::Result<Claims>
     where
         Claims: serde::de::DeserializeOwned,
     {
@@ -906,7 +914,7 @@ where
                     &granted.scope,
                     session_id.as_deref(),
                 )
-                    .await?,
+                .await?,
             )
         } else {
             None
@@ -1142,7 +1150,7 @@ where
                     &refresh.scope,
                     session_id.as_deref(),
                 )
-                    .await?,
+                .await?,
             )
         } else {
             None
@@ -1201,7 +1209,9 @@ where
         self.tokens
             .revoke_token_by_id(instance_id.as_ref(), &stored_refresh.token_id)
             .await
-            .map_err(|error| ProtocolError::server_error(format!("revoke refresh token: {error}")))?;
+            .map_err(|error| {
+                ProtocolError::server_error(format!("revoke refresh token: {error}"))
+            })?;
 
         Ok(TokenResponse {
             access_token,
@@ -1383,7 +1393,11 @@ mod tests {
     }
 
     impl TokenStore for RecordingTokenStore {
-        async fn store_token(&self, _instance_id: &str, token: &NewStoredToken) -> anyhow::Result<()> {
+        async fn store_token(
+            &self,
+            _instance_id: &str,
+            token: &NewStoredToken,
+        ) -> anyhow::Result<()> {
             self.stored_specs.lock().unwrap().push(token.clone());
             self.stored_by_raw.lock().unwrap().insert(
                 token.raw_token.clone(),
@@ -1409,7 +1423,11 @@ mod tests {
             Ok(self.stored_by_raw.lock().unwrap().get(raw_token).cloned())
         }
 
-        async fn revoke_token_by_id(&self, _instance_id: &str, token_id: &str) -> anyhow::Result<()> {
+        async fn revoke_token_by_id(
+            &self,
+            _instance_id: &str,
+            token_id: &str,
+        ) -> anyhow::Result<()> {
             self.revoked_ids.lock().unwrap().push(token_id.to_string());
             Ok(())
         }
@@ -1441,7 +1459,13 @@ mod tests {
 
     fn test_provider(
         consumed: Option<ConsumedAuthRequest>,
-    ) -> Provider<FakeClientStore, FakeAuthRequestStore, StaticKeyStore, FakeClaimSource, NoopTokenStore> {
+    ) -> Provider<
+        FakeClientStore,
+        FakeAuthRequestStore,
+        StaticKeyStore,
+        FakeClaimSource,
+        NoopTokenStore,
+    > {
         Provider::new(
             "default".to_string(),
             "http://issuer.example".to_string(),

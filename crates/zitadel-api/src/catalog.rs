@@ -99,7 +99,14 @@ async fn install_from_catalog(
     Json(req): Json<InstallRequest>,
 ) -> Response {
     let ctx = crate::response::build_actor_context(&identity);
-    if let Err(e) = crate::fga_check(&s, &ctx, "admin", &format!("instance:{}", ctx.instance_id())).await {
+    if let Err(e) = crate::fga_check(
+        &s,
+        &ctx,
+        "admin",
+        &format!("instance:{}", ctx.instance_id()),
+    )
+    .await
+    {
         return e;
     }
     let catalog = zitadel_catalog::Catalog::embedded();

@@ -1,7 +1,9 @@
 use crate::context::ActorContext;
 use crate::error::AppError;
 use crate::event::DomainEvent;
-use crate::repo::{DomainRecord, DomainRemoveResult, InstanceRecord, ListParams, ListResult, Repositories};
+use crate::repo::{
+    DomainRecord, DomainRemoveResult, InstanceRecord, ListParams, ListResult, Repositories,
+};
 use std::sync::Arc;
 
 pub struct CreateInstance {
@@ -37,7 +39,10 @@ impl CreateInstance {
         // Authz: operator admins can always create instances.
         // Non-operators must be admin on the owner org.
         crate::authz::require_permission(
-            &self.repos, ctx, "admin", &format!("org:{}", owner_org_id),
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("org:{}", owner_org_id),
         )
         .await?;
 
@@ -160,7 +165,13 @@ impl UpdateInstance {
         cmd: UpdateInstanceCommand,
     ) -> Result<InstanceRecord, AppError> {
         // Authz: caller must be admin on the target instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", cmd.instance_id)).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("instance:{}", cmd.instance_id),
+        )
+        .await?;
 
         let mut instance = self
             .repos
@@ -243,11 +254,11 @@ impl DeprovisionInstance {
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("instance", instance_id))?;
 
-        if instance.state == "deprovisioned" {
+        if instance.state != "active" && instance.state != "created" {
             return Err(AppError::InvalidState {
                 entity: "instance".to_string(),
                 id: instance_id.to_string(),
-                current_state: "deprovisioned".to_string(),
+                current_state: instance.state.clone(),
                 expected_state: "active or created".to_string(),
             });
         }
@@ -331,7 +342,13 @@ impl AddDomain {
         }
 
         // Authz: caller must be admin on the target instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", cmd.instance_id)).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("instance:{}", cmd.instance_id),
+        )
+        .await?;
 
         let now = crate::users::chrono_now();
         let record = DomainRecord {
@@ -390,7 +407,13 @@ impl RemoveDomain {
         domain: &str,
     ) -> Result<DomainRemoveResult, AppError> {
         // Authz: caller must be admin on the target instance
-        crate::authz::require_permission(&self.repos, ctx, "admin", &format!("instance:{}", instance_id)).await?;
+        crate::authz::require_permission(
+            &self.repos,
+            ctx,
+            "admin",
+            &format!("instance:{}", instance_id),
+        )
+        .await?;
 
         let result = self
             .repos
