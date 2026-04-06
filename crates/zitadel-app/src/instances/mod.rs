@@ -46,7 +46,7 @@ impl CreateInstance {
 
         let record = InstanceRecord {
             instance_id: instance_id.clone(),
-            state: "created".to_string(),
+            state: "active".to_string(),
             kind: cmd.kind,
             placement_mode: cmd.placement_mode,
             region_key: cmd.region_key,

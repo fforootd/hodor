@@ -2,14 +2,26 @@
 //!
 //! These tests verify business logic in isolation — no database, no HTTP.
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use zitadel_app::ApplicationServices;
 use zitadel_app::context::{ActorContext, AuthContext, Capability, Identity, InstanceContext};
 use zitadel_app::error::AppError;
 use zitadel_app::hook::HookPipeline;
-use zitadel_app::mock::{MockEventRepository, MockOrgRepository, MockUserRepository};
-use zitadel_app::repo::Repositories;
-use zitadel_app::users::{CreateUser, CreateUserCommand};
+use zitadel_app::repo::{
+    BoxFuture, ConsoleBootstrapData, DomainRecord, DomainRemoveResult, FingerprintRecord,
+    GroupRecord, GroupRepository, InstanceInfo, InstanceRecord, InstanceRepository, JobRecord,
+    ListParams, ListResult, NamedResourceRecord, OrgSummary, RawQueryRepository, Repositories,
+    RouteResolution, SavedQueryRecord,
+};
+use zitadel_app::{
+    groups::{CreateGroupCommand, UpdateGroupCommand},
+    instances::{CreateInstanceCommand, UpdateInstanceCommand},
+    resources::{CreateNamedResourceCommand, UpdateNamedResourceCommand},
+};
+use zitadel_app::users::CreateUserCommand;
 
 fn test_ctx() -> ActorContext {
     ActorContext {
@@ -37,6 +49,386 @@ fn test_services() -> (Arc<ApplicationServices>, Arc<Repositories>) {
     let hooks = Arc::new(HookPipeline::empty());
     let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
     (app, repos)
+}
+
+fn test_services_with_repositories(repos: Repositories) -> (Arc<ApplicationServices>, Arc<Repositories>) {
+    let repos = Arc::new(repos);
+    let hooks = Arc::new(HookPipeline::empty());
+    let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
+    (app, repos)
+}
+
+#[derive(Default)]
+struct MemoryGroupRepository {
+    store: Mutex<HashMap<(String, String), GroupRecord>>,
+}
+
+impl MemoryGroupRepository {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl GroupRepository for MemoryGroupRepository {
+    fn create(
+        &self,
+        instance_id: &str,
+        group: &GroupRecord,
+    ) -> BoxFuture<'_, anyhow::Result<GroupRecord>> {
+        let key = (instance_id.to_string(), group.id.clone());
+        let group = group.clone();
+        Box::pin(async move {
+            self.store.lock().unwrap().insert(key, group.clone());
+            Ok(group)
+        })
+    }
+
+    fn get(
+        &self,
+        instance_id: &str,
+        group_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<GroupRecord>>> {
+        let key = (instance_id.to_string(), group_id.to_string());
+        Box::pin(async move { Ok(self.store.lock().unwrap().get(&key).cloned()) })
+    }
+
+    fn list(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        _params: &ListParams,
+    ) -> BoxFuture<'_, anyhow::Result<ListResult<GroupRecord>>> {
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(ToOwned::to_owned);
+        Box::pin(async move {
+            let items = self
+                .store
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|((stored_instance_id, _), group)| {
+                    stored_instance_id == &instance_id
+                        && org_id
+                            .as_ref()
+                            .is_none_or(|expected_org_id| &group.org_id == expected_org_id)
+                })
+                .map(|(_, group)| group.clone())
+                .collect();
+            Ok(ListResult {
+                items,
+                next_cursor: None,
+                total_count: None,
+            })
+        })
+    }
+
+    fn update(
+        &self,
+        instance_id: &str,
+        group: &GroupRecord,
+    ) -> BoxFuture<'_, anyhow::Result<GroupRecord>> {
+        let key = (instance_id.to_string(), group.id.clone());
+        let group = group.clone();
+        Box::pin(async move {
+            self.store.lock().unwrap().insert(key, group.clone());
+            Ok(group)
+        })
+    }
+
+    fn delete(&self, instance_id: &str, group_id: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        let key = (instance_id.to_string(), group_id.to_string());
+        Box::pin(async move {
+            self.store.lock().unwrap().remove(&key);
+            Ok(())
+        })
+    }
+
+    fn add_member(
+        &self,
+        _instance_id: &str,
+        _group_id: &str,
+        _user_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn remove_member(
+        &self,
+        _instance_id: &str,
+        _group_id: &str,
+        _user_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[derive(Default)]
+struct MemoryNamedResourceRepository {
+    store: Mutex<HashMap<(String, String, String), NamedResourceRecord>>,
+}
+
+impl MemoryNamedResourceRepository {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl RawQueryRepository for MemoryNamedResourceRepository {
+    fn create_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+        name: &str,
+        _org_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>> {
+        let key = (instance_id.to_string(), table.to_string(), id.to_string());
+        let record = NamedResourceRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            state: "active".into(),
+            created_at: "created".into(),
+            updated_at: "created".into(),
+        };
+        Box::pin(async move {
+            self.store.lock().unwrap().insert(key, record.clone());
+            Ok(record)
+        })
+    }
+
+    fn get_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
+        let key = (instance_id.to_string(), table.to_string(), id.to_string());
+        Box::pin(async move { Ok(self.store.lock().unwrap().get(&key).cloned()) })
+    }
+
+    fn list_named_resources(
+        &self,
+        instance_id: &str,
+        table: &str,
+        _cursor: &str,
+        _limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>> {
+        let instance_id = instance_id.to_string();
+        let table = table.to_string();
+        Box::pin(async move {
+            let mut items: Vec<_> = self
+                .store
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|((stored_instance_id, stored_table, _), _)| {
+                    stored_instance_id == &instance_id && stored_table == &table
+                })
+                .map(|(_, item)| item.clone())
+                .collect();
+            items.sort_by(|left, right| left.id.cmp(&right.id));
+            Ok(items)
+        })
+    }
+
+    fn update_named_resource_name(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+        name: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let key = (instance_id.to_string(), table.to_string(), id.to_string());
+        let next_name = name.to_string();
+        Box::pin(async move {
+            let mut guard = self.store.lock().unwrap();
+            if let Some(record) = guard.get_mut(&key) {
+                record.name = next_name;
+                record.updated_at = "updated".into();
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+    }
+
+    fn delete_named_resource(
+        &self,
+        instance_id: &str,
+        table: &str,
+        id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        let key = (instance_id.to_string(), table.to_string(), id.to_string());
+        Box::pin(async move { Ok(self.store.lock().unwrap().remove(&key).is_some()) })
+    }
+
+    fn load_console_bootstrap(
+        &self,
+        _instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<ConsoleBootstrapData>> {
+        Box::pin(async {
+            Ok(ConsoleBootstrapData {
+                counts: vec![],
+                orgs: Vec::<OrgSummary>::new(),
+                instance: InstanceInfo {
+                    instance_id: "test-instance".into(),
+                    kind: "root".into(),
+                    feature_overrides_json: "{}".into(),
+                    parent_instance_id: None,
+                },
+            })
+        })
+    }
+
+    fn load_entity_counts(
+        &self,
+        _instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<(String, i64)>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn list_fingerprints(
+        &self,
+        _instance_id: &str,
+        _cursor: &str,
+        _limit: i64,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<FingerprintRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn upsert_fingerprint(
+        &self,
+        _instance_id: &str,
+        _id: &str,
+        _type_: &str,
+        _raw_data: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn list_jobs(&self, _instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<JobRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn list_saved_queries(
+        &self,
+        _instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SavedQueryRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn create_saved_query(
+        &self,
+        _instance_id: &str,
+        _id: &str,
+        _name: &str,
+        _description: &str,
+        _sql: &str,
+    ) -> BoxFuture<'_, anyhow::Result<SavedQueryRecord>> {
+        Box::pin(async { anyhow::bail!("not implemented in test repository") })
+    }
+
+    fn delete_saved_query(
+        &self,
+        _instance_id: &str,
+        _id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+}
+
+#[derive(Default)]
+struct MemoryInstanceRepository {
+    store: Mutex<HashMap<String, InstanceRecord>>,
+}
+
+impl MemoryInstanceRepository {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl InstanceRepository for MemoryInstanceRepository {
+    fn create(
+        &self,
+        _root_instance_id: &str,
+        instance: &InstanceRecord,
+    ) -> BoxFuture<'_, anyhow::Result<InstanceRecord>> {
+        let instance = instance.clone();
+        let key = instance.instance_id.clone();
+        Box::pin(async move {
+            self.store.lock().unwrap().insert(key, instance.clone());
+            Ok(instance)
+        })
+    }
+
+    fn get(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Option<InstanceRecord>>> {
+        let instance_id = instance_id.to_string();
+        Box::pin(async move { Ok(self.store.lock().unwrap().get(&instance_id).cloned()) })
+    }
+
+    fn list(
+        &self,
+        _root_instance_id: &str,
+        _params: &ListParams,
+    ) -> BoxFuture<'_, anyhow::Result<ListResult<InstanceRecord>>> {
+        Box::pin(async move {
+            let mut items: Vec<_> = self.store.lock().unwrap().values().cloned().collect();
+            items.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+            Ok(ListResult {
+                items,
+                next_cursor: None,
+                total_count: None,
+            })
+        })
+    }
+
+    fn update(&self, instance: &InstanceRecord) -> BoxFuture<'_, anyhow::Result<InstanceRecord>> {
+        let instance = instance.clone();
+        let key = instance.instance_id.clone();
+        Box::pin(async move {
+            self.store.lock().unwrap().insert(key, instance.clone());
+            Ok(instance)
+        })
+    }
+
+    fn deprovision(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        let instance_id = instance_id.to_string();
+        Box::pin(async move {
+            if let Some(instance) = self.store.lock().unwrap().get_mut(&instance_id) {
+                instance.state = "deprovisioning".into();
+                instance.updated_at = "deprovisioned".into();
+            }
+            Ok(())
+        })
+    }
+
+    fn resolve_domain(
+        &self,
+        _domain: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<RouteResolution>>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn list_domains(&self, _instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn set_domain(
+        &self,
+        _instance_id: &str,
+        _domain: &DomainRecord,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn remove_domain(
+        &self,
+        _instance_id: &str,
+        _domain: &str,
+    ) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>> {
+        Box::pin(async { Ok(DomainRemoveResult::NotFound) })
+    }
 }
 
 // ─── CreateUser tests ─��──────────────────────────────────
@@ -545,6 +937,316 @@ async fn delete_org_requires_operator_admin() {
     assert!(matches!(err, AppError::OperatorAdminRequired));
 }
 
+// ─── Group subsystem tests ───────────────────────────────
+
+#[tokio::test]
+async fn groups_validate_and_persist_crud_behavior() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.groups = Arc::new(MemoryGroupRepository::new());
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = test_ctx();
+
+    let validation_err = app
+        .create_group
+        .execute(
+            &ctx,
+            CreateGroupCommand {
+                name: String::new(),
+                org_id: "org-1".into(),
+                metadata: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(validation_err, AppError::Validation { .. }));
+
+    let created = app
+        .create_group
+        .execute(
+            &ctx,
+            CreateGroupCommand {
+                name: "Platform".into(),
+                org_id: "org-1".into(),
+                metadata: serde_json::json!({ "team": "identity" }),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.name, "Platform");
+    assert_eq!(created.org_id, "org-1");
+
+    let fetched = app.get_group.execute(&ctx, &created.id).await.unwrap();
+    assert_eq!(fetched.id, created.id);
+
+    let listed = app
+        .list_groups
+        .execute(
+            &ctx,
+            Some("org-1"),
+            &ListParams {
+                limit: Some(50),
+                cursor: None,
+                search: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].id, created.id);
+
+    let updated = app
+        .update_group
+        .execute(
+            &ctx,
+            UpdateGroupCommand {
+                group_id: created.id.clone(),
+                name: Some("Platform Security".into()),
+                metadata: Some(serde_json::json!({ "team": "security" })),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "Platform Security");
+    assert_eq!(updated.metadata["team"], "security");
+
+    app.delete_group.execute(&ctx, &created.id).await.unwrap();
+
+    let missing = app.get_group.execute(&ctx, &created.id).await.unwrap_err();
+    assert!(matches!(missing, AppError::NotFound { .. }));
+
+    let update_missing = app
+        .update_group
+        .execute(
+            &ctx,
+            UpdateGroupCommand {
+                group_id: created.id.clone(),
+                name: Some("No longer here".into()),
+                metadata: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(update_missing, AppError::NotFound { .. }));
+
+    let delete_missing = app.delete_group.execute(&ctx, &created.id).await.unwrap_err();
+    assert!(matches!(delete_missing, AppError::NotFound { .. }));
+}
+
+// ─── Named resource subsystem tests ──────────────────────
+
+#[tokio::test]
+async fn named_resources_support_projects_and_apps() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.raw = Arc::new(MemoryNamedResourceRepository::new());
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = test_ctx();
+
+    let project = app
+        .create_named_resource
+        .execute(
+            &ctx,
+            CreateNamedResourceCommand {
+                kind: "projects".into(),
+                name: "Customer Portal".into(),
+                org_id: "org-1".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let application = app
+        .create_named_resource
+        .execute(
+            &ctx,
+            CreateNamedResourceCommand {
+                kind: "apps".into(),
+                name: "Console Frontend".into(),
+                org_id: "org-1".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let listed_projects = app
+        .list_named_resources
+        .execute(&ctx, "projects", "", 50)
+        .await
+        .unwrap();
+    assert_eq!(listed_projects.len(), 1);
+    assert_eq!(listed_projects[0].id, project.id);
+
+    let listed_apps = app
+        .list_named_resources
+        .execute(&ctx, "apps", "", 50)
+        .await
+        .unwrap();
+    assert_eq!(listed_apps.len(), 1);
+    assert_eq!(listed_apps[0].id, application.id);
+
+    let loaded_project = app
+        .get_named_resource
+        .execute(&ctx, "projects", &project.id)
+        .await
+        .unwrap();
+    assert_eq!(loaded_project.name, "Customer Portal");
+
+    let updated_project = app
+        .update_named_resource
+        .execute(
+            &ctx,
+            UpdateNamedResourceCommand {
+                kind: "projects".into(),
+                id: project.id.clone(),
+                name: "Customer Portal Renamed".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(updated_project);
+
+    let reloaded_project = app
+        .get_named_resource
+        .execute(&ctx, "projects", &project.id)
+        .await
+        .unwrap();
+    assert_eq!(reloaded_project.name, "Customer Portal Renamed");
+
+    let deleted_application = app
+        .delete_named_resource
+        .execute(&ctx, "apps", &application.id)
+        .await
+        .unwrap();
+    assert!(deleted_application);
+
+    let missing_application = app
+        .get_named_resource
+        .execute(&ctx, "apps", &application.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(missing_application, AppError::NotFound { .. }));
+
+    let update_missing = app
+        .update_named_resource
+        .execute(
+            &ctx,
+            UpdateNamedResourceCommand {
+                kind: "apps".into(),
+                id: "missing".into(),
+                name: "Missing".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!update_missing);
+
+    let delete_missing = app
+        .delete_named_resource
+        .execute(&ctx, "projects", "missing")
+        .await
+        .unwrap();
+    assert!(!delete_missing);
+}
+
+// ─── Instance subsystem tests ────────────────────────────
+
+#[tokio::test]
+async fn instances_support_create_update_and_deprovision_state_transitions() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.instances = Arc::new(MemoryInstanceRepository::new());
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = test_ctx();
+
+    let created = app
+        .create_instance
+        .execute(
+            &ctx,
+            CreateInstanceCommand {
+                kind: "managed".into(),
+                placement_mode: "global".into(),
+                region_key: None,
+                owner_org_id: "org-1".into(),
+                feature_overrides: serde_json::json!({}),
+                primary_domain: Some("tenant.example.com".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.state, "created");
+    assert_eq!(created.primary_domain.as_deref(), Some("tenant.example.com"));
+
+    let fetched = app
+        .get_instance
+        .execute(&ctx, &created.instance_id)
+        .await
+        .unwrap();
+    assert_eq!(fetched.instance_id, created.instance_id);
+
+    let listed = app
+        .list_instances
+        .execute(
+            &ctx,
+            &ListParams {
+                limit: Some(50),
+                cursor: None,
+                search: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(listed.items.len(), 1);
+    assert_eq!(listed.items[0].instance_id, created.instance_id);
+
+    let updated = app
+        .update_instance
+        .execute(
+            &ctx,
+            UpdateInstanceCommand {
+                instance_id: created.instance_id.clone(),
+                placement_mode: Some("regional".into()),
+                region_key: Some("europe-west1".into()),
+                feature_overrides: Some(serde_json::json!({ "custom_domains": true })),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.placement_mode, "regional");
+    assert_eq!(updated.region_key.as_deref(), Some("europe-west1"));
+    assert_eq!(updated.feature_overrides["custom_domains"], true);
+
+    app.deprovision_instance
+        .execute(&ctx, &created.instance_id)
+        .await
+        .unwrap();
+
+    let deprovisioned = app
+        .get_instance
+        .execute(&ctx, &created.instance_id)
+        .await
+        .unwrap();
+    assert_eq!(deprovisioned.state, "deprovisioning");
+
+    let duplicate_deprovision = app
+        .deprovision_instance
+        .execute(&ctx, &created.instance_id)
+        .await
+        .unwrap_err();
+    assert!(matches!(duplicate_deprovision, AppError::InvalidState { .. }));
+
+    let update_missing = app
+        .update_instance
+        .execute(
+            &ctx,
+            UpdateInstanceCommand {
+                instance_id: "missing-instance".into(),
+                placement_mode: Some("regional".into()),
+                region_key: None,
+                feature_overrides: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(update_missing, AppError::NotFound { .. }));
+}
+
 // ─── ApplicationServices wiring test ─────────────────────
 
 #[tokio::test]
@@ -552,8 +1254,6 @@ async fn application_services_wired_correctly() {
     let (app, _) = test_services();
 
     // Verify all use case fields are accessible (compile-time check + runtime sanity)
-    let ctx = test_ctx();
-
     // Each field should be callable without panicking on construction
     let _ = &app.create_user;
     let _ = &app.get_user;

@@ -1,4 +1,5 @@
 use crate::{ApiState, extractors::ResourceId, response};
+use axum::Extension;
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -93,9 +94,14 @@ struct InstallRequest {
 /// POST /v1/catalog/{id}/install — install a template with variable substitution.
 async fn install_from_catalog(
     State(s): State<ApiState>,
+    Extension(identity): Extension<crate::middleware::Identity>,
     ResourceId(id): ResourceId,
     Json(req): Json<InstallRequest>,
 ) -> Response {
+    let ctx = crate::response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "admin", &format!("instance:{}", ctx.instance_id())).await {
+        return e;
+    }
     let catalog = zitadel_catalog::Catalog::embedded();
 
     // Check template exists and determine type.
@@ -116,7 +122,7 @@ async fn install_from_catalog(
                 })),
             )
                 .into_response(),
-            Err(e) => response::internal_error(format!("install failed: {e}")),
+            Err(e) => response::internal(e),
         },
         "action" => match catalog.install_action(&id, &req.variables, &s.db).await {
             Ok(action_id) => (
@@ -129,7 +135,7 @@ async fn install_from_catalog(
                 })),
             )
                 .into_response(),
-            Err(e) => response::internal_error(format!("install failed: {e}")),
+            Err(e) => response::internal(e),
         },
         // For other types (login_flow, authorization), return stub for now.
         other => (

@@ -9,12 +9,6 @@ use serde::{Deserialize, Serialize};
 use zitadel_db::current_instance_id;
 use zitadel_storage::AnalyticsQuery;
 
-// TODO(ADR-032): Session operations (list_own_sessions, get_own_session,
-// revoke_own_session, revoke_other_sessions) and activity listing bypass the
-// app layer. They depend on s.transient and s.analytics, which are separate
-// storage roles (ADR-010) not yet exposed through Repositories.
-// Profile operations (get_profile, update_profile) are compliant.
-
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/account/profile", get(get_profile).patch(update_profile))
@@ -113,7 +107,7 @@ async fn update_profile(
     }
 }
 
-// ─── Sessions ───
+// ─── Sessions (routed through app layer) ───
 
 #[derive(Serialize)]
 struct OwnSessionResponse {
@@ -133,8 +127,8 @@ async fn list_own_sessions(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
 ) -> Response {
-    let instance_id = current_instance_id();
-    match s.transient.list_sessions(&instance_id).await {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.list_sessions.execute(&ctx).await {
         Ok(rows) => {
             let sessions: Vec<OwnSessionResponse> = rows
                 .into_iter()
@@ -158,7 +152,7 @@ async fn list_own_sessions(
                 "sessions": sessions,
             }))
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
@@ -167,18 +161,16 @@ async fn revoke_own_session(
     Extension(identity): Extension<Identity>,
     Path(id): Path<String>,
 ) -> Response {
+    let ctx = response::build_actor_context(&identity);
     // Verify the session belongs to this user.
-    let instance_id = current_instance_id();
-    match s.transient.get_session(&instance_id, &id).await {
-        Ok(Some(session)) if session.user_id == identity.user_id => {}
-        Ok(Some(_)) => return response::forbidden("cannot revoke another user's session"),
-        Ok(None) => return response::not_found("session not found"),
-        Err(e) => return response::internal_error(format!("{e}")),
+    match s.app.get_session.execute(&ctx, &id).await {
+        Ok(session) if session.user_id == identity.user_id => {}
+        Ok(_) => return response::forbidden("cannot revoke another user's session"),
+        Err(e) => return response::app_error(e),
     }
-    match s.transient.revoke_session(&instance_id, &id).await {
-        Ok(true) => response::no_content(),
-        Ok(false) => response::not_found("session not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+    match s.app.runner.run_fn(&ctx, "session.revoke", || s.app.revoke_session.execute(&ctx, &id)).await {
+        Ok(()) => response::no_content(),
+        Err(e) => response::app_error(e),
     }
 }
 
@@ -186,8 +178,8 @@ async fn revoke_other_sessions(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
 ) -> Response {
-    let instance_id = current_instance_id();
-    match s.transient.list_sessions(&instance_id).await {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.list_sessions.execute(&ctx).await {
         Ok(rows) => {
             let mut revoked = 0u32;
             for session in rows {
@@ -195,18 +187,21 @@ async fn revoke_other_sessions(
                     && session.id != identity.session_id
                     && session.revoked_at.is_none()
                 {
-                    if let Ok(true) = s.transient.revoke_session(&instance_id, &session.id).await {
+                    if s.app.revoke_session.execute(&ctx, &session.id).await.is_ok() {
                         revoked += 1;
                     }
                 }
             }
             response::json_ok(serde_json::json!({ "revoked": revoked }))
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
 // ─── Activity ───
+// Activity listing queries analytics storage directly.
+// This is a read-only analytics query and is kept outside the use-case layer
+// intentionally — analytics is a separate storage role (ADR-010).
 
 #[derive(Deserialize)]
 struct ActivityParams {
@@ -241,7 +236,7 @@ async fn list_own_activity(
     {
         Ok(result) => {
             if let Some(error) = result.error {
-                return response::internal_error(error);
+                return response::internal(error);
             }
             let events: Vec<serde_json::Value> = result
                 .rows
@@ -263,6 +258,6 @@ async fn list_own_activity(
                 "events": events,
             }))
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::internal(e),
     }
 }

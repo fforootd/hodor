@@ -57,19 +57,17 @@ export async function completePasswordLogin(
   userIdentifier: string,
   userPassword: string,
 ) {
-  const passwordInput = page.locator('input[name="password"], input[type="password"]').first()
-  const identifierInput = page
-    .locator('input[name="identifier"], input[type="text"], input[type="email"]')
-    .first()
-  const continueButton = page.getByRole('button', { name: /^Continue$/i })
-  const signInButton = page.getByRole('button', { name: /^Sign in$/i })
+  const visibleIdentifierSelector =
+    'input[name="identifier"]:visible, input[type="text"]:visible, input[type="email"]:visible'
+  const visiblePasswordSelector =
+    'input[name="password"]:visible, input[type="password"]:visible'
+  const passwordInput = page.locator(visiblePasswordSelector).first()
+  const identifierInput = page.locator(visibleIdentifierSelector).first()
+  const continueButton = page.locator('button:visible').filter({ hasText: /^Continue$/i }).first()
+  const signInButton = page.locator('button:visible').filter({ hasText: /Sign in/i }).first()
 
   await expect(
-    page
-      .locator(
-        'input[name="identifier"], input[type="text"], input[type="email"], input[name="password"], input[type="password"]',
-      )
-      .first(),
+    page.locator(`${visibleIdentifierSelector}, ${visiblePasswordSelector}`).first(),
   ).toBeVisible({ timeout: 15_000 })
 
   if (await identifierInput.isVisible()) {
@@ -87,8 +85,34 @@ export async function completePasswordLogin(
 
   await expect(passwordInput).toBeVisible({ timeout: 15_000 })
   await passwordInput.fill(userPassword)
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const submitPasswordStep = async (strategy: 'button' | 'form' | 'enter') => {
+    const buttonVisible = await signInButton.isVisible().catch(() => false)
+    if (strategy === 'button' && buttonVisible) {
+      await signInButton.click()
+      return
+    }
+
+    if (strategy === 'form') {
+      await page.locator('form').evaluate((form) => {
+        if (!(form instanceof HTMLFormElement)) {
+          throw new Error('visible login form not found')
+        }
+        form.requestSubmit()
+      })
+      return
+    }
+
+    if (strategy === 'enter') {
+      await passwordInput.press('Enter')
+      return
+    }
+
     await passwordInput.press('Enter')
+  }
+
+  const submitStrategies: Array<'button' | 'form' | 'enter'> = ['button', 'form', 'enter']
+  for (const strategy of submitStrategies) {
+    await submitPasswordStep(strategy)
 
     if (!page.url().includes('/login')) {
       return
@@ -111,6 +135,11 @@ export async function completePasswordLogin(
       await page.waitForTimeout(100)
     }
   }
+
+  const bodyText = await page.locator('body').innerText().catch(() => '')
+  throw new Error(
+    `Password login did not advance. Current URL: ${page.url()}. Body: ${bodyText.slice(0, 300)}`,
+  )
 }
 
 export async function completeMockOidcLogin(page: Page, password: string, email?: string) {

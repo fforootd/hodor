@@ -18,8 +18,10 @@ const callbackOrigin = 'http://127.0.0.1:9876'
 const redirectUri = `${callbackOrigin}/callback`
 const userIdentifier = 'e2e-user@example.com'
 const userPassword = 'password123'
-const reusableSessionIdentifier = 'admin'
-const reusableSessionPassword = 'admin123'
+const reusableSessionIdentifier = 'reviewer@example.com'
+const reusableSessionPassword = 'password123'
+const promptLoginSessionIdentifier = 'prompt-login@example.com'
+const promptLoginSessionPassword = 'password123'
 
 const callbackHarness = new CallbackHarness(callbackOrigin, 9876)
 
@@ -102,10 +104,10 @@ test.describe.serial('OIDC code + PKCE journey', () => {
   test('prompt=login forces fresh credentials even when a session exists', async () => {
     test.setTimeout(60_000)
     await withIsolatedPage(async (page) => {
-      await establishAuthenticatedBrowserSession(page, {
-        userIdentifier: reusableSessionIdentifier,
-        userPassword: reusableSessionPassword,
-      })
+      const initialAuth = await createAuthorizationRequest({ redirectUri })
+      await page.goto(initialAuth.url)
+      await completePasswordLogin(page, promptLoginSessionIdentifier, promptLoginSessionPassword)
+      await waitForCallback(page, redirectUri, initialAuth.state, () => callbackHarness.lastCallback())
 
       callbackHarness.reset()
       const auth = await createAuthorizationRequest({ redirectUri, prompt: 'login' })
@@ -116,7 +118,7 @@ test.describe.serial('OIDC code + PKCE journey', () => {
         page.locator('input[name="identifier"], input[type="text"], input[type="email"]').first(),
       ).toBeVisible({ timeout: 15_000 })
 
-      await completePasswordLogin(page, userIdentifier, userPassword)
+      await completePasswordLogin(page, promptLoginSessionIdentifier, promptLoginSessionPassword)
 
       const callbackURL = await waitForCallback(page, redirectUri, auth.state, () => callbackHarness.lastCallback())
       const exchanged = await exchangeAuthorizationCode(

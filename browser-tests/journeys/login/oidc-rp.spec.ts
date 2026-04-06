@@ -59,14 +59,14 @@ async function expectAuthenticatedApiSession(page: Page) {
   const cookies = await page.context().cookies()
   expect(cookies.some((cookie) => cookie.name === sessionCookieName && cookie.value.length > 0)).toBe(true)
 
-  const sessions = await browserJSON(page, '/v1/sessions')
+  const sessions = await browserJSON(page, '/v1/account/sessions')
   expect(sessions.status).toBe(200)
-  expect(Array.isArray(sessions.body.items)).toBe(true)
-  expect(sessions.body.items.length).toBeGreaterThan(0)
+  expect(Array.isArray(sessions.body.sessions)).toBe(true)
+  expect(sessions.body.sessions.length).toBeGreaterThan(0)
 }
 
 async function expectUnauthenticatedApiSession(page: Page) {
-  const sessions = await browserJSON(page, '/v1/sessions')
+  const sessions = await browserJSON(page, '/v1/account/sessions')
   expect(sessions.status).toBe(401)
 }
 

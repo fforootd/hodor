@@ -29,6 +29,81 @@
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        <!-- Instance Switcher (root instances only) -->
+        <div v-if="isRootInstance" class="px-2 group-data-[collapsible=icon]:hidden">
+          <Popover v-model:open="showInstanceDropdown">
+            <PopoverTrigger as-child>
+              <button class="w-full flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-sm hover:bg-sidebar-accent transition-colors">
+                <span class="flex items-center gap-2 truncate">
+                  <Server class="size-3.5 shrink-0 text-muted-foreground" />
+                  <span class="truncate">{{ instanceDisplayLabel }}</span>
+                </span>
+                <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent class="w-64 p-0" align="start" side="bottom">
+              <Command>
+                <CommandInput placeholder="Find instance..." />
+                <CommandList>
+                  <CommandEmpty>No instance found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem value="no-instance" @select="deselectInstance">
+                      <Globe class="mr-2 size-4" />
+                      No instance selected
+                    </CommandItem>
+                    <CommandItem
+                      v-for="inst in instanceList"
+                      :key="inst.instance_id"
+                      :value="inst.primary_domain || inst.instance_id"
+                      @select="selectInstance(inst)"
+                    >
+                      <Server class="mr-2 size-4" />
+                      {{ inst.primary_domain || inst.instance_id }}
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <!-- Org Switcher -->
+        <div class="px-2 pb-1 group-data-[collapsible=icon]:hidden">
+          <Popover v-model:open="showOrgDropdown">
+            <PopoverTrigger as-child>
+              <button class="w-full flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-sm hover:bg-sidebar-accent transition-colors">
+                <span class="flex items-center gap-2 truncate">
+                  <Building2 class="size-3.5 shrink-0 text-muted-foreground" />
+                  <span class="truncate">{{ selectedOrg?.display_name || 'All Orgs' }}</span>
+                </span>
+                <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent class="w-56 p-0" align="start" side="bottom">
+              <Command>
+                <CommandInput placeholder="Search organizations..." />
+                <CommandList>
+                  <CommandEmpty>No organization found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem value="all-orgs" @select="selectOrg(null)">
+                      <Globe class="mr-2 size-4" />
+                      All Organizations
+                    </CommandItem>
+                    <CommandItem
+                      v-for="org in orgs"
+                      :key="org.id"
+                      :value="org.display_name"
+                      @select="selectOrg(org)"
+                    >
+                      <Building2 class="mr-2 size-4" />
+                      {{ org.display_name }}
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
       </SidebarHeader>
 
       <SidebarContent>
@@ -104,8 +179,6 @@
                         <router-link :to="resolveRoute(item.route)">
                           <component :is="getIcon(item.type)" class="size-4" />
                           <span>{{ item.label }}</span>
-                          <span v-if="item.count !== undefined && item.count > 0"
-                            class="ml-auto text-xs text-muted-foreground tabular-nums">{{ item.count }}</span>
                         </router-link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -130,23 +203,6 @@
             </template>
           </template>
 
-          <!-- Admin section (operators only, drillable) -->
-          <template v-if="isOperatorAdmin">
-            <SidebarSeparator class="my-1" />
-            <SidebarGroup>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton @click="drilledCategoryKey = '_admin'" :data-active="isAdminRouteActive" :tooltip="'Admin'">
-                      <ShieldCheck class="size-4" />
-                      <span>Admin</span>
-                      <ChevronRight class="ml-auto size-4 opacity-50" />
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </template>
         </template>
       </SidebarContent>
 
@@ -211,74 +267,6 @@
         </Breadcrumb>
 
         <div class="ml-auto flex items-center gap-2">
-          <!-- Instance Switcher (root only) -->
-          <Popover v-if="isRootInstance" v-model:open="showInstanceDropdown">
-            <PopoverTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-1.5 text-xs">
-                <Server class="size-3.5" />
-                {{ currentInstanceDomain || 'Select instance...' }}
-                <ChevronsUpDown class="size-3 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent class="w-64 p-0" align="end">
-              <Command>
-                <CommandInput placeholder="Find instance..." />
-                <CommandList>
-                  <CommandEmpty>No instance found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem value="no-instance" @select="selectInstance(null)">
-                      <Globe class="mr-2 size-4" />
-                      No instance selected
-                    </CommandItem>
-                    <CommandItem
-                      v-for="inst in instanceList"
-                      :key="inst.instance_id"
-                      :value="inst.primary_domain || inst.instance_id"
-                      @select="selectInstance(inst)"
-                    >
-                      <Server class="mr-2 size-4" />
-                      {{ inst.primary_domain || inst.instance_id }}
-                    </CommandItem>
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-
-          <!-- Org Switcher -->
-          <Popover v-model:open="showOrgDropdown">
-            <PopoverTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-1.5 text-xs">
-                <Building2 class="size-3.5" />
-                {{ selectedOrg?.display_name || 'All Orgs' }}
-                <ChevronsUpDown class="size-3 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent class="w-56 p-0" align="end">
-              <Command>
-                <CommandInput placeholder="Search organizations..." />
-                <CommandList>
-                  <CommandEmpty>No organization found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem value="all-orgs" @select="selectOrg(null)">
-                      <Globe class="mr-2 size-4" />
-                      All Organizations
-                    </CommandItem>
-                    <CommandItem
-                      v-for="org in orgs"
-                      :key="org.id"
-                      :value="org.display_name"
-                      @select="selectOrg(org)"
-                    >
-                      <Building2 class="mr-2 size-4" />
-                      {{ org.display_name }}
-                    </CommandItem>
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-
           <!-- Command Palette Trigger -->
           <Button
             variant="outline"
@@ -377,7 +365,7 @@
   import { getUserSchemaLabel, normalizeUserSchemaType } from '@/console/utils/user-routes'
   import { useRoute, useRouter } from 'vue-router'
   import { api } from '@/api/client'
-  import { searchApi, instanceApi, countsApi, type SearchResult, type Instance } from '@/api/resources'
+  import { searchApi, instanceApi, orgApi, type SearchResult, type Instance } from '@/api/resources'
   import AppBootstrapScreen from '@/components/AppBootstrapScreen.vue'
   import { Toaster } from '@/components/ui/sonner'
 
@@ -491,12 +479,19 @@
   // ─── Instance Switcher ───
   const { currentInstanceId, currentInstanceDomain, setInstance, clearInstance } = useInstanceContext()
   const showInstanceDropdown = ref(false)
+  const instanceDisplayLabel = computed(() => currentInstanceDomain.value || 'Select instance...')
   const instanceList = ref<Instance[]>([])
 
-  function selectInstance(inst: Instance | null) {
+  function deselectInstance() {
     showInstanceDropdown.value = false
+    // Navigate to root — the route watcher handles clearInstance()
+    router.push('/')
+  }
+
+  function selectInstance(inst: Instance | null) {
     if (inst) {
       setInstance(inst.instance_id, inst.primary_domain || inst.instance_id)
+      showInstanceDropdown.value = false
       // Navigate to the instance, preserving current product section if possible
       const currentPath = route.path
       const instanceMatch = currentPath.match(/^\/instances\/[^/]+(\/.*)?$/)
@@ -504,6 +499,7 @@
       router.push(`/instances/${inst.instance_id}${productPath}`)
     } else {
       clearInstance()
+      showInstanceDropdown.value = false
       router.push('/')
     }
   }
@@ -633,7 +629,6 @@
 
   const navItems = ref<NavItem[]>([])
   const navGroupDefs = ref<Record<string, NavGroupDef>>({})
-  const entityCounts = ref<Record<string, number>>({})
 
   // ─── Vercel-style collapsible category definitions ───
   interface NavCategory {
@@ -702,7 +697,6 @@
 
       applyOrgs(bootstrap.orgs?.items || [])
       hydrateNav(bootstrap.meta || {})
-      applyCounts(bootstrap.counts || {})
 
       // Load instances list for the instance switcher (root only).
       if (isRootInstance.value) {
@@ -711,6 +705,17 @@
     },
     {
       waitForReady: createReadyzWaiter(),
+    },
+  )
+
+  // Refresh instance list when navigating back to the instances page
+  // (e.g., after creating a new instance).
+  watch(
+    () => route.name,
+    (name) => {
+      if (isRootInstance.value && (name === 'instances' || name === 'dashboard')) {
+        loadInstances()
+      }
     },
   )
 
@@ -782,28 +787,14 @@
   })
 
   // The currently drilled-in category (resolved from key)
-  const adminDrillItems: NavItem[] = [
-    { type: 'admin-instances', label: 'All Instances', route: '/admin/instances', sortOrder: 0, storage: 'dedicated', countable: false },
-    { type: 'admin-events', label: 'Events', route: '/admin/events', sortOrder: 1, storage: 'dedicated', countable: false },
-    { type: 'billing', label: 'Billing', route: '/billing', sortOrder: 2, storage: 'dedicated', countable: false },
-    { type: 'admin-config', label: 'System Config', route: '/admin/config', sortOrder: 3, storage: 'dedicated', countable: false },
-  ]
-
   const drilledCategory = computed<ResolvedCategory | null>(() => {
     if (!drilledCategoryKey.value) return null
-    if (drilledCategoryKey.value === '_admin') {
-      return { key: '_admin', label: 'Admin', icon: ShieldCheck, drillable: true, items: adminDrillItems }
-    }
     return categorizedNav.value.find(c => c.key === drilledCategoryKey.value) || null
   })
 
   function isCategoryActive(category: ResolvedCategory): boolean {
     return category.items.some(item => isNavActive(item))
   }
-
-  const isAdminRouteActive = computed(() =>
-    ['admin-instances', 'admin-events', 'billing', 'admin-config'].includes(route.name as string)
-  )
 
   // Auto-drill into the matching category when navigating to a sub-item
   watch(
@@ -817,11 +808,6 @@
           drilledCategoryKey.value = cat.key
           return
         }
-      }
-      // Check admin routes
-      if (isAdminRouteActive.value) {
-        drilledCategoryKey.value = '_admin'
-        return
       }
       // No match — go back to top level
       drilledCategoryKey.value = null
@@ -915,20 +901,6 @@
     navItems.value = items.sort((a, b) => a.sortOrder - b.sortOrder)
   }
 
-  function applyCounts(counts: Record<string, number>) {
-    entityCounts.value = counts
-
-    for (const item of navItems.value) {
-      if (!item.countable) continue
-
-      if (item.aggregates && item.aggregates.length > 0) {
-        item.count = item.aggregates.reduce((sum, type) => sum + (entityCounts.value[type] || 0), 0)
-      } else {
-        item.count = entityCounts.value[item.type] || 0
-      }
-    }
-  }
-
   function applyOrgs(items: Array<Record<string, any>>) {
     orgs.value = items.map((org) => ({
       id: String(org.id || ''),
@@ -958,13 +930,13 @@
       } else {
         clearInstance()
       }
-      // Refresh counts — the /v1/counts call gets rewritten to
-      // /v1/instances/:id/counts by the fetch layer when inside an instance.
+      // Refresh orgs for the current scope.
+      // The fetch layer rewrites to /v1/instances/:id/... when inside an instance.
       try {
-        const resp = await countsApi.get()
-        applyCounts(resp as unknown as Record<string, number>)
+        const orgResp = await orgApi.list({ limit: 200 })
+        applyOrgs(orgResp.items ?? [])
       } catch {
-        applyCounts({})
+        applyOrgs([])
       }
     },
   )
@@ -989,9 +961,6 @@
       'instance-detail': 'Instance',
       team: 'Team',
       billing: 'Billing',
-      'admin-instances': 'All Instances',
-      'admin-events': 'Events',
-      'admin-config': 'System Config',
       'user-detail': 'User Detail',
       'identity-create': 'New User',
       orgs: 'Organizations',
@@ -1047,14 +1016,8 @@
     const crumbs: { label: string; path: string }[] = []
     const instanceId = route.params.instanceId as string | undefined
 
-    // Instance trail: Instances > domain.com
-    if (instanceId) {
-      crumbs.push({ label: 'Instances', path: '/instances' })
-      crumbs.push({
-        label: currentInstanceDomain.value || instanceId,
-        path: `/instances/${instanceId}`,
-      })
-    }
+    // Instance context is now shown in the sidebar selector — breadcrumb
+    // only shows navigation within the current instance scope.
 
     // Normalize route name (strip i- prefix for instance-scoped routes)
     const name = (route.name as string || '').replace(/^i-/, '')

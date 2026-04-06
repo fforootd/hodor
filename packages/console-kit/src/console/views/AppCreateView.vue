@@ -75,13 +75,26 @@ const appTypes = [
 
 const canSubmit = computed(() => form.name.trim().length > 0)
 
+function buildClientId(name: string) {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-+/g, '-')
+
+  const base = slug || 'app'
+  return `${base}-${Date.now().toString(36)}`
+}
+
 async function submit() {
   submitting.value = true
   error.value = ''
   try {
+    const trimmedName = form.name.trim()
     const created = await appApi.create({
-      name: form.name.trim(),
-      metadata: { app_type: form.app_type },
+      name: trimmedName,
+      app_type: form.app_type,
+      client_id: buildClientId(trimmedName),
     })
     notifySuccess('Application created', `${form.name} is ready.`)
     router.push(`/applications/${created.id}`)

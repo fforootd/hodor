@@ -1,5 +1,6 @@
 use crate::context::ActorContext;
 use crate::error::AppError;
+use crate::event::DomainEvent;
 use crate::repo::{ActionRecord, ListParams, ListResult, Repositories};
 use std::sync::Arc;
 
@@ -65,11 +66,31 @@ impl CreateAction {
         ctx: &ActorContext,
         action: &ActionRecord,
     ) -> Result<ActionRecord, AppError> {
-        self.repos
+        let result = self
+            .repos
             .actions
             .create(ctx.instance_id(), action)
             .await
-            .map_err(AppError::Internal)
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::ActionCreated {
+                    action_id: result.id.clone(),
+                    name: result.name.clone(),
+                    hook: result.hook.clone(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(result)
     }
 }
 
@@ -88,11 +109,30 @@ impl UpdateAction {
         ctx: &ActorContext,
         action: &ActionRecord,
     ) -> Result<ActionRecord, AppError> {
-        self.repos
+        let result = self
+            .repos
             .actions
             .update(ctx.instance_id(), action)
             .await
-            .map_err(AppError::Internal)
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::ActionUpdated {
+                    action_id: result.id.clone(),
+                    fields_changed: vec!["config".to_string()],
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(result)
     }
 }
 
@@ -107,7 +147,6 @@ impl DeleteAction {
 
     #[tracing::instrument(name = "use_case.delete_action", skip_all)]
     pub async fn execute(&self, ctx: &ActorContext, action_id: &str) -> Result<(), AppError> {
-        // Authz: caller must be admin on the instance
         crate::authz::require_permission(
             &self.repos,
             ctx,
@@ -120,6 +159,23 @@ impl DeleteAction {
             .actions
             .delete(ctx.instance_id(), action_id)
             .await
-            .map_err(AppError::Internal)
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::ActionDeleted {
+                    action_id: action_id.to_string(),
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(())
     }
 }

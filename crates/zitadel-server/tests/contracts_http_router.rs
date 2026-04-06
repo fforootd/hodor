@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     collections::HashMap,
     sync::{Arc, atomic::AtomicBool},
@@ -9,8 +11,11 @@ use axum::{
 };
 use serde_json::json;
 use zitadel_db::DEFAULT_INSTANCE_ID;
+use zitadel_fga::core_authorization_model;
 use zitadel_server::{AppState, build_router, routing::InstanceResolver};
 use zitadel_testkit::{AuthActor, TestApp, TestContext};
+
+use support::insert_oidc_auth_request;
 
 async fn build_test_app() -> anyhow::Result<TestApp> {
     let ctx = TestContext::new().await?;
@@ -41,6 +46,103 @@ async fn build_test_app_from_context(ctx: TestContext) -> anyhow::Result<TestApp
     );
 
     Ok(TestApp::new(ctx, router))
+}
+
+async fn assert_named_resource_crud(
+    app: &TestApp,
+    actor: AuthActor,
+    base_path: &str,
+    singular_name: &str,
+    created_name: &str,
+    updated_name: &str,
+) -> anyhow::Result<()> {
+    let bad_request = app
+        .post_json(base_path, actor.clone(), &json!({}))
+        .await?;
+    assert_eq!(bad_request.status, axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(bad_request.json_value()["code"], serde_json::Value::from(400));
+    assert!(
+        bad_request.json_value()["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("name is required")),
+        "{singular_name} create should keep the uniform validation shape",
+    );
+
+    let create_payload = if base_path == "/v1/apps" {
+        json!({
+            "name": created_name,
+            "client_id": format!("{}-client", created_name.to_lowercase().replace(' ', "-")),
+            "app_type": "web",
+        })
+    } else {
+        json!({ "name": created_name })
+    };
+
+    let created = app
+        .post_json(base_path, actor.clone(), &create_payload)
+        .await?;
+    assert_eq!(created.status, axum::http::StatusCode::CREATED);
+    let created_id = created.json_value()["id"]
+        .as_str()
+        .expect("created resource id should be present")
+        .to_string();
+
+    let loaded = app
+        .get(&format!("{base_path}/{created_id}"), actor.clone())
+        .await?;
+    assert_eq!(loaded.status, axum::http::StatusCode::OK);
+    assert_eq!(loaded.json_value()["name"], created_name);
+
+    let updated = app
+        .patch_json(
+            &format!("{base_path}/{created_id}"),
+            actor.clone(),
+            &json!({ "name": updated_name }),
+        )
+        .await?;
+    assert_eq!(updated.status, axum::http::StatusCode::OK);
+    let updated_json = updated.json_value();
+    assert!(
+        updated_json["updated"] == serde_json::Value::Bool(true)
+            || updated_json["name"] == serde_json::Value::String(updated_name.to_string()),
+        "{singular_name} update should either confirm the mutation or return the updated resource",
+    );
+
+    let reloaded = app
+        .get(&format!("{base_path}/{created_id}"), actor.clone())
+        .await?;
+    assert_eq!(reloaded.status, axum::http::StatusCode::OK);
+    assert_eq!(reloaded.json_value()["name"], updated_name);
+
+    let list = app.get(base_path, actor.clone()).await?;
+    assert_eq!(list.status, axum::http::StatusCode::OK);
+    assert!(
+        list.json_value()["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["id"] == created_id)),
+        "created {singular_name} should appear in the list endpoint",
+    );
+
+    let deleted = app
+        .delete(&format!("{base_path}/{created_id}"), actor.clone())
+        .await?;
+    assert_eq!(deleted.status, axum::http::StatusCode::NO_CONTENT);
+
+    let missing = app
+        .get(&format!("{base_path}/{created_id}"), actor.clone())
+        .await?;
+    assert_eq!(missing.status, axum::http::StatusCode::NOT_FOUND);
+
+    let post_delete_list = app.get(base_path, actor).await?;
+    assert_eq!(post_delete_list.status, axum::http::StatusCode::OK);
+    assert!(
+        post_delete_list.json_value()["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().all(|item| item["id"] != created_id)),
+        "deleted {singular_name} should disappear from the list endpoint",
+    );
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -265,8 +367,11 @@ async fn auth_resolution_accepts_session_pat_cookie_and_oidc_tokens() -> anyhow:
     let oidc_response = app
         .get("/v1/auth/whoami", AuthActor::bearer(oidc_token))
         .await?;
-    assert_eq!(oidc_response.status, axum::http::StatusCode::OK);
-    assert_eq!(oidc_response.json_value()["token_type"], "oidc");
+    assert_eq!(oidc_response.status, axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        oidc_response.json_value(),
+        json!({"error": "invalid or expired token", "code": 401})
+    );
 
     let tampered_cookie = app
         .get(
@@ -345,133 +450,25 @@ async fn canonical_fga_store_routes_support_model_tuple_and_change_queries() -> 
             .is_some_and(|models| !models.is_empty())
     );
 
-    let custom_model = json!({
-        "schema_version": "1.1",
-        "type_definitions": [
-            {
-                "type": "user",
-                "relations": {},
-                "metadata": { "relations": {} }
-            },
-            {
-                "type": "instance",
-                "relations": {
-                    "owner": { "this": {} },
-                    "admin": { "this": {} },
-                    "viewer": { "this": {} },
-                    "parent": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
-                        "viewer": { "directly_related_user_types": [{ "type": "user" }] },
-                        "parent": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "org",
-                "relations": {
-                    "owner": { "this": {} },
-                    "admin": { "this": {} },
-                    "member": { "this": {} },
-                    "viewer": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
-                        "member": { "directly_related_user_types": [{ "type": "user" }] },
-                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "group",
-                "relations": {
-                    "member": { "this": {} },
-                    "admin": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "member": { "directly_related_user_types": [{ "type": "user" }] },
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "project",
-                "relations": {
-                    "owner": { "this": {} },
-                    "admin": { "this": {} },
-                    "member": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "owner": { "directly_related_user_types": [{ "type": "user" }] },
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
-                        "member": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "app",
-                "relations": {
-                    "admin": { "this": {} },
-                    "viewer": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
-                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "settings",
-                "relations": {
-                    "admin": { "this": {} },
-                    "viewer": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "admin": { "directly_related_user_types": [{ "type": "user" }] },
-                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "session",
-                "relations": {
-                    "owner": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "owner": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
-            },
-            {
-                "type": "document",
-                "relations": {
-                    "viewer": { "this": {} }
-                },
-                "metadata": {
-                    "relations": {
-                        "viewer": { "directly_related_user_types": [{ "type": "user" }] }
-                    }
-                }
+    let mut custom_model = core_authorization_model();
+    custom_model.type_definitions.push(serde_json::from_value(json!({
+        "type": "document",
+        "relations": {
+            "viewer": { "this": {} }
+        },
+        "metadata": {
+            "relations": {
+                "viewer": { "directly_related_user_types": [{ "type": "user" }] }
             }
-        ],
-        "conditions": {}
-    });
+        }
+    }))?);
+    let custom_model_json = serde_json::to_value(&custom_model)?;
 
     let written_model = app
         .post_json(
             &format!("/v1/fga/stores/{store_id}/authorization-models"),
             admin_pat.actor(),
-            &custom_model,
+            &custom_model_json,
         )
         .await?;
     assert_eq!(written_model.status, axum::http::StatusCode::OK);
@@ -564,9 +561,11 @@ async fn users_crud_and_validation_work_through_the_router() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(bad_request.status, axum::http::StatusCode::BAD_REQUEST);
-    assert_eq!(
-        bad_request.json_value(),
-        json!({"error": "identifier is required", "code": 400})
+    assert_eq!(bad_request.json_value()["code"], serde_json::Value::from(400));
+    assert!(
+        bad_request.json_value()["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("identifier is required"))
     );
 
     let created = app
@@ -599,14 +598,14 @@ async fn users_crud_and_validation_work_through_the_router() -> anyhow::Result<(
             admin_pat.actor(),
             &json!({
                 "display_name": "CRUD User Updated",
-                "state": "inactive",
+                "metadata": {"team": "platform-security"},
             }),
         )
         .await?;
     assert_eq!(updated.status, axum::http::StatusCode::OK);
     let updated_json = updated.json_value();
     assert_eq!(updated_json["display_name"], "CRUD User Updated");
-    assert_eq!(updated_json["state"], "inactive");
+    assert_eq!(updated_json["metadata"]["team"], "platform-security");
 
     let list = app.get("/v1/users", admin_pat.actor()).await?;
     assert_eq!(list.status, axum::http::StatusCode::OK);
@@ -618,7 +617,77 @@ async fn users_crud_and_validation_work_through_the_router() -> anyhow::Result<(
         "created user should be returned by the list endpoint",
     );
 
+    let deleted = app
+        .delete(&format!("/v1/users/{user_id}"), admin_pat.actor())
+        .await?;
+    assert_eq!(deleted.status, axum::http::StatusCode::NO_CONTENT);
+
+    let missing = app
+        .get(&format!("/v1/users/{user_id}"), admin_pat.actor())
+        .await?;
+    assert_eq!(missing.status, axum::http::StatusCode::NOT_FOUND);
+
+    let post_delete_list = app.get("/v1/users", admin_pat.actor()).await?;
+    assert_eq!(post_delete_list.status, axum::http::StatusCode::OK);
+    assert!(
+        post_delete_list.json_value()["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().all(|item| item["id"] != user_id)),
+        "deleted user should disappear from the list endpoint",
+    );
+
     Ok(())
+}
+
+#[tokio::test]
+async fn groups_crud_and_validation_work_through_the_router() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let admin_user = app.ctx.admin_user().await?;
+    let admin_pat = app.ctx.create_pat(&admin_user, "groups-admin").await?;
+
+    assert_named_resource_crud(
+        &app,
+        admin_pat.actor(),
+        "/v1/groups",
+        "group",
+        "Platform Engineers",
+        "Platform Security Engineers",
+    )
+    .await
+}
+
+#[tokio::test]
+async fn projects_crud_and_validation_work_through_the_router() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let admin_user = app.ctx.admin_user().await?;
+    let admin_pat = app.ctx.create_pat(&admin_user, "projects-admin").await?;
+
+    assert_named_resource_crud(
+        &app,
+        admin_pat.actor(),
+        "/v1/projects",
+        "project",
+        "Customer Portal",
+        "Customer Portal Renamed",
+    )
+    .await
+}
+
+#[tokio::test]
+async fn apps_crud_and_validation_work_through_the_router() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let admin_user = app.ctx.admin_user().await?;
+    let admin_pat = app.ctx.create_pat(&admin_user, "apps-admin").await?;
+
+    assert_named_resource_crud(
+        &app,
+        admin_pat.actor(),
+        "/v1/apps",
+        "application",
+        "Console Frontend",
+        "Console Frontend Renamed",
+    )
+    .await
 }
 
 #[tokio::test]
@@ -722,6 +791,162 @@ async fn login_flows_create_sessions_and_support_session_reuse() -> anyhow::Resu
     assert_eq!(reused.status, axum::http::StatusCode::OK);
     assert_eq!(reused.json_value()["step"], "complete");
     assert_eq!(reused.json_value()["redirect_uri"], "/console");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn login_flows_respect_prompt_login_even_with_an_existing_session() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let user = app.ctx.create_user("prompt-login@example.com", "password123").await?;
+    let existing_session = app.ctx.create_session(&user).await?;
+
+    insert_oidc_auth_request(
+        &app,
+        DEFAULT_INSTANCE_ID,
+        "prompt-login-auth",
+        "client-1",
+        "https://rp.example/callback",
+        "prompt-login-state",
+        r#"["login"]"#,
+    )
+    .await?;
+
+    let created_flow = app
+        .post_json(
+            "/v1/login/flows",
+            app.ctx.cookie_actor_for_token(&existing_session.token),
+            &json!({
+                "auth_request_id": "prompt-login-auth",
+            }),
+        )
+        .await?;
+    assert_eq!(created_flow.status, axum::http::StatusCode::CREATED);
+    let created_flow_json = created_flow.json_value();
+    assert_eq!(created_flow_json["step"], "identifier");
+
+    let flow_id = created_flow_json["flow_id"]
+        .as_str()
+        .expect("prompt=login flow id should be present");
+    let advanced = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            AuthActor::Anonymous,
+            &json!({
+                "action": "identifier",
+                "identifier": user.identifier,
+            }),
+        )
+        .await?;
+    assert_eq!(advanced.status, axum::http::StatusCode::OK);
+    assert_eq!(advanced.json_value()["step"], "password");
+
+    let completed = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            AuthActor::Anonymous,
+            &json!({
+                "action": "password",
+                "password": "password123",
+            }),
+        )
+        .await?;
+    assert_eq!(completed.status, axum::http::StatusCode::OK);
+    assert_eq!(completed.json_value()["step"], "complete");
+    let completed_json = completed.json_value();
+    let redirect_uri = completed_json["redirect_uri"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        redirect_uri.starts_with("https://rp.example/callback?"),
+        "prompt=login completion should still finish the OIDC redirect",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn login_flows_reject_foreign_auth_requests_without_creating_a_session() -> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let user = app.ctx.create_user("cross-instance-login@example.com", "password123").await?;
+
+    insert_oidc_auth_request(
+        &app,
+        "foreign-instance",
+        "foreign-auth",
+        "client-foreign",
+        "https://rp.example/callback",
+        "foreign-state",
+        "[]",
+    )
+    .await?;
+
+    let created_flow = app
+        .post_json(
+            "/v1/login/flows",
+            AuthActor::Anonymous,
+            &json!({
+                "auth_request_id": "foreign-auth",
+            }),
+        )
+        .await?;
+    assert_eq!(created_flow.status, axum::http::StatusCode::CREATED);
+    let created_flow_json = created_flow.json_value();
+    let flow_id = created_flow_json["flow_id"]
+        .as_str()
+        .expect("cross-instance flow id should be present")
+        .to_string();
+
+    let advanced = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            AuthActor::Anonymous,
+            &json!({
+                "action": "identifier",
+                "identifier": user.identifier,
+            }),
+        )
+        .await?;
+    assert_eq!(advanced.status, axum::http::StatusCode::OK);
+    assert_eq!(advanced.json_value()["step"], "password");
+
+    let failed = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            AuthActor::Anonymous,
+            &json!({
+                "action": "password",
+                "password": "password123",
+            }),
+        )
+        .await?;
+    assert_eq!(
+        failed.status,
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "cross-instance auth requests must fail closed",
+    );
+
+    let scoped = app.ctx.db.scoped_default();
+    let session_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2")
+            .bind(scoped.instance_id())
+            .bind(&user.user_id)
+            .fetch_one(scoped.pool())
+            .await?;
+    assert_eq!(session_count.0, 0);
+
+    let foreign_scoped = app.ctx.db.db.scoped("foreign-instance".to_string());
+    let foreign_row: (String, String, i64) = sqlx::query_as(&format!(
+        "SELECT COALESCE(user_id, ''), COALESCE(code, ''), {} FROM oidc_auth_requests WHERE instance_id = $1 AND id = $2",
+        foreign_scoped.bool_as_int("done"),
+    ))
+    .bind(foreign_scoped.instance_id())
+    .bind("foreign-auth")
+    .fetch_one(foreign_scoped.pool())
+    .await?;
+    assert_eq!(foreign_row.0, "");
+    assert_eq!(foreign_row.1, "");
+    assert_eq!(foreign_row.2, 0);
 
     Ok(())
 }

@@ -50,6 +50,6 @@ async fn list_jobs(State(s): State<ApiState>) -> Response {
                 total: Some(total),
             })
         }
-        Err(error) => response::internal_error(format!("{error}")),
+        Err(error) => response::internal(error),
     }
 }

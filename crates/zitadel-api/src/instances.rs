@@ -299,7 +299,7 @@ async fn list(
             .await
         {
             Ok(ids) => ids,
-            Err(error) => return response::internal_error(format!("{error}")),
+            Err(error) => return response::internal(error),
         };
 
         for item in result.items {
@@ -507,7 +507,7 @@ async fn require_root_management(
             .fga
             .reconcile_root_hierarchy(&instance.instance_id)
             .await
-            .map_err(|error| response::internal_error(format!("{error}")))?;
+            .map_err(|error| response::internal(error))?;
     }
 
     Ok(ManagementAccess {
@@ -526,7 +526,7 @@ async fn reconcile_after_mutation(
         .fga
         .reconcile_root_hierarchy(root_instance_id)
         .await
-        .map_err(|error| response::internal_error(format!("{error}")))
+        .map_err(|error| response::internal(error))
 }
 
 async fn require_instance_relation(
@@ -560,5 +560,5 @@ async fn root_relation_allowed(
         .fga
         .root_relation_allowed(root_instance_id, user_id, relation, object)
         .await
-        .map_err(|error| response::internal_error(format!("{error}")))
+        .map_err(|error| response::internal(error))
 }

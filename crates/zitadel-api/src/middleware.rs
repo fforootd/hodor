@@ -94,7 +94,7 @@ pub async fn require_scoped_instance_access(
         Ok(None) => return response::not_found("instance not found"),
         Err(error) => {
             tracing::error!(%error, instance_id = %target_instance_id, "load scoped instance metadata failed");
-            return response::internal_error(format!("{error}"));
+            return response::internal(error);
         }
     };
 
@@ -118,7 +118,7 @@ pub async fn require_scoped_instance_access(
     {
         Ok(true) => next.run(req).await,
         Ok(false) => response::not_found("instance not found"),
-        Err(error) => response::internal_error(format!("{error}")),
+        Err(error) => response::internal(error),
     }
 }
 
@@ -264,7 +264,7 @@ mod tests {
     async fn test_state() -> ApiState {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
 
         let mut config = Config::default();
         config.server.public_origin = "http://localhost:18080".into();

@@ -95,6 +95,13 @@ pub fn internal_error(msg: impl Into<String>) -> Response {
     error(StatusCode::INTERNAL_SERVER_ERROR, msg)
 }
 
+/// Log the real error server-side but return a generic message to the client.
+/// Use this instead of `internal_error(format!("{e}"))` to avoid leaking internals.
+pub fn internal(e: impl std::fmt::Display) -> Response {
+    tracing::error!(%e, "internal error");
+    error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+}
+
 /// Handle the result of an UPDATE/INSERT that should affect exactly one row.
 pub fn handle_mutation(
     result: Result<sqlx::any::AnyQueryResult, sqlx::Error>,
@@ -104,7 +111,7 @@ pub fn handle_mutation(
     match result {
         Ok(r) if r.rows_affected() == 0 => not_found(format!("{entity} not found")),
         Ok(_) => on_success(),
-        Err(e) => internal_error(format!("{e}")),
+        Err(e) => internal(e),
     }
 }
 

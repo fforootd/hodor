@@ -202,7 +202,7 @@ async fn set_password(
     // Hash password in the transport layer (Swapper is transport infrastructure).
     let hash = match state.passwords.hash(&req.password) {
         Ok(h) => h,
-        Err(e) => return response::internal_error(format!("hash password: {e}")),
+        Err(e) => return response::internal(e),
     };
     let cred_json = zitadel_authn::password::encode_credential_json(&hash);
     let cmd = SetPasswordCommand {

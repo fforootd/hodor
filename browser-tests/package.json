@@ -5,10 +5,11 @@
   "scripts": {
     "preflight": "node ./scripts/preflight.cjs",
     "test": "playwright test",
-    "test:journeys": "playwright test --project=journeys-admin --project=journeys-login-oidc",
-    "test:journeys:smoke": "playwright test --project=journeys-admin --project=journeys-login-oidc --grep @smoke",
+    "test:journeys": "playwright test --project=journeys-admin --project=journeys-login --project=journeys-login-oidc",
+    "test:journeys:smoke": "playwright test --project=journeys-admin --project=journeys-login --project=journeys-login-oidc --grep @smoke",
     "test:journeys:admin": "playwright test --project=journeys-admin",
     "test:journeys:admin:smoke": "playwright test --project=journeys-admin --grep @smoke",
+    "test:journeys:login": "playwright test --project=journeys-login",
     "test:journeys:oidc": "playwright test --project=journeys-login-oidc",
     "test:journeys:oidc:op": "playwright test --project=journeys-login-oidc journeys/login/oidc-code-pkce.spec.ts",
     "test:journeys:oidc:rp": "playwright test --project=journeys-login-oidc journeys/login/oidc-rp.spec.ts",

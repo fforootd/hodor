@@ -81,7 +81,9 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     // Bootstrap (create default org + admin if empty).
     if config.storage.stateful.resolve_bootstrap_mode() == "auto" {
-        zitadel_db::bootstrap::bootstrap(&db).await?;
+        let ext_domain = Some(config.server.external_domain.as_str())
+            .filter(|d| !d.is_empty());
+        zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
     }
 
     // Apply seed file if configured.

@@ -407,6 +407,17 @@ pub trait SessionRepository: Send + Sync {
         session_id: &str,
         metadata_json: &str,
     ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    fn list_by_instance(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SessionDetail>>>;
+
+    fn get(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<SessionDetail>>>;
 }
 
 #[derive(Clone, Debug)]
@@ -421,6 +432,18 @@ pub struct SessionInfo {
     pub user_id: String,
     pub org_id: String,
     pub token_type: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionDetail {
+    pub id: String,
+    pub user_id: String,
+    pub org_id: String,
+    pub user_agent: String,
+    pub ip_address: String,
+    pub created_at: String,
+    pub expires_at: Option<String>,
+    pub revoked_at: Option<String>,
 }
 
 pub trait InstanceRepository: Send + Sync {

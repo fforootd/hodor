@@ -1,16 +1,11 @@
-// TODO(ADR-032): Event listing uses s.analytics for columnar queries.
-// This should migrate to a ListEvents use case once analytics storage
-// is exposed through Repositories.
 use crate::{ApiState, middleware::Identity, response};
 use axum::{
     Extension, Router,
     extract::{Query, State},
-    response::{Response, Sse, sse::Event as SseEvent},
+    response::Response,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
-use tokio_stream::StreamExt;
 use zitadel_db::current_instance_id;
 use zitadel_storage::{AnalyticsQuery, AnalyticsQueryResult};
 
@@ -60,13 +55,15 @@ pub struct EventResponse {
     pub created_at: String,
 }
 
-// TODO(ADR-032): Route through use case layer for FGA permission checks
 async fn list_events(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
     Query(p): Query<EventParams>,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "viewer", "events:*").await {
+        return e;
+    }
     tracing::debug!(actor = %ctx.user_id(), "list_events");
     let cursor = decode_cursor(p.cursor.as_deref());
 
@@ -126,7 +123,7 @@ async fn list_events(
     {
         Ok(result) => {
             if let Some(error) = result.error {
-                return response::internal_error(error);
+                return response::internal(error);
             }
             let items: Vec<EventResponse> = result
                 .rows
@@ -140,7 +137,7 @@ async fn list_events(
                 total: None,
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::internal(e),
     }
 }
 

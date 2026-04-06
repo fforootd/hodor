@@ -126,13 +126,58 @@ users:
     type: human_user_v1
     password: admin123
     on_conflict: update
-    capabilities: [admin, password]
+    capabilities: [operator_admin, admin, password]
     pats:
       - name: dev-admin-token
         token: zitadel-dev-pat-do-not-use-in-production
         scopes: [admin]
     profile:
       email: admin@zitadel.local
+
+  - identifier: admin-users
+    display_name: Admin Users
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [operator_admin, admin, password]
+    profile:
+      email: admin-users@zitadel.local
+
+  - identifier: admin-groups
+    display_name: Admin Groups
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [operator_admin, admin, password]
+    profile:
+      email: admin-groups@zitadel.local
+
+  - identifier: admin-projects
+    display_name: Admin Projects
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [operator_admin, admin, password]
+    profile:
+      email: admin-projects@zitadel.local
+
+  - identifier: admin-apps
+    display_name: Admin Apps
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [operator_admin, admin, password]
+    profile:
+      email: admin-apps@zitadel.local
+
+  - identifier: admin-instances
+    display_name: Admin Instances
+    type: human_user_v1
+    password: admin123
+    on_conflict: update
+    capabilities: [operator_admin, admin, password]
+    profile:
+      email: admin-instances@zitadel.local
 
   - identifier: e2e-user@example.com
     display_name: E2E User
@@ -154,3 +199,13 @@ users:
     profile:
       email: reviewer@example.com
       display_name: Reviewer
+
+  - identifier: prompt-login@example.com
+    display_name: Prompt Login
+    type: human_user_v1
+    password: password123
+    capabilities: [password]
+    on_conflict: update
+    profile:
+      email: prompt-login@example.com
+      display_name: Prompt Login

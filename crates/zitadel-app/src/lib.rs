@@ -39,6 +39,7 @@ pub mod login_flows;
 pub mod resources;
 pub mod schemas;
 pub mod search;
+pub mod sessions;
 pub mod settings;
 pub mod telemetry;
 pub mod users;
@@ -78,6 +79,10 @@ pub struct ApplicationServices {
     pub submit_login_step: auth::SubmitLoginStep,
     pub issue_session: auth::IssueSession,
     pub revoke_session: auth::RevokeSession,
+
+    // Sessions
+    pub list_sessions: sessions::ListSessions,
+    pub get_session: sessions::GetSession,
 
     // Orgs
     pub create_org: orgs::CreateOrg,
@@ -199,6 +204,10 @@ impl ApplicationServices {
             submit_login_step: auth::SubmitLoginStep::new(repos.clone()),
             issue_session: auth::IssueSession::new(repos.clone()),
             revoke_session: auth::RevokeSession::new(repos.clone()),
+
+            // Sessions
+            list_sessions: sessions::ListSessions::new(repos.clone()),
+            get_session: sessions::GetSession::new(repos.clone()),
 
             // Orgs
             create_org: orgs::CreateOrg::new(repos.clone()),

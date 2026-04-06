@@ -1,6 +1,5 @@
 pub mod account;
 pub mod actions;
-pub mod admin;
 pub mod analytics;
 pub mod apps;
 pub mod extractors;
@@ -53,6 +52,19 @@ pub struct ApiState {
     pub is_dev: bool,
 }
 
+/// Lightweight FGA permission check for handlers that bypass the use-case layer.
+/// Returns `Ok(())` if allowed, `Err(Response)` if denied.
+pub async fn fga_check(
+    state: &ApiState,
+    ctx: &zitadel_app::ActorContext,
+    relation: &str,
+    object: &str,
+) -> Result<(), axum::response::Response> {
+    zitadel_app::authz::require_permission(&state.app.repos, ctx, relation, object)
+        .await
+        .map_err(response::app_error)
+}
+
 /// Build the REST API router with all /v1/* routes.
 ///
 /// Product routes are mounted both flat (`/v1/users`) and nested under
@@ -91,8 +103,6 @@ pub fn routes(state: ApiState) -> Router {
         .nest("/instances/{instanceId}", scoped_product_handlers)
         // Instance management CRUD (operates on parent)
         .merge(instances::routes())
-        // Root/admin APIs
-        .merge(admin::routes())
         .merge(auth::routes())
         .merge(account::routes())
         .merge(pats::routes())

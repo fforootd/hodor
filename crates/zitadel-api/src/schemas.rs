@@ -29,7 +29,7 @@ pub fn routes() -> Router<ApiState> {
 async fn get_meta_schema() -> Response {
     match serde_json::from_str::<serde_json::Value>(META_SCHEMA) {
         Ok(v) => response::json_ok(v),
-        Err(e) => response::internal_error(format!("parse meta-schema: {e}")),
+        Err(e) => response::internal(e),
     }
 }
 

@@ -67,6 +67,7 @@ ADRs are grouped by theme. For the full chronological list, see the [collapsed t
 | [029](adr/029-control-plane-auth-data-plane.md) | Control Plane, Auth Data Plane, and Bounded Eventual Consistency | Accepted |
 | [030](adr/030-customer-portal-regional-projections-integrations.md) | Customer Portal, Regional Projections, and Control-Plane Integrations | Proposed |
 | [031](adr/031-instance-hierarchy-spanner-geo-placement.md) | Instance Hierarchy with Geo-Partitioned Placement | Proposed |
+| [036](adr/036-staff-access-support-grants.md) | Staff Access and Support Grants | Proposed |
 
 ### Product Features
 
@@ -154,6 +155,9 @@ graph TD
     A034 --> A031
     A026 --> A031
     A029 --> A031
+    A020 --> A036[036 Staff Access]
+    A031 --> A036
+    A034 --> A036
 ```
 
 ## Conventions
@@ -162,7 +166,7 @@ graph TD
 - **ADR filename**: `NNN-slug.md` (zero-padded 3-digit number)
 - **ADR header**: `# ADR-NNN: Title` + Status / Date / Builds on / Supersedes
 - **ADR status**: `Proposed` → `Accepted` → `Superseded`
-- **Next ADR number**: 036
+- **Next ADR number**: 037
 
 ---
 
@@ -206,5 +210,6 @@ graph TD
 | [033](adr/033-customizable-login-layouts.md) | Customizable Login Layouts | Accepted | 2026-03-29 |
 | [034](adr/034-multi-tenancy.md) | Multi-Tenancy via Instance Boundaries | Accepted | 2026-04-04 |
 | [035](adr/035-provider-catalog-schema-binding.md) | Provider Catalog, Schema Binding, and Session Provenance | Accepted | 2026-03-30 |
+| [036](adr/036-staff-access-support-grants.md) | Staff Access and Support Grants | Proposed | 2026-04-05 |
 
 </details>

@@ -11,6 +11,9 @@ pub mod steps;
 pub mod ui;
 
 use axum::{
+    extract::State,
+    http::{HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
     Router,
     routing::{get, post},
 };
@@ -54,6 +57,7 @@ impl LoginState {
 
 pub fn routes(state: LoginState) -> Router {
     Router::new()
+        .route("/logout", get(logout))
         // Direct login (legacy/simple)
         .route("/v1/auth/login", post(legacy::login))
         .route("/v1/auth/settings", get(legacy::auth_settings))
@@ -72,6 +76,34 @@ pub fn routes(state: LoginState) -> Router {
         )
         .merge(sso::routes())
         .with_state(state)
+}
+
+async fn logout(State(state): State<LoginState>) -> Response {
+    let mut response = StatusCode::FOUND.into_response();
+    response.headers_mut().insert(
+        header::LOCATION,
+        HeaderValue::from_static("/login?logged_out=1"),
+    );
+
+    for cookie_name in state.cookie_config.all_cookie_names() {
+        if let Ok(value) =
+            HeaderValue::from_str(&expired_session_cookie(cookie_name, state.cookie_config.secure))
+        {
+            response.headers_mut().append(header::SET_COOKIE, value);
+        }
+    }
+
+    response
+}
+
+fn expired_session_cookie(cookie_name: &str, secure: bool) -> String {
+    let mut cookie = format!(
+        "{cookie_name}=; Path=/; HttpOnly; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax"
+    );
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
 }
 
 #[cfg(test)]
@@ -94,7 +126,7 @@ mod tests {
     async fn test_state() -> LoginState {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         let mut config = zitadel_config::Config::default();
         config.server.public_origin = "http://localhost:8080".into();
         config.server.force_insecure_cookies = false;

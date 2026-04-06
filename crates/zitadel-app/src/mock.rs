@@ -396,6 +396,21 @@ impl SessionRepository for MockSessionRepository {
     fn update_metadata(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
         Box::pin(async { Ok(()) })
     }
+
+    fn list_by_instance(
+        &self,
+        _instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SessionDetail>>> {
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn get(
+        &self,
+        _instance_id: &str,
+        _session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<SessionDetail>>> {
+        Box::pin(async { Ok(None) })
+    }
 }
 
 // FGA

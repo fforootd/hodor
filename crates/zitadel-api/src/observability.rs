@@ -51,7 +51,7 @@ async fn overview(
     );
     let counts = match analytics_row_map(&s.analytics, counts_sql).await {
         Ok(map) => map,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
 
     let sessions_current_sql = format!(
@@ -73,7 +73,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let sess_ts = match fetch_timestamps(
         &s.analytics,
@@ -85,7 +85,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let tok_ts = match fetch_timestamps(
         &s.analytics,
@@ -96,7 +96,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let fail_ts = match fetch_timestamps(
         &s.analytics,
@@ -107,7 +107,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
 
     let top_ops = match fetch_breakdown(
@@ -121,7 +121,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let top_users = match fetch_breakdown(
         &s.analytics,
@@ -134,7 +134,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let top_ips = match fetch_breakdown(
         &s.analytics,
@@ -147,7 +147,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let top_clients = match fetch_breakdown(
         &s.analytics,
@@ -160,7 +160,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let top_sdks = match fetch_breakdown(
         &s.analytics,
@@ -173,7 +173,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
     let delegation = match fetch_breakdown(
         &s.analytics,
@@ -186,7 +186,7 @@ async fn overview(
     .await
     {
         Ok(values) => values,
-        Err(error) => return response::internal_error(format!("{error}")),
+        Err(error) => return response::internal(error),
     };
 
     let sessions_current = analytics_scalar_i64(&s.analytics, sessions_current_sql)

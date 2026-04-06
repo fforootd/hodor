@@ -6,12 +6,6 @@ use axum::{
     routing::get,
 };
 use serde::Serialize;
-use zitadel_db::current_instance_id;
-
-// TODO(ADR-032): list_sessions and get_session bypass the app layer and call
-// s.transient directly. SessionRepository lacks list/get methods — these need
-// to be added, then use cases created and handlers rewired.
-// revoke_session already goes through the app layer correctly.
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -30,14 +24,12 @@ struct SessionResponse {
     revoked_at: Option<String>,
 }
 
-// Sessions live in transient KvStore; queried directly, not through use case.
-// Requires operator_admin to list all sessions; regular users see only their own.
 async fn list_sessions(
     State(s): State<ApiState>,
     Extension(identity): Extension<Identity>,
 ) -> Response {
-    let instance_id = current_instance_id();
-    match s.transient.list_sessions(&instance_id).await {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.list_sessions.execute(&ctx).await {
         Ok(rows) => {
             let items: Vec<SessionResponse> = rows
                 .into_iter()
@@ -57,15 +49,18 @@ async fn list_sessions(
                 total: None,
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 
-// TODO(CLAUDE-4): Call session get use case when available
-async fn get_session(State(s): State<ApiState>, ResourceId(id): ResourceId) -> Response {
-    let instance_id = current_instance_id();
-    match s.transient.get_session(&instance_id, &id).await {
-        Ok(Some(r)) => response::json_ok(SessionResponse {
+async fn get_session(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    ResourceId(id): ResourceId,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    match s.app.get_session.execute(&ctx, &id).await {
+        Ok(r) => response::json_ok(SessionResponse {
             id: r.id,
             user_id: r.user_id,
             org_id: r.org_id,
@@ -73,8 +68,7 @@ async fn get_session(State(s): State<ApiState>, ResourceId(id): ResourceId) -> R
             expires_at: r.expires_at,
             revoked_at: r.revoked_at,
         }),
-        Ok(None) => response::not_found("session not found"),
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::app_error(e),
     }
 }
 

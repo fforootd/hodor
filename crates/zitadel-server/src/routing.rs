@@ -397,7 +397,7 @@ mod tests {
     async fn seeded_resolver() -> InstanceResolver {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         sqlx::query(
             "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, region_key, feature_overrides) \
              VALUES ('inst_eu', 'default', '1', 'managed', 'active', 'regional', 'europe-west1', '{}')",
@@ -445,7 +445,7 @@ mod tests {
     async fn resolves_org_bound_domain_and_sets_resolved_org_id() {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         sqlx::query(
             "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, region_key, feature_overrides) \
              VALUES ('inst_child', 'default', '1', 'managed', 'active', 'regional', 'us-central1', '{}')",
@@ -515,7 +515,7 @@ mod tests {
     async fn resolves_default_instance_when_root_domain_mapping_exists() {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         sqlx::query(
             "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
              VALUES ('root.example.com', 'default', NULL, 1, 'active', 1)",
@@ -560,7 +560,7 @@ mod tests {
 
         let stateful_db = Db::open(&stateful_url).await.unwrap();
         zitadel_db::migrate::migrate(&stateful_db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&stateful_db)
+        zitadel_db::bootstrap::bootstrap(&stateful_db, None)
             .await
             .unwrap();
 

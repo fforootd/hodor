@@ -4,10 +4,10 @@ const baseURL = process.env.BASE_URL || 'http://127.0.0.1:18080'
 process.env.BASE_URL = baseURL
 
 export default defineConfig({
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: 'html',
   use: {
     baseURL,
@@ -19,15 +19,19 @@ export default defineConfig({
       testDir: './journeys/admin',
     },
     {
+      name: 'journeys-login',
+      testMatch: '**/journeys/login/password-login.spec.ts',
+    },
+    {
       name: 'journeys-login-oidc',
-      testDir: './journeys/login',
+      testMatch: '**/journeys/login/oidc-*.spec.ts',
     },
   ],
   webServer: {
     command: './browser-tests/scripts/start-stack.sh',
     cwd: '..',
     url: `${baseURL}/healthz`,
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 })

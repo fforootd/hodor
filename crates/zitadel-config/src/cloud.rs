@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct CloudConfig {
     pub enabled: bool,
+    /// License key for cloud features. Required when `enabled = true`.
+    /// Cloud functionality will not activate without a valid key.
+    pub license_key: String,
     pub resolver_cache_capacity: u32,
     pub positive_cache_ttl_secs: u64,
     pub negative_cache_ttl_secs: u64,
@@ -44,6 +47,7 @@ impl Default for CloudConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            license_key: String::new(),
             resolver_cache_capacity: 50_000,
             positive_cache_ttl_secs: 60,
             negative_cache_ttl_secs: 10,

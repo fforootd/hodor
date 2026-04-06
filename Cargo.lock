@@ -5498,6 +5498,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "zitadel-cloud"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "zitadel-config",
+]
+
+[[package]]
 name = "zitadel-config"
 version = "0.1.0"
 dependencies = [

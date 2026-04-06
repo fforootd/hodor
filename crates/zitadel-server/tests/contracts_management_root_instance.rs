@@ -1,235 +1,30 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, atomic::AtomicBool},
-};
+mod support;
 
 use anyhow::Context;
-use axum::{
-    Router,
-    body::Body,
-    http::{HeaderMap, Method, header::HOST},
-};
+use axum::{body::Body, http::Method};
 use serde_json::json;
-use uuid::Uuid;
-use zitadel_config::Config;
 use zitadel_db::DEFAULT_INSTANCE_ID;
-use zitadel_server::{AppState, build_router, routing::InstanceResolver};
-use zitadel_testkit::{AuthActor, SessionFixture, TestApp, TestContext, UserFixture};
 
-const ROOT_HOST: &str = "root.example.com";
+use support::{
+    ROOT_HOST, build_cloud_test_app, create_root_user_in_org, create_session_for_instance,
+    delete_on_host, get_on_host, grant_org_role, host_headers, insert_child_instance,
+    patch_json_on_host, post_json_on_host,
+};
 
-async fn build_test_app() -> anyhow::Result<TestApp> {
-    let mut config = Config::default();
-    config.cloud.enabled = true;
-    config.storage.stateful.url = "sqlite://:memory:".into();
-    let ctx = TestContext::with_config(config).await?;
-    let scoped = ctx.db.scoped_default();
-    sqlx::query(
-        "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
-         VALUES ($1, $2, NULL, 1, 'active', 1)",
-    )
-    .bind(ROOT_HOST)
-    .bind(DEFAULT_INSTANCE_ID)
-    .execute(scoped.pool())
-    .await
-    .context("insert root domain")?;
-    let app_state = Arc::new(AppState {
-        config: ctx.config.clone(),
-        db: ctx.db.db.clone(),
-        secret_box: Arc::new(zitadel_crypto::SecretBox::new("", &HashMap::new())?),
-        ready: AtomicBool::new(true),
-        instance_resolver: Arc::new(InstanceResolver::new(&ctx.config, ctx.db.db.clone())),
-    });
-    let router: Router = build_router(
-        app_state,
-        ctx.api_state.clone(),
-        ctx.oidc_state.clone(),
-        ctx.login_state.clone(),
-    );
-
-    Ok(TestApp::new(ctx, router))
-}
-
-async fn create_root_user_in_org(
-    app: &TestApp,
-    org_id: &str,
-    org_name: &str,
-    identifier: &str,
-) -> anyhow::Result<UserFixture> {
-    let scoped = app.ctx.db.scoped_default();
-    sqlx::query("INSERT INTO orgs (instance_id, id, name, state) VALUES ($1, $2, $3, 'active')")
-        .bind(scoped.instance_id())
-        .bind(org_id)
-        .bind(org_name)
-        .execute(scoped.pool())
-        .await
-        .context("insert root org")?;
-
-    let user_id = Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, metadata) \
-         VALUES ($1, $2, $3, $4, $5, 'human', 'active', '{}')",
-    )
-    .bind(&user_id)
-    .bind(scoped.instance_id())
-    .bind(org_id)
-    .bind(identifier)
-    .bind(identifier)
-    .execute(scoped.pool())
-    .await
-    .context("insert root user")?;
-
-    grant_org_role(app, org_id, &user_id, "owner").await?;
-
-    Ok(UserFixture {
-        user_id,
-        org_id: org_id.to_string(),
-        identifier: identifier.to_string(),
-    })
-}
-
-async fn create_session_for_instance(
-    app: &TestApp,
-    instance_id: &str,
-    user: &UserFixture,
-) -> anyhow::Result<SessionFixture> {
-    let session = app
-        .ctx
-        .login_state
-        .transient
-        .create_session(
-            instance_id,
-            &user.user_id,
-            &user.org_id,
-            "root-management-contract",
-            "127.0.0.1",
-            "",
-        )
-        .await
-        .context("create session")?;
-    Ok(SessionFixture {
-        session_id: session.session_id,
-        token: session.token,
-    })
-}
-
-async fn grant_org_role(
-    app: &TestApp,
-    org_id: &str,
-    user_id: &str,
-    role: &str,
-) -> anyhow::Result<()> {
-    zitadel_db::add_membership(&app.ctx.db.db, DEFAULT_INSTANCE_ID, "org", org_id, user_id, role)
-        .await
-        .with_context(|| format!("grant {role} membership for org {org_id}"))?;
-    Ok(())
-}
-
-async fn insert_child_instance(
-    app: &TestApp,
-    instance_id: &str,
-    owner_org_id: &str,
-    domain: &str,
-) -> anyhow::Result<()> {
-    let scoped = app.ctx.db.scoped_default();
-    sqlx::query(
-        "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, feature_overrides) \
-         VALUES ($1, $2, $3, 'managed', 'active', 'global', '{}')",
-    )
-    .bind(instance_id)
-    .bind(DEFAULT_INSTANCE_ID)
-    .bind(owner_org_id)
-    .execute(scoped.pool())
-    .await
-    .context("insert child instance")?;
-    sqlx::query(
-        "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
-         VALUES ($1, $2, NULL, 1, 'active', 1)",
-    )
-    .bind(domain)
-    .bind(instance_id)
-    .execute(scoped.pool())
-    .await
-    .context("insert child domain")?;
-    Ok(())
+async fn build_test_app() -> anyhow::Result<zitadel_testkit::TestApp> {
+    build_cloud_test_app().await
 }
 
 async fn create_child_user_session(
-    app: &TestApp,
+    app: &zitadel_testkit::TestApp,
     instance_id: &str,
     org_id: &str,
     identifier: &str,
-) -> anyhow::Result<SessionFixture> {
-    let scoped = app.ctx.db.db.scoped(instance_id.to_string());
-    sqlx::query("INSERT INTO orgs (instance_id, id, name, state) VALUES ($1, $2, $3, 'active')")
-        .bind(instance_id)
-        .bind(org_id)
-        .bind(org_id)
-        .execute(scoped.pool())
-        .await
-        .context("insert child org")?;
-    let user_id = Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state, metadata) \
-         VALUES ($1, $2, $3, $4, $5, 'human', 'active', '{}')",
-    )
-    .bind(&user_id)
-    .bind(instance_id)
-    .bind(org_id)
-    .bind(identifier)
-    .bind(identifier)
-    .execute(scoped.pool())
-    .await
-    .context("insert child user")?;
-
-    create_session_for_instance(
-        app,
-        instance_id,
-        &UserFixture {
-            user_id,
-            org_id: org_id.to_string(),
-            identifier: identifier.to_string(),
-        },
-    )
-    .await
-}
-
-fn host_headers(host: &str) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(HOST, host.parse().unwrap());
-    headers
-}
-
-async fn get_on_host(
-    app: &TestApp,
-    path: &str,
-    actor: AuthActor,
-    host: &str,
-) -> anyhow::Result<zitadel_testkit::TestResponse> {
-    app.request(Method::GET, path, actor, host_headers(host), Body::empty())
-        .await
-}
-
-async fn post_json_on_host(
-    app: &TestApp,
-    path: &str,
-    actor: AuthActor,
-    host: &str,
-    body: &serde_json::Value,
-) -> anyhow::Result<zitadel_testkit::TestResponse> {
-    let mut headers = host_headers(host);
-    headers.insert(
-        axum::http::header::CONTENT_TYPE,
-        "application/json".parse().unwrap(),
-    );
-    app.request(
-        Method::POST,
-        path,
-        actor,
-        headers,
-        Body::from(body.to_string()),
-    )
-    .await
+) -> anyhow::Result<zitadel_testkit::SessionFixture> {
+    let user =
+        support::insert_user_with_password(app, instance_id, org_id, identifier, identifier, "password123")
+            .await?;
+    create_session_for_instance(app, instance_id, &user).await
 }
 
 #[tokio::test]
@@ -283,11 +78,7 @@ async fn root_users_are_owner_scoped_and_operators_are_unscoped() -> anyhow::Res
             Body::empty(),
         )
         .await?;
-    assert_eq!(owner_admin_list.status, axum::http::StatusCode::FORBIDDEN);
-    assert_eq!(
-        owner_admin_list.json_value(),
-        json!({"error": "operator admin required", "code": 403})
-    );
+    assert_eq!(owner_admin_list.status, axum::http::StatusCode::NOT_FOUND);
 
     let operator = app.ctx.admin_user().await?;
     let operator_session = app.ctx.create_session(&operator).await?;
@@ -317,14 +108,7 @@ async fn root_users_are_owner_scoped_and_operators_are_unscoped() -> anyhow::Res
             Body::empty(),
         )
         .await?;
-    assert_eq!(operator_admin_list.status, axum::http::StatusCode::OK);
-    assert_eq!(
-        operator_admin_list.json_value()["items"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(operator_admin_list.status, axum::http::StatusCode::NOT_FOUND);
 
     Ok(())
 }
@@ -555,6 +339,108 @@ async fn instance_pagination_skips_hidden_rows_without_losing_visible_instances(
     assert_eq!(third_page.status, axum::http::StatusCode::OK);
     assert_eq!(third_page.json_value()["items"], json!([]));
     assert_eq!(third_page.json_value()["next_cursor"], serde_json::Value::Null);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn instances_support_get_update_and_deprovision_through_management_routes()
+-> anyhow::Result<()> {
+    let app = build_test_app().await?;
+    let admin = app.ctx.admin_user().await?;
+    let admin_pat = app.ctx.create_pat(&admin, "instance-lifecycle-admin").await?;
+
+    let created = post_json_on_host(
+        &app,
+        "/v1/instances",
+        admin_pat.actor(),
+        ROOT_HOST,
+        &json!({
+            "domain": "instance-lifecycle.example.com",
+        }),
+    )
+    .await?;
+    assert_eq!(created.status, axum::http::StatusCode::CREATED);
+    let created_json = created.json_value();
+    let instance_id = created_json["instance_id"]
+        .as_str()
+        .expect("created instance id should be present")
+        .to_string();
+    assert_eq!(created_json["primary_domain"], "instance-lifecycle.example.com");
+    assert_eq!(created_json["state"], "active");
+
+    let loaded = get_on_host(
+        &app,
+        &format!("/v1/instances/{instance_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(loaded.status, axum::http::StatusCode::OK);
+    assert_eq!(loaded.json_value()["instance_id"], instance_id);
+
+    let listed = get_on_host(&app, "/v1/instances", admin_pat.actor(), ROOT_HOST).await?;
+    assert_eq!(listed.status, axum::http::StatusCode::OK);
+    assert!(
+        listed.json_value()["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["instance_id"] == instance_id)),
+        "created instance should appear in the management list",
+    );
+
+    let updated = patch_json_on_host(
+        &app,
+        &format!("/v1/instances/{instance_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+        &json!({
+            "placement_mode": "regional",
+            "region_key": "europe-west1",
+            "feature_overrides": {
+                "custom_domains": true,
+            },
+        }),
+    )
+    .await?;
+    assert_eq!(updated.status, axum::http::StatusCode::OK);
+    assert_eq!(updated.json_value()["placement_mode"], "regional");
+    assert_eq!(updated.json_value()["region_key"], "europe-west1");
+    assert_eq!(
+        updated.json_value()["feature_overrides"]["custom_domains"],
+        serde_json::Value::Bool(true)
+    );
+
+    let deleted = delete_on_host(
+        &app,
+        &format!("/v1/instances/{instance_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(deleted.status, axum::http::StatusCode::NO_CONTENT);
+
+    let after_delete = get_on_host(
+        &app,
+        &format!("/v1/instances/{instance_id}"),
+        admin_pat.actor(),
+        ROOT_HOST,
+    )
+    .await?;
+    assert_eq!(after_delete.status, axum::http::StatusCode::OK);
+    assert_eq!(after_delete.json_value()["state"], "deprovisioning");
+
+    let listed_after_delete =
+        get_on_host(&app, "/v1/instances", admin_pat.actor(), ROOT_HOST).await?;
+    assert_eq!(listed_after_delete.status, axum::http::StatusCode::OK);
+    assert!(
+        listed_after_delete.json_value()["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| {
+                item["instance_id"] == instance_id
+                    && item["state"] == serde_json::Value::String("deprovisioning".into())
+            })),
+        "deprovisioned instances should remain visible with their updated state",
+    );
 
     Ok(())
 }

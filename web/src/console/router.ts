@@ -127,10 +127,6 @@ const router = createRouter({
     // Root management routes
     { path: '/team', name: 'team', component: () => import('@/console/views/TeamView.vue') },
     { path: '/billing', name: 'billing', component: () => import('@/console/views/BillingView.vue') },
-    // Operator admin routes
-    { path: '/admin/instances', name: 'admin-instances', component: () => import('@/console/views/admin/AdminInstancesView.vue') },
-    { path: '/admin/events', name: 'admin-events', component: () => import('@/console/views/admin/AdminEventsView.vue') },
-    { path: '/admin/config', name: 'admin-config', component: () => import('@/console/views/admin/AdminConfigView.vue') },
     // Flat product routes (single-instance dev mode / backward compat)
     ...flattenRoutes(productRoutes),
     // Legacy redirects

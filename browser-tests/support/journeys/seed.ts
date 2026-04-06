@@ -1,9 +1,16 @@
 import { expect, type Page } from '@playwright/test'
 
 import {
-  browserJSON,
   completePasswordLogin,
 } from '../browser'
+import { loginAsAdmin } from './browser-login'
+
+const sessionCookieName = '__zitadel_session'
+
+async function hasBrowserSession(page: Page) {
+  const cookies = await page.context().cookies()
+  return cookies.some((cookie) => cookie.name === sessionCookieName && cookie.value.length > 0)
+}
 
 export async function postJSON<T>(
   page: Page,
@@ -40,13 +47,8 @@ export async function establishAuthenticatedBrowserSession(
 
   // Seed reusable session state only for preconditions that are not the behavior under test.
   if (userIdentifier === 'admin' && userPassword === 'admin123') {
-    await page.goto('/console')
-    await expect(page).toHaveURL(/\/login/)
-    await completePasswordLogin(page, 'admin', 'admin123')
-    const sessions = await browserJSON(page, '/v1/sessions')
-    expect(sessions.status).toBe(200)
-    expect(Array.isArray(sessions.body.items)).toBe(true)
-    expect(sessions.body.items.length).toBeGreaterThan(0)
+    await loginAsAdmin(page, 'admin', 'admin123')
+    expect(await hasBrowserSession(page)).toBe(true)
     return
   }
 
@@ -84,17 +86,12 @@ export async function establishAuthenticatedBrowserSession(
       },
     )
     expect(completion.status).toBeLessThan(400)
-    const sessions = await browserJSON(page, '/v1/sessions')
-    if (sessions.status === 200 && Array.isArray(sessions.body.items) && sessions.body.items.length > 0) {
+    if (await hasBrowserSession(page)) {
       return
     }
   }
 
   await page.goto('/login?redirect_uri=%2Fconsole')
   await completePasswordLogin(page, userIdentifier, userPassword)
-
-  const sessions = await browserJSON(page, '/v1/sessions')
-  expect(sessions.status).toBe(200)
-  expect(Array.isArray(sessions.body.items)).toBe(true)
-  expect(sessions.body.items.length).toBeGreaterThan(0)
+  expect(await hasBrowserSession(page)).toBe(true)
 }

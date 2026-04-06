@@ -131,9 +131,17 @@ Root instance (Zitadel staff only)
 
 Staff and customer credentials never share a database. The root instance is a separate, locked-down deployment. Support access uses federated OIDC trust — staff tokens from the root instance are validated by child instances via standard provider federation.
 
-## Cloud-Exclusive Features
+## Cloud Features (`zitadel-cloud` crate)
 
-These features exist in the binary but are inactive unless `cloud.enabled = true`. They are control-plane concerns attached to the root or customer-portal instance, not part of the auth runtime.
+Cloud features live in the dedicated `zitadel-cloud` crate. The code is in the public repository under AGPL-3.0 (source available, auditable by anyone) but requires a **valid license key** to activate at runtime.
+
+```toml
+[cloud]
+enabled = true
+license_key = "eyJ..."   # JWT issued by Zitadel
+```
+
+The license key is a signed JWT encoding the licensee's entitlements — which features are enabled, how many managed instances are allowed, and when the license expires. This allows feature-gating per customer without compile-time splits.
 
 | Feature | Integration | Purpose |
 |---|---|---|
@@ -143,10 +151,11 @@ These features exist in the binary but are inactive unless `cloud.enabled = true
 | **Load balancer** | GCP Cloud Load Balancing | TLS termination, domain routing to regional backends |
 | **Instance placement** | Spanner geo-partitioning | Automatic data locality per instance `region_key` |
 | **Federated registration** | Heartbeat + OIDC trust | Self-hosted instances register with the cloud hierarchy |
+| **Usage metering** | Internal | Per-instance request counts, active users, billable metrics |
 
 These integrations follow the pattern from [ADR-030 section 6](../adr/030-customer-portal-regional-projections-integrations.md): persist desired state → enqueue job → perform side effects with retries → record observed state.
 
-Self-hosted operators never encounter these features. The billing, HubSpot, and GCP code paths are dead code on a self-hosted deployment — no config means no activation, no overhead.
+Self-hosted operators never encounter these features. Without a license key, cloud code paths are inert — no config means no activation, no overhead.
 
 ## Three-Plane Model
 

@@ -55,7 +55,7 @@ impl TestDb {
         zitadel_db::migrate::migrate(&db)
             .await
             .context("run test migrations")?;
-        zitadel_db::bootstrap::bootstrap(&db)
+        zitadel_db::bootstrap::bootstrap(&db, None)
             .await
             .context("bootstrap default org/admin")?;
         Ok(Self { db })

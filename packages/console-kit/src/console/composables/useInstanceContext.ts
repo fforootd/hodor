@@ -5,10 +5,10 @@
  * This composable only tracks the current instance ID and domain
  * for sidebar/breadcrumb display, synced from route params.
  */
-import { ref, readonly } from 'vue'
+import { ref } from 'vue'
 
 const _instanceId = ref<string | null>(null)
-const _domain = ref<string>('')
+const _domain = ref('')
 
 export function useInstanceContext() {
   /** Update display state (called by InstanceLayout when route param changes). */
@@ -18,12 +18,13 @@ export function useInstanceContext() {
   }
 
   function clearInstance() {
-    setInstance(null)
+    _instanceId.value = null
+    _domain.value = ''
   }
 
   return {
-    currentInstanceId: readonly(_instanceId),
-    currentInstanceDomain: readonly(_domain),
+    currentInstanceId: _instanceId,
+    currentInstanceDomain: _domain,
     setInstance,
     clearInstance,
   }

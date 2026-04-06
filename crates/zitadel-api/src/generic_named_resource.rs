@@ -266,9 +266,9 @@ pub mod membership {
         "member".to_string()
     }
 
-    // TODO: Route through membership use cases when available
     async fn list_members(
         State(s): State<ApiState>,
+        Extension(identity): Extension<Identity>,
         Extension(config): Extension<MembershipConfig>,
         Path(params): Path<HashMap<String, String>>,
     ) -> Response {
@@ -277,6 +277,11 @@ pub mod membership {
             Some(id) => id.as_str(),
             None => return response::bad_request(format!("missing {}", config.id_param)),
         };
+        let ctx = response::build_actor_context(&identity);
+        let object = format!("{}:{}", config.entity_type, entity_id);
+        if let Err(e) = crate::fga_check(&s, &ctx, "viewer", &object).await {
+            return e;
+        }
         match zitadel_db::list_memberships(&s.db, &instance_id, config.entity_type, entity_id)
             .await
         {
@@ -296,13 +301,13 @@ pub mod membership {
                     total: None,
                 })
             }
-            Err(e) => response::internal_error(format!("{e}")),
+            Err(e) => response::internal(e),
         }
     }
 
-    // TODO: Route through membership use cases when available
     async fn add_member(
         State(s): State<ApiState>,
+        Extension(identity): Extension<Identity>,
         Extension(config): Extension<MembershipConfig>,
         Path(params): Path<HashMap<String, String>>,
         Json(req): Json<AddMemberRequest>,
@@ -312,6 +317,11 @@ pub mod membership {
             Some(id) => id.as_str(),
             None => return response::bad_request(format!("missing {}", config.id_param)),
         };
+        let ctx = response::build_actor_context(&identity);
+        let object = format!("{}:{}", config.entity_type, entity_id);
+        if let Err(e) = crate::fga_check(&s, &ctx, "admin", &object).await {
+            return e;
+        }
         match zitadel_db::add_membership(
             &s.db,
             &instance_id,
@@ -322,19 +332,34 @@ pub mod membership {
         )
         .await
         {
-            Ok(()) => response::json_created(MemberResponse {
-                user_id: req.user_id,
-                display_name: None,
-                role: req.role,
-                added_at: String::new(),
-            }),
-            Err(e) => response::internal_error(format!("{e}")),
+            Ok(()) => {
+                // Emit membership event (best-effort — don't fail the request)
+                let _ = s.app.repos.events.append(
+                    &instance_id,
+                    &zitadel_app::DomainEvent::MembershipChanged {
+                        entity_type: config.entity_type.to_string(),
+                        entity_id: entity_id.to_string(),
+                        user_id: req.user_id.clone(),
+                        action: "added".to_string(),
+                        role: req.role.clone(),
+                        actor_id: ctx.user_id().to_string(),
+                    },
+                    None, None, None,
+                ).await;
+                response::json_created(MemberResponse {
+                    user_id: req.user_id,
+                    display_name: None,
+                    role: req.role,
+                    added_at: String::new(),
+                })
+            }
+            Err(e) => response::internal(e),
         }
     }
 
-    // TODO: Route through membership use cases when available
     async fn remove_member(
         State(s): State<ApiState>,
+        Extension(identity): Extension<Identity>,
         Extension(config): Extension<MembershipConfig>,
         Path(params): Path<HashMap<String, String>>,
     ) -> Response {
@@ -347,6 +372,11 @@ pub mod membership {
             Some(id) => id.as_str(),
             None => return response::bad_request("missing user_id"),
         };
+        let ctx = response::build_actor_context(&identity);
+        let object = format!("{}:{}", config.entity_type, entity_id);
+        if let Err(e) = crate::fga_check(&s, &ctx, "admin", &object).await {
+            return e;
+        }
         match zitadel_db::remove_membership(
             &s.db,
             &instance_id,
@@ -356,8 +386,22 @@ pub mod membership {
         )
         .await
         {
-            Ok(()) => response::no_content(),
-            Err(e) => response::internal_error(format!("{e}")),
+            Ok(()) => {
+                let _ = s.app.repos.events.append(
+                    &instance_id,
+                    &zitadel_app::DomainEvent::MembershipChanged {
+                        entity_type: config.entity_type.to_string(),
+                        entity_id: entity_id.to_string(),
+                        user_id: user_id.to_string(),
+                        action: "removed".to_string(),
+                        role: String::new(),
+                        actor_id: ctx.user_id().to_string(),
+                    },
+                    None, None, None,
+                ).await;
+                response::no_content()
+            }
+            Err(e) => response::internal(e),
         }
     }
 }

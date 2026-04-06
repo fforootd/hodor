@@ -805,25 +805,87 @@ pub async fn create_named_resource(
     name: &str,
     org_id: &str,
 ) -> anyhow::Result<NamedResourceRecord> {
+    fn app_client_id(name: &str) -> String {
+        let mut slug = name
+            .trim()
+            .to_lowercase()
+            .chars()
+            .map(|char| if char.is_ascii_alphanumeric() { char } else { '-' })
+            .collect::<String>();
+        while slug.contains("--") {
+            slug = slug.replace("--", "-");
+        }
+        let slug = slug.trim_matches('-').to_string();
+        if slug.is_empty() {
+            "app".to_string()
+        } else {
+            slug
+        }
+    }
+
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
-            let sql = format!(
-                "INSERT INTO {table} (id, instance_id, org_id, name, state) VALUES ($1, $2, $3, $4, 'active')"
-            );
-            sqlx::query(&sql)
-                .bind(id)
-                .bind(instance_id)
-                .bind(org_id)
-                .bind(name)
-                .execute(scoped.pool())
-                .await?;
+            if table == "apps" {
+                let client_id = app_client_id(name);
+                let sql = format!(
+                    "INSERT INTO apps \
+                     (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, post_logout_redirect_uris, grant_types, response_types, state) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {}, {}, {}, 'active')",
+                    scoped.json_bind(8),
+                    scoped.json_bind(9),
+                    scoped.json_bind(10),
+                    scoped.json_bind(11),
+                );
+                sqlx::query(&sql)
+                    .bind(id)
+                    .bind(instance_id)
+                    .bind(org_id)
+                    .bind(name)
+                    .bind("web")
+                    .bind(client_id)
+                    .bind("")
+                    .bind("[]")
+                    .bind("[]")
+                    .bind("[\"authorization_code\",\"refresh_token\"]")
+                    .bind("[\"code\"]")
+                    .execute(scoped.pool())
+                    .await?;
+            } else {
+                let sql = format!(
+                    "INSERT INTO {table} (id, instance_id, org_id, name, state) VALUES ($1, $2, $3, $4, 'active')"
+                );
+                sqlx::query(&sql)
+                    .bind(id)
+                    .bind(instance_id)
+                    .bind(org_id)
+                    .bind(name)
+                    .execute(scoped.pool())
+                    .await?;
+            }
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(&format!(
-                "INSERT INTO {table} (id, instance_id, org_id, name, state) \
-                 VALUES (@id, @instance_id, @org_id, @name, 'active')"
-            ));
+            let mut stmt = if table == "apps" {
+                let client_id = app_client_id(name);
+                let mut stmt = Statement::new(
+                    "INSERT INTO apps \
+                     (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, post_logout_redirect_uris, grant_types, response_types, state) \
+                     VALUES (@id, @instance_id, @org_id, @name, @app_type, @client_id, @client_secret, @redirect_uris, @post_logout_redirect_uris, @grant_types, @response_types, 'active')",
+                );
+                stmt.add_param("app_type", &"web");
+                stmt.add_param("client_id", &client_id);
+                stmt.add_param("client_secret", &"");
+                stmt.add_param("redirect_uris", &"[]");
+                stmt.add_param("post_logout_redirect_uris", &"[]");
+                stmt.add_param("grant_types", &"[\"authorization_code\",\"refresh_token\"]");
+                stmt.add_param("response_types", &"[\"code\"]");
+                stmt
+            } else {
+                Statement::new(&format!(
+                    "INSERT INTO {table} (id, instance_id, org_id, name, state) \
+                     VALUES (@id, @instance_id, @org_id, @name, 'active')"
+                ))
+            };
             stmt.add_param("id", &id);
             stmt.add_param("instance_id", &instance_id);
             stmt.add_param("org_id", &org_id);

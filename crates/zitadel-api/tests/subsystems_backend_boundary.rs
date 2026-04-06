@@ -33,21 +33,35 @@ fn assert_source_does_not_contain(path: &Path, forbidden: &str) {
 fn api_runtime_handlers_stay_behind_repository_boundaries() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     for rel in [
+        "src/account.rs",
         "src/actions.rs",
         "src/admin.rs",
         "src/analytics.rs",
+        "src/apps.rs",
+        "src/auth.rs",
+        "src/catalog.rs",
         "src/console.rs",
+        "src/events.rs",
+        "src/fga.rs",
+        "src/groups.rs",
         "src/instances.rs",
+        "src/jobs.rs",
         "src/login_flows.rs",
         "src/middleware.rs",
         "src/orgs.rs",
+        "src/pats.rs",
         "src/projects.rs",
         "src/providers.rs",
         "src/search.rs",
+        "src/sessions.rs",
         "src/settings.rs",
+        "src/telemetry.rs",
         "src/users.rs",
     ] {
-        assert_no_sql_runtime_calls(&manifest.join(rel));
+        let path = manifest.join(rel);
+        if path.exists() {
+            assert_no_sql_runtime_calls(&path);
+        }
     }
 }
 

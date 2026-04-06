@@ -4,9 +4,12 @@ use uuid::Uuid;
 
 /// Bootstrap creates the default org and admin user if they don't exist.
 /// Safe to run repeatedly; it only inserts missing defaults.
-pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
+///
+/// When `external_domain` is provided, a domain mapping is created so that
+/// cloud-mode instance routing can resolve the host to the default instance.
+pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result<bool> {
     if let Some(spanner) = db.spanner() {
-        bootstrap_spanner(spanner).await?;
+        bootstrap_spanner(spanner, external_domain).await?;
         tracing::info!("bootstrapped default org, admin user, and login flow for spanner");
         return Ok(true);
     }
@@ -136,6 +139,32 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
         tracing::info!(flow_id, "bootstrapped default login flow");
     }
 
+    // Ensure a domain mapping exists for the external domain so that
+    // cloud-mode instance routing can resolve the host to the default instance.
+    if let Some(domain) = external_domain.filter(|d| !d.is_empty()) {
+        let domain_sql = match db.dialect() {
+            crate::Dialect::Postgres => {
+                "INSERT INTO domains (domain, instance_id, is_primary, state, verified) \
+                 VALUES ($1, $2, TRUE, 'active', TRUE) \
+                 ON CONFLICT (domain) DO NOTHING"
+            }
+            crate::Dialect::Sqlite => {
+                "INSERT OR IGNORE INTO domains (domain, instance_id, is_primary, state, verified) \
+                 VALUES ($1, $2, TRUE, 'active', TRUE)"
+            }
+            crate::Dialect::Spanner => unreachable!(),
+        };
+        let domain_inserted = sqlx::query(domain_sql)
+            .bind(domain)
+            .bind(DEFAULT_INSTANCE_ID)
+            .execute(&mut *tx)
+            .await?;
+        if domain_inserted.rows_affected() > 0 {
+            changed = true;
+            tracing::info!(domain, "bootstrapped domain mapping for default instance");
+        }
+    }
+
     tx.commit().await?;
 
     if changed {
@@ -151,11 +180,14 @@ pub async fn bootstrap(db: &Db) -> anyhow::Result<bool> {
     Ok(changed)
 }
 
-async fn bootstrap_spanner(spanner: &crate::SpannerDb) -> anyhow::Result<()> {
+async fn bootstrap_spanner(
+    spanner: &crate::SpannerDb,
+    external_domain: Option<&str>,
+) -> anyhow::Result<()> {
     let operator_metadata = r#"{"capabilities":["operator_admin"]}"#;
     let auth_methods = r#"{"password":{"enabled":true,"interactive":true,"position":0},"passkey":{"enabled":true,"interactive":true,"position":1},"sso":{"enabled":true,"interactive":true,"position":2}}"#;
 
-    let mutations = vec![
+    let mut mutations = vec![
         insert_or_update(
             "instances",
             &[
@@ -247,6 +279,20 @@ async fn bootstrap_spanner(spanner: &crate::SpannerDb) -> anyhow::Result<()> {
         ),
     ];
 
+    if let Some(domain) = external_domain.filter(|d| !d.is_empty()) {
+        mutations.push(insert_or_update(
+            "domains",
+            &[
+                "domain",
+                "instance_id",
+                "is_primary",
+                "state",
+                "verified",
+            ],
+            &[&domain, &DEFAULT_INSTANCE_ID, &true, &"active", &true],
+        ));
+    }
+
     spanner.client().apply(mutations).await?;
     Ok(())
 }
@@ -261,8 +307,8 @@ mod tests {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
 
-        assert!(bootstrap(&db).await.unwrap());
-        assert!(!bootstrap(&db).await.unwrap());
+        assert!(bootstrap(&db, None).await.unwrap());
+        assert!(!bootstrap(&db, None).await.unwrap());
 
         let orgs: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM orgs WHERE instance_id = $1 AND name = 'Default'")

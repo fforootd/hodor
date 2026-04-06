@@ -8,7 +8,7 @@ use zitadel_fga::{CheckRequest, Evaluator, FgaService, StoreResolver, TupleKey};
 
 async fn assert_root_org_owner_inherits_child_instance_admin(db: Db) -> anyhow::Result<()> {
     migrate::migrate(&db).await?;
-    bootstrap::bootstrap(&db).await?;
+    bootstrap::bootstrap(&db, None).await?;
 
     let service = FgaService::new(db.clone());
     service.initialize_instance(DEFAULT_INSTANCE_ID).await?;

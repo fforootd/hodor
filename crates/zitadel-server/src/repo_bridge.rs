@@ -108,6 +108,51 @@ impl SessionRepository for KvSessionRepo {
             Ok(())
         })
     }
+
+    fn list_by_instance(
+        &self,
+        instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SessionDetail>>> {
+        let iid = instance_id.to_string();
+        Box::pin(async move {
+            let rows = self.0.list_sessions(&iid).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| SessionDetail {
+                    id: r.id,
+                    user_id: r.user_id,
+                    org_id: r.org_id,
+                    user_agent: r.user_agent,
+                    ip_address: r.ip_address,
+                    created_at: r.created_at,
+                    expires_at: r.expires_at,
+                    revoked_at: r.revoked_at,
+                })
+                .collect())
+        })
+    }
+
+    fn get(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<SessionDetail>>> {
+        let iid = instance_id.to_string();
+        let sid = session_id.to_string();
+        Box::pin(async move {
+            let r = self.0.get_session(&iid, &sid).await?;
+            Ok(r.map(|r| SessionDetail {
+                id: r.id,
+                user_id: r.user_id,
+                org_id: r.org_id,
+                user_agent: r.user_agent,
+                ip_address: r.ip_address,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+                revoked_at: r.revoked_at,
+            }))
+        })
+    }
 }
 
 // ─── FGA (delegates to FgaService) ───────────────────────
@@ -242,15 +287,15 @@ impl FgaRepository for FgaBridge {
 
 struct DbRawQueryRepo(Db);
 
-fn static_table(table: &str) -> &'static str {
+fn static_table(table: &str) -> anyhow::Result<&'static str> {
     match table {
-        "apps" => "apps",
-        "projects" => "projects",
-        "groups" => "groups",
-        "orgs" => "orgs",
-        "users" => "users",
-        "schemas" => "schemas",
-        other => panic!("unknown table for named resource: {other}"),
+        "apps" => Ok("apps"),
+        "projects" => Ok("projects"),
+        "groups" => Ok("groups"),
+        "orgs" => Ok("orgs"),
+        "users" => Ok("users"),
+        "schemas" => Ok("schemas"),
+        other => anyhow::bail!("unknown table for named resource: {other}"),
     }
 }
 
@@ -265,7 +310,10 @@ impl RawQueryRepository for DbRawQueryRepo {
     ) -> BoxFuture<'_, anyhow::Result<NamedResourceRecord>> {
         let db = self.0.clone();
         let iid = instance_id.to_string();
-        let tbl = static_table(table);
+        let tbl = match static_table(table) {
+            Ok(t) => t,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
         let id = id.to_string();
         let name = name.to_string();
         let oid = org_id.to_string();
@@ -288,7 +336,10 @@ impl RawQueryRepository for DbRawQueryRepo {
     ) -> BoxFuture<'_, anyhow::Result<Option<NamedResourceRecord>>> {
         let db = self.0.clone();
         let iid = instance_id.to_string();
-        let tbl = static_table(table);
+        let tbl = match static_table(table) {
+            Ok(t) => t,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
         let id = id.to_string();
         Box::pin(async move {
             let r = zitadel_db::get_named_resource(&db, &iid, tbl, &id).await?;
@@ -310,7 +361,10 @@ impl RawQueryRepository for DbRawQueryRepo {
     ) -> BoxFuture<'_, anyhow::Result<Vec<NamedResourceRecord>>> {
         let db = self.0.clone();
         let iid = instance_id.to_string();
-        let tbl = static_table(table);
+        let tbl = match static_table(table) {
+            Ok(t) => t,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
         let cur = cursor.to_string();
         Box::pin(async move {
             let rows = zitadel_db::list_named_resources(&db, &iid, tbl, &cur, limit).await?;
@@ -335,7 +389,10 @@ impl RawQueryRepository for DbRawQueryRepo {
     ) -> BoxFuture<'_, anyhow::Result<bool>> {
         let db = self.0.clone();
         let iid = instance_id.to_string();
-        let tbl = static_table(table);
+        let tbl = match static_table(table) {
+            Ok(t) => t,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
         let id = id.to_string();
         let name = name.to_string();
         Box::pin(
@@ -350,7 +407,10 @@ impl RawQueryRepository for DbRawQueryRepo {
     ) -> BoxFuture<'_, anyhow::Result<bool>> {
         let db = self.0.clone();
         let iid = instance_id.to_string();
-        let tbl = static_table(table);
+        let tbl = match static_table(table) {
+            Ok(t) => t,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
         let id = id.to_string();
         Box::pin(async move { zitadel_db::delete_instance_row(&db, &iid, tbl, &id).await })
     }

@@ -1,5 +1,6 @@
 use crate::context::ActorContext;
 use crate::error::AppError;
+use crate::event::DomainEvent;
 use crate::repo::{NamedResourceRecord, Repositories};
 use std::sync::Arc;
 
@@ -26,7 +27,8 @@ impl CreateNamedResource {
     ) -> Result<NamedResourceRecord, AppError> {
         let id = uuid::Uuid::now_v7().to_string();
 
-        self.repos
+        let result = self
+            .repos
             .raw
             .create_named_resource(
                 ctx.instance_id(),
@@ -36,7 +38,26 @@ impl CreateNamedResource {
                 &cmd.org_id,
             )
             .await
-            .map_err(AppError::Internal)
+            .map_err(AppError::Internal)?;
+
+        self.repos
+            .events
+            .append(
+                ctx.instance_id(),
+                &DomainEvent::ResourceCreated {
+                    resource_id: result.id.clone(),
+                    kind: cmd.kind,
+                    name: cmd.name,
+                    actor_id: ctx.user_id().to_string(),
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(AppError::Internal)?;
+
+        Ok(result)
     }
 }
 
@@ -111,7 +132,8 @@ impl UpdateNamedResource {
         ctx: &ActorContext,
         cmd: UpdateNamedResourceCommand,
     ) -> Result<bool, AppError> {
-        self.repos
+        let updated = self
+            .repos
             .raw
             .update_named_resource_name(
                 ctx.instance_id(),
@@ -120,7 +142,28 @@ impl UpdateNamedResource {
                 &cmd.name,
             )
             .await
-            .map_err(AppError::Internal)
+            .map_err(AppError::Internal)?;
+
+        if updated {
+            self.repos
+                .events
+                .append(
+                    ctx.instance_id(),
+                    &DomainEvent::ResourceUpdated {
+                        resource_id: cmd.id,
+                        kind: cmd.kind,
+                        fields_changed: vec!["name".to_string()],
+                        actor_id: ctx.user_id().to_string(),
+                    },
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(AppError::Internal)?;
+        }
+
+        Ok(updated)
     }
 }
 
@@ -140,10 +183,31 @@ impl DeleteNamedResource {
         kind: &str,
         id: &str,
     ) -> Result<bool, AppError> {
-        self.repos
+        let deleted = self
+            .repos
             .raw
             .delete_named_resource(ctx.instance_id(), kind, id)
             .await
-            .map_err(AppError::Internal)
+            .map_err(AppError::Internal)?;
+
+        if deleted {
+            self.repos
+                .events
+                .append(
+                    ctx.instance_id(),
+                    &DomainEvent::ResourceDeleted {
+                        resource_id: id.to_string(),
+                        kind: kind.to_string(),
+                        actor_id: ctx.user_id().to_string(),
+                    },
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(AppError::Internal)?;
+        }
+
+        Ok(deleted)
     }
 }

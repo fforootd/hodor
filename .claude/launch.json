@@ -2,21 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev-stack",
+      "name": "dev",
       "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "source $HOME/.nvm/nvm.sh && source $HOME/.cargo/env && make dev"],
-      "port": 5173
-    },
-    {
-      "name": "backend",
-      "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "source $HOME/.cargo/env && cargo build -p zitadel && ./target/debug/zitadel start -c fixtures/zitadel.dev.toml"],
-      "port": 8080
-    },
-    {
-      "name": "frontend",
-      "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && source $HOME/.nvm/nvm.sh && just dev-web"],
+      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && source $HOME/.nvm/nvm.sh && source $HOME/.cargo/env && just dev"],
       "port": 5173
     }
   ]

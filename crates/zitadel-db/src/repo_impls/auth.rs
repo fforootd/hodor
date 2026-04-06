@@ -12,7 +12,7 @@ use zitadel_app::{
         EventQueryParams, EventRecord, EventRepository, FgaRelation, FgaRepository,
         LinkedIdentityRecord, ListParams, ListResult, LoginFlowRecord, LoginFlowRepository,
         OidcAuthRequest, OidcClientInfo, OidcRepository, PatRecord, PatRepository, ResolvedPat,
-        SessionInfo, SessionRepository, UnitOfWork, UnitOfWorkFactory, UserClaims,
+        SessionDetail, SessionInfo, SessionRepository, UnitOfWork, UnitOfWorkFactory, UserClaims,
     },
 };
 use zitadel_crypto::token_hash;
@@ -417,6 +417,25 @@ impl SessionRepository for DbSessionRepository {
             crate::update_session_metadata(&db, &instance_id, &session_id, &metadata_json).await?;
             Ok(())
         })
+    }
+
+    fn list_by_instance(
+        &self,
+        _instance_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<SessionDetail>>> {
+        // SQL-backed sessions don't support listing yet.
+        // Production uses KvSessionRepo; this is a fallback path.
+        Box::pin(async { Ok(vec![]) })
+    }
+
+    fn get(
+        &self,
+        _instance_id: &str,
+        _session_id: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<SessionDetail>>> {
+        // SQL-backed sessions don't support get-by-id yet.
+        // Production uses KvSessionRepo; this is a fallback path.
+        Box::pin(async { Ok(None) })
     }
 }
 

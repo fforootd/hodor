@@ -33,14 +33,14 @@ mod tests {
     async fn test_service() -> FgaService {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         FgaService::new(db)
     }
 
     async fn test_service_with_db() -> (Db, FgaService) {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
-        zitadel_db::bootstrap::bootstrap(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         let service = FgaService::new(db.clone());
         (db, service)
     }

@@ -15,6 +15,10 @@ url = "sqlite://../data/zitadel.db"
 [observability]
 cache_path = "../data/zitadel-cache.db"
 
+[cloud]
+enabled = true
+license_key = "zitadel-dev-cloud-license-do-not-use-in-production"
+
 [dev]
 mock_oidc = true
 seed_file = "./seeds/frontend.yaml"

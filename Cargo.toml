@@ -22,12 +22,13 @@ members = [
     "crates/zitadel-schema",
     "crates/zitadel-expr",
     "crates/zitadel-botdetect",
+    "crates/zitadel-cloud",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [workspace.dependencies]
 # Async runtime
@@ -105,3 +106,4 @@ zitadel-crypto = { path = "crates/zitadel-crypto" }
 zitadel-catalog = { path = "crates/zitadel-catalog" }
 zitadel-schema = { path = "crates/zitadel-schema" }
 zitadel-expr = { path = "crates/zitadel-expr" }
+zitadel-cloud = { path = "crates/zitadel-cloud" }

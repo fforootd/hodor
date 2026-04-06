@@ -301,14 +301,19 @@ const stateLabel = computed(() => stateLabels[instance.value?.state || ''] || in
 async function loadInstance() {
   loading.value = true
   try {
-    const [inst, doms] = await Promise.all([
-      instanceApi.get(instanceId.value),
-      instanceApi.listDomains(instanceId.value),
-    ])
-    instance.value = inst
-    domains.value = doms
+    instance.value = await instanceApi.get(instanceId.value)
   } catch (e: any) {
     notifyError('Failed to load instance', e)
+    instance.value = null
+    domains.value = []
+    return
+  }
+
+  try {
+    domains.value = await instanceApi.listDomains(instanceId.value)
+  } catch (e: any) {
+    domains.value = []
+    notifyError('Failed to load instance domains', e)
   } finally {
     loading.value = false
   }

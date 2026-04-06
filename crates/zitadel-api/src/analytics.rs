@@ -1,6 +1,6 @@
-use crate::{ApiState, response};
+use crate::{ApiState, middleware::Identity, response};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     response::Response,
     routing::{get, post},
@@ -10,12 +10,6 @@ use uuid::Uuid;
 use zitadel_db::{create_saved_query, delete_saved_query, list_saved_queries};
 use zitadel_storage::AnalyticsQuery;
 
-// TODO(ADR-032): Analytics queries (query, schema) use s.analytics directly.
-// Saved query operations (list, create, delete) use zitadel_db directly.
-// Analytics storage is a separate role (ADR-010) not yet exposed through
-// Repositories. Saved queries should migrate to use cases when an
-// AnalyticsRepository is added.
-
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/analytics/query", post(query))
@@ -23,9 +17,17 @@ pub fn routes() -> Router<ApiState> {
         .route("/analytics/queries", get(list_queries).post(create_query))
         .route(
             "/analytics/queries/{id}",
-            axum::routing::delete(|state: State<ApiState>, path: Path<String>| async move {
-                delete_query(state, path).await
-            }),
+            axum::routing::delete(
+                |state: State<ApiState>,
+                 Extension(identity): Extension<Identity>,
+                 path: Path<String>| async move {
+                    let ctx = response::build_actor_context(&identity);
+                    if let Err(e) = crate::fga_check(&state, &ctx, "admin", "analytics:queries").await {
+                        return e;
+                    }
+                    delete_query(state, path).await
+                },
+            ),
         )
 }
 
@@ -37,7 +39,15 @@ struct QueryRequest {
 }
 
 /// POST /v1/analytics/query — execute a read-only SQL query and return columnar results.
-async fn query(State(s): State<ApiState>, Json(req): Json<QueryRequest>) -> Response {
+async fn query(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<QueryRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "admin", "analytics:query").await {
+        return e;
+    }
     match s
         .analytics
         .query(&AnalyticsQuery {
@@ -53,10 +63,17 @@ async fn query(State(s): State<ApiState>, Json(req): Json<QueryRequest>) -> Resp
 }
 
 /// GET /v1/analytics/schema — return table metadata for the schema browser.
-async fn schema(State(s): State<ApiState>) -> Response {
+async fn schema(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "admin", "analytics:schema").await {
+        return e;
+    }
     match s.analytics.schema().await {
         Ok(schema) => response::json_ok(schema),
-        Err(e) => response::internal_error(format!("analytics schema: {e}")),
+        Err(e) => response::internal(e),
     }
 }
 
@@ -80,7 +97,14 @@ struct CreateQueryRequest {
 }
 
 /// GET /v1/analytics/queries — list saved queries.
-async fn list_queries(State(s): State<ApiState>) -> Response {
+async fn list_queries(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "viewer", "analytics:queries").await {
+        return e;
+    }
     match list_saved_queries(&s.db, zitadel_db::current_instance_id().as_ref()).await {
         Ok(rows) => {
             let items: Vec<SavedQueryResponse> = rows
@@ -99,12 +123,20 @@ async fn list_queries(State(s): State<ApiState>) -> Response {
                 total: None,
             })
         }
-        Err(e) => response::internal_error(format!("{e}")),
+        Err(e) => response::internal(e),
     }
 }
 
 /// POST /v1/analytics/queries — save a new query.
-async fn create_query(State(s): State<ApiState>, Json(req): Json<CreateQueryRequest>) -> Response {
+async fn create_query(
+    State(s): State<ApiState>,
+    Extension(identity): Extension<Identity>,
+    Json(req): Json<CreateQueryRequest>,
+) -> Response {
+    let ctx = response::build_actor_context(&identity);
+    if let Err(e) = crate::fga_check(&s, &ctx, "admin", "analytics:queries").await {
+        return e;
+    }
     if req.name.is_empty() || req.sql.is_empty() {
         return response::bad_request("name and sql are required");
     }
@@ -135,6 +167,6 @@ async fn delete_query(State(s): State<ApiState>, Path(id): Path<String>) -> Resp
     match delete_saved_query(&s.db, zitadel_db::current_instance_id().as_ref(), &id).await {
         Ok(true) => response::no_content(),
         Ok(false) => response::not_found("saved query not found"),
-        Err(error) => response::internal_error(format!("{error}")),
+        Err(error) => response::internal(error),
     }
 }

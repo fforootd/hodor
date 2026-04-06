@@ -203,6 +203,59 @@ pub enum DomainEvent {
         metadata: serde_json::Value,
     },
 
+    // ── Actions ──
+    #[serde(rename = "action.created")]
+    ActionCreated {
+        action_id: String,
+        name: String,
+        hook: String,
+        actor_id: String,
+    },
+    #[serde(rename = "action.updated")]
+    ActionUpdated {
+        action_id: String,
+        fields_changed: Vec<String>,
+        actor_id: String,
+    },
+    #[serde(rename = "action.deleted")]
+    ActionDeleted {
+        action_id: String,
+        actor_id: String,
+    },
+
+    // ── Resources (generic named) ──
+    #[serde(rename = "resource.created")]
+    ResourceCreated {
+        resource_id: String,
+        kind: String,
+        name: String,
+        actor_id: String,
+    },
+    #[serde(rename = "resource.updated")]
+    ResourceUpdated {
+        resource_id: String,
+        kind: String,
+        fields_changed: Vec<String>,
+        actor_id: String,
+    },
+    #[serde(rename = "resource.deleted")]
+    ResourceDeleted {
+        resource_id: String,
+        kind: String,
+        actor_id: String,
+    },
+
+    // ── Memberships ──
+    #[serde(rename = "membership.changed")]
+    MembershipChanged {
+        entity_type: String,
+        entity_id: String,
+        user_id: String,
+        action: String, // "added" or "removed"
+        role: String,
+        actor_id: String,
+    },
+
     // ── PATs ──
     #[serde(rename = "pat.created")]
     PatCreated {
@@ -250,6 +303,13 @@ impl DomainEvent {
             Self::SchemaUpdated { .. } => "schema.updated",
             Self::LoginFlowConfigured { .. } => "login_flow.configured",
             Self::BotDetection { .. } => "security.bot_detection",
+            Self::ActionCreated { .. } => "action.created",
+            Self::ActionUpdated { .. } => "action.updated",
+            Self::ActionDeleted { .. } => "action.deleted",
+            Self::ResourceCreated { .. } => "resource.created",
+            Self::ResourceUpdated { .. } => "resource.updated",
+            Self::ResourceDeleted { .. } => "resource.deleted",
+            Self::MembershipChanged { .. } => "membership.changed",
             Self::PatCreated { .. } => "pat.created",
             Self::PatRevoked { .. } => "pat.revoked",
         }
@@ -279,6 +339,13 @@ impl DomainEvent {
             Self::SchemaRegistered { .. } | Self::SchemaUpdated { .. } => "schema",
             Self::LoginFlowConfigured { .. } => "login_flow",
             Self::BotDetection { .. } => "security",
+            Self::ActionCreated { .. }
+            | Self::ActionUpdated { .. }
+            | Self::ActionDeleted { .. } => "action",
+            Self::ResourceCreated { .. }
+            | Self::ResourceUpdated { .. }
+            | Self::ResourceDeleted { .. } => "resource",
+            Self::MembershipChanged { .. } => "membership",
             Self::PatCreated { .. } | Self::PatRevoked { .. } => "pat",
         }
     }
@@ -318,6 +385,13 @@ impl DomainEvent {
             }
             Self::LoginFlowConfigured { flow_id, .. } => flow_id,
             Self::BotDetection { fingerprint, .. } => fingerprint,
+            Self::ActionCreated { action_id, .. }
+            | Self::ActionUpdated { action_id, .. }
+            | Self::ActionDeleted { action_id, .. } => action_id,
+            Self::ResourceCreated { resource_id, .. }
+            | Self::ResourceUpdated { resource_id, .. }
+            | Self::ResourceDeleted { resource_id, .. } => resource_id,
+            Self::MembershipChanged { entity_id, .. } => entity_id,
             Self::PatCreated { pat_id, .. } | Self::PatRevoked { pat_id, .. } => pat_id,
         }
     }
@@ -352,6 +426,13 @@ impl DomainEvent {
             | Self::SchemaRegistered { actor_id, .. }
             | Self::SchemaUpdated { actor_id, .. }
             | Self::LoginFlowConfigured { actor_id, .. }
+            | Self::ActionCreated { actor_id, .. }
+            | Self::ActionUpdated { actor_id, .. }
+            | Self::ActionDeleted { actor_id, .. }
+            | Self::ResourceCreated { actor_id, .. }
+            | Self::ResourceUpdated { actor_id, .. }
+            | Self::ResourceDeleted { actor_id, .. }
+            | Self::MembershipChanged { actor_id, .. }
             | Self::PatCreated { actor_id, .. }
             | Self::PatRevoked { actor_id, .. } => actor_id,
             // Events without explicit actor
