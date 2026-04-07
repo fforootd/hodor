@@ -1,0 +1,146 @@
+name: Deploy / Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. sha-abc1234, latest, v1.0.0)"
+        required: true
+        default: latest
+        type: string
+      environment:
+        description: "Target environment"
+        required: true
+        default: test
+        type: choice
+        options:
+          - test
+          - production
+      run_migrations:
+        description: "Run schema migrations before deploying"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false # Never cancel an in-flight deploy
+
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  AR_REGION: ${{ vars.AR_REGION || 'us-west1' }}
+  AR_REPOSITORY: ${{ vars.AR_REPOSITORY || 'zitadel' }}
+  IMAGE_NAME: zitadel
+
+jobs:
+  deploy:
+    name: Deploy / ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Compute image reference
+        id: image
+        run: |
+          registry="${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPOSITORY}"
+          full="${registry}/${IMAGE_NAME}:${{ inputs.image_tag }}"
+          echo "ref=${full}" >> "$GITHUB_OUTPUT"
+          echo "Deploying: ${full}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify image exists
+        run: |
+          gcloud artifacts docker images describe "${{ steps.image.outputs.ref }}" \
+            --project="${GCP_PROJECT_ID}" \
+            || { echo "::error::Image not found: ${{ steps.image.outputs.ref }}"; exit 1; }
+
+      - name: Run migrations
+        if: inputs.run_migrations
+        env:
+          MIGRATE_JOB: ${{ vars.CLOUD_RUN_MIGRATE_JOB || 'zitadel-migrate' }}
+          REGION: ${{ vars.CLOUD_RUN_REGION || env.AR_REGION }}
+        run: |
+          echo "Updating migration job image..."
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --image="${{ steps.image.outputs.ref }}" \
+            --region="${REGION}" \
+            --project="${GCP_PROJECT_ID}"
+
+          echo "Executing migration job..."
+          gcloud run jobs execute "${MIGRATE_JOB}" \
+            --region="${REGION}" \
+            --project="${GCP_PROJECT_ID}" \
+            --wait
+
+      - name: Deploy service
+        id: deploy
+        env:
+          SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'zitadel-test' }}
+          REGION: ${{ vars.CLOUD_RUN_REGION || env.AR_REGION }}
+        run: |
+          gcloud run services update "${SERVICE}" \
+            --image="${{ steps.image.outputs.ref }}" \
+            --region="${REGION}" \
+            --project="${GCP_PROJECT_ID}"
+
+          url="$(gcloud run services describe "${SERVICE}" \
+            --region="${REGION}" \
+            --project="${GCP_PROJECT_ID}" \
+            --format='value(status.url)')"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+          # Update origin env vars to match the deployed URL.
+          host="${url#https://}"
+          gcloud run services update "${SERVICE}" \
+            --region="${REGION}" \
+            --project="${GCP_PROJECT_ID}" \
+            --update-env-vars "ZITADEL_SERVER__PUBLIC_ORIGIN=${url},ZITADEL_SERVER__EXTERNAL_DOMAIN=${host}"
+
+      - name: Health check
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          echo "Checking ${SERVICE_URL}/healthz ..."
+          for i in 1 2 3 4 5; do
+            status="$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/healthz" || true)"
+            if [[ "$status" == "200" ]]; then
+              echo "Health check passed"
+              break
+            fi
+            echo "Attempt ${i}: got HTTP ${status}, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Checking ${SERVICE_URL}/readyz ..."
+          status="$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/readyz" || true)"
+          if [[ "$status" != "200" ]]; then
+            echo "::warning::Readiness probe returned HTTP ${status}"
+          else
+            echo "Readiness check passed"
+          fi
+
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Deployment Complete
+
+          | Field | Value |
+          |-------|-------|
+          | Environment | \`${{ inputs.environment }}\` |
+          | Image | \`${{ steps.image.outputs.ref }}\` |
+          | Service URL | ${{ steps.deploy.outputs.url }} |
+          | Migrations | ${{ inputs.run_migrations && '✅ ran' || '⏭️ skipped' }} |
+          EOF

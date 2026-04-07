@@ -1,0 +1,84 @@
+name: Build / Container Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag_override:
+        description: "Additional image tag (e.g. v1.0.0). sha-{short} and latest are always applied."
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation
+
+env:
+  # Override these via repository variables for your GCP project.
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  AR_REGION: ${{ vars.AR_REGION || 'us-west1' }}
+  AR_REPOSITORY: ${{ vars.AR_REPOSITORY || 'zitadel' }}
+  IMAGE_NAME: zitadel
+
+jobs:
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Compute image metadata
+        id: meta
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          registry="${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPOSITORY}"
+          image="${registry}/${IMAGE_NAME}"
+          tags="${image}:sha-${short_sha},${image}:latest"
+          if [[ -n "${{ inputs.tag_override }}" ]]; then
+            tags="${tags},${image}:${{ inputs.tag_override }}"
+          fi
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${AR_REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=container-image
+          cache-to: type=gha,mode=max,scope=container-image
+
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Container Image Published
+
+          | Field | Value |
+          |-------|-------|
+          | Image | \`${{ steps.meta.outputs.image }}\` |
+          | Tag | \`sha-${{ steps.meta.outputs.short_sha }}\` |
+          | Digest | \`${{ steps.push.outputs.digest }}\` |
+          EOF

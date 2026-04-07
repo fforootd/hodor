@@ -261,6 +261,8 @@ log_level = "info"  # debug, info, warn, error
 log_format = "text" # text, json
 cache_path = "./data/zitadel-cache.db"
 cache_max = 50000
+gcp_cloud_logging = false  # true: emit GCP Cloud Logging structured JSON (severity, trace correlation)
+gcp_project_id = ""        # auto-detected from GCP_PROJECT / GOOGLE_CLOUD_PROJECT env if empty
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Streams — routing rules applied before sink fan-out
@@ -300,8 +302,17 @@ sample_rate = 0.0
 # Sinks — best-effort export and analytics drain configuration
 # ─────────────────────────────────────────────────────────────────────────────
 [observability.sinks.otel]
-endpoint = ""
-protocol = "http" # http | grpc
+endpoint = ""          # OTLP endpoint (empty = disabled). Examples:
+                       #   "http://localhost:4317"                   — local collector
+                       #   "https://telemetry.googleapis.com"       — GCP native OTLP
+protocol = "http"      # http | grpc
+auth = "none"          # none | gcp (Bearer token from ADC / workload identity)
+traces_enabled = true  # export distributed traces via OTLP (requires endpoint)
+metrics_enabled = true # export metrics via OTLP (requires endpoint)
+logs_enabled = true    # export logs via OTLP (requires endpoint)
+traces_endpoint = ""   # per-signal override (empty = use endpoint)
+metrics_endpoint = ""  # per-signal override (empty = use endpoint)
+metrics_interval = "60s" # metric export interval
 
 [observability.sinks.analytics]
 enabled = true

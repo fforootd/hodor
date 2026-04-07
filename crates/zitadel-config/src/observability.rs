@@ -8,6 +8,8 @@ pub struct ObservabilityConfig {
     pub log_format: String,
     pub cache_path: String,
     pub cache_max: u64,
+    pub gcp_cloud_logging: bool,
+    pub gcp_project_id: String,
     pub streams: StreamRoutingConfig,
     pub sinks: SinksConfig,
     pub redaction: RedactionConfig,
@@ -20,6 +22,8 @@ impl Default for ObservabilityConfig {
             log_format: "text".into(),
             cache_path: "./data/zitadel-cache.db".into(),
             cache_max: 50000,
+            gcp_cloud_logging: false,
+            gcp_project_id: String::new(),
             streams: StreamRoutingConfig::default(),
             sinks: SinksConfig::default(),
             redaction: RedactionConfig::default(),
@@ -114,6 +118,13 @@ pub struct SinksConfig {
 pub struct OtelSinkConfig {
     pub endpoint: String,
     pub protocol: String,
+    pub auth: String,
+    pub traces_enabled: bool,
+    pub metrics_enabled: bool,
+    pub logs_enabled: bool,
+    pub traces_endpoint: String,
+    pub metrics_endpoint: String,
+    pub metrics_interval: String,
 }
 
 impl Default for OtelSinkConfig {
@@ -121,7 +132,36 @@ impl Default for OtelSinkConfig {
         Self {
             endpoint: String::new(),
             protocol: "http".into(),
+            auth: "none".into(),
+            traces_enabled: true,
+            metrics_enabled: true,
+            logs_enabled: true,
+            traces_endpoint: String::new(),
+            metrics_endpoint: String::new(),
+            metrics_interval: "60s".into(),
         }
+    }
+}
+
+impl OtelSinkConfig {
+    pub fn traces_endpoint(&self) -> &str {
+        if self.traces_endpoint.is_empty() {
+            &self.endpoint
+        } else {
+            &self.traces_endpoint
+        }
+    }
+
+    pub fn metrics_endpoint(&self) -> &str {
+        if self.metrics_endpoint.is_empty() {
+            &self.endpoint
+        } else {
+            &self.metrics_endpoint
+        }
+    }
+
+    pub fn is_gcp_auth(&self) -> bool {
+        self.auth.eq_ignore_ascii_case("gcp")
     }
 }
 

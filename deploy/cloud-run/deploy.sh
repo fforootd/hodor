@@ -11,6 +11,7 @@ SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_EMAIL:?set SERVICE_ACCOUNT_EMAIL}"
 SOURCE_CONFIG="${SOURCE_CONFIG:-${REPO_ROOT}/fixtures/zitadel.spanner.local.toml}"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/runtime.env.yaml}"
 SOURCE_DIR="${SOURCE_DIR:-${REPO_ROOT}}"
+IMAGE="${IMAGE:-}"  # Pre-built image reference. When set, skips --source build.
 PORT="${PORT:-8080}"
 CPU="${CPU:-1}"
 MEMORY="${MEMORY:-1Gi}"
@@ -115,7 +116,6 @@ deploy_cmd=(
   gcloud run deploy "${SERVICE_NAME}"
   --project "${PROJECT_ID}"
   --region "${REGION}"
-  --source "${SOURCE_DIR}"
   --service-account "${SERVICE_ACCOUNT_EMAIL}"
   --port "${PORT}"
   --cpu "${CPU}"
@@ -123,6 +123,12 @@ deploy_cmd=(
   --min-instances "${MIN_INSTANCES}"
   --env-vars-file "${ENV_FILE}"
 )
+
+if [[ -n "${IMAGE}" ]]; then
+  deploy_cmd+=(--image "${IMAGE}")
+else
+  deploy_cmd+=(--source "${SOURCE_DIR}")
+fi
 
 if [[ "${ALLOW_UNAUTHENTICATED}" == "true" ]]; then
   deploy_cmd+=(--allow-unauthenticated)

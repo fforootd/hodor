@@ -244,6 +244,17 @@ jobs:
     name: Contracts
     if: inputs.run_contracts
     runs-on: ubuntu-latest
+    services:
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator
+        ports:
+          - 9010:9010
+          - 9020:9020
+    env:
+      ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      ZITADEL_TEST_SPANNER_PROJECT: local-project
+      ZITADEL_TEST_SPANNER_INSTANCE: test-instance
+      ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelct
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -254,6 +265,17 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Wait for Spanner emulator
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 9010; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
+          exit 1
 
       - name: Run contract suites
         run: just contracts
@@ -262,6 +284,17 @@ jobs:
     name: Invariants
     if: inputs.run_invariants
     runs-on: ubuntu-latest
+    services:
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator
+        ports:
+          - 9010:9010
+          - 9020:9020
+    env:
+      ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      ZITADEL_TEST_SPANNER_PROJECT: local-project
+      ZITADEL_TEST_SPANNER_INSTANCE: test-instance
+      ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadeliv
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -272,6 +305,17 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Wait for Spanner emulator
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 9010; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
+          exit 1
 
       - name: Run invariant suites
         run: just invariants
@@ -294,8 +338,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator
+        ports:
+          - 9010:9010
+          - 9020:9020
     env:
       ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      ZITADEL_TEST_SPANNER_PROJECT: local-project
+      ZITADEL_TEST_SPANNER_INSTANCE: test-instance
+      ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelss
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -306,6 +359,17 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Wait for Spanner emulator
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 9010; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
+          exit 1
 
       - name: Run subsystem suites
         run: just subsystems
@@ -314,6 +378,17 @@ jobs:
     name: Resilience
     if: inputs.run_resilience
     runs-on: ubuntu-latest
+    services:
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator
+        ports:
+          - 9010:9010
+          - 9020:9020
+    env:
+      ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      ZITADEL_TEST_SPANNER_PROJECT: local-project
+      ZITADEL_TEST_SPANNER_INSTANCE: test-instance
+      ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelrs
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -324,6 +399,17 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Wait for Spanner emulator
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 9010; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
+          exit 1
 
       - name: Run resilience suites
         run: just resilience

@@ -693,6 +693,11 @@ async fn dispatch_effect(
                 }
             }
 
+            // Inject trace context for distributed tracing (Tier 3 OTEL export).
+            for (key, value) in zitadel_observability::propagation::trace_context_headers() {
+                req = req.header(key, value);
+            }
+
             let resp = req.send().await?;
             if !resp.status().is_success() {
                 anyhow::bail!(

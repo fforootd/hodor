@@ -7,8 +7,8 @@ This matrix maps the current repo to the question-oriented taxonomy. Families ar
 | Tier | Purpose | Current entry points |
 |---|---|---|
 | `fast` | Cheap always-on local and CI feedback | `just test`, `just rust-static`, `just web-static`, `just test-web` |
-| `pr` | Required stable wall on every pull request | `just test-pr`, `.github/workflows/ci-pr.yml` |
-| `release` | Required stable wall on every push to `main` | `just test-release`, `.github/workflows/ci-main.yml` |
+| `pr` | Required stable wall on every pull request | `just test-pr`, `just spanner-cert`, `.github/workflows/ci-pr.yml` |
+| `release` | Required stable wall on every push to `main` | `just test-release`, `just spanner-cert`, `.github/workflows/ci-main.yml` |
 | `nightly` | Slower or quarantined coverage | `just test-nightly`, `.github/workflows/nightly-families.yml`, `.github/workflows/oidc-conformance-daily.yml`, `.github/workflows/db-perf-daily.yml`, `.github/workflows/fuzz-daily.yml` |
 | `manual` | Operator-invoked reruns and certification | `workflow_dispatch` on the nightly/manual workflows and `just conformance-oidc` |
 
@@ -41,14 +41,18 @@ The `prompt=login` browser case is tagged `@quarantine`. The repo still enforces
 | `conformance` | `conformance/oidc` | OIDC protocol compliance | `nightly`, `manual` |
 | `contracts` | `crates/zitadel-server/tests/contracts_http_router.rs` | server / router and discovery | `pr`, `release` |
 | `contracts` | `crates/zitadel-server/tests/contracts_management_root_instance.rs` | server / root instance management | `pr`, `release` |
+| `contracts` | `crates/zitadel-server/tests/contracts_spanner_http_router.rs` | server / auth, observability, and analytics routes on native Spanner | `pr`, `release` |
+| `contracts` | `crates/zitadel-db/tests/contracts_spanner_schema_layout.rs` | storage / Spanner DDL guardrails for PKs, indexes, and non-interleaving | `pr`, `release` |
 | `invariants` | `crates/zitadel-server/tests/invariants_tenant_instance_isolation.rs` | server / tenant isolation | `pr`, `release` |
-| `invariants` | `crates/zitadel-fga/tests/invariants_authorization_hierarchy.rs` | FGA / authorization inheritance | `pr`, `release` |
+| `invariants` | `crates/zitadel-fga/tests/invariants_authorization_hierarchy.rs` | FGA / authorization inheritance, tuple lifecycle, and store scope isolation | `pr`, `release` |
 | `subsystems` | `crates/zitadel-api/tests/subsystems_backend_boundary.rs` | API / repository boundary | `pr`, `release` |
 | `subsystems` | `crates/zitadel-login/tests/subsystems_backend_boundary.rs` | login / repository boundary | `pr`, `release` |
 | `subsystems` | `crates/zitadel-oidc/tests/subsystems_backend_boundary.rs` | OIDC / repository boundary | `pr`, `release` |
 | `subsystems` | `crates/zitadel-server/tests/subsystems_backend_boundary.rs` | server / repository boundary | `pr`, `release` |
 | `subsystems` | `crates/zitadel-storage/tests/subsystems_storage_postgres_roles.rs` | storage / role runtime | `pr`, `release` |
-| `resilience` | `crates/zitadel-storage/tests/resilience_storage_spanner_transient.rs` | storage / transient semantics | `nightly`, env-gated `manual` |
+| `subsystems` | `crates/zitadel-storage/tests/subsystems_storage_spanner_emulator.rs` | storage / native Spanner runtime certification | `pr`, `release` |
+| `resilience` | `crates/zitadel-storage/tests/resilience_storage_spanner_transient.rs` | storage / transient semantics and observability analytics on native Spanner | `pr`, `release` |
+| `resilience` | `crates/zitadel-db/tests/resilience_spanner_effects_jobs.rs` | storage / durable effects and job lease semantics on native Spanner | `pr`, `release` |
 | `performance` | `.github/workflows/db-perf-daily.yml` and `just perf-db-*` | storage / latency and throughput trends | `nightly`, `manual` |
 | `upgrade` | reserved for future suites | migrations and compatibility | documentation only |
 
@@ -64,6 +68,7 @@ just contracts
 just invariants
 just subsystems
 just resilience
+just spanner-cert
 just conformance-oidc
 just test-pr
 just test-release
@@ -73,6 +78,7 @@ just test-nightly
 ## Notes
 
 - `just test` is the fast local default. It is not the full PR wall.
+- `just spanner-cert` is the canonical emulator-backed native Spanner lane. If the Spanner env vars are absent locally, the Spanner-backed tests skip cleanly.
 - `journeys` is the family name. Browser-only versus API-assisted setup is a test-design detail, not a top-level taxonomy bucket.
 - `conformance` is reserved for standards validation. Repo-authored Playwright OIDC coverage belongs to `journeys`, not `conformance`.
 - `performance` stays outside the required PR/release wall even though the repo already runs a daily DB harness.

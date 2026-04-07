@@ -10,6 +10,7 @@ pub mod retained;
 pub mod scoped;
 pub mod seed;
 pub mod spanner;
+pub mod test_support;
 
 use anyhow::Context;
 use sqlx::{AnyPool, any::AnyPoolOptions};

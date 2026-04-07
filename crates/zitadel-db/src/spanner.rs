@@ -332,7 +332,10 @@ async fn build_admin_config(config: &StatefulStorageConfig) -> anyhow::Result<Ad
 }
 
 fn normalize_ddl(statements: &[String]) -> Vec<String> {
-    statements.iter().map(|statement| normalize_statement(statement)).collect()
+    statements
+        .iter()
+        .map(|statement| normalize_statement(statement))
+        .collect()
 }
 
 fn normalize_statement(statement: &str) -> String {
@@ -340,7 +343,10 @@ fn normalize_statement(statement: &str) -> String {
 }
 
 fn ddl_object_keys(statements: &[String]) -> BTreeSet<String> {
-    statements.iter().filter_map(|statement| ddl_object_key(statement)).collect()
+    statements
+        .iter()
+        .filter_map(|statement| ddl_object_key(statement))
+        .collect()
 }
 
 fn ddl_object_key(statement: &str) -> Option<String> {
@@ -370,7 +376,9 @@ fn ddl_object_key(statement: &str) -> Option<String> {
     }
 
     if tokens[0].eq_ignore_ascii_case("ALTER")
-        && tokens.get(1).is_some_and(|t| t.eq_ignore_ascii_case("TABLE"))
+        && tokens
+            .get(1)
+            .is_some_and(|t| t.eq_ignore_ascii_case("TABLE"))
     {
         let table = sanitize_ident(tokens.get(2)?);
         let mut pos = 3usize;
@@ -390,7 +398,10 @@ fn ddl_object_key(statement: &str) -> Option<String> {
 
 fn parse_object_ident(tokens: &[&str], start: usize) -> Option<String> {
     let mut pos = start;
-    if tokens.get(pos).is_some_and(|t| t.eq_ignore_ascii_case("IF")) {
+    if tokens
+        .get(pos)
+        .is_some_and(|t| t.eq_ignore_ascii_case("IF"))
+    {
         pos += 3;
     }
     tokens.get(pos).map(|raw| sanitize_ident(raw))

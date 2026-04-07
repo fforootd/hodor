@@ -124,7 +124,11 @@ impl Default for ReqwestHttpClient {
 
 impl HttpClient for ReqwestHttpClient {
     async fn get_json<T: DeserializeOwned + Send>(&self, url: &str) -> anyhow::Result<T> {
-        let response = self.client.get(url).send().await?;
+        let mut request = self.client.get(url);
+        for (key, value) in zitadel_observability::propagation::trace_context_headers() {
+            request = request.header(key, value);
+        }
+        let response = request.send().await?;
         if !response.status().is_success() {
             anyhow::bail!("GET {url} failed with {}", response.status());
         }
@@ -136,12 +140,11 @@ impl HttpClient for ReqwestHttpClient {
         url: &str,
         access_token: &str,
     ) -> anyhow::Result<T> {
-        let response = self
-            .client
-            .get(url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
+        let mut request = self.client.get(url).bearer_auth(access_token);
+        for (key, value) in zitadel_observability::propagation::trace_context_headers() {
+            request = request.header(key, value);
+        }
+        let response = request.send().await?;
         if !response.status().is_success() {
             anyhow::bail!("GET {url} failed with {}", response.status());
         }
@@ -157,6 +160,9 @@ impl HttpClient for ReqwestHttpClient {
         let mut request = self.client.post(url).form(params);
         if let Some((username, password)) = basic_auth {
             request = request.basic_auth(username, Some(password));
+        }
+        for (key, value) in zitadel_observability::propagation::trace_context_headers() {
+            request = request.header(key, value);
         }
         let response = request.send().await?;
         if !response.status().is_success() {

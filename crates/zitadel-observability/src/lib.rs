@@ -1,4 +1,5 @@
 mod middleware;
+pub mod propagation;
 
 use std::{
     collections::{BTreeMap, HashSet, hash_map::DefaultHasher},
@@ -16,12 +17,14 @@ use middleware::REQUEST_ID_HEADER;
 use opentelemetry::{
     KeyValue,
     logs::{AnyValue, LogRecord as _, Logger as _, LoggerProvider as _, Severity},
-    trace::{SpanId, TraceFlags, TraceId},
+    trace::{SpanId, TraceFlags, TraceId, TracerProvider as _},
 };
-use opentelemetry_otlp::{LogExporter, Protocol, WithExportConfig};
+use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
     Resource,
     logs::{SdkLogger, SdkLoggerProvider},
+    metrics::SdkMeterProvider,
+    trace::SdkTracerProvider,
 };
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -35,12 +38,13 @@ use tokio::{
     time::MissedTickBehavior,
 };
 use tracing::{Event, Id, Subscriber, field::Visit};
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, layer::Context, prelude::*, registry::LookupSpan,
     util::SubscriberInitExt,
 };
 use uuid::Uuid;
-use zitadel_config::{ObservabilityConfig, StreamConfig};
+use zitadel_config::{ObservabilityConfig, OtelSinkConfig, StreamConfig};
 use zitadel_db::{DEFAULT_INSTANCE_ID, Db, Dialect};
 
 pub use middleware::{
@@ -105,7 +109,7 @@ enum ReliabilityMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OutputFormat {
+pub(crate) enum OutputFormat {
     Text,
     Json,
 }
@@ -135,6 +139,7 @@ enum IpMode {
 #[derive(Clone)]
 struct RuntimeState {
     format: OutputFormat,
+    gcp_logging: Option<String>, // Some(project_id) when GCP Cloud Logging JSON is enabled
     redaction: Redaction,
     streams: BTreeMap<Stream, StreamRouting>,
     analytics_tx: Option<mpsc::UnboundedSender<StructuredRecord>>,
@@ -178,6 +183,8 @@ struct SpanFields {
 pub struct ObservabilityGuard {
     shutdown: watch::Sender<bool>,
     tasks: Vec<JoinHandle<()>>,
+    tracer_provider: Option<SdkTracerProvider>,
+    meter_provider: Option<SdkMeterProvider>,
 }
 
 impl Drop for ObservabilityGuard {
@@ -185,6 +192,12 @@ impl Drop for ObservabilityGuard {
         let _ = self.shutdown.send(true);
         for task in &self.tasks {
             task.abort();
+        }
+        if let Some(provider) = self.tracer_provider.take() {
+            let _ = provider.shutdown();
+        }
+        if let Some(provider) = self.meter_provider.take() {
+            let _ = provider.shutdown();
         }
     }
 }
@@ -215,36 +228,77 @@ pub async fn install(
     };
     tasks.extend(analytics_tasks);
 
-    let (otel_tx, otel_tasks) = if !config.sinks.otel.endpoint.is_empty() {
-        let (tx, handles) = start_otel_pipeline(config, shutdown_rx.clone()).await?;
-        (Some(tx), handles)
-    } else {
-        (None, Vec::new())
-    };
+    let (otel_tx, otel_tasks) =
+        if !config.sinks.otel.endpoint.is_empty() && config.sinks.otel.logs_enabled {
+            let (tx, handles) = start_otel_log_pipeline(config, shutdown_rx.clone()).await?;
+            (Some(tx), handles)
+        } else {
+            (None, Vec::new())
+        };
     tasks.extend(otel_tasks);
+
+    let gcp_project_id = resolve_gcp_project_id(&config.gcp_project_id);
 
     let format = match config.log_format.as_str() {
         "json" => OutputFormat::Json,
         _ => OutputFormat::Text,
     };
+    let gcp_logging = if config.gcp_cloud_logging && format == OutputFormat::Json {
+        gcp_project_id.clone()
+    } else {
+        None
+    };
     let state = Arc::new(RuntimeState {
         format,
+        gcp_logging,
         redaction,
         streams,
         analytics_tx,
         otel_tx,
     });
 
+    // Build OTEL TracerProvider for distributed trace export (Tier 3)
+    let tracer_provider =
+        if !config.sinks.otel.endpoint.is_empty() && config.sinks.otel.traces_enabled {
+            let provider = build_tracer_provider(&config.sinks.otel).await?;
+            // Register W3C TraceContext propagator for inbound/outbound trace correlation
+            opentelemetry::global::set_text_map_propagator(
+                opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+            );
+            Some(provider)
+        } else {
+            None
+        };
+
+    // Build OTEL MeterProvider for metrics export (Tier 3)
+    let meter_provider =
+        if !config.sinks.otel.endpoint.is_empty() && config.sinks.otel.metrics_enabled {
+            let provider = build_meter_provider(&config.sinks.otel).await?;
+            opentelemetry::global::set_meter_provider(provider.clone());
+            Some(provider)
+        } else {
+            None
+        };
+
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(config.log_level.clone()));
+
+    // Subscriber stack: EnvFilter + ObservabilityLayer (wide events) + OpenTelemetryLayer (trace export)
+    let otel_layer = tracer_provider
+        .as_ref()
+        .map(|provider| OpenTelemetryLayer::new(provider.tracer(SERVICE_NAME)));
+
     Registry::default()
         .with(filter)
         .with(ObservabilityLayer { state })
+        .with(otel_layer)
         .try_init()?;
 
     Ok(ObservabilityGuard {
         shutdown: shutdown_tx,
         tasks,
+        tracer_provider,
+        meter_provider,
     })
 }
 
@@ -302,7 +356,11 @@ where
         };
 
         if route.stdout {
-            write_stdout(self.state.format, &record);
+            write_stdout(
+                self.state.format,
+                self.state.gcp_logging.as_deref(),
+                &record,
+            );
         }
         if route.analytics
             && let Some(tx) = &self.state.analytics_tx
@@ -579,8 +637,11 @@ fn should_sample(sample_rate: f64, seed: &str) -> bool {
     bucket <= sample_rate
 }
 
-fn write_stdout(format: OutputFormat, record: &StructuredRecord) {
+fn write_stdout(format: OutputFormat, gcp_project: Option<&str>, record: &StructuredRecord) {
     match format {
+        OutputFormat::Json if gcp_project.is_some() => {
+            write_stdout_gcp_json(gcp_project.unwrap(), record);
+        }
         OutputFormat::Json => {
             let line = json!({
                 "timestamp_ms": record.created_at_ms,
@@ -627,6 +688,96 @@ fn compact_value(value: &Value) -> String {
         Value::String(value) => value.clone(),
         _ => value.to_string(),
     }
+}
+
+fn write_stdout_gcp_json(project_id: &str, record: &StructuredRecord) {
+    let severity = match record.level.as_str() {
+        "error" => "ERROR",
+        "warn" => "WARNING",
+        "debug" => "DEBUG",
+        "trace" => "DEBUG",
+        _ => "INFO",
+    };
+    let secs = record.created_at_ms / 1000;
+    let nanos = (record.created_at_ms % 1000) * 1_000_000;
+    let time = format!("{}.{:09}Z", chrono_format_utc(secs), nanos,);
+
+    let mut line = serde_json::Map::new();
+    line.insert("severity".into(), Value::String(severity.into()));
+    line.insert("time".into(), Value::String(time));
+    line.insert("message".into(), Value::String(record.message.clone()));
+    line.insert(
+        "stream".into(),
+        Value::String(record.stream.as_str().into()),
+    );
+    line.insert(
+        "event_type".into(),
+        Value::String(record.event_type.clone()),
+    );
+
+    // Trace correlation: request_id maps to trace_id per ADR-023
+    if let Some(request_id) = &record.request_id {
+        line.insert(
+            "logging.googleapis.com/trace".into(),
+            Value::String(format!("projects/{project_id}/traces/{request_id}")),
+        );
+    }
+    if let Some(span_id) = record
+        .metadata
+        .get("parent_span_id")
+        .and_then(value_as_string)
+    {
+        line.insert(
+            "logging.googleapis.com/spanId".into(),
+            Value::String(span_id),
+        );
+    }
+
+    // Source location from tracing metadata
+    let mut source_location = serde_json::Map::new();
+    if let Some(file) = record.metadata.get("file").and_then(value_as_string) {
+        source_location.insert("file".into(), Value::String(file));
+    }
+    if let Some(line_num) = record.metadata.get("line") {
+        source_location.insert("line".into(), line_num.clone());
+    }
+    if !source_location.is_empty() {
+        line.insert(
+            "logging.googleapis.com/sourceLocation".into(),
+            Value::Object(source_location),
+        );
+    }
+
+    if let Some(request_id) = &record.request_id {
+        line.insert("request_id".into(), Value::String(request_id.clone()));
+    }
+    line.insert("payload".into(), record.payload.clone());
+    line.insert("metadata".into(), record.metadata.clone());
+
+    let _ = writeln!(std::io::stdout(), "{}", Value::Object(line));
+}
+
+/// Formats a unix timestamp in seconds as "YYYY-MM-DDTHH:MM:SS" UTC.
+fn chrono_format_utc(secs: i64) -> String {
+    const SECS_PER_DAY: i64 = 86400;
+    let days = secs.div_euclid(SECS_PER_DAY);
+    let day_secs = secs.rem_euclid(SECS_PER_DAY);
+    let h = day_secs / 3600;
+    let m = (day_secs % 3600) / 60;
+    let s = day_secs % 60;
+
+    // Civil date from days since epoch (algorithm from Howard Hinnant)
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { y + 1 } else { y };
+    format!("{year:04}-{month:02}-{d:02}T{h:02}:{m:02}:{s:02}")
 }
 
 fn category_for(event_type: &str) -> String {
@@ -1132,9 +1283,18 @@ fn spanner_insert_event_stmt(event: &BufferedEventRow) -> Statement {
     stmt.add_param("org_id", &event.org_id);
     stmt.add_param("actor_id", &event.actor_id.clone().unwrap_or_default());
     stmt.add_param("actor_type", &event.actor_type.clone().unwrap_or_default());
-    stmt.add_param("aggregate_id", &event.aggregate_id.clone().unwrap_or_default());
-    stmt.add_param("aggregate_type", &event.aggregate_type.clone().unwrap_or_default());
-    stmt.add_param("resource_type", &event.resource_type.clone().unwrap_or_default());
+    stmt.add_param(
+        "aggregate_id",
+        &event.aggregate_id.clone().unwrap_or_default(),
+    );
+    stmt.add_param(
+        "aggregate_type",
+        &event.aggregate_type.clone().unwrap_or_default(),
+    );
+    stmt.add_param(
+        "resource_type",
+        &event.resource_type.clone().unwrap_or_default(),
+    );
     stmt.add_param("payload", &event.payload);
     stmt.add_param("metadata", &event.metadata);
     stmt.add_param("request_id", &event.request_id.clone().unwrap_or_default());
@@ -1150,7 +1310,7 @@ fn spanner_insert_event_stmt(event: &BufferedEventRow) -> Statement {
     stmt
 }
 
-async fn start_otel_pipeline(
+async fn start_otel_log_pipeline(
     config: &ObservabilityConfig,
     shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<(mpsc::UnboundedSender<StructuredRecord>, Vec<JoinHandle<()>>)> {
@@ -1168,11 +1328,7 @@ async fn start_otel_pipeline(
 
     let provider = SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)
-        .with_resource(
-            Resource::builder()
-                .with_attributes([KeyValue::new("service.name", SERVICE_NAME)])
-                .build(),
-        )
+        .with_resource(otel_resource())
         .build();
     let logger = provider.logger("zitadel");
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1192,6 +1348,69 @@ async fn start_otel_pipeline(
     });
 
     Ok((tx, vec![task]))
+}
+
+fn otel_resource() -> Resource {
+    Resource::builder()
+        .with_attributes([
+            KeyValue::new("service.name", SERVICE_NAME),
+            KeyValue::new("service.version", VERSION),
+        ])
+        .build()
+}
+
+async fn build_tracer_provider(otel_config: &OtelSinkConfig) -> anyhow::Result<SdkTracerProvider> {
+    let endpoint = otel_config.traces_endpoint();
+    let exporter = match otel_config.protocol.as_str() {
+        "grpc" | "tonic" => SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint)
+            .build()?,
+        _ => SpanExporter::builder()
+            .with_http()
+            .with_endpoint(endpoint)
+            .with_protocol(Protocol::HttpBinary)
+            .build()?,
+    };
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(otel_resource())
+        .build();
+    Ok(provider)
+}
+
+async fn build_meter_provider(otel_config: &OtelSinkConfig) -> anyhow::Result<SdkMeterProvider> {
+    let endpoint = otel_config.metrics_endpoint();
+    let interval = parse_duration(&otel_config.metrics_interval);
+    let exporter = match otel_config.protocol.as_str() {
+        "grpc" | "tonic" => MetricExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint)
+            .build()?,
+        _ => MetricExporter::builder()
+            .with_http()
+            .with_endpoint(endpoint)
+            .with_protocol(Protocol::HttpBinary)
+            .build()?,
+    };
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+        .with_interval(interval)
+        .build();
+    let provider = SdkMeterProvider::builder()
+        .with_reader(reader)
+        .with_resource(otel_resource())
+        .build();
+    Ok(provider)
+}
+
+fn resolve_gcp_project_id(configured: &str) -> Option<String> {
+    if !configured.is_empty() {
+        return Some(configured.to_string());
+    }
+    std::env::var("GCP_PROJECT")
+        .or_else(|_| std::env::var("GOOGLE_CLOUD_PROJECT"))
+        .or_else(|_| std::env::var("GCLOUD_PROJECT"))
+        .ok()
 }
 
 fn emit_otel(logger: &SdkLogger, record: &StructuredRecord) {

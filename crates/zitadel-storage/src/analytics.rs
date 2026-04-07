@@ -1,4 +1,11 @@
+use google_cloud_googleapis::spanner::v1::{
+    Type as SpannerType, TypeCode, struct_type::Field as SpannerField,
+};
+use google_cloud_spanner::row::{
+    Error as SpannerRowError, TryFromValue as SpannerTryFromValue, as_ref as spanner_as_ref,
+};
 use google_cloud_spanner::statement::Statement;
+use prost_types::{Value as ProtoValue, value::Kind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -194,15 +201,17 @@ impl AnalyticsQueryBackend for SpannerAnalyticsQueryBackend {
 
         let limit = query.limit.unwrap_or(1000).min(10000);
         let rewritten = rewrite_spanner_placeholders(trimmed);
-        let wrapped = format!(
-            "SELECT TO_JSON_STRING(row_data) AS row_json FROM ({rewritten}) AS row_data LIMIT {limit}"
-        );
+        let sql = if upper.contains("LIMIT") {
+            rewritten
+        } else {
+            format!("{rewritten} LIMIT {limit}")
+        };
         let client = self
             .db
             .spanner()
             .expect("spanner analytics backend requires native spanner client")
             .client();
-        let mut stmt = Statement::new(wrapped);
+        let mut stmt = Statement::new(sql);
         for (i, p) in query.params.iter().enumerate() {
             stmt.add_param(&format!("p{}", i + 1), p);
         }
@@ -221,15 +230,33 @@ impl AnalyticsQueryBackend for SpannerAnalyticsQueryBackend {
             }
         };
 
-        let mut decoded = Vec::new();
+        let mut columns = Vec::new();
+        let mut column_types = Vec::new();
+        let mut result_rows = Vec::new();
         while let Some(row) = rows.next().await? {
-            let json = row.column_by_name::<String>("row_json")?;
-            let value = serde_json::from_str::<Value>(&json).unwrap_or(Value::String(json));
-            decoded.push(value);
+            if columns.is_empty() {
+                let metadata = rows.columns_metadata();
+                columns = metadata
+                    .iter()
+                    .enumerate()
+                    .map(|(index, field)| {
+                        if field.name.is_empty() {
+                            format!("column_{}", index + 1)
+                        } else {
+                            field.name.clone()
+                        }
+                    })
+                    .collect();
+                column_types = metadata.iter().map(spanner_column_type_name).collect();
+            }
+
+            let mut values = Vec::with_capacity(columns.len());
+            for idx in 0..columns.len() {
+                values.push(row.column::<SpannerJsonCell>(idx)?.0);
+            }
+            result_rows.push(values);
         }
 
-        let (columns, result_rows) = values_to_tabular_rows(&decoded);
-        let column_types = vec!["JSON".to_string(); columns.len()];
         Ok(AnalyticsQueryResult {
             columns,
             column_types,
@@ -279,6 +306,216 @@ impl AnalyticsQueryBackend for SpannerAnalyticsQueryBackend {
             );
         }
         Ok(Value::Object(tables))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SpannerJsonCell(Value);
+
+impl SpannerTryFromValue for SpannerJsonCell {
+    fn try_from(item: &ProtoValue, field: &SpannerField) -> Result<Self, SpannerRowError> {
+        Ok(Self(spanner_value_to_json(item, field)?))
+    }
+}
+
+fn spanner_value_to_json(
+    item: &ProtoValue,
+    field: &SpannerField,
+) -> Result<Value, SpannerRowError> {
+    let kind = spanner_as_ref(item, field)?;
+    if matches!(kind, Kind::NullValue(_)) {
+        return Ok(Value::Null);
+    }
+
+    let Some(spanner_type) = field.r#type.as_ref() else {
+        return Ok(spanner_kind_to_json(kind));
+    };
+
+    let type_code = TypeCode::try_from(spanner_type.code).unwrap_or(TypeCode::Unspecified);
+    match type_code {
+        TypeCode::Bool => Ok(spanner_kind_to_json(kind)),
+        TypeCode::Int64 | TypeCode::Enum => Ok(match kind {
+            Kind::StringValue(raw) => raw
+                .parse::<i64>()
+                .map(|value| Value::Number(value.into()))
+                .unwrap_or_else(|_| Value::String(raw.clone())),
+            _ => spanner_kind_to_json(kind),
+        }),
+        TypeCode::Float64 | TypeCode::Float32 => Ok(match kind {
+            Kind::NumberValue(value) => serde_json::Number::from_f64(*value)
+                .map(Value::Number)
+                .unwrap_or_else(|| Value::String(value.to_string())),
+            Kind::StringValue(raw) => Value::String(raw.clone()),
+            _ => spanner_kind_to_json(kind),
+        }),
+        TypeCode::Json => Ok(match kind {
+            Kind::StringValue(raw) => {
+                serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.clone()))
+            }
+            _ => spanner_kind_to_json(kind),
+        }),
+        TypeCode::Array => spanner_array_to_json(kind, spanner_type, field.name.as_str()),
+        TypeCode::Struct => spanner_struct_to_json(kind, spanner_type),
+        TypeCode::Unspecified
+        | TypeCode::Timestamp
+        | TypeCode::Date
+        | TypeCode::String
+        | TypeCode::Bytes
+        | TypeCode::Numeric
+        | TypeCode::Proto => Ok(spanner_kind_to_json(kind)),
+    }
+}
+
+fn spanner_array_to_json(
+    kind: &Kind,
+    spanner_type: &SpannerType,
+    field_name: &str,
+) -> Result<Value, SpannerRowError> {
+    let Kind::ListValue(list) = kind else {
+        return Ok(spanner_kind_to_json(kind));
+    };
+    let Some(element_type) = spanner_type.array_element_type.as_ref() else {
+        return Ok(spanner_kind_to_json(kind));
+    };
+    let element_field = spanner_nested_field(field_name, *element_type.clone());
+    let mut values = Vec::with_capacity(list.values.len());
+    for value in &list.values {
+        values.push(spanner_value_to_json(value, &element_field)?);
+    }
+    Ok(Value::Array(values))
+}
+
+fn spanner_struct_to_json(
+    kind: &Kind,
+    spanner_type: &SpannerType,
+) -> Result<Value, SpannerRowError> {
+    let Some(struct_type) = spanner_type.struct_type.as_ref() else {
+        return Ok(spanner_kind_to_json(kind));
+    };
+
+    let mut object = serde_json::Map::new();
+    match kind {
+        Kind::ListValue(list) => {
+            for (index, nested_field) in struct_type.fields.iter().enumerate() {
+                let key = spanner_struct_field_name(nested_field, index);
+                let value = match list.values.get(index) {
+                    Some(value) => spanner_value_to_json(value, nested_field)?,
+                    None => Value::Null,
+                };
+                object.insert(key, value);
+            }
+        }
+        Kind::StructValue(values) => {
+            for (index, nested_field) in struct_type.fields.iter().enumerate() {
+                let key = spanner_struct_field_name(nested_field, index);
+                let value = match values.fields.get(&nested_field.name) {
+                    Some(value) => spanner_value_to_json(value, nested_field)?,
+                    None => Value::Null,
+                };
+                object.insert(key, value);
+            }
+        }
+        _ => return Ok(spanner_kind_to_json(kind)),
+    }
+
+    Ok(Value::Object(object))
+}
+
+fn spanner_kind_to_json(kind: &Kind) -> Value {
+    match kind {
+        Kind::NullValue(_) => Value::Null,
+        Kind::BoolValue(flag) => Value::Bool(*flag),
+        Kind::NumberValue(value) => serde_json::Number::from_f64(*value)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(value.to_string())),
+        Kind::StringValue(raw) => Value::String(raw.clone()),
+        Kind::ListValue(list) => Value::Array(
+            list.values
+                .iter()
+                .map(spanner_proto_kindless_to_json)
+                .collect::<Vec<_>>(),
+        ),
+        Kind::StructValue(values) => {
+            let mut object = serde_json::Map::new();
+            for (key, value) in &values.fields {
+                object.insert(key.clone(), spanner_proto_kindless_to_json(value));
+            }
+            Value::Object(object)
+        }
+    }
+}
+
+fn spanner_proto_kindless_to_json(value: &ProtoValue) -> Value {
+    value
+        .kind
+        .as_ref()
+        .map(spanner_kind_to_json)
+        .unwrap_or(Value::Null)
+}
+
+fn spanner_nested_field(name: &str, spanner_type: SpannerType) -> SpannerField {
+    SpannerField {
+        name: name.to_string(),
+        r#type: Some(spanner_type),
+    }
+}
+
+fn spanner_struct_field_name(field: &SpannerField, index: usize) -> String {
+    if field.name.is_empty() {
+        format!("field_{}", index + 1)
+    } else {
+        field.name.clone()
+    }
+}
+
+fn spanner_column_type_name(field: &SpannerField) -> String {
+    field
+        .r#type
+        .as_ref()
+        .map(spanner_type_name)
+        .unwrap_or_else(|| "UNKNOWN".to_string())
+}
+
+fn spanner_type_name(spanner_type: &SpannerType) -> String {
+    match TypeCode::try_from(spanner_type.code).unwrap_or(TypeCode::Unspecified) {
+        TypeCode::Bool => "BOOL".into(),
+        TypeCode::Int64 => "INT64".into(),
+        TypeCode::Float64 => "FLOAT64".into(),
+        TypeCode::Float32 => "FLOAT32".into(),
+        TypeCode::Timestamp => "TIMESTAMP".into(),
+        TypeCode::Date => "DATE".into(),
+        TypeCode::String => "STRING".into(),
+        TypeCode::Bytes => "BYTES".into(),
+        TypeCode::Numeric => "NUMERIC".into(),
+        TypeCode::Json => "JSON".into(),
+        TypeCode::Proto => "PROTO".into(),
+        TypeCode::Enum => "ENUM".into(),
+        TypeCode::Array => spanner_type
+            .array_element_type
+            .as_ref()
+            .map(|element| format!("ARRAY<{}>", spanner_type_name(element)))
+            .unwrap_or_else(|| "ARRAY<UNKNOWN>".into()),
+        TypeCode::Struct => spanner_type
+            .struct_type
+            .as_ref()
+            .map(|struct_type| {
+                let fields = struct_type
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let name = if field.name.is_empty() {
+                            "field".to_string()
+                        } else {
+                            field.name.clone()
+                        };
+                        format!("{name} {}", spanner_column_type_name(field))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("STRUCT<{fields}>")
+            })
+            .unwrap_or_else(|| "STRUCT<>".into()),
+        TypeCode::Unspecified => "UNKNOWN".into(),
     }
 }
 
@@ -367,35 +604,6 @@ async fn list_columns(db: &Db, table_name: &str) -> anyhow::Result<Vec<Value>> {
             Ok(columns)
         }
     }
-}
-
-fn values_to_tabular_rows(rows: &[Value]) -> (Vec<String>, Vec<Vec<Value>>) {
-    if rows.is_empty() {
-        return (Vec::new(), Vec::new());
-    }
-
-    if let Some(first) = rows.first().and_then(Value::as_object) {
-        let columns = first.keys().cloned().collect::<Vec<_>>();
-        let values = rows
-            .iter()
-            .map(|row| {
-                row.as_object()
-                    .map(|object| {
-                        columns
-                            .iter()
-                            .map(|column| object.get(column).cloned().unwrap_or(Value::Null))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| vec![row.clone()])
-            })
-            .collect::<Vec<_>>();
-        return (columns, values);
-    }
-
-    (
-        vec!["value".to_string()],
-        rows.iter().map(|row| vec![row.clone()]).collect(),
-    )
 }
 
 fn rewrite_spanner_placeholders(query: &str) -> String {

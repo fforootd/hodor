@@ -20,7 +20,12 @@ pub struct ResolvedPatIdentity {
 fn metadata_has_capability(metadata_json: &str, capability: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(metadata_json)
         .ok()
-        .and_then(|value| value.get("capabilities").and_then(serde_json::Value::as_array).cloned())
+        .and_then(|value| {
+            value
+                .get("capabilities")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+        })
         .map(|entries| {
             entries
                 .iter()
@@ -158,20 +163,22 @@ impl ReadStore for SqlReadStore {
              WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active'"
         );
         let row: Option<(String, String, Option<String>, String, String)> = sqlx::query_as(&sql)
-        .bind(scoped.instance_id())
-        .bind(token_hash(raw_token))
-        .fetch_optional(scoped.pool())
-        .await?;
+            .bind(scoped.instance_id())
+            .bind(token_hash(raw_token))
+            .fetch_optional(scoped.pool())
+            .await?;
 
-        Ok(row.map(
-            |(user_id, token_type, session_id, org_id, metadata_json)| ResolvedPatIdentity {
-                user_id,
-                session_id: session_id.unwrap_or_default(),
-                token_type,
-                org_id,
-                operator_admin: metadata_has_capability(&metadata_json, "operator_admin"),
-            },
-        ))
+        Ok(
+            row.map(|(user_id, token_type, session_id, org_id, metadata_json)| {
+                ResolvedPatIdentity {
+                    user_id,
+                    session_id: session_id.unwrap_or_default(),
+                    token_type,
+                    org_id,
+                    operator_admin: metadata_has_capability(&metadata_json, "operator_admin"),
+                }
+            }),
+        )
     }
 }
 

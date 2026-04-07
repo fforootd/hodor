@@ -139,6 +139,7 @@ just contracts
 just invariants
 just subsystems
 just resilience
+just spanner-cert
 just conformance-oidc
 just test-pr
 just test-release
@@ -149,5 +150,6 @@ just test-nightly
 
 - The `CI / PR` workflow runs a fixed `Stable Wall` for every pull request.
 - The `CI / Main` workflow mirrors the same `Stable Wall` on pushes to `main`.
+- Native Spanner coverage now runs in the stable wall through the `contracts`, `invariants`, `subsystems`, and `resilience` family jobs, all backed by the Cloud Spanner emulator.
 - Nightly/manual coverage is split across `nightly-families.yml`, `oidc-conformance-daily.yml`, `db-perf-daily.yml`, and `fuzz-daily.yml`.
 - Deprecated compatibility aliases were removed. Docs should reference only canonical commands from the map above.

@@ -143,21 +143,17 @@ pub async fn require_scoped_instance_access(
             if !seen.insert(candidate.relation_name.clone()) {
                 continue;
             }
-        match time_async(
-            "auth.scoped_instance_fga_check",
-            state
-                .app
-                .repos
-                .fga
-                .check(
+            match time_async(
+                "auth.scoped_instance_fga_check",
+                state.app.repos.fga.check(
                     &target_instance_id,
                     &identity.principal_ref,
                     &candidate.relation_name,
                     &format!("instance:{target_instance_id}"),
                 ),
-        )
-        .await
-        {
+            )
+            .await
+            {
                 Ok(true) => return next.run(req).await,
                 Ok(false) => {}
                 Err(error) => {
@@ -223,7 +219,9 @@ async fn resolve_token(
     if token_source == TokenSource::Bearer {
         if let Some(identity) = time_async(
             "auth.resolve_pat_token",
-            state.stateful.resolve_pat_token(&auth_instance_id, raw_token),
+            state
+                .stateful
+                .resolve_pat_token(&auth_instance_id, raw_token),
         )
         .await?
         {
@@ -243,7 +241,9 @@ async fn resolve_token(
 
     if let Some(session) = time_async(
         "auth.resolve_session_token",
-        state.transient.find_session_by_token(&auth_instance_id, raw_token),
+        state
+            .transient
+            .find_session_by_token(&auth_instance_id, raw_token),
     )
     .await?
     {

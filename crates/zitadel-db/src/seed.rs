@@ -1,14 +1,14 @@
 use crate::{
     DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, create_org, create_pat, create_user,
-    find_active_user_by_identifier, get_oidc_client_record, get_org,
-    get_settings_record, list_login_flow_records, put_instance_settings,
-    replace_password_credential,
+    find_active_user_by_identifier, get_oidc_client_record, get_org, get_settings_record,
+    list_login_flow_records,
     provider::{
         ProviderCatalogRef, ProviderConnection, ProviderLinking, ProviderLinkingMode,
         ProviderMapping, ProviderPayload, ProviderTarget, ProviderUi, get_provider,
         get_provider_for, insert_provider, insert_provider_for, update_provider,
         update_provider_for,
     },
+    put_instance_settings, replace_password_credential,
 };
 use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 use serde::Deserialize;
@@ -577,9 +577,11 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
 async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
     let org_id = match get_org(db, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID).await? {
         Some(org) => org.id,
-        None => create_org(db, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, "Default", "{}")
-            .await?
-            .id,
+        None => {
+            create_org(db, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, "Default", "{}")
+                .await?
+                .id
+        }
     };
 
     for user in &seed.users {
@@ -591,11 +593,18 @@ async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
         let metadata = seed_user_metadata(user);
         let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".into());
 
-        let existing = find_active_user_by_identifier(db, DEFAULT_INSTANCE_ID, &user.identifier).await?;
+        let existing =
+            find_active_user_by_identifier(db, DEFAULT_INSTANCE_ID, &user.identifier).await?;
         let user_id = if let Some(existing) = existing {
             if user.on_conflict == "update" {
-                update_seed_user_spanner(db, DEFAULT_INSTANCE_ID, &existing.id, display_name, &metadata_json)
-                    .await?;
+                update_seed_user_spanner(
+                    db,
+                    DEFAULT_INSTANCE_ID,
+                    &existing.id,
+                    display_name,
+                    &metadata_json,
+                )
+                .await?;
             }
             existing.id
         } else {
@@ -652,7 +661,9 @@ async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
         let grant_types = serde_json::to_string(&app.grant_types)?;
         let response_types = serde_json::to_string(&app.response_types)?;
 
-        if let Some(existing) = get_oidc_client_record(db, DEFAULT_INSTANCE_ID, &app.client_id).await? {
+        if let Some(existing) =
+            get_oidc_client_record(db, DEFAULT_INSTANCE_ID, &app.client_id).await?
+        {
             if app.on_conflict == "update" {
                 upsert_seed_app_spanner(
                     db,
@@ -687,7 +698,10 @@ async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
 
     for provider in &seed.providers {
         let payload = provider.to_payload();
-        if get_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id).await?.is_some() {
+        if get_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id)
+            .await?
+            .is_some()
+        {
             update_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id, &payload).await?;
         } else {
             insert_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id, &org_id, &payload).await?;
@@ -710,15 +724,8 @@ async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
             .find(|record| record.name == flow.name);
 
         if let Some(existing) = existing {
-            upsert_seed_login_flow_spanner(
-                db,
-                &existing.id,
-                flow,
-                &auth_methods,
-                &config,
-                true,
-            )
-            .await?;
+            upsert_seed_login_flow_spanner(db, &existing.id, flow, &auth_methods, &config, true)
+                .await?;
         } else {
             upsert_seed_login_flow_spanner(
                 db,

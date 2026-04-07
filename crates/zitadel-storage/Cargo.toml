@@ -11,7 +11,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
 google-cloud-spanner = { workspace = true }
+google-cloud-googleapis = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
+prost-types = "0.13"

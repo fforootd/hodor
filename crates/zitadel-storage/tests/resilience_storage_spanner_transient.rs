@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::{sync::Barrier, task::JoinSet};
 use uuid::Uuid;
-use zitadel_config::{StatefulStorageConfig, StorageConfig};
+use zitadel_config::StorageConfig;
 use zitadel_crypto::token_hash;
 use zitadel_db::{
     DEFAULT_INSTANCE_ID, Db, create_oidc_auth_request_record, create_org, create_pat, create_user,
@@ -11,22 +11,14 @@ use zitadel_db::{
 use zitadel_storage::{AnalyticsQuery, ProviderAuthState, StorageRuntime};
 
 async fn spanner_runtime() -> anyhow::Result<Option<StorageRuntime>> {
-    let Some(database) = std::env::var("ZITADEL_TEST_SPANNER_DATABASE").ok() else {
-        eprintln!("skipping Spanner transient test: ZITADEL_TEST_SPANNER_DATABASE is not set");
-        return Ok(None);
-    };
-    let Some(emulator_host) = std::env::var("ZITADEL_TEST_SPANNER_EMULATOR_HOST").ok() else {
-        eprintln!("skipping Spanner transient test: ZITADEL_TEST_SPANNER_EMULATOR_HOST is not set");
+    let Some(stateful) =
+        zitadel_db::test_support::spanner_stateful_config_from_env("storage-transient").await?
+    else {
         return Ok(None);
     };
 
     let config = StorageConfig {
-        stateful: StatefulStorageConfig {
-            backend: "spanner".into(),
-            database,
-            emulator_host,
-            ..Default::default()
-        },
+        stateful,
         ..Default::default()
     };
     let db = Db::open_with_config("", &config.stateful).await?;
@@ -83,6 +75,53 @@ async fn disable_user(runtime: &StorageRuntime, user_id: &str) -> anyhow::Result
             })
         })
         .await?;
+    Ok(())
+}
+
+async fn insert_spanner_events(
+    runtime: &StorageRuntime,
+    event_types: &[String],
+) -> anyhow::Result<()> {
+    let spanner = runtime
+        .stateful
+        .db()
+        .spanner()
+        .expect("runtime uses native spanner backend");
+
+    let mut stmts = Vec::with_capacity(event_types.len());
+    for event_type in event_types {
+        let mut stmt = google_cloud_spanner::statement::Statement::new(
+            "INSERT INTO events \
+             (instance_id, id, event_type, category, org_id, payload, metadata, created_at) \
+             VALUES \
+             (@instance_id, @id, @event_type, @category, @org_id, @payload, @metadata, CURRENT_TIMESTAMP())",
+        );
+        stmt.add_param("instance_id", &DEFAULT_INSTANCE_ID);
+        stmt.add_param("id", &unique("evt"));
+        stmt.add_param("event_type", event_type);
+        stmt.add_param(
+            "category",
+            &event_type.split('.').next().unwrap_or_default().to_string(),
+        );
+        stmt.add_param("org_id", &"0");
+        stmt.add_param("payload", &"{}");
+        stmt.add_param("metadata", &"{}");
+        stmts.push(stmt);
+    }
+
+    let _ = spanner
+        .client()
+        .read_write_transaction(|tx| {
+            let stmts = stmts.clone();
+            Box::pin(async move {
+                for stmt in stmts {
+                    tx.update(stmt).await?;
+                }
+                Ok::<(), google_cloud_spanner::client::Error>(())
+            })
+        })
+        .await?;
+
     Ok(())
 }
 
@@ -298,6 +337,60 @@ async fn spanner_analytics_accepts_dollar_placeholders_when_configured() -> anyh
     assert_eq!(
         result.rows,
         vec![vec![serde_json::Value::String(identifier)]]
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn spanner_analytics_supports_grouped_observability_breakdowns_when_configured()
+-> anyhow::Result<()> {
+    let Some(runtime) = spanner_runtime().await? else {
+        return Ok(());
+    };
+
+    let prefix = unique("auth.spanner_breakdown");
+    let ok_event = format!("{prefix}.ok");
+    let fail_event = format!("{prefix}.fail");
+    insert_spanner_events(
+        &runtime,
+        &[ok_event.clone(), ok_event.clone(), fail_event.clone()],
+    )
+    .await?;
+
+    let result = runtime
+        .analytics
+        .query(&AnalyticsQuery {
+            sql: "SELECT event_type AS name, COUNT(*) AS count \
+                  FROM events \
+                  WHERE instance_id = $1 AND event_type LIKE $2 \
+                  GROUP BY event_type \
+                  ORDER BY count DESC"
+                .into(),
+            params: vec![DEFAULT_INSTANCE_ID.to_string(), format!("{prefix}.%")],
+            limit: Some(8),
+        })
+        .await?;
+
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(
+        result.columns,
+        vec!["name".to_string(), "count".to_string()]
+    );
+    assert_eq!(result.row_count, 2);
+    assert_eq!(
+        result.rows[0],
+        vec![
+            serde_json::Value::String(ok_event),
+            serde_json::Value::Number(2.into()),
+        ]
+    );
+    assert_eq!(
+        result.rows[1],
+        vec![
+            serde_json::Value::String(fail_event),
+            serde_json::Value::Number(1.into()),
+        ]
     );
 
     Ok(())

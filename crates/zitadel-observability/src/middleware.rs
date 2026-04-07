@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
@@ -11,16 +11,52 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use opentelemetry::{global, propagation::Extractor};
 use tokio::task_local;
 use tracing::{Instrument, info_span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 use crate::Stream;
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
+// HTTP request metrics (Tier 3 OTEL export)
+static METRICS: LazyLock<RequestMetrics> = LazyLock::new(|| {
+    let meter = global::meter("zitadel");
+    RequestMetrics {
+        duration: meter
+            .f64_histogram("http.server.request.duration")
+            .with_description("HTTP request duration in seconds")
+            .with_unit("s")
+            .build(),
+        count: meter
+            .u64_counter("http.server.request.count")
+            .with_description("HTTP request count")
+            .build(),
+    }
+});
+
+struct RequestMetrics {
+    duration: opentelemetry::metrics::Histogram<f64>,
+    count: opentelemetry::metrics::Counter<u64>,
+}
+
 task_local! {
     static SERVER_TIMING: ServerTimingCollector;
+}
+
+/// Wrapper to extract trace context from HTTP request headers.
+struct HeaderExtractor<'a>(&'a axum::http::HeaderMap);
+
+impl Extractor for HeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(|v| v.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|k| k.as_str()).collect()
+    }
 }
 
 pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> Response {
@@ -31,6 +67,12 @@ pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> R
     let start = Instant::now();
     let server_timing = ServerTimingCollector::default();
     let (request_id, parent_span_id) = extract_request_context(&req);
+
+    // Extract OTel trace context from inbound headers for distributed tracing (Tier 3 export)
+    let parent_cx = global::get_text_map_propagator(|propagator| {
+        propagator.extract(&HeaderExtractor(req.headers()))
+    });
+
     let fingerprint = header_value(&req, "x-fingerprint");
     let flow_id = header_value(&req, "x-flow-id");
     let session_id = header_value(&req, "x-session-id");
@@ -70,17 +112,36 @@ pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> R
         duration_ms = tracing::field::Empty,
     );
 
+    // Set the extracted OTel context as the parent so the tracing-opentelemetry layer
+    // links this span to the incoming trace for export.
+    let _ = span.set_parent(parent_cx);
+
     let mut response = SERVER_TIMING
-        .scope(server_timing.clone(), next.run(req).instrument(span.clone()))
+        .scope(
+            server_timing.clone(),
+            next.run(req).instrument(span.clone()),
+        )
         .await;
+
+    let duration_secs = start.elapsed().as_secs_f64();
+    let status_code = response.status().as_u16();
     server_timing.record("request.total", start.elapsed());
-    span.record("status", response.status().as_u16());
+    span.record("status", status_code);
     span.record("duration_ms", start.elapsed().as_millis() as u64);
     tracing::info!(
         parent: &span,
         event_type = event_type,
         "request served"
     );
+
+    // Record HTTP metrics (Tier 3 OTEL export)
+    let attrs = [
+        opentelemetry::KeyValue::new("http.request.method", method.clone()),
+        opentelemetry::KeyValue::new("http.response.status_code", status_code as i64),
+        opentelemetry::KeyValue::new("http.route", classify_route(&path)),
+    ];
+    METRICS.duration.record(duration_secs, &attrs);
+    METRICS.count.add(1, &attrs);
 
     if let Ok(value) = HeaderValue::from_str(&request_id) {
         response
@@ -93,6 +154,29 @@ pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> R
             .insert(HeaderName::from_static("server-timing"), value);
     }
     response
+}
+
+/// Classifies a request path into a route pattern for metrics (low cardinality).
+fn classify_route(path: &str) -> &'static str {
+    if path.starts_with("/v1/") {
+        "/v1/*"
+    } else if path.starts_with("/login") {
+        "/login/*"
+    } else if path.starts_with("/.well-known/") {
+        "/.well-known/*"
+    } else if path.starts_with("/oauth/") || path.starts_with("/oidc/") {
+        "/oidc/*"
+    } else if path == "/authorize" {
+        "authorize"
+    } else if path == "/token" {
+        "token"
+    } else if path == "/userinfo" {
+        "userinfo"
+    } else if path == "/jwks" {
+        "jwks"
+    } else {
+        "other"
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -129,7 +213,10 @@ impl ServerTimingCollector {
             .map(|(name, stat)| {
                 let millis = stat.duration.as_secs_f64() * 1000.0;
                 if stat.count > 1 {
-                    format!(r#"{name};dur={millis:.2};desc="count={count}""#, count = stat.count)
+                    format!(
+                        r#"{name};dur={millis:.2};desc="count={count}""#,
+                        count = stat.count
+                    )
                 } else {
                     format!("{name};dur={millis:.2}")
                 }

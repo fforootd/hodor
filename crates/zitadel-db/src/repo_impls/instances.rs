@@ -238,9 +238,8 @@ impl InstanceRepository for SqlInstanceRepository {
                         .await?;
                 }
                 Db::Spanner(spanner) => {
-                    let mut stmt = Statement::new(
-                        "DELETE FROM instances WHERE instance_id = @instance_id",
-                    );
+                    let mut stmt =
+                        Statement::new("DELETE FROM instances WHERE instance_id = @instance_id");
                     stmt.add_param("instance_id", &instance_id);
                     let _ = write_spanner_count(spanner, stmt).await?;
                 }

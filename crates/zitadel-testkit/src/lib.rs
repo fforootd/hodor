@@ -22,7 +22,10 @@ use zitadel_authn::{
 };
 use zitadel_config::{Config, password::PasswordHasherConfig};
 use zitadel_crypto::SecretBox;
-use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
+use zitadel_db::{
+    DEFAULT_INSTANCE_ID, Db, create_oidc_auth_request_record, create_pat, create_user,
+    find_active_user_by_identifier, first_org_id, replace_password_credential,
+};
 use zitadel_fga::{FgaService, StoreResolver};
 use zitadel_login::LoginState;
 use zitadel_oidc::{
@@ -61,20 +64,23 @@ impl TestDb {
         Ok(Self { db })
     }
 
+    pub async fn spanner_from_env(suite: &str) -> anyhow::Result<Option<Self>> {
+        let Some(config) =
+            zitadel_db::test_support::spanner_stateful_config_from_env(suite).await?
+        else {
+            return Ok(None);
+        };
+        Self::open_with_config(&config).await.map(Some)
+    }
+
     pub fn scoped_default(&self) -> zitadel_db::scoped::ScopedDb {
         self.db.scoped_default()
     }
 
     pub async fn default_org_id(&self) -> anyhow::Result<String> {
-        let scoped = self.scoped_default();
-        let row: (String,) = sqlx::query_as(
-            "SELECT id FROM orgs WHERE instance_id = $1 ORDER BY created_at ASC LIMIT 1",
-        )
-        .bind(scoped.instance_id())
-        .fetch_one(scoped.pool())
-        .await
-        .context("load default org")?;
-        Ok(row.0)
+        first_org_id(&self.db, DEFAULT_INSTANCE_ID)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("load default org"))
     }
 }
 
@@ -264,6 +270,18 @@ impl TestContext {
         })
     }
 
+    pub async fn spanner_from_env(suite: &str) -> anyhow::Result<Option<Self>> {
+        let Some(stateful) =
+            zitadel_db::test_support::spanner_stateful_config_from_env(suite).await?
+        else {
+            return Ok(None);
+        };
+
+        let mut config = Config::default();
+        config.storage.stateful = stateful;
+        Self::with_config(config).await.map(Some)
+    }
+
     pub fn api_router(&self) -> Router {
         zitadel_api::routes(self.api_state.clone())
     }
@@ -278,17 +296,12 @@ impl TestContext {
     }
 
     pub async fn admin_user(&self) -> anyhow::Result<UserFixture> {
-        let scoped = self.db.scoped_default();
-        let row: (String, String) = sqlx::query_as(
-            "SELECT id, org_id FROM users WHERE instance_id = $1 AND identifier = 'admin' LIMIT 1",
-        )
-        .bind(scoped.instance_id())
-        .fetch_one(scoped.pool())
-        .await
-        .context("load admin user")?;
+        let row = find_active_user_by_identifier(&self.db.db, DEFAULT_INSTANCE_ID, "admin")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("load admin user"))?;
         Ok(UserFixture {
-            user_id: row.0,
-            org_id: row.1,
+            user_id: row.id,
+            org_id: row.org_id,
             identifier: "admin".into(),
         })
     }
@@ -298,7 +311,6 @@ impl TestContext {
         identifier: &str,
         password: &str,
     ) -> anyhow::Result<UserFixture> {
-        let scoped = self.db.scoped_default();
         let org_id = self.db.default_org_id().await?;
         let user_id = Uuid::new_v4().to_string();
         let credential_id = format!("cred-{user_id}");
@@ -308,32 +320,27 @@ impl TestContext {
             .hash(password)
             .context("hash test password")?;
         let credential_json = encode_credential_json(&password_hash);
-        let sql = format!(
-            "INSERT INTO credentials (id, instance_id, user_id, type, data) VALUES ($1, $2, $3, 'password', {})",
-            scoped.json_bind(4),
-        );
-
-        sqlx::query(
-            "INSERT INTO users (id, instance_id, org_id, identifier, display_name, user_type, state) \
-             VALUES ($1, $2, $3, $4, $5, 'human', 'active')",
+        create_user(
+            &self.db.db,
+            DEFAULT_INSTANCE_ID,
+            &user_id,
+            &org_id,
+            identifier,
+            identifier,
+            "",
+            "{}",
         )
-        .bind(&user_id)
-        .bind(scoped.instance_id())
-        .bind(&org_id)
-        .bind(identifier)
-        .bind(identifier)
-        .execute(scoped.pool())
         .await
         .context("insert test user")?;
-
-        sqlx::query(&sql)
-            .bind(&credential_id)
-            .bind(scoped.instance_id())
-            .bind(&user_id)
-            .bind(&credential_json)
-            .execute(scoped.pool())
-            .await
-            .context("insert test password credential")?;
+        replace_password_credential(
+            &self.db.db,
+            DEFAULT_INSTANCE_ID,
+            &user_id,
+            &credential_id,
+            &credential_json,
+        )
+        .await
+        .context("insert test password credential")?;
 
         Ok(UserFixture {
             user_id,
@@ -343,19 +350,42 @@ impl TestContext {
     }
 
     pub async fn grant_operator_admin(&self, user: &UserFixture) -> anyhow::Result<()> {
-        let scoped = self.db.scoped_default();
         let metadata = r#"{"capabilities":["operator_admin"]}"#;
-        let metadata_bind = scoped.json_bind(1);
-        let sql = format!(
-            "UPDATE users SET metadata = {metadata_bind} WHERE instance_id = $2 AND id = $3"
-        );
-        sqlx::query(&sql)
-            .bind(metadata)
-            .bind(scoped.instance_id())
-            .bind(&user.user_id)
-            .execute(scoped.pool())
-            .await
-            .context("grant operator_admin")?;
+        match &self.db.db {
+            Db::Sql(_) => {
+                let scoped = self.db.scoped_default();
+                let metadata_bind = scoped.json_bind(1);
+                let sql = format!(
+                    "UPDATE users SET metadata = {metadata_bind} WHERE instance_id = $2 AND id = $3"
+                );
+                sqlx::query(&sql)
+                    .bind(metadata)
+                    .bind(scoped.instance_id())
+                    .bind(&user.user_id)
+                    .execute(scoped.pool())
+                    .await
+                    .context("grant operator_admin")?;
+            }
+            Db::Spanner(spanner) => {
+                let mut stmt = google_cloud_spanner::statement::Statement::new(
+                    "UPDATE users SET metadata = @metadata WHERE instance_id = @instance_id AND id = @id",
+                );
+                stmt.add_param("metadata", &metadata);
+                stmt.add_param("instance_id", &DEFAULT_INSTANCE_ID);
+                stmt.add_param("id", &user.user_id);
+                let _ = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let stmt = stmt.clone();
+                        Box::pin(async move {
+                            tx.update(stmt).await?;
+                            Ok::<(), google_cloud_spanner::client::Error>(())
+                        })
+                    })
+                    .await
+                    .context("grant operator_admin")?;
+            }
+        }
         Ok(())
     }
 
@@ -380,24 +410,20 @@ impl TestContext {
     }
 
     pub async fn create_pat(&self, user: &UserFixture, name: &str) -> anyhow::Result<PatFixture> {
-        let scoped = self.db.scoped_default();
         let pat_id = Uuid::new_v4().to_string();
         let token = format!("zit_pat_{}", zitadel_crypto::random_hex(24));
         let token_hash = hash_token(&token);
-        let sql = format!(
-            "INSERT INTO tokens (id, instance_id, type, token_hash, user_id, name, scopes) VALUES ($1, $2, 'pat', $3, $4, $5, {})",
-            scoped.json_bind(6),
-        );
-        sqlx::query(&sql)
-            .bind(&pat_id)
-            .bind(scoped.instance_id())
-            .bind(&token_hash)
-            .bind(&user.user_id)
-            .bind(name)
-            .bind("[\"admin\"]")
-            .execute(scoped.pool())
-            .await
-            .context("insert test pat")?;
+        create_pat(
+            &self.db.db,
+            DEFAULT_INSTANCE_ID,
+            &pat_id,
+            &user.user_id,
+            name,
+            &token_hash,
+            "[\"admin\"]",
+        )
+        .await
+        .context("insert test pat")?;
         Ok(PatFixture { pat_id, token })
     }
 
@@ -405,7 +431,6 @@ impl TestContext {
         &self,
         grant_types: &[&str],
     ) -> anyhow::Result<OidcClientFixture> {
-        let scoped = self.db.scoped_default();
         let org_id = self.db.default_org_id().await?;
         let app_id = Uuid::new_v4().to_string();
         let client_id = format!("client-{}", &app_id[..8]);
@@ -417,29 +442,64 @@ impl TestContext {
             serde_json::to_string(&["code"]).context("serialize oidc response types")?;
         let redirect_uris_json = serde_json::to_string(&vec![redirect_uri.clone()])
             .context("serialize oidc redirect uris")?;
-        let sql = format!(
-            "INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {}, {}, $11)",
-            scoped.json_bind(8),
-            scoped.json_bind(9),
-            scoped.json_bind(10),
-        );
+        match &self.db.db {
+            Db::Sql(_) => {
+                let scoped = self.db.scoped_default();
+                let sql = format!(
+                    "INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {}, {}, $11)",
+                    scoped.json_bind(8),
+                    scoped.json_bind(9),
+                    scoped.json_bind(10),
+                );
 
-        sqlx::query(&sql)
-            .bind(&app_id)
-            .bind(scoped.instance_id())
-            .bind(&org_id)
-            .bind("Test Client")
-            .bind("web")
-            .bind(&client_id)
-            .bind(&client_secret)
-            .bind(&redirect_uris_json)
-            .bind(&grant_types_json)
-            .bind(&response_types_json)
-            .bind("active")
-            .execute(scoped.pool())
-            .await
-            .context("insert oidc client")?;
+                sqlx::query(&sql)
+                    .bind(&app_id)
+                    .bind(scoped.instance_id())
+                    .bind(&org_id)
+                    .bind("Test Client")
+                    .bind("web")
+                    .bind(&client_id)
+                    .bind(&client_secret)
+                    .bind(&redirect_uris_json)
+                    .bind(&grant_types_json)
+                    .bind(&response_types_json)
+                    .bind("active")
+                    .execute(scoped.pool())
+                    .await
+                    .context("insert oidc client")?;
+            }
+            Db::Spanner(spanner) => {
+                let mut stmt = google_cloud_spanner::statement::Statement::new(
+                    "INSERT INTO apps \
+                     (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state) \
+                     VALUES \
+                     (@id, @instance_id, @org_id, @name, @app_type, @client_id, @client_secret, @redirect_uris, @grant_types, @response_types, @state)",
+                );
+                stmt.add_param("id", &app_id);
+                stmt.add_param("instance_id", &DEFAULT_INSTANCE_ID);
+                stmt.add_param("org_id", &org_id);
+                stmt.add_param("name", &"Test Client");
+                stmt.add_param("app_type", &"web");
+                stmt.add_param("client_id", &client_id);
+                stmt.add_param("client_secret", &client_secret);
+                stmt.add_param("redirect_uris", &redirect_uris_json);
+                stmt.add_param("grant_types", &grant_types_json);
+                stmt.add_param("response_types", &response_types_json);
+                stmt.add_param("state", &"active");
+                let _ = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let stmt = stmt.clone();
+                        Box::pin(async move {
+                            tx.update(stmt).await?;
+                            Ok::<(), google_cloud_spanner::client::Error>(())
+                        })
+                    })
+                    .await
+                    .context("insert oidc client")?;
+            }
+        }
 
         Ok(OidcClientFixture {
             client_id,
@@ -452,27 +512,67 @@ impl TestContext {
         &self,
         user: &UserFixture,
     ) -> anyhow::Result<String> {
-        let scoped = self.db.scoped_default();
         let client = self.create_oidc_client(&["authorization_code"]).await?;
         let auth_request_id = Uuid::new_v4().to_string();
         let auth_code = Uuid::new_v4().to_string();
 
-        sqlx::query(
-            "INSERT INTO oidc_auth_requests (id, instance_id, user_id, client_id, redirect_uri, scope, nonce, code_challenge, code, done) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1)",
+        create_oidc_auth_request_record(
+            &self.db.db,
+            DEFAULT_INSTANCE_ID,
+            &auth_request_id,
+            &client.client_id,
+            &client.redirect_uri,
+            "openid email profile",
+            "",
+            "nonce-testkit",
+            "code",
+            "",
+            "",
+            "[]",
+            "",
+            None,
         )
-        .bind(&auth_request_id)
-        .bind(scoped.instance_id())
-        .bind(&user.user_id)
-        .bind(&client.client_id)
-        .bind(&client.redirect_uri)
-        .bind("openid email profile")
-        .bind("nonce-testkit")
-        .bind("")
-        .bind(&auth_code)
-        .execute(scoped.pool())
         .await
         .context("insert oidc auth request")?;
+
+        match &self.db.db {
+            Db::Sql(_) => {
+                let scoped = self.db.scoped_default();
+                sqlx::query(
+                    "UPDATE oidc_auth_requests SET user_id = $3, code = $4, done = 1 \
+                     WHERE instance_id = $1 AND id = $2",
+                )
+                .bind(scoped.instance_id())
+                .bind(&auth_request_id)
+                .bind(&user.user_id)
+                .bind(&auth_code)
+                .execute(scoped.pool())
+                .await
+                .context("finalize oidc auth request")?;
+            }
+            Db::Spanner(spanner) => {
+                let mut stmt = google_cloud_spanner::statement::Statement::new(
+                    "UPDATE oidc_auth_requests \
+                     SET user_id = @user_id, code = @code, done = TRUE \
+                     WHERE instance_id = @instance_id AND id = @id",
+                );
+                stmt.add_param("user_id", &user.user_id);
+                stmt.add_param("code", &auth_code);
+                stmt.add_param("instance_id", &DEFAULT_INSTANCE_ID);
+                stmt.add_param("id", &auth_request_id);
+                let _ = spanner
+                    .client()
+                    .read_write_transaction(|tx| {
+                        let stmt = stmt.clone();
+                        Box::pin(async move {
+                            tx.update(stmt).await?;
+                            Ok::<(), google_cloud_spanner::client::Error>(())
+                        })
+                    })
+                    .await
+                    .context("finalize oidc auth request")?;
+            }
+        }
 
         let token = self
             .oidc_state

@@ -55,12 +55,13 @@ schemars = "0.8"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Logging
+# Logging & Telemetry
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["logs", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["logs", "grpc-tonic", "http-proto", "reqwest-client"] }
+opentelemetry_sdk = { version = "0.31", features = ["logs", "trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["logs", "trace", "metrics", "grpc-tonic", "http-proto", "reqwest-client"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "any", "migrate"] }

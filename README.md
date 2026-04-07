@@ -132,6 +132,8 @@ just journeys-quarantine
 just contracts
 just invariants
 just subsystems
+just resilience
+just spanner-cert
 
 # Emulate CI locally
 just test-pr

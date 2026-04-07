@@ -90,6 +90,29 @@ cargo run -p zitadel -- migrate -c fixtures/zitadel.dev.toml --bootstrap
 
 The current bootstrap/recovery status is documented in [Bootstrap and Recovery](bootstrap-recovery.md). Dedicated `recover admin` commands are planned separately and are not part of the current Rust binary.
 
+## Spanner Emulator Certification
+
+The native Spanner PR-wall lane is reproducible locally through:
+
+```bash
+just spanner-cert
+```
+
+If you want the emulator-backed suites to run instead of skipping, start the Cloud Spanner emulator and export the stable test env contract:
+
+```bash
+docker run --rm -p 9010:9010 -p 9020:9020 gcr.io/cloud-spanner-emulator/emulator
+
+export ZITADEL_TEST_SPANNER_EMULATOR_HOST=127.0.0.1:9010
+export ZITADEL_TEST_SPANNER_PROJECT=local-project
+export ZITADEL_TEST_SPANNER_INSTANCE=test-instance
+export ZITADEL_TEST_SPANNER_DATABASE_PREFIX=zitadel
+
+just spanner-cert
+```
+
+`just test-pr` now includes the same emulator-backed certification lane. If those env vars are absent locally, the Spanner suites skip cleanly instead of blocking the zero-config SQLite workflow.
+
 ## Notifications In Local Dev
 
 Local notification delivery is zero-config by default:

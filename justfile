@@ -224,7 +224,8 @@ journeys-quarantine: _ensure-node-modules _ensure-browser-tests-runtime
 # Run contract tests
 [group('test')]
 contracts: ensure-webdist
-    cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance
+    cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance --test contracts_spanner_http_router
+    cargo test -p zitadel-db --test contracts_spanner_schema_layout
 
 # Run invariant tests
 [group('test')]
@@ -240,11 +241,21 @@ subsystems: ensure-webdist
     cargo test -p zitadel-oidc --test subsystems_backend_boundary
     cargo test -p zitadel-server --test subsystems_backend_boundary
     cargo test -p zitadel-storage --test subsystems_storage_postgres_roles
+    cargo test -p zitadel-storage --test subsystems_storage_spanner_emulator
 
 # Run resilience tests that are currently environment-gated
 [group('test')]
 resilience: ensure-webdist
     cargo test -p zitadel-storage --test resilience_storage_spanner_transient
+    cargo test -p zitadel-db --test resilience_spanner_effects_jobs
+
+# Run the emulator-backed native Spanner certification lane
+[group('test')]
+spanner-cert: ensure-webdist
+    just contracts
+    just invariants
+    just subsystems
+    just resilience
 
 # Run the required PR wall locally
 [group('test')]
@@ -256,9 +267,7 @@ test-pr:
     just test-fast
     just web-static
     just test-web
-    just contracts
-    just invariants
-    just subsystems
+    just spanner-cert
     just journeys-admin
     just journeys-login
     just journeys-oidc
@@ -277,7 +286,6 @@ test-nightly:
     set -euo pipefail
     just test-release
     just journeys-quarantine
-    just resilience
     just conformance-oidc
 
 # ─── Conformance ─────────────────────────────────────────
