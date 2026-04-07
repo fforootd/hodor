@@ -662,6 +662,32 @@ pub(crate) async fn handle_password_step(
         .and_then(|v| v.as_str())
         .unwrap_or_default();
 
+    if !auth_request_id.is_empty() {
+        // Fail closed before issuing a session when the attached auth request
+        // cannot be resolved in the current instance context.
+        match state
+            .transient
+            .load_auth_request_redirect(&instance_id, auth_request_id)
+            .await
+        {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "internal error"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, {
+                    tracing::error!(%e, auth_request_id, "preflight auth request lookup");
+                    Json(serde_json::json!({"error": "internal error"}))
+                })
+                    .into_response();
+            }
+        }
+    }
+
     // Issue a new session via the use case instead of direct transient storage.
     let created_session = match state
         .app

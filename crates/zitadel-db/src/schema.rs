@@ -898,7 +898,13 @@ fn normalize_type_family(raw: &str) -> ColumnTypeFamily {
     ColumnTypeFamily::Unknown
 }
 
-fn logical_type_family(column_name: &str, raw: &str) -> ColumnTypeFamily {
+fn logical_type_family(table_name: &str, column_name: &str, raw: &str) -> ColumnTypeFamily {
+    match (table_name, column_name) {
+        ("auth_states", "scopes") | ("tokens", "audience") => {
+            return normalize_type_family(raw);
+        }
+        _ => {}
+    }
     if JSON_COLUMN_NAMES.contains(&column_name) {
         return ColumnTypeFamily::Json;
     }
@@ -1428,7 +1434,7 @@ async fn list_columns(
                 sqlx::query_as(&pragma_sql).fetch_all(db.pool()).await?;
             rows.into_iter()
                 .map(|(_, name, raw_type, notnull, default, _)| {
-                    let family = logical_type_family(&name, &raw_type);
+                    let family = logical_type_family(table_name, &name, &raw_type);
                     ColumnManifest {
                         default: normalize_default_value(family, default.as_deref()),
                         family,
@@ -1450,7 +1456,7 @@ async fn list_columns(
             .await?;
             rows.into_iter()
                 .map(|(name, raw_type, is_nullable, default)| {
-                    let family = logical_type_family(&name, &raw_type);
+                    let family = logical_type_family(table_name, &name, &raw_type);
                     ColumnManifest {
                         default: normalize_default_value(family, default.as_deref()),
                         family,
@@ -1478,7 +1484,7 @@ async fn list_columns(
             while let Some(row) = rows.next().await? {
                 let name = row.column_by_name::<String>("column_name")?;
                 let raw_type = row.column_by_name::<String>("spanner_type")?;
-                let family = logical_type_family(&name, &raw_type);
+                let family = logical_type_family(table_name, &name, &raw_type);
                 columns.push(ColumnManifest {
                     default: spanner_column_defaults
                         .and_then(|tables| tables.get(table_name))
@@ -2017,16 +2023,36 @@ mod tests {
     #[test]
     fn logical_type_family_promotes_storage_encoded_json_and_timestamps() {
         assert_eq!(
-            logical_type_family("metadata", "TEXT"),
+            logical_type_family("users", "metadata", "TEXT"),
             ColumnTypeFamily::Json
         );
         assert_eq!(
-            logical_type_family("created_at", "TEXT"),
+            logical_type_family("users", "created_at", "TEXT"),
             ColumnTypeFamily::Timestamp
         );
         assert_eq!(
-            logical_type_family("name", "TEXT"),
+            logical_type_family("users", "name", "TEXT"),
             ColumnTypeFamily::String
+        );
+    }
+
+    #[test]
+    fn logical_type_family_keeps_known_scalar_exceptions_as_strings() {
+        assert_eq!(
+            logical_type_family("auth_states", "scopes", "TEXT"),
+            ColumnTypeFamily::String
+        );
+        assert_eq!(
+            logical_type_family("tokens", "audience", "TEXT"),
+            ColumnTypeFamily::String
+        );
+        assert_eq!(
+            logical_type_family("tokens", "scopes", "TEXT"),
+            ColumnTypeFamily::Json
+        );
+        assert_eq!(
+            logical_type_family("login_flows", "audience", "TEXT"),
+            ColumnTypeFamily::Json
         );
     }
 

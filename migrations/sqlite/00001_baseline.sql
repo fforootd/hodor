@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS auth_states (
     provider_id TEXT DEFAULT '',
     redirect_uri TEXT DEFAULT '',
     response_type TEXT DEFAULT 'code',
-    scopes TEXT DEFAULT (''),
+    scopes TEXT DEFAULT '',
     state TEXT DEFAULT '',
     step TEXT DEFAULT '',
     type TEXT NOT NULL,
@@ -567,7 +567,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE TABLE IF NOT EXISTS tokens (
     application_id TEXT DEFAULT '',
-    audience TEXT DEFAULT (''),
+    audience TEXT DEFAULT '',
     auth_method TEXT DEFAULT '',
     auth_time TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),

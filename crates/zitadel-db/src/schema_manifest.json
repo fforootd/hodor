@@ -473,11 +473,11 @@
         },
         {
           "name": "scopes",
-          "family": "Json",
+          "family": "String",
           "nullable": true,
           "default": {
-            "kind": "Expression",
-            "value": "''"
+            "kind": "String",
+            "value": ""
           }
         },
         {
@@ -4615,11 +4615,11 @@
         },
         {
           "name": "audience",
-          "family": "Json",
+          "family": "String",
           "nullable": true,
           "default": {
-            "kind": "Expression",
-            "value": "''"
+            "kind": "String",
+            "value": ""
           }
         },
         {
