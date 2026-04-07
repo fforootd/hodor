@@ -227,6 +227,9 @@ jobs:
         with:
           shared-key: rust-with-webdist
 
+      - name: Force rebuild of crate that embeds web assets
+        run: cargo clean -p zitadel-server 2>/dev/null || true
+
       - name: Build zitadel binary
         run: cargo build -p zitadel
 
