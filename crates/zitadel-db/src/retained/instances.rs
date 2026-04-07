@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use google_cloud_spanner::{
     client::Error as SpannerError,
     mutation::insert,
     statement::{Statement, ToKind},
 };
+use serde::{Deserialize, Serialize};
 
 use super::{
     ChildInstanceOwnershipRecord, ConsoleBootstrapData, CreateManagedInstanceInput,
@@ -13,7 +15,7 @@ use super::{
     instance_from_spanner_row, instance_from_sql_row, spanner_query_all, spanner_query_optional,
     spanner_query_scalar_i64,
 };
-use crate::{Db, spanner_ident};
+use crate::{Db, InstanceContext, spanner_ident};
 
 #[derive(sqlx::FromRow)]
 struct DomainSqlRow {
@@ -37,6 +39,11 @@ struct DomainSqlRow {
     provisioning_error: String,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct InstanceRoutingCacheEnvelope {
+    value: Option<InstanceContext>,
 }
 
 pub async fn load_instance_metadata(
@@ -1721,6 +1728,79 @@ pub async fn resolve_instance_route(
                 }))
         }
     }
+}
+
+pub async fn load_instance_routing_cache_entry(
+    db: &Db,
+    key: &str,
+) -> anyhow::Result<Option<Option<InstanceContext>>> {
+    let Db::Sql(_) = db else {
+        return Ok(None);
+    };
+
+    let scoped = db.scoped_default();
+    let data = scoped.as_text("data");
+    let sql = format!(
+        "SELECT {data} FROM cache \
+         WHERE instance_id = $1 AND namespace = $2 AND key = $3 \
+           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
+    );
+    let row: Option<(String,)> = sqlx::query_as(&sql)
+        .bind(scoped.instance_id())
+        .bind("instance_routing")
+        .bind(key)
+        .fetch_optional(scoped.pool())
+        .await?;
+
+    match row {
+        Some((payload,)) => {
+            let envelope: InstanceRoutingCacheEnvelope = serde_json::from_str(&payload)?;
+            Ok(Some(envelope.value))
+        }
+        None => Ok(None),
+    }
+}
+
+pub async fn store_instance_routing_cache_entry(
+    db: &Db,
+    key: &str,
+    value: Option<InstanceContext>,
+    ttl: Duration,
+) -> anyhow::Result<()> {
+    let Db::Sql(_) = db else {
+        return Ok(());
+    };
+
+    let scoped = db.scoped_default();
+    let expires_expr = match scoped.dialect() {
+        crate::Dialect::Postgres => {
+            format!("CURRENT_TIMESTAMP + INTERVAL '{} seconds'", ttl.as_secs())
+        }
+        crate::Dialect::Sqlite => {
+            format!("datetime(CURRENT_TIMESTAMP, '+{} seconds')", ttl.as_secs())
+        }
+        crate::Dialect::Spanner => return Ok(()),
+    };
+    let payload = serde_json::to_string(&InstanceRoutingCacheEnvelope { value })?;
+    let sql = format!(
+        "INSERT INTO cache (instance_id, namespace, key, data, fetched_at, expires_at) \
+         VALUES ($1, $2, $3, {}, {}, {}) \
+         ON CONFLICT(instance_id, namespace, key) DO UPDATE SET \
+           data = excluded.data, \
+           fetched_at = excluded.fetched_at, \
+           expires_at = excluded.expires_at",
+        scoped.json_bind(4),
+        scoped.timestamp_now(),
+        expires_expr,
+    );
+    sqlx::query(&sql)
+        .bind(scoped.instance_id())
+        .bind("instance_routing")
+        .bind(key)
+        .bind(payload)
+        .execute(scoped.pool())
+        .await?;
+    Ok(())
 }
 
 // ─── Private helpers ───

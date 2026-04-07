@@ -11,11 +11,12 @@ use axum::http::{Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use lru::LruCache;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tower::{Layer, Service};
 use zitadel_config::Config;
 use zitadel_db::{
-    DEFAULT_INSTANCE_ID, Db, InstanceContext, resolve_domain_route, resolve_instance_route,
+    DEFAULT_INSTANCE_ID, Db, InstanceContext, load_instance_routing_cache_entry,
+    resolve_domain_route, resolve_instance_route, store_instance_routing_cache_entry,
     with_instance_context,
 };
 use zitadel_fga::PLATFORM_STORE_ID;
@@ -59,11 +60,6 @@ struct RequestRoutingInput {
 #[derive(Clone)]
 enum SharedResolverCache {
     Db(Db),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct SharedCacheEnvelope {
-    value: Option<InstanceContext>,
 }
 
 #[derive(Serialize)]
@@ -292,14 +288,18 @@ impl InstanceResolver {
 
     async fn shared_cached(&self, key: &str) -> Option<anyhow::Result<InstanceContext>> {
         match &self.shared_cache {
-            Some(SharedResolverCache::Db(db)) => match load_shared_cache_entry(db, key).await {
-                Ok(Some(value)) => Some(value.ok_or_else(|| anyhow::anyhow!("instance not found"))),
-                Ok(None) => None,
-                Err(error) => {
-                    tracing::warn!(%error, key, "shared cache read failed");
-                    None
+            Some(SharedResolverCache::Db(db)) => {
+                match load_instance_routing_cache_entry(db, key).await {
+                    Ok(Some(value)) => {
+                        Some(value.ok_or_else(|| anyhow::anyhow!("instance not found")))
+                    }
+                    Ok(None) => None,
+                    Err(error) => {
+                        tracing::warn!(%error, key, "shared cache read failed");
+                        None
+                    }
                 }
-            },
+            }
             None => None,
         }
     }
@@ -315,7 +315,7 @@ impl InstanceResolver {
             self.negative_ttl
         };
 
-        if let Err(error) = store_shared_cache_entry(db, &key, value, ttl).await {
+        if let Err(error) = store_instance_routing_cache_entry(db, &key, value, ttl).await {
             tracing::warn!(%error, key, "shared cache write failed");
         }
     }
@@ -355,79 +355,6 @@ impl InstanceResolver {
 
 fn is_reserved_instance_id(instance_id: &str) -> bool {
     instance_id == PLATFORM_STORE_ID
-}
-
-async fn load_shared_cache_entry(
-    db: &Db,
-    key: &str,
-) -> anyhow::Result<Option<Option<InstanceContext>>> {
-    let Db::Sql(_) = db else {
-        return Ok(None);
-    };
-
-    let scoped = db.scoped_default();
-    let data = scoped.as_text("data");
-    let sql = format!(
-        "SELECT {data} FROM cache \
-         WHERE instance_id = $1 AND namespace = $2 AND key = $3 \
-           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
-    );
-    let row: Option<(String,)> = sqlx::query_as(&sql)
-        .bind(scoped.instance_id())
-        .bind("instance_routing")
-        .bind(key)
-        .fetch_optional(scoped.pool())
-        .await?;
-
-    match row {
-        Some((payload,)) => {
-            let envelope: SharedCacheEnvelope = serde_json::from_str(&payload)?;
-            Ok(Some(envelope.value))
-        }
-        None => Ok(None),
-    }
-}
-
-async fn store_shared_cache_entry(
-    db: &Db,
-    key: &str,
-    value: Option<InstanceContext>,
-    ttl: Duration,
-) -> anyhow::Result<()> {
-    let Db::Sql(_) = db else {
-        return Ok(());
-    };
-
-    let scoped = db.scoped_default();
-    let expires_expr = match scoped.dialect() {
-        zitadel_db::Dialect::Postgres => {
-            format!("CURRENT_TIMESTAMP + INTERVAL '{} seconds'", ttl.as_secs())
-        }
-        zitadel_db::Dialect::Sqlite => {
-            format!("datetime(CURRENT_TIMESTAMP, '+{} seconds')", ttl.as_secs())
-        }
-        zitadel_db::Dialect::Spanner => return Ok(()),
-    };
-    let payload = serde_json::to_string(&SharedCacheEnvelope { value })?;
-    let sql = format!(
-        "INSERT INTO cache (instance_id, namespace, key, data, fetched_at, expires_at) \
-         VALUES ($1, $2, $3, {}, {}, {}) \
-         ON CONFLICT(instance_id, namespace, key) DO UPDATE SET \
-           data = excluded.data, \
-           fetched_at = excluded.fetched_at, \
-           expires_at = excluded.expires_at",
-        scoped.json_bind(4),
-        scoped.timestamp_now(),
-        expires_expr,
-    );
-    sqlx::query(&sql)
-        .bind(scoped.instance_id())
-        .bind("instance_routing")
-        .bind(key)
-        .bind(payload)
-        .execute(scoped.pool())
-        .await?;
-    Ok(())
 }
 
 impl InstanceContextLayer {
