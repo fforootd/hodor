@@ -16,7 +16,10 @@ test.describe('Admin projects journey', () => {
     const name = `Journey Project ${suffix}`
 
     await page.goto('/console/projects/new')
+    // Step 0: Project details
     await page.getByPlaceholder('My Project').fill(name)
+    await page.getByRole('button', { name: /Continue/i }).click()
+    // Step 1: Confirmation — submit
     await page.getByRole('button', { name: /Create Project/i }).click()
 
     await expect(page).toHaveURL(/\/console\/projects\/.+/)

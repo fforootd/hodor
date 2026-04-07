@@ -13,8 +13,11 @@ test.describe('Admin instances journey', () => {
     const domain = `${instanceId}.zitadel.cloud`
 
     await page.goto('/console/instances/new')
-    await page.getByPlaceholder('my-project-prod', { exact: true }).fill(instanceId)
-    await page.getByPlaceholder('my-project-prod.zitadel.cloud').fill(domain)
+    // Step 0: Configuration
+    await page.getByPlaceholder('my-project-prod').fill(instanceId)
+    await page.getByPlaceholder('my-company').fill(instanceId)
+    await page.getByRole('button', { name: /Continue/i }).click()
+    // Step 1: Confirmation — submit
     await page.getByRole('button', { name: /Create Instance/i }).click()
 
     await expect(page).toHaveURL(/\/console\/instances\/?$/)

@@ -16,7 +16,12 @@ test.describe('Admin applications journey', () => {
     const name = `Journey Application ${suffix}`
 
     await page.goto('/console/applications/new')
+    // Step 0: App type — 'web' is pre-selected
+    await page.getByRole('button', { name: /Continue/i }).click()
+    // Step 1: Details
     await page.getByPlaceholder('My Web App').fill(name)
+    await page.getByRole('button', { name: /Continue/i }).click()
+    // Step 2: Confirmation — submit
     await page.getByRole('button', { name: /Create Application/i }).click()
 
     await expect(page).toHaveURL(/\/console\/applications\/.+/)

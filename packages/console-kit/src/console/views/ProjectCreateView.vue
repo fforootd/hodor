@@ -21,7 +21,7 @@
         </div>
         <div class="space-y-2">
           <Label for="project-name">Project Name</Label>
-          <Input id="project-name" v-model="form.name" placeholder="My Web Application" />
+          <Input id="project-name" v-model="form.name" placeholder="My Project" />
           <p class="text-xs text-muted-foreground">Used to identify this project across the platform</p>
         </div>
         <div class="space-y-2">
@@ -73,7 +73,7 @@ import WizardSheet from '@/console/components/WizardSheet.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-defineProps<{ open: boolean }>()
+const props = withDefaults(defineProps<{ open?: boolean }>(), { open: true })
 const emit = defineEmits<{
   'update:open': [value: boolean]
   created: []

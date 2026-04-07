@@ -91,7 +91,7 @@ import { Badge } from '@/components/ui/badge'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Globe, Smartphone, Server, Chrome } from 'lucide-vue-next'
 
-defineProps<{ open: boolean }>()
+const props = withDefaults(defineProps<{ open?: boolean }>(), { open: true })
 const emit = defineEmits<{
   'update:open': [value: boolean]
   created: []
