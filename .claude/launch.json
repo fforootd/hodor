@@ -2,9 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
-      "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && source $HOME/.nvm/nvm.sh && source $HOME/.cargo/env && cargo build -p zitadel && (./target/debug/zitadel start --seed fixtures/seeds/frontend.yaml & npm run dev -w web)"],
+      "name": "api",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "-p", "zitadel", "--", "start", "--seed", "fixtures/seeds/frontend.yaml"],
+      "port": 8080
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "web"],
       "port": 5173
     }
   ]
