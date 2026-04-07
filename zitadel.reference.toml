@@ -131,6 +131,8 @@ url = "sqlite://./data/zitadel.db"
 # credentials_json = "{\"type\":\"service_account\",...}"
 
 # Example cloud-mode Spanner config:
+# Pre-create the Spanner database resource first. Zitadel manages schema
+# inside the database, but does not create or drop the database itself.
 # backend  = "spanner"
 # url      = ""
 # database = "projects/my-project/instances/zitadel/databases/zitadel"

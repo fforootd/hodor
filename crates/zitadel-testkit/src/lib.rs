@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
 use axum::{
@@ -165,6 +165,12 @@ impl TestContext {
 
     pub async fn with_config(mut config: Config) -> anyhow::Result<Self> {
         let db = TestDb::open_with_config(&config.storage.stateful).await?;
+
+        if !config.dev.seed_file.is_empty() {
+            zitadel_db::seed::apply(&db.db, Path::new(&config.dev.seed_file))
+                .await
+                .context("apply configured test seed file")?;
+        }
 
         config.server.external_domain = "localhost".into();
         config.server.public_origin = "http://localhost:18080".into();

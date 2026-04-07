@@ -11,6 +11,10 @@ Run schema migration and bootstrap once before deployment, then keep Cloud Run r
 - `ZITADEL_STORAGE__STATEFUL__MIGRATE=check`
 - `ZITADEL_STORAGE__STATEFUL__BOOTSTRAP=skip`
 
+For Spanner, pre-create the target database out of band. Zitadel manages schema
+inside that database, but does not create or drop the Spanner database
+resource.
+
 For your current Spanner setup, keep Cloud Run in `us-west1` if the Spanner instance is also in `us-west1`.
 
 ## One-Time Setup

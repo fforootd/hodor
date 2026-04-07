@@ -50,7 +50,9 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
             zitadel_db::migrate::check_version(&db).await?;
             tracing::info!("schema is up to date");
         } else {
-            zitadel_db::migrate::migrate(&db).await?;
+            if backend != zitadel_db::BackendKind::Spanner {
+                zitadel_db::migrate::migrate(&db).await?;
+            }
             let seeded_roles = zitadel_db::seed_builtin_role_definitions(&db).await?;
             zitadel_storage::prepare_postgres_role_databases(&cfg.storage, &db).await?;
             if args.bootstrap {

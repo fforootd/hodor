@@ -5,8 +5,7 @@ use anyhow::Context;
 use google_cloud_auth::credentials::CredentialsFile;
 use google_cloud_gax::{conn::Environment, grpc::Code};
 use google_cloud_googleapis::spanner::admin::database::v1::{
-    CreateDatabaseRequest, DatabaseDialect, GetDatabaseDdlRequest, GetDatabaseRequest,
-    UpdateDatabaseDdlRequest,
+    GetDatabaseDdlRequest, GetDatabaseRequest, UpdateDatabaseDdlRequest,
 };
 use google_cloud_spanner::{
     admin::{AdminClientConfig, client::Client as AdminClient},
@@ -233,25 +232,10 @@ async fn ensure_database_with_admin(
     };
 
     if !exists {
-        let request = CreateDatabaseRequest {
-            parent: database.parent.clone(),
-            create_statement: format!("CREATE DATABASE `{}`", database.database_id),
-            extra_statements: target_ddl.to_vec(),
-            encryption_config: None,
-            database_dialect: DatabaseDialect::GoogleStandardSql.into(),
-            proto_descriptors: vec![],
-        };
-        let mut operation = admin
-            .database()
-            .create_database(request, None)
-            .await
-            .context("create spanner database")?;
-        operation
-            .wait(None)
-            .await
-            .context("wait for spanner database creation")?
-            .context("spanner database creation returned no database")?;
-        return Ok(());
+        anyhow::bail!(
+            "spanner database {} does not exist — create the database out of band and rerun migrations; Zitadel only manages schema inside an existing database",
+            database.full_name
+        );
     }
 
     let existing_ddl = admin
@@ -326,8 +310,8 @@ async fn ensure_database_with_admin(
         let missing = target_ddl
             .iter()
             .filter(|statement| {
-                ddl_object_key(&normalize_statement(statement))
-                    .is_some_and(|key| !existing_keys.contains(&key))
+                let keys = ddl_statement_object_keys(&normalize_statement(statement));
+                !keys.is_empty() && keys.iter().any(|key| !existing_keys.contains(key))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -370,14 +354,14 @@ fn normalize_statement(statement: &str) -> String {
 fn ddl_object_keys(statements: &[String]) -> BTreeSet<String> {
     statements
         .iter()
-        .filter_map(|statement| ddl_object_key(statement))
+        .flat_map(|statement| ddl_statement_object_keys(statement))
         .collect()
 }
 
-fn ddl_object_key(statement: &str) -> Option<String> {
+fn ddl_statement_object_keys(statement: &str) -> Vec<String> {
     let tokens = statement.split_whitespace().collect::<Vec<_>>();
     if tokens.len() < 3 {
-        return None;
+        return Vec::new();
     }
 
     if tokens[0].eq_ignore_ascii_case("CREATE") {
@@ -389,14 +373,33 @@ fn ddl_object_key(statement: &str) -> Option<String> {
             pos += 1;
         }
 
-        if tokens.get(pos)?.eq_ignore_ascii_case("TABLE") {
-            let ident = parse_object_ident(&tokens, pos + 1)?;
-            return Some(format!("table:{ident}"));
+        if tokens
+            .get(pos)
+            .is_some_and(|token| token.eq_ignore_ascii_case("TABLE"))
+        {
+            let Some(ident) = parse_object_ident(&tokens, pos + 1) else {
+                return Vec::new();
+            };
+            let mut keys = vec![format!("table:{ident}")];
+            let mut scan = pos + 1;
+            while scan + 1 < tokens.len() {
+                if tokens[scan].eq_ignore_ascii_case("CONSTRAINT") {
+                    let constraint = sanitize_ident(tokens[scan + 1]);
+                    keys.push(format!("constraint:{ident}:{constraint}"));
+                }
+                scan += 1;
+            }
+            return keys;
         }
 
-        if tokens.get(pos)?.eq_ignore_ascii_case("INDEX") {
-            let ident = parse_object_ident(&tokens, pos + 1)?;
-            return Some(format!("index:{ident}"));
+        if tokens
+            .get(pos)
+            .is_some_and(|token| token.eq_ignore_ascii_case("INDEX"))
+        {
+            let Some(ident) = parse_object_ident(&tokens, pos + 1) else {
+                return Vec::new();
+            };
+            return vec![format!("index:{ident}")];
         }
     }
 
@@ -405,20 +408,26 @@ fn ddl_object_key(statement: &str) -> Option<String> {
             .get(1)
             .is_some_and(|t| t.eq_ignore_ascii_case("TABLE"))
     {
-        let table = sanitize_ident(tokens.get(2)?);
+        let Some(table_token) = tokens.get(2) else {
+            return Vec::new();
+        };
+        let table = sanitize_ident(table_token);
         let mut pos = 3usize;
         while pos + 1 < tokens.len() {
             if tokens[pos].eq_ignore_ascii_case("ADD")
                 && tokens[pos + 1].eq_ignore_ascii_case("CONSTRAINT")
             {
-                let constraint = sanitize_ident(tokens.get(pos + 2)?);
-                return Some(format!("constraint:{table}:{constraint}"));
+                let Some(constraint_token) = tokens.get(pos + 2) else {
+                    return Vec::new();
+                };
+                let constraint = sanitize_ident(constraint_token);
+                return vec![format!("constraint:{table}:{constraint}")];
             }
             pos += 1;
         }
     }
 
-    None
+    Vec::new()
 }
 
 fn parse_object_ident(tokens: &[&str], start: usize) -> Option<String> {
@@ -491,5 +500,20 @@ mod tests {
         ]);
 
         assert_eq!(ddl_object_keys(&existing), ddl_object_keys(&target));
+    }
+
+    #[test]
+    fn ddl_object_keys_include_inline_named_constraints() {
+        let ddl = normalize_ddl(&["CREATE TABLE instances (
+                instance_id STRING(MAX) NOT NULL,
+                parent_instance_id STRING(MAX),
+                CONSTRAINT fk_instances_8c1ab80b176c67ba FOREIGN KEY(parent_instance_id) REFERENCES instances(instance_id),
+                PRIMARY KEY(instance_id)
+            )"
+        .to_string()]);
+
+        let keys = ddl_object_keys(&ddl);
+        assert!(keys.contains("table:instances"));
+        assert!(keys.contains("constraint:instances:fk_instances_8c1ab80b176c67ba"));
     }
 }

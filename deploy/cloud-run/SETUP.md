@@ -79,19 +79,20 @@ gcloud spanner databases add-iam-policy-binding "${SPANNER_DATABASE}" \
 
 ### 3b. Migrator service account (Cloud Run Job)
 
-Needs schema admin, not just read/write. Grant this on the Spanner instance so the
-migration job can recreate the database after deletion.
+Grant this only on the Zitadel database. The migrator manages schema inside an
+existing database; it does not create or drop the Spanner database resource.
 
 ```bash
 gcloud iam service-accounts create zitadel-migrator \
   --project="${PROJECT_ID}" \
   --display-name="Zitadel Schema Migrator"
 
-# Spanner admin (DDL)
-gcloud spanner instances add-iam-policy-binding "${SPANNER_INSTANCE}" \
+# Spanner schema + data access inside the existing database
+gcloud spanner databases add-iam-policy-binding "${SPANNER_DATABASE}" \
   --project="${PROJECT_ID}" \
+  --instance="${SPANNER_INSTANCE}" \
   --member="serviceAccount:zitadel-migrator@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/spanner.databaseAdmin"
+  --role="roles/spanner.databaseUser"
 ```
 
 ### 3c. GitHub Actions service account (CI/CD)

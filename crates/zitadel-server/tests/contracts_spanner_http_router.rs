@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{Arc, atomic::AtomicBool},
 };
 
 use axum::Router;
 use serde_json::json;
 use uuid::Uuid;
+use zitadel_config::Config;
 use zitadel_db::{DEFAULT_INSTANCE_ID, append_event};
 use zitadel_server::{AppState, build_router, routing::InstanceResolver};
 use zitadel_testkit::{TestApp, TestContext};
@@ -15,6 +17,27 @@ async fn build_spanner_test_app(suite: &str) -> anyhow::Result<Option<TestApp>> 
         return Ok(None);
     };
     build_test_app_from_context(ctx).await.map(Some)
+}
+
+async fn build_seeded_spanner_test_app(suite: &str) -> anyhow::Result<Option<TestApp>> {
+    let Some(stateful) = zitadel_db::test_support::spanner_stateful_config_from_env(suite).await?
+    else {
+        return Ok(None);
+    };
+
+    let mut config = Config::default();
+    config.storage.stateful = stateful;
+    config.dev.seed_file = frontend_seed_file().to_string_lossy().into_owned();
+
+    let ctx = TestContext::with_config(config).await?;
+    build_test_app_from_context(ctx).await.map(Some)
+}
+
+fn frontend_seed_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/seeds/frontend.yaml")
+        .canonicalize()
+        .expect("resolve frontend seed file")
 }
 
 async fn build_test_app_from_context(ctx: TestContext) -> anyhow::Result<TestApp> {
@@ -200,6 +223,56 @@ async fn spanner_observability_routes_expose_events_overview_and_analytics_when_
             .is_some_and(|rows| rows.iter().any(|row| row[0] == "auth.login_succeeded")),
         "analytics query should decode grouped Spanner rows without TO_JSON_STRING hacks",
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn spanner_seeded_admin_can_log_in_with_default_password_when_configured()
+-> anyhow::Result<()> {
+    let Some(app) = build_seeded_spanner_test_app("server-contracts-seeded-admin").await? else {
+        return Ok(());
+    };
+
+    let created_flow = app
+        .post_json(
+            "/v1/login/flows",
+            zitadel_testkit::AuthActor::Anonymous,
+            &json!({}),
+        )
+        .await?;
+    assert_eq!(created_flow.status, axum::http::StatusCode::CREATED);
+
+    let flow_id = created_flow.json_value()["flow_id"]
+        .as_str()
+        .expect("seeded admin login flow id should be present")
+        .to_string();
+
+    let advanced = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            zitadel_testkit::AuthActor::Anonymous,
+            &json!({
+                "action": "identifier",
+                "identifier": "admin",
+            }),
+        )
+        .await?;
+    assert_eq!(advanced.status, axum::http::StatusCode::OK);
+    assert_eq!(advanced.json_value()["step"], "password");
+
+    let completed = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            zitadel_testkit::AuthActor::Anonymous,
+            &json!({
+                "action": "password",
+                "password": "admin123",
+            }),
+        )
+        .await?;
+    assert_eq!(completed.status, axum::http::StatusCode::OK);
+    assert_eq!(completed.json_value()["step"], "complete");
 
     Ok(())
 }

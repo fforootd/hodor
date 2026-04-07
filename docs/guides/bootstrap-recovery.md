@@ -30,12 +30,21 @@ cargo run -p zitadel -- db migrate --bootstrap
 cargo run -p zitadel -- server start
 ```
 
+Example with Spanner:
+
+```bash
+# Create the Spanner database resource out of band first.
+cargo run -p zitadel -- db migrate -c fixtures/zitadel.spanner.gcp.toml --bootstrap
+cargo run -p zitadel -- server start -c fixtures/zitadel.spanner.gcp.toml
+```
+
 What `migrate --bootstrap` does today:
 
 - loads config and resolves local storage paths
 - runs pending schema migrations
 - ensures the default org and `admin` user record exist
 - is safe to run repeatedly
+- for Spanner, manages schema inside an existing database but does not create the database resource
 
 What it does **not** do today:
 

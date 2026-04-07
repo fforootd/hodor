@@ -2,6 +2,7 @@
 #
 # Usage:
 #   export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/spanner-sa.json
+#   # Pre-create the Spanner database resource first.
 #   cargo run -p zitadel -- db migrate -c fixtures/zitadel.spanner.gcp.toml --bootstrap
 #   cargo run -p zitadel -- server start -c fixtures/zitadel.spanner.gcp.toml
 #
