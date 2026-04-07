@@ -77,7 +77,7 @@ async fn run_search(
                              WHERE instance_id = $1 AND (identifier LIKE $2 OR display_name LIKE $2) \
                              ORDER BY display_name, id LIMIT $3",
                         )
-                        .bind(&instance_id)
+                        .bind(instance_id)
                         .bind(&pattern)
                         .bind(limit)
                         .fetch_all(scoped.pool())
@@ -122,7 +122,7 @@ async fn run_search(
                 let rows: Vec<(String, String)> = sqlx::query_as(
                             "SELECT id, name FROM orgs WHERE instance_id = $1 AND name LIKE $2 ORDER BY name, id LIMIT $3",
                         )
-                        .bind(&instance_id)
+                        .bind(instance_id)
                         .bind(&pattern)
                         .bind(limit)
                         .fetch_all(scoped.pool())
@@ -163,7 +163,7 @@ async fn run_search(
                     "SELECT id, COALESCE(org_id, ''), name FROM groups \
                              WHERE instance_id = $1 AND name LIKE $2 ORDER BY name, id LIMIT $3",
                 )
-                .bind(&instance_id)
+                .bind(instance_id)
                 .bind(&pattern)
                 .bind(limit)
                 .fetch_all(scoped.pool())
