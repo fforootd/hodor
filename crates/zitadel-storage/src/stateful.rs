@@ -14,6 +14,19 @@ pub struct ResolvedPatIdentity {
     pub session_id: String,
     pub token_type: String,
     pub org_id: String,
+    pub operator_admin: bool,
+}
+
+fn metadata_has_capability(metadata_json: &str, capability: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(metadata_json)
+        .ok()
+        .and_then(|value| value.get("capabilities").and_then(serde_json::Value::as_array).cloned())
+        .map(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.as_str().is_some_and(|item| item == capability))
+        })
+        .unwrap_or(false)
 }
 
 pub trait StatefulStore: Clone + Send + Sync + 'static {
@@ -137,23 +150,26 @@ impl ReadStore for SqlReadStore {
         raw_token: &str,
     ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
         let scoped = self.db.scoped(instance_id.to_string());
-        let row: Option<(String, String, Option<String>, String)> = sqlx::query_as(
-            "SELECT t.user_id, t.type, t.session_id, COALESCE(u.org_id, '') \
+        let metadata = scoped.as_text("u.metadata");
+        let sql = format!(
+            "SELECT t.user_id, t.type, t.session_id, COALESCE(u.org_id, ''), COALESCE({metadata}, '{{}}') \
              FROM tokens t \
              JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
-             WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active'",
-        )
+             WHERE t.instance_id = $1 AND t.token_hash = $2 AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active'"
+        );
+        let row: Option<(String, String, Option<String>, String, String)> = sqlx::query_as(&sql)
         .bind(scoped.instance_id())
         .bind(token_hash(raw_token))
         .fetch_optional(scoped.pool())
         .await?;
 
         Ok(row.map(
-            |(user_id, token_type, session_id, org_id)| ResolvedPatIdentity {
+            |(user_id, token_type, session_id, org_id, metadata_json)| ResolvedPatIdentity {
                 user_id,
                 session_id: session_id.unwrap_or_default(),
                 token_type,
                 org_id,
+                operator_admin: metadata_has_capability(&metadata_json, "operator_admin"),
             },
         ))
     }
@@ -250,7 +266,7 @@ impl ReadStore for SpannerReadStore {
             .client();
         let hashed = token_hash(raw_token);
         let mut stmt = Statement::new(
-            "SELECT t.user_id, t.type, t.session_id, u.org_id \
+            "SELECT t.user_id, t.type, t.session_id, u.org_id, IFNULL(u.metadata, '{}') AS metadata \
              FROM tokens t \
              JOIN users u ON u.id = t.user_id AND u.instance_id = t.instance_id \
              WHERE t.instance_id = @instance_id AND t.token_hash = @token_hash AND t.type = 'pat' AND t.revoked_at IS NULL AND u.state = 'active' \
@@ -273,6 +289,10 @@ impl ReadStore for SpannerReadStore {
                 .unwrap_or_default(),
             token_type: row.column_by_name::<String>("type")?,
             org_id: row.column_by_name::<String>("org_id")?,
+            operator_admin: metadata_has_capability(
+                &row.column_by_name::<String>("metadata")?,
+                "operator_admin",
+            ),
         }))
     }
 }

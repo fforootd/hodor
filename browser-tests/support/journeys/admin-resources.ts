@@ -46,5 +46,5 @@ export async function openInstanceDetailFromList(page: Page, domain: string) {
   if (!href) {
     throw new Error(`Unable to resolve instance detail link for ${domain}`)
   }
-  await page.goto(href.endsWith('/detail') ? href : `${href}/detail`)
+  await page.goto(href.endsWith('/settings') ? href : `${href}/settings`)
 }

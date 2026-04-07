@@ -11,6 +11,7 @@ use zitadel_app::{
     repo::{ListParams as AppListParams, UserRecord},
     users::{CreateUserCommand, UpdateUserCommand},
 };
+use zitadel_observability::time_async;
 
 use crate::{ApiState, extractors::ResourceId, middleware::Identity, response};
 
@@ -104,7 +105,7 @@ async fn create_user(
     if let Some(schema) = schema.as_ref()
         && let Err(resp) = validate_user_metadata(schema, &req.metadata)
     {
-        return resp;
+        return *resp;
     }
 
     let display = if req.display_name.is_empty() {
@@ -139,11 +140,14 @@ async fn get_user(
     ResourceId(id): ResourceId,
 ) -> Response {
     let ctx = response::build_actor_context(&identity);
-    match state
-        .app
-        .runner
-        .run(&ctx, "user.get", || state.app.get_user.execute(&ctx, &id))
-        .await
+    match time_async(
+        "api.user.get",
+        state
+            .app
+            .runner
+            .run(&ctx, "user.get", || state.app.get_user.execute(&ctx, &id)),
+    )
+    .await
     {
         Ok(user) => response::json_ok(UserResponse::from(user)),
         Err(e) => response::app_error(e),
@@ -206,10 +210,10 @@ async fn update_user(
         && let Some(schema) = schema.as_ref()
     {
         if let Err(resp) = validate_user_metadata(schema, metadata) {
-            return resp;
+            return *resp;
         }
         if let Err(resp) = validate_editable_user_metadata(schema, metadata) {
-            return resp;
+            return *resp;
         }
     }
 
@@ -260,12 +264,7 @@ async fn resolve_user_extension_schema(
             .get(instance_id, schema_id)
             .await
             .map_err(response::internal)?;
-        return match schema {
-            Some(schema) => Ok(Some(schema.schema_json)),
-            None => Err(response::not_found(format!(
-                "schema not found: {schema_id}"
-            ))),
-        };
+        return Ok(schema.map(|schema| schema.schema_json));
     }
 
     if let Some(default_schema) = state
@@ -285,7 +284,7 @@ async fn resolve_user_extension_schema(
 fn validate_user_metadata(
     schema: &serde_json::Value,
     metadata: &serde_json::Value,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let extension_schema =
         zitadel_schema::validator::extension_schema_view(schema, USER_METADATA_RESERVED_FIELDS);
     let payload = if metadata.is_null() {
@@ -295,7 +294,7 @@ fn validate_user_metadata(
     };
     match zitadel_schema::validator::validate_schema(&extension_schema, &payload) {
         Ok(()) => Ok(()),
-        Err(errors) => Err(response::error(
+        Err(errors) => Err(Box::new(response::error(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!(
                 "schema validation failed: {}",
@@ -305,24 +304,24 @@ fn validate_user_metadata(
                     .collect::<Vec<_>>()
                     .join("; ")
             ),
-        )),
+        ))),
     }
 }
 
 fn validate_editable_user_metadata(
     schema: &serde_json::Value,
     metadata: &serde_json::Value,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     match zitadel_schema::annotations::check_editable_fields_in_schema(
         schema,
         metadata,
         USER_METADATA_RESERVED_FIELDS,
     ) {
         Ok(()) => Ok(()),
-        Err(fields) => Err(response::error(
+        Err(fields) => Err(Box::new(response::error(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("metadata fields are not editable: {}", fields.join(", ")),
-        )),
+        ))),
     }
 }
 

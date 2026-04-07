@@ -3,28 +3,43 @@
     v-model:search-query="searchQuery"
     title="Instances"
     singular-title="Instance"
+    description="Manage your ZITADEL instances across all environments"
     create-route="/instances/new"
     :items="items"
     :loading="loading"
     :columns="columns"
     :search-fields="['instance_id', 'primary_domain']"
+    :filters="filters"
   >
+    <template #header-actions>
+      <Button @click="showCreate = true">
+        <Plus class="mr-2 size-4" />
+        New Instance
+      </Button>
+    </template>
     <template #empty-icon><Server /></template>
   </ResourceListView>
+
+  <InstanceCreateView
+    :open="showCreate"
+    @update:open="showCreate = $event"
+    @created="fetch"
+  />
 </template>
 
 <script setup lang="ts">
-import { h, onMounted } from 'vue'
+import { h, ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { createColumnHelper } from '@tanstack/vue-table'
 import { instanceApi, type Instance } from '@/api/resources'
 import { useResourceList } from '@/console/composables/useResourceList'
-import { formatDate } from '@/console/utils/format'
-import ResourceListView from '@/console/components/ResourceListView.vue'
+import ResourceListView, { type ListFilter } from '@/console/components/ResourceListView.vue'
+import InstanceCreateView from '@/console/views/InstanceCreateView.vue'
 import { StateBadge } from '@/components/ui/state-badge'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
-import { Server } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { Server, Plus, Globe, Activity } from 'lucide-vue-next'
+
+const showCreate = ref(false)
 
 const stateLabels: Record<string, string> = {
   active: 'Active',
@@ -42,32 +57,90 @@ const { items, loading, searchQuery, fetch } = useResourceList<Instance>({
   searchFields: ['instance_id', 'primary_domain'],
 })
 
+// Dynamic filters derived from data
+const filters = computed<ListFilter[]>(() => {
+  const states = new Map<string, number>()
+  const regions = new Map<string, number>()
+  const kinds = new Map<string, number>()
+
+  for (const inst of items.value) {
+    states.set(inst.state, (states.get(inst.state) || 0) + 1)
+    if (inst.region_key) regions.set(inst.region_key, (regions.get(inst.region_key) || 0) + 1)
+    if (inst.kind) kinds.set(inst.kind, (kinds.get(inst.kind) || 0) + 1)
+  }
+
+  const result: ListFilter[] = []
+
+  if (kinds.size > 1) {
+    result.push({
+      key: 'kind',
+      label: 'Hosting',
+      icon: Server,
+      options: [...kinds.entries()].map(([value, count]) => ({
+        value,
+        label: value === 'managed' ? 'Cloud Hosted' : value.charAt(0).toUpperCase() + value.slice(1),
+        count,
+      })),
+    })
+  }
+
+  if (states.size > 1) {
+    result.push({
+      key: 'state',
+      label: 'Status',
+      icon: Activity,
+      options: [...states.entries()].map(([value, count]) => ({
+        value,
+        label: stateLabels[value] || value,
+        count,
+      })),
+    })
+  }
+
+  if (regions.size > 1) {
+    result.push({
+      key: 'region_key',
+      label: 'Region',
+      icon: Globe,
+      options: [...regions.entries()].map(([value, count]) => ({
+        value,
+        label: formatRegion(value || null),
+        count,
+      })),
+    })
+  }
+
+  return result
+})
+
+const regionLabels: Record<string, string> = {
+  'eu-frankfurt': 'EU (Frankfurt)',
+  'europe-west1': 'EU (Belgium)',
+  'us-virginia': 'US (Virginia)',
+  'us-central1': 'US (Iowa)',
+  'us-oregon': 'US (Oregon)',
+  'asia-singapore': 'Asia (Singapore)',
+  'asia-southeast1': 'Asia (Singapore)',
+  'asia-tokyo': 'Asia (Tokyo)',
+  'au-sydney': 'Australia (Sydney)',
+}
+
+function formatRegion(key: string | null): string {
+  if (!key) return 'Global'
+  return regionLabels[key] || key
+}
+
 const col = createColumnHelper<Instance>()
 const columns = [
-  col.display({
-    id: 'select',
-    header: ({ table }) =>
-      h(Checkbox, {
-        modelValue: table.getIsAllPageRowsSelected(),
-        'onUpdate:modelValue': (val: boolean | 'indeterminate') => table.toggleAllPageRowsSelected(!!val),
-        ariaLabel: 'Select all',
-      }),
-    cell: ({ row }) =>
-      h(Checkbox, {
-        modelValue: row.getIsSelected(),
-        'onUpdate:modelValue': (val: boolean | 'indeterminate') => row.toggleSelected(!!val),
-        ariaLabel: 'Select row',
-      }),
-    enableSorting: false,
-    enableHiding: false,
-  }),
   col.accessor('primary_domain', {
     header: 'Name',
-    cell: (info) =>
-      h(RouterLink, {
-        to: `/instances/${info.row.original.instance_id}`,
+    cell: (info) => {
+      const inst = info.row.original
+      return h(RouterLink, {
+        to: `/instances/${inst.instance_id}`,
         class: 'font-medium hover:underline',
-      }, () => info.getValue() || info.row.original.instance_id),
+      }, () => inst.primary_domain || inst.instance_id)
+    },
     filterFn: 'includesString',
   }),
   col.accessor('state', {
@@ -76,15 +149,7 @@ const columns = [
   }),
   col.accessor('region_key', {
     header: 'Region',
-    cell: (info) => info.getValue() || '—',
-  }),
-  col.accessor('kind', {
-    header: 'Type',
-    cell: (info) => h(Badge, { variant: 'outline' }, () => info.getValue()),
-  }),
-  col.accessor('created_at', {
-    header: 'Created',
-    cell: (info) => formatDate(info.getValue()),
+    cell: (info) => h('span', { class: 'text-sm' }, formatRegion(info.getValue())),
   }),
 ]
 

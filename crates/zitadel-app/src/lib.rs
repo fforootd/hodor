@@ -32,6 +32,7 @@ pub mod apps;
 pub mod auth;
 pub mod console;
 pub mod credentials;
+pub mod domains;
 pub mod groups;
 pub mod instances;
 pub mod jobs;
@@ -124,6 +125,13 @@ pub struct ApplicationServices {
     pub add_domain: instances::AddDomain,
     pub remove_domain: instances::RemoveDomain,
 
+    // Custom Domains (customer-facing)
+    pub list_custom_domains: domains::ListCustomDomains,
+    pub get_custom_domain: domains::GetCustomDomain,
+    pub add_custom_domain: domains::AddCustomDomain,
+    pub verify_custom_domain: domains::VerifyCustomDomain,
+    pub remove_custom_domain: domains::RemoveCustomDomain,
+
     // Support
     pub create_support_grant: support::CreateSupportGrant,
     pub list_support_grants: support::ListSupportGrants,
@@ -211,7 +219,7 @@ pub struct ApplicationServices {
 
 impl ApplicationServices {
     /// Build all use cases from a set of repositories and a hook pipeline.
-    pub fn new(repos: Arc<Repositories>, hooks: Arc<HookPipeline>) -> Self {
+    pub fn new(repos: Arc<Repositories>, hooks: Arc<HookPipeline>, cloud_enabled: bool) -> Self {
         Self {
             repos: repos.clone(),
             // Users
@@ -266,6 +274,13 @@ impl ApplicationServices {
             list_domains: instances::ListDomains::new(repos.clone()),
             add_domain: instances::AddDomain::new(repos.clone()),
             remove_domain: instances::RemoveDomain::new(repos.clone()),
+
+            // Custom Domains (customer-facing)
+            list_custom_domains: domains::ListCustomDomains::new(repos.clone()),
+            get_custom_domain: domains::GetCustomDomain::new(repos.clone()),
+            add_custom_domain: domains::AddCustomDomain::new(repos.clone()),
+            verify_custom_domain: domains::VerifyCustomDomain::new(repos.clone(), cloud_enabled),
+            remove_custom_domain: domains::RemoveCustomDomain::new(repos.clone(), cloud_enabled),
 
             // Support
             create_support_grant: support::CreateSupportGrant::new(repos.clone()),

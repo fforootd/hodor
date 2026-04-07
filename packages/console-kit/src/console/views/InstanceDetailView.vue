@@ -1,13 +1,5 @@
 <template>
   <div class="space-y-8">
-    <!-- Back link -->
-    <div>
-      <router-link to="/instances" class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-        <ArrowLeft class="size-4" />
-        Back to Instances
-      </router-link>
-    </div>
-
     <!-- Loading -->
     <div v-if="loading" class="flex h-48 items-center justify-center">
       <Spinner class="size-6 text-muted-foreground" />
@@ -70,27 +62,6 @@
             </Card>
           </div>
 
-          <!-- Quick actions -->
-          <Card v-if="instance.state === 'active' || instance.state === 'suspended'">
-            <CardContent class="pt-4 flex items-center justify-between">
-              <div>
-                <p class="text-sm font-medium">
-                  {{ instance.state === 'active' ? 'Suspend Instance' : 'Reactivate Instance' }}
-                </p>
-                <p class="text-xs text-muted-foreground mt-0.5">
-                  {{ instance.state === 'active' ? 'Temporarily disable this instance.' : 'Bring this instance back online.' }}
-                </p>
-              </div>
-              <Button
-                :variant="instance.state === 'active' ? 'outline' : 'default'"
-                size="sm"
-                :disabled="saving"
-                @click="toggleState"
-              >
-                {{ instance.state === 'active' ? 'Suspend' : 'Activate' }}
-              </Button>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <!-- Domains -->
@@ -222,14 +193,14 @@
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-2">
-          <Label>Type the instance ID to confirm:</Label>
-          <Input v-model="deleteConfirmation" :placeholder="instance?.instance_id" />
+          <Label>Type <strong>{{ deleteConfirmTarget }}</strong> to confirm:</Label>
+          <Input v-model="deleteConfirmation" :placeholder="deleteConfirmTarget" />
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <Button variant="outline" @click="showDeleteDialog = false">Cancel</Button>
           <Button
             variant="destructive"
-            :disabled="deleteConfirmation !== instance?.instance_id || deleting"
+            :disabled="deleteConfirmation !== deleteConfirmTarget || deleting"
             @click="doDelete"
           >
             <Spinner v-if="deleting" class="mr-1 size-4" />
@@ -257,14 +228,13 @@ import { Switch } from '@/components/ui/switch'
 import { Spinner } from '@/components/ui/spinner'
 import { StateBadge } from '@/components/ui/state-badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { ArrowLeft, Globe, Plus, Trash2 } from 'lucide-vue-next'
+import { Globe, Plus, Trash2 } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
-const instanceId = computed(() => route.params.id as string)
+const instanceId = computed(() => (route.params.instanceId || route.params.id) as string)
 
 const loading = ref(true)
-const saving = ref(false)
 const deleting = ref(false)
 const instance = ref<Instance | null>(null)
 const domains = ref<InstanceDomain[]>([])
@@ -279,6 +249,7 @@ const removingDomain = ref('')
 // Delete confirmation
 const showDeleteDialog = ref(false)
 const deleteConfirmation = ref('')
+const deleteConfirmTarget = computed(() => instance.value?.primary_domain || instance.value?.instance_id || '')
 
 // Feature overrides
 const featureOverrides = computed(() => instance.value?.feature_overrides || {})
@@ -311,25 +282,11 @@ async function loadInstance() {
 
   try {
     domains.value = await instanceApi.listDomains(instanceId.value)
-  } catch (e: any) {
+  } catch {
+    // Domain endpoints may not exist yet — silently default to empty.
     domains.value = []
-    notifyError('Failed to load instance domains', e)
   } finally {
     loading.value = false
-  }
-}
-
-async function toggleState() {
-  if (!instance.value) return
-  saving.value = true
-  const newState = instance.value.state === 'active' ? 'suspended' : 'active'
-  try {
-    instance.value = await instanceApi.update(instanceId.value, { state: newState })
-    notifySuccess('Instance updated', `Instance is now ${stateLabels[newState] || newState}.`)
-  } catch (e: any) {
-    notifyError('Failed to update instance', e)
-  } finally {
-    saving.value = false
   }
 }
 
@@ -384,7 +341,7 @@ async function doDelete() {
     await instanceApi.delete(instanceId.value)
     notifySuccess('Instance deleted', 'The instance is being removed.')
     showDeleteDialog.value = false
-    router.push('/instances')
+    router.push({ name: 'instances' })
   } catch (e: any) {
     notifyError('Failed to delete instance', e)
   } finally {

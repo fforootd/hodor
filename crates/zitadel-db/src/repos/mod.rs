@@ -18,7 +18,7 @@ pub mod auth {
 
 pub mod domains {
     pub use crate::{
-        DomainDeleteOutcome, DomainRecord, add_instance_domain, delete_instance_domain,
+        DomainDeleteOutcome, DomainRecord, add_instance_domain, delete_domain_for_scope,
         list_instance_domains,
     };
 }

@@ -131,7 +131,7 @@ pub fn check_editable_fields_in_schema(
     payload: &Value,
     reserved_fields: &[&str],
 ) -> Result<(), Vec<String>> {
-    let ann = extract_annotations(&schema);
+    let ann = extract_annotations(schema);
     let Some(obj) = payload.as_object() else {
         return Ok(());
     };

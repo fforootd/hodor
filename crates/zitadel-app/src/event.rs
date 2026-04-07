@@ -272,6 +272,36 @@ pub enum DomainEvent {
     },
     #[serde(rename = "pat.revoked")]
     PatRevoked { pat_id: String, actor_id: String },
+
+    // ── Domains ──
+    #[serde(rename = "domain.added")]
+    DomainAdded {
+        domain: String,
+        instance_id: String,
+        org_id: Option<String>,
+        purpose: String,
+        actor_id: String,
+    },
+    #[serde(rename = "domain.verified")]
+    DomainVerified {
+        domain: String,
+        instance_id: String,
+        actor_id: String,
+    },
+    #[serde(rename = "domain.activated")]
+    DomainActivated { domain: String, instance_id: String },
+    #[serde(rename = "domain.removed")]
+    DomainRemoved {
+        domain: String,
+        instance_id: String,
+        actor_id: String,
+    },
+    #[serde(rename = "domain.verification_failed")]
+    DomainVerificationFailed {
+        domain: String,
+        instance_id: String,
+        reason: String,
+    },
 }
 
 impl DomainEvent {
@@ -321,6 +351,11 @@ impl DomainEvent {
             Self::PatRevoked { .. } => "pat.revoked",
             Self::SupportGrantCreated { .. } => "support_grant.created",
             Self::SupportGrantRevoked { .. } => "support_grant.revoked",
+            Self::DomainAdded { .. } => "domain.added",
+            Self::DomainVerified { .. } => "domain.verified",
+            Self::DomainActivated { .. } => "domain.activated",
+            Self::DomainRemoved { .. } => "domain.removed",
+            Self::DomainVerificationFailed { .. } => "domain.verification_failed",
         }
     }
 
@@ -359,6 +394,11 @@ impl DomainEvent {
             Self::MembershipChanged { .. } => "membership",
             Self::PatCreated { .. } | Self::PatRevoked { .. } => "pat",
             Self::SupportGrantCreated { .. } | Self::SupportGrantRevoked { .. } => "support_grant",
+            Self::DomainAdded { .. }
+            | Self::DomainVerified { .. }
+            | Self::DomainActivated { .. }
+            | Self::DomainRemoved { .. }
+            | Self::DomainVerificationFailed { .. } => "domain",
         }
     }
 
@@ -407,6 +447,11 @@ impl DomainEvent {
             Self::PatCreated { pat_id, .. } | Self::PatRevoked { pat_id, .. } => pat_id,
             Self::SupportGrantCreated { grant_id, .. }
             | Self::SupportGrantRevoked { grant_id, .. } => grant_id,
+            Self::DomainAdded { domain, .. }
+            | Self::DomainVerified { domain, .. }
+            | Self::DomainActivated { domain, .. }
+            | Self::DomainRemoved { domain, .. }
+            | Self::DomainVerificationFailed { domain, .. } => domain,
         }
     }
 
@@ -450,13 +495,18 @@ impl DomainEvent {
             | Self::PatCreated { actor_id, .. }
             | Self::PatRevoked { actor_id, .. }
             | Self::SupportGrantCreated { actor_id, .. }
-            | Self::SupportGrantRevoked { actor_id, .. } => actor_id,
+            | Self::SupportGrantRevoked { actor_id, .. }
+            | Self::DomainAdded { actor_id, .. }
+            | Self::DomainVerified { actor_id, .. }
+            | Self::DomainRemoved { actor_id, .. } => actor_id,
             // Events without explicit actor
             Self::SessionStarted { user_id, .. } => user_id,
             Self::LoginFlowCompleted { user_id, .. } => user_id,
             Self::OtpVerified { user_id, .. } => user_id,
             Self::TokenIssued { subject, .. } => subject,
             Self::BotDetection { fingerprint, .. } => fingerprint,
+            Self::DomainActivated { instance_id, .. } => instance_id,
+            Self::DomainVerificationFailed { instance_id, .. } => instance_id,
         }
     }
 }

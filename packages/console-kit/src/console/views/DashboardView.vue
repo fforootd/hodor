@@ -1,61 +1,78 @@
 <template>
   <div class="space-y-6">
-    <!-- Root Instance Picker (no instance selected) -->
+    <!-- Getting Started (root, no instance selected) -->
     <template v-if="isRoot && !hasInstance">
-      <div class="flex flex-col items-center justify-center py-16">
-        <div class="flex size-16 items-center justify-center rounded-xl border bg-muted mb-6">
-          <LayoutGrid class="size-8 text-muted-foreground" />
-        </div>
-        <h1 class="text-2xl font-semibold tracking-tight">Continue to Overview</h1>
-        <p class="text-sm text-muted-foreground mt-1">Choose an instance to continue</p>
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Getting Started</h1>
+        <p class="text-sm text-muted-foreground mt-1">New to ZITADEL? Try our onboarding guide to get started.</p>
       </div>
 
-      <div class="mx-auto max-w-lg space-y-3">
-        <!-- Search -->
-        <div class="relative">
-          <Search class="absolute left-3 top-3 size-4 text-muted-foreground" />
-          <Input
-            v-model="instanceSearch"
-            placeholder="Find Instance..."
-            class="pl-9"
-          />
-        </div>
-
-        <!-- Instance list -->
-        <Card>
-          <div class="divide-y">
-            <button
-              v-for="inst in filteredInstances"
-              :key="inst.instance_id"
-              type="button"
-              class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-accent transition-colors"
-              @click="pickInstance(inst)"
-            >
-              <Server class="size-5 text-muted-foreground shrink-0" />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium truncate">{{ inst.primary_domain || inst.instance_id }}</span>
-                  <Badge variant="secondary" class="text-[10px] shrink-0">{{ stateLabel(inst.state) }}</Badge>
-                </div>
-                <span class="text-xs text-muted-foreground truncate block">{{ inst.primary_domain || inst.instance_id }}</span>
-              </div>
-            </button>
-
-            <div v-if="filteredInstances.length === 0 && !loading" class="px-4 py-8 text-center text-sm text-muted-foreground">
-              {{ instanceSearch ? 'No instances match your search.' : 'No instances yet.' }}
+      <!-- Start Building -->
+      <Card class="bg-muted/30">
+        <CardContent class="pt-6">
+          <h2 class="text-lg font-semibold mb-1">Start Building</h2>
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium">Integrate ZITADEL into your application</p>
+              <p class="text-xs text-muted-foreground mt-0.5">Connect your app or use one of our templates to get started in minutes.</p>
             </div>
-
-            <!-- Add Instance -->
-            <router-link
-              to="/instances/new"
-              class="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            >
-              <Plus class="size-5 shrink-0" />
-              <span>Add Instance</span>
-            </router-link>
+            <div class="flex gap-2 shrink-0">
+              <Button size="sm" @click="router.push('/applications/new')">Create Application</Button>
+              <Button variant="outline" size="sm" as-child>
+                <a href="https://zitadel.com/docs/guides/start/quickstart" target="_blank" rel="noopener noreferrer">Learn More</a>
+              </Button>
+            </div>
           </div>
-        </Card>
+        </CardContent>
+      </Card>
+
+      <!-- Your Next Steps -->
+      <div>
+        <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Your Next Steps</h3>
+        <div class="grid gap-4 md:grid-cols-3">
+          <Card v-for="step in nextSteps" :key="step.title" class="cursor-pointer hover:border-primary/50 transition-colors" @click="step.action">
+            <CardContent class="pt-5">
+              <div class="flex items-start gap-3">
+                <div class="flex size-8 items-center justify-center rounded-lg" :class="step.iconBg">
+                  <component :is="step.icon" class="size-4 text-white" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium">{{ step.title }}</p>
+                  <p class="text-xs text-muted-foreground mt-0.5">{{ step.description }}</p>
+                  <button class="text-xs text-primary mt-2 hover:underline">{{ step.linkLabel }} →</button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
+
+      <!-- Developer Tools -->
+      <div>
+        <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Developer Tools</h3>
+        <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <a
+            v-for="tool in devTools"
+            :key="tool.title"
+            :href="tool.href"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-start gap-3 rounded-lg border p-3.5 transition-colors hover:bg-accent"
+          >
+            <component :is="tool.icon" class="size-4 text-muted-foreground shrink-0 mt-0.5" />
+            <div class="min-w-0">
+              <p class="text-sm font-medium">{{ tool.title }}</p>
+              <p class="text-xs text-muted-foreground">{{ tool.description }}</p>
+            </div>
+          </a>
+        </div>
+      </div>
+
+      <!-- Dismiss hint -->
+      <p class="text-xs text-muted-foreground text-center pt-4">
+        I'm done with this setup guide.
+        <button class="text-primary hover:underline" @click="router.push('/instances')">Hide this →</button>
+      </p>
     </template>
 
     <!-- Product Dashboard (instance selected or non-root) -->
@@ -119,47 +136,59 @@
 import { ref, computed, onMounted, markRaw } from 'vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Users, Building2, AppWindow, FileJson, Globe, Activity, Server, Plus, Search, LayoutGrid } from 'lucide-vue-next'
-import { api, getInstanceContext } from '@/api/client'
+import {
+  Users, Building2, AppWindow, FileJson, Globe, Activity,
+  LogIn, FolderKanban, BookOpen, Code2, Terminal, Rocket, MessageCircle,
+} from 'lucide-vue-next'
+import { api } from '@/api/client'
 import { useInstanceContext } from '@/console/composables/useInstanceContext'
-import { countsApi, schemaApi, providerApi, eventApi, orgApi, instanceApi, type Instance } from '@/api/resources'
+import { countsApi, schemaApi, providerApi, eventApi, orgApi } from '@/api/resources'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const { currentInstanceId, setInstance } = useInstanceContext()
+const { currentInstanceId } = useInstanceContext()
 
 const isRoot = ref(false)
 const hasInstance = computed(() => !!currentInstanceId.value)
+
+const nextSteps = [
+  {
+    title: 'Log in to your application',
+    description: 'Integrate your application with ZITADEL for authentication and test by logging in with your admin user.',
+    linkLabel: 'Log in',
+    icon: markRaw(LogIn),
+    iconBg: 'bg-rose-500',
+    action: () => window.open('https://zitadel.com/docs/guides/start/quickstart', '_blank'),
+  },
+  {
+    title: 'Create a project',
+    description: 'Add a project to your portfolio to manage roles and role assignments.',
+    linkLabel: 'Create project',
+    icon: markRaw(FolderKanban),
+    iconBg: 'bg-amber-500',
+    action: () => router.push('/projects/new'),
+  },
+  {
+    title: 'Register your application',
+    description: 'Register your web, native, or API application and setup authentication.',
+    linkLabel: 'Register application',
+    icon: markRaw(AppWindow),
+    iconBg: 'bg-emerald-500',
+    action: () => router.push('/applications/new'),
+  },
+]
+
+const devTools = [
+  { title: 'ZITADEL Community', description: 'Chat and support', icon: markRaw(MessageCircle), href: 'https://zitadel.com/chat' },
+  { title: 'API Reference', description: "Explore ZITADEL's APIs", icon: markRaw(Code2), href: 'https://zitadel.com/docs/apis' },
+  { title: 'Example Projects', description: 'Pre-built authentication examples', icon: markRaw(Rocket), href: 'https://github.com/zitadel/examples' },
+  { title: 'Documentation', description: 'Comprehensive guides and tutorials', icon: markRaw(BookOpen), href: 'https://zitadel.com/docs' },
+  { title: 'ZITADEL CLI', description: 'Manage configuration from terminal', icon: markRaw(Terminal), href: 'https://zitadel.com/docs/guides/manage/cli' },
+  { title: 'Quick Start Guides', description: 'Get up and running fast', icon: markRaw(Globe), href: 'https://zitadel.com/docs/guides/start/quickstart' },
+]
 const loading = ref(true)
-
-// Instance picker
-const instances = ref<Instance[]>([])
-const instanceSearch = ref('')
-
-const stateLabels: Record<string, string> = {
-  active: 'active',
-  provisioning: 'setting up',
-  deprovisioning: 'removing',
-  suspended: 'suspended',
-}
-function stateLabel(state: string) { return stateLabels[state] || state }
-
-const filteredInstances = computed(() => {
-  if (!instanceSearch.value.trim()) return instances.value
-  const q = instanceSearch.value.toLowerCase()
-  return instances.value.filter(i =>
-    (i.primary_domain || '').toLowerCase().includes(q) ||
-    i.instance_id.toLowerCase().includes(q),
-  )
-})
-
-function pickInstance(inst: Instance) {
-  setInstance(inst.instance_id, inst.primary_domain || inst.instance_id)
-  router.push(`/instances/${inst.instance_id}`)
-}
 
 // Product dashboard
 const stats = ref([
@@ -191,11 +220,7 @@ onMounted(async () => {
   }
 
   if (isRoot.value && !hasInstance.value) {
-    // Load instance list for the picker.
-    try {
-      const res = await instanceApi.list({ limit: 100 })
-      instances.value = res.items ?? []
-    } catch { /* empty */ }
+    // Getting started page — no data loading needed.
     loading.value = false
   } else {
     // Product dashboard data.

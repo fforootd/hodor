@@ -22,6 +22,7 @@ pub struct EventParams {
     pub event_type: Option<String>,
     pub session_id: Option<String>,
     pub fingerprint: Option<String>,
+    #[serde(alias = "resource_id")]
     pub aggregate_id: Option<String>,
 }
 fn default_limit() -> i64 {

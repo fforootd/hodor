@@ -12,6 +12,7 @@ pub struct CloudConfig {
     pub positive_cache_ttl_secs: u64,
     pub negative_cache_ttl_secs: u64,
     pub control_plane: CloudControlPlaneConfig,
+    pub gcp: GcpInfraConfig,
 }
 
 impl CloudConfig {
@@ -43,6 +44,22 @@ pub struct CloudControlPlaneConfig {
     pub secret_ref: String,
 }
 
+/// GCP infrastructure configuration for domain provisioning.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct GcpInfraConfig {
+    /// GCP project ID.
+    pub project_id: String,
+    /// Certificate map name (e.g. "zitadel-cert-map").
+    pub certificate_map: String,
+    /// URL map name for the GLB (e.g. "zitadel-lb").
+    pub url_map: String,
+    /// Backend service name (e.g. "zitadel-backend").
+    pub backend_service: String,
+    /// Path to service account JSON. Empty = use workload identity.
+    pub credentials_path: String,
+}
+
 impl Default for CloudConfig {
     fn default() -> Self {
         Self {
@@ -52,6 +69,7 @@ impl Default for CloudConfig {
             positive_cache_ttl_secs: 60,
             negative_cache_ttl_secs: 10,
             control_plane: CloudControlPlaneConfig::default(),
+            gcp: GcpInfraConfig::default(),
         }
     }
 }

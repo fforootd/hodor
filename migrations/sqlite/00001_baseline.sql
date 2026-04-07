@@ -440,8 +440,20 @@ CREATE TABLE IF NOT EXISTS domains (
     instance_id  TEXT NOT NULL,
     org_id       TEXT,
     is_primary   BOOLEAN NOT NULL DEFAULT 0,
+    purpose      TEXT NOT NULL DEFAULT 'served',
     state        TEXT NOT NULL DEFAULT 'active',
     verified     BOOLEAN NOT NULL DEFAULT 0,
+    verification_token           TEXT NOT NULL DEFAULT '',
+    dns_challenge_host           TEXT NOT NULL DEFAULT '',
+    dns_authorization_id         TEXT NOT NULL DEFAULT '',
+    certificate_dns_record_name  TEXT NOT NULL DEFAULT '',
+    certificate_dns_record_type  TEXT NOT NULL DEFAULT '',
+    certificate_dns_record_value TEXT NOT NULL DEFAULT '',
+    certificate_state            TEXT NOT NULL DEFAULT '',
+    certificate_id               TEXT NOT NULL DEFAULT '',
+    certificate_map_entry        TEXT NOT NULL DEFAULT '',
+    origin_trust_state           TEXT NOT NULL DEFAULT '',
+    provisioning_error           TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (instance_id) REFERENCES instances(instance_id) ON DELETE CASCADE,
@@ -987,15 +999,49 @@ CREATE TABLE domains_new (
     instance_id  TEXT NOT NULL,
     org_id       TEXT,
     is_primary   BOOLEAN NOT NULL DEFAULT 0,
+    purpose      TEXT NOT NULL DEFAULT 'served',
     state        TEXT NOT NULL DEFAULT 'active',
     verified     BOOLEAN NOT NULL DEFAULT 0,
+    verification_token           TEXT NOT NULL DEFAULT '',
+    dns_challenge_host           TEXT NOT NULL DEFAULT '',
+    dns_authorization_id         TEXT NOT NULL DEFAULT '',
+    certificate_dns_record_name  TEXT NOT NULL DEFAULT '',
+    certificate_dns_record_type  TEXT NOT NULL DEFAULT '',
+    certificate_dns_record_value TEXT NOT NULL DEFAULT '',
+    certificate_state            TEXT NOT NULL DEFAULT '',
+    certificate_id               TEXT NOT NULL DEFAULT '',
+    certificate_map_entry        TEXT NOT NULL DEFAULT '',
+    origin_trust_state           TEXT NOT NULL DEFAULT '',
+    provisioning_error           TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (instance_id) REFERENCES instances(instance_id) ON DELETE CASCADE
 );
 
-INSERT INTO domains_new (domain, instance_id, org_id, is_primary, state, verified, created_at, updated_at)
-    SELECT domain, instance_id, org_id, is_primary, state, verified, created_at, updated_at FROM domains;
+INSERT INTO domains_new (
+    domain, instance_id, org_id, is_primary, purpose, state, verified,
+    verification_token, dns_challenge_host, dns_authorization_id,
+    certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value,
+    certificate_state, certificate_id, certificate_map_entry,
+    origin_trust_state, provisioning_error, created_at, updated_at
+)
+    SELECT
+        domain, instance_id, org_id, is_primary,
+        COALESCE(purpose, 'served'),
+        state, verified,
+        COALESCE(verification_token, ''),
+        COALESCE(dns_challenge_host, ''),
+        COALESCE(dns_authorization_id, ''),
+        COALESCE(certificate_dns_record_name, ''),
+        COALESCE(certificate_dns_record_type, ''),
+        COALESCE(certificate_dns_record_value, ''),
+        COALESCE(certificate_state, ''),
+        COALESCE(certificate_id, ''),
+        COALESCE(certificate_map_entry, ''),
+        COALESCE(origin_trust_state, ''),
+        COALESCE(provisioning_error, ''),
+        created_at, updated_at
+    FROM domains;
 DROP TABLE domains;
 ALTER TABLE domains_new RENAME TO domains;
 

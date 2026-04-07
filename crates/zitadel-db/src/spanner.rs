@@ -1,4 +1,5 @@
 use std::cmp;
+use std::collections::BTreeSet;
 
 use anyhow::Context;
 use google_cloud_auth::credentials::CredentialsFile;
@@ -131,6 +132,13 @@ impl SpannerDb {
             return Ok(());
         }
 
+        let existing_keys = ddl_object_keys(&normalized_existing);
+        let target_keys = ddl_object_keys(&normalized_target);
+
+        if !target_keys.is_empty() && target_keys.is_subset(&existing_keys) {
+            return Ok(());
+        }
+
         if let Some(missing) = normalized_target
             .as_slice()
             .strip_prefix(normalized_existing.as_slice())
@@ -152,6 +160,36 @@ impl SpannerDb {
                     .wait(None)
                     .await
                     .context("wait for spanner suffix DDL operation")?;
+            }
+            return Ok(());
+        }
+
+        if !existing_keys.is_empty() && existing_keys.is_subset(&target_keys) {
+            let missing = ddl
+                .iter()
+                .filter(|statement| {
+                    ddl_object_key(&normalize_statement(statement))
+                        .is_some_and(|key| !existing_keys.contains(&key))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                let request = UpdateDatabaseDdlRequest {
+                    database: self.database.full_name.clone(),
+                    statements: missing,
+                    operation_id: String::new(),
+                    proto_descriptors: vec![],
+                };
+                let mut operation = self
+                    .admin
+                    .database()
+                    .update_database_ddl(request, None)
+                    .await
+                    .context("apply spanner object-set DDL")?;
+                operation
+                    .wait(None)
+                    .await
+                    .context("wait for spanner object-set DDL operation")?;
             }
             return Ok(());
         }
@@ -294,10 +332,73 @@ async fn build_admin_config(config: &StatefulStorageConfig) -> anyhow::Result<Ad
 }
 
 fn normalize_ddl(statements: &[String]) -> Vec<String> {
-    statements
-        .iter()
-        .map(|statement| statement.split_whitespace().collect::<Vec<_>>().join(" "))
-        .collect()
+    statements.iter().map(|statement| normalize_statement(statement)).collect()
+}
+
+fn normalize_statement(statement: &str) -> String {
+    statement.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn ddl_object_keys(statements: &[String]) -> BTreeSet<String> {
+    statements.iter().filter_map(|statement| ddl_object_key(statement)).collect()
+}
+
+fn ddl_object_key(statement: &str) -> Option<String> {
+    let tokens = statement.split_whitespace().collect::<Vec<_>>();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    if tokens[0].eq_ignore_ascii_case("CREATE") {
+        let mut pos = 1usize;
+        while pos < tokens.len()
+            && (tokens[pos].eq_ignore_ascii_case("UNIQUE")
+                || tokens[pos].eq_ignore_ascii_case("NULL_FILTERED"))
+        {
+            pos += 1;
+        }
+
+        if tokens.get(pos)?.eq_ignore_ascii_case("TABLE") {
+            let ident = parse_object_ident(&tokens, pos + 1)?;
+            return Some(format!("table:{ident}"));
+        }
+
+        if tokens.get(pos)?.eq_ignore_ascii_case("INDEX") {
+            let ident = parse_object_ident(&tokens, pos + 1)?;
+            return Some(format!("index:{ident}"));
+        }
+    }
+
+    if tokens[0].eq_ignore_ascii_case("ALTER")
+        && tokens.get(1).is_some_and(|t| t.eq_ignore_ascii_case("TABLE"))
+    {
+        let table = sanitize_ident(tokens.get(2)?);
+        let mut pos = 3usize;
+        while pos + 1 < tokens.len() {
+            if tokens[pos].eq_ignore_ascii_case("ADD")
+                && tokens[pos + 1].eq_ignore_ascii_case("CONSTRAINT")
+            {
+                let constraint = sanitize_ident(tokens.get(pos + 2)?);
+                return Some(format!("constraint:{table}:{constraint}"));
+            }
+            pos += 1;
+        }
+    }
+
+    None
+}
+
+fn parse_object_ident(tokens: &[&str], start: usize) -> Option<String> {
+    let mut pos = start;
+    if tokens.get(pos).is_some_and(|t| t.eq_ignore_ascii_case("IF")) {
+        pos += 3;
+    }
+    tokens.get(pos).map(|raw| sanitize_ident(raw))
+}
+
+fn sanitize_ident(raw: &str) -> String {
+    raw.trim_matches(|c: char| matches!(c, '`' | '(' | ')' | ',' | ';'))
+        .to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -334,5 +435,25 @@ mod tests {
             .strip_prefix(existing.as_slice())
             .expect("target should contain existing DDL as a prefix");
         assert_eq!(suffix, &["CREATE TABLE c (id INT64)"]);
+    }
+
+    #[test]
+    fn ddl_object_keys_ignore_if_not_exists_and_quoting() {
+        let existing = normalize_ddl(&[
+            "CREATE TABLE groups (instance_id STRING(MAX))".to_string(),
+            "CREATE NULL_FILTERED INDEX idx_sessions_instance_expires ON sessions(instance_id, expires_at)"
+                .to_string(),
+            "ALTER TABLE instances ADD CONSTRAINT instances_owner_org_fk FOREIGN KEY (parent_instance_id, owner_org_id) REFERENCES orgs(instance_id, id) ON DELETE NO ACTION"
+                .to_string(),
+        ]);
+        let target = normalize_ddl(&[
+            "CREATE TABLE IF NOT EXISTS `groups` (instance_id STRING(MAX))".to_string(),
+            "CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_expires ON sessions(instance_id, expires_at)"
+                .to_string(),
+            "ALTER TABLE instances ADD CONSTRAINT instances_owner_org_fk FOREIGN KEY (parent_instance_id, owner_org_id) REFERENCES orgs(instance_id, id) ON DELETE NO ACTION"
+                .to_string(),
+        ]);
+
+        assert_eq!(ddl_object_keys(&existing), ddl_object_keys(&target));
     }
 }

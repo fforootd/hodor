@@ -6,8 +6,8 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 
 use crate::{
-    Db, SpannerDb, add_instance_domain, get_org, get_schema_record, get_user,
-    list_instance_domains, provider,
+    Db, SpannerDb, get_org, get_schema_record, get_user, list_instance_domains, provider,
+    spanner_ident,
 };
 use zitadel_app::repo::{
     DomainRecord, GroupRecord, InstanceRecord, ListParams, OrgRecord, ProviderDefinitionRecord,
@@ -251,10 +251,24 @@ pub(super) fn instance_from_retained(record: crate::ManagedInstanceRecord) -> In
 
 pub(super) fn domain_from_retained(record: crate::DomainRecord) -> DomainRecord {
     DomainRecord {
+        instance_id: record.instance_id,
+        org_id: record.org_id,
         domain: record.domain,
         is_primary: record.is_primary,
+        purpose: record.purpose,
         state: record.state,
         verified: record.verified,
+        verification_token: record.verification_token,
+        dns_challenge_host: record.dns_challenge_host,
+        dns_authorization_id: record.dns_authorization_id,
+        certificate_dns_record_name: record.certificate_dns_record_name,
+        certificate_dns_record_type: record.certificate_dns_record_type,
+        certificate_dns_record_value: record.certificate_dns_record_value,
+        certificate_state: record.certificate_state,
+        certificate_id: record.certificate_id,
+        certificate_map_entry: record.certificate_map_entry,
+        origin_trust_state: record.origin_trust_state,
+        provisioning_error: record.provisioning_error,
         created_at: record.created_at,
         updated_at: record.updated_at,
     }
@@ -456,11 +470,12 @@ pub(super) async fn load_group(
                 .map(group_from_sql_row))
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(
-                "SELECT id, IFNULL(org_id, '') AS org_id, name, state, IFNULL(metadata, '{}') AS metadata, \
-                        CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at \
-                 FROM groups WHERE instance_id = @instance_id AND id = @id LIMIT 1",
-            );
+            let groups = spanner_ident("groups");
+            let mut stmt = Statement::new(format!(
+                "SELECT id, IFNULL(org_id, '') AS org_id, name, state, IFNULL(metadata, '{{}}') AS metadata, \
+                 CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at \
+                 FROM {groups} WHERE instance_id = @instance_id AND id = @id LIMIT 1"
+            ));
             stmt.add_param("instance_id", &instance_id);
             stmt.add_param("id", &group_id);
             Ok(spanner_query_optional(spanner, stmt)
@@ -671,20 +686,49 @@ pub(super) async fn upsert_domain(
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
             sqlx::query(
-                "INSERT INTO domains (domain, instance_id, is_primary, state, verified) \
-                 VALUES ($1, $2, $3, $4, $5) \
+                "INSERT INTO domains (domain, instance_id, org_id, is_primary, purpose, state, verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, \
+                 certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                 certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) \
                  ON CONFLICT(domain) DO UPDATE SET \
                      instance_id = excluded.instance_id, \
+                     org_id = excluded.org_id, \
                      is_primary = excluded.is_primary, \
+                     purpose = excluded.purpose, \
                      state = excluded.state, \
                      verified = excluded.verified, \
+                     verification_token = excluded.verification_token, \
+                     dns_challenge_host = excluded.dns_challenge_host, \
+                     dns_authorization_id = excluded.dns_authorization_id, \
+                     certificate_dns_record_name = excluded.certificate_dns_record_name, \
+                     certificate_dns_record_type = excluded.certificate_dns_record_type, \
+                     certificate_dns_record_value = excluded.certificate_dns_record_value, \
+                     certificate_state = excluded.certificate_state, \
+                     certificate_id = excluded.certificate_id, \
+                     certificate_map_entry = excluded.certificate_map_entry, \
+                     origin_trust_state = excluded.origin_trust_state, \
+                     provisioning_error = excluded.provisioning_error, \
                      updated_at = CURRENT_TIMESTAMP",
             )
             .bind(&domain.domain)
             .bind(instance_id)
+            .bind(&domain.org_id)
             .bind(domain.is_primary)
+            .bind(&domain.purpose)
             .bind(&domain.state)
             .bind(domain.verified)
+            .bind(&domain.verification_token)
+            .bind(&domain.dns_challenge_host)
+            .bind(&domain.dns_authorization_id)
+            .bind(&domain.certificate_dns_record_name)
+            .bind(&domain.certificate_dns_record_type)
+            .bind(&domain.certificate_dns_record_value)
+            .bind(&domain.certificate_state)
+            .bind(&domain.certificate_id)
+            .bind(&domain.certificate_map_entry)
+            .bind(&domain.origin_trust_state)
+            .bind(&domain.provisioning_error)
             .execute(scoped.pool())
             .await?;
         }
@@ -694,28 +738,84 @@ pub(super) async fn upsert_domain(
             exists.add_param("domain", &domain.domain);
             if spanner_query_optional(spanner, exists).await?.is_some() {
                 let mut stmt = Statement::new(
-                    "UPDATE domains SET instance_id = @instance_id, is_primary = @is_primary, \
-                         state = @state, verified = @verified, updated_at = CURRENT_TIMESTAMP() \
+                    "UPDATE domains SET instance_id = @instance_id, org_id = @org_id, is_primary = @is_primary, \
+                         purpose = @purpose, state = @state, verified = @verified, \
+                         verification_token = @verification_token, dns_challenge_host = @dns_challenge_host, \
+                         dns_authorization_id = @dns_authorization_id, certificate_dns_record_name = @certificate_dns_record_name, \
+                         certificate_dns_record_type = @certificate_dns_record_type, \
+                         certificate_dns_record_value = @certificate_dns_record_value, \
+                         certificate_state = @certificate_state, certificate_id = @certificate_id, \
+                         certificate_map_entry = @certificate_map_entry, origin_trust_state = @origin_trust_state, \
+                         provisioning_error = @provisioning_error, \
+                         updated_at = CURRENT_TIMESTAMP() \
                      WHERE domain = @domain",
                 );
+                stmt.add_param("org_id", &domain.org_id);
                 stmt.add_param("instance_id", &instance_id);
                 stmt.add_param("is_primary", &domain.is_primary);
+                stmt.add_param("purpose", &domain.purpose);
                 stmt.add_param("state", &domain.state);
                 stmt.add_param("verified", &domain.verified);
+                stmt.add_param("verification_token", &domain.verification_token);
+                stmt.add_param("dns_challenge_host", &domain.dns_challenge_host);
+                stmt.add_param("dns_authorization_id", &domain.dns_authorization_id);
+                stmt.add_param(
+                    "certificate_dns_record_name",
+                    &domain.certificate_dns_record_name,
+                );
+                stmt.add_param(
+                    "certificate_dns_record_type",
+                    &domain.certificate_dns_record_type,
+                );
+                stmt.add_param(
+                    "certificate_dns_record_value",
+                    &domain.certificate_dns_record_value,
+                );
+                stmt.add_param("certificate_state", &domain.certificate_state);
+                stmt.add_param("certificate_id", &domain.certificate_id);
+                stmt.add_param("certificate_map_entry", &domain.certificate_map_entry);
+                stmt.add_param("origin_trust_state", &domain.origin_trust_state);
+                stmt.add_param("provisioning_error", &domain.provisioning_error);
                 stmt.add_param("domain", &domain.domain);
                 let _ = write_spanner_count(spanner, stmt).await?;
-            } else if !domain.is_primary && domain.state == "active" && !domain.verified {
-                let _ = add_instance_domain(db, instance_id, &domain.domain).await?;
             } else {
                 let mut stmt = Statement::new(
-                    "INSERT INTO domains (domain, instance_id, is_primary, state, verified) \
-                     VALUES (@domain, @instance_id, @is_primary, @state, @verified)",
+                    "INSERT INTO domains (domain, instance_id, org_id, is_primary, purpose, state, verified, \
+                     verification_token, dns_challenge_host, dns_authorization_id, \
+                     certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                     certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error) \
+                     VALUES (@domain, @instance_id, @org_id, @is_primary, @purpose, @state, @verified, \
+                     @verification_token, @dns_challenge_host, @dns_authorization_id, \
+                     @certificate_dns_record_name, @certificate_dns_record_type, @certificate_dns_record_value, \
+                     @certificate_state, @certificate_id, @certificate_map_entry, @origin_trust_state, @provisioning_error)",
                 );
                 stmt.add_param("domain", &domain.domain);
                 stmt.add_param("instance_id", &instance_id);
+                stmt.add_param("org_id", &domain.org_id);
                 stmt.add_param("is_primary", &domain.is_primary);
+                stmt.add_param("purpose", &domain.purpose);
                 stmt.add_param("state", &domain.state);
                 stmt.add_param("verified", &domain.verified);
+                stmt.add_param("verification_token", &domain.verification_token);
+                stmt.add_param("dns_challenge_host", &domain.dns_challenge_host);
+                stmt.add_param("dns_authorization_id", &domain.dns_authorization_id);
+                stmt.add_param(
+                    "certificate_dns_record_name",
+                    &domain.certificate_dns_record_name,
+                );
+                stmt.add_param(
+                    "certificate_dns_record_type",
+                    &domain.certificate_dns_record_type,
+                );
+                stmt.add_param(
+                    "certificate_dns_record_value",
+                    &domain.certificate_dns_record_value,
+                );
+                stmt.add_param("certificate_state", &domain.certificate_state);
+                stmt.add_param("certificate_id", &domain.certificate_id);
+                stmt.add_param("certificate_map_entry", &domain.certificate_map_entry);
+                stmt.add_param("origin_trust_state", &domain.origin_trust_state);
+                stmt.add_param("provisioning_error", &domain.provisioning_error);
                 write_spanner_stmt(spanner, stmt).await?;
             }
         }

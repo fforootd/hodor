@@ -8,18 +8,20 @@ use std::{
 };
 use zitadel_app::ApplicationServices;
 use zitadel_app::context::{ActorContext, AuthContext, Capability, Identity, InstanceContext};
+use zitadel_app::effect::Effect;
 use zitadel_app::error::AppError;
 use zitadel_app::hook::HookPipeline;
 use zitadel_app::repo::{
     AppRecord, AppRepository, BoxFuture, ConsoleBootstrapData, ConsoleQueryRepository,
-    CreatedSession, DomainRecord, DomainRemoveResult, FingerprintRecord, GroupRecord,
-    GroupRepository, InstanceInfo, InstanceRecord, InstanceRepository, JobRecord, JobRepository,
-    ListParams, ListResult, NamedResourceRecord, OrgSummary, ProjectRepository, Repositories,
-    RouteResolution, SavedQueryRecord, SavedQueryRepository, SessionDetail, SessionInfo,
-    SessionRepository, TelemetryRepository,
+    CreatedSession, DomainRecord, DomainRemoveResult, EffectRepository, FingerprintRecord,
+    GroupRecord, GroupRepository, InstanceInfo, InstanceRecord, InstanceRepository, JobRecord,
+    JobRepository, ListParams, ListResult, NamedResourceRecord, OrgSummary, ProjectRepository,
+    Repositories, RouteResolution, SavedQueryRecord, SavedQueryRepository, SessionDetail,
+    SessionInfo, SessionRepository, TelemetryRepository,
 };
 use zitadel_app::users::CreateUserCommand;
 use zitadel_app::{
+    domains::AddCustomDomainCommand,
     groups::{CreateGroupCommand, UpdateGroupCommand},
     instances::{CreateInstanceCommand, UpdateInstanceCommand},
     resources::{CreateNamedResourceCommand, UpdateNamedResourceCommand},
@@ -76,16 +78,27 @@ fn self_service_ctx() -> ActorContext {
 fn test_services() -> (Arc<ApplicationServices>, Arc<Repositories>) {
     let repos = Arc::new(zitadel_app::mock::mock_repositories());
     let hooks = Arc::new(HookPipeline::empty());
-    let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
+    let app = Arc::new(ApplicationServices::new(repos.clone(), hooks, false));
     (app, repos)
 }
 
 fn test_services_with_repositories(
     repos: Repositories,
 ) -> (Arc<ApplicationServices>, Arc<Repositories>) {
+    test_services_with_repositories_and_cloud(repos, false)
+}
+
+fn test_services_with_repositories_and_cloud(
+    repos: Repositories,
+    cloud_enabled: bool,
+) -> (Arc<ApplicationServices>, Arc<Repositories>) {
     let repos = Arc::new(repos);
     let hooks = Arc::new(HookPipeline::empty());
-    let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
+    let app = Arc::new(ApplicationServices::new(
+        repos.clone(),
+        hooks,
+        cloud_enabled,
+    ));
     (app, repos)
 }
 
@@ -586,11 +599,24 @@ impl SavedQueryRepository for MemoryNamedResourceRepository {
 #[derive(Default)]
 struct MemoryInstanceRepository {
     store: Mutex<HashMap<String, InstanceRecord>>,
+    domains: Mutex<HashMap<(String, Option<String>, String), DomainRecord>>,
 }
 
 impl MemoryInstanceRepository {
     fn new() -> Self {
         Self::default()
+    }
+
+    fn domain_key(
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+    ) -> (String, Option<String>, String) {
+        (
+            instance_id.to_string(),
+            org_id.map(ToOwned::to_owned),
+            domain.to_string(),
+        )
     }
 }
 
@@ -651,29 +677,278 @@ impl InstanceRepository for MemoryInstanceRepository {
 
     fn resolve_domain(
         &self,
-        _domain: &str,
+        domain: &str,
     ) -> BoxFuture<'_, anyhow::Result<Option<RouteResolution>>> {
-        Box::pin(async { Ok(None) })
+        let domain = domain.to_string();
+        Box::pin(async move {
+            let guard = self.domains.lock().unwrap();
+            Ok(guard
+                .values()
+                .find(|record| record.domain == domain && record.state == "active")
+                .map(|record| RouteResolution {
+                    instance_id: record.instance_id.clone(),
+                    resolved_org_id: record.org_id.clone(),
+                    placement_mode: "global".into(),
+                    region_key: None,
+                }))
+        })
     }
 
-    fn list_domains(&self, _instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
-        Box::pin(async { Ok(vec![]) })
+    fn list_domains(&self, instance_id: &str) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
+        let instance_id = instance_id.to_string();
+        Box::pin(async move {
+            let mut items: Vec<_> = self
+                .domains
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|record| record.instance_id == instance_id)
+                .cloned()
+                .collect();
+            items.sort_by(|left, right| left.domain.cmp(&right.domain));
+            Ok(items)
+        })
     }
 
     fn set_domain(
         &self,
-        _instance_id: &str,
-        _domain: &DomainRecord,
+        instance_id: &str,
+        domain: &DomainRecord,
     ) -> BoxFuture<'_, anyhow::Result<()>> {
-        Box::pin(async { Ok(()) })
+        let key = Self::domain_key(instance_id, domain.org_id.as_deref(), &domain.domain);
+        let domain = domain.clone();
+        Box::pin(async move {
+            self.domains.lock().unwrap().insert(key, domain);
+            Ok(())
+        })
     }
 
     fn remove_domain(
         &self,
-        _instance_id: &str,
-        _domain: &str,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
     ) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>> {
-        Box::pin(async { Ok(DomainRemoveResult::NotFound) })
+        let key = Self::domain_key(instance_id, org_id, domain);
+        Box::pin(async move {
+            let mut guard = self.domains.lock().unwrap();
+            let Some(existing) = guard.get(&key) else {
+                return Ok(DomainRemoveResult::NotFound);
+            };
+            if existing.is_primary {
+                return Ok(DomainRemoveResult::PrimaryDomain);
+            }
+            guard.remove(&key);
+            Ok(DomainRemoveResult::Deleted)
+        })
+    }
+
+    fn find_domain(&self, domain: &str) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>> {
+        let domain = domain.to_string();
+        Box::pin(async move {
+            Ok(self
+                .domains
+                .lock()
+                .unwrap()
+                .values()
+                .find(|record| record.domain == domain)
+                .cloned())
+        })
+    }
+
+    fn get_domain(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>> {
+        let key = Self::domain_key(instance_id, org_id, domain);
+        Box::pin(async move { Ok(self.domains.lock().unwrap().get(&key).cloned()) })
+    }
+
+    fn update_domain_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        new_state: &str,
+        verified: bool,
+        provisioning_error: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let key = Self::domain_key(instance_id, org_id, domain);
+        let new_state = new_state.to_string();
+        let provisioning_error = provisioning_error.map(ToOwned::to_owned);
+        Box::pin(async move {
+            if let Some(record) = self.domains.lock().unwrap().get_mut(&key) {
+                record.state = new_state;
+                record.verified = verified;
+                record.provisioning_error = provisioning_error.unwrap_or_default();
+            }
+            Ok(())
+        })
+    }
+
+    fn update_domain_certificate_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        cert_state: &str,
+        cert_id: &str,
+        cert_map_entry: Option<&str>,
+        dns_authorization_id: Option<&str>,
+        dns_record_name: Option<&str>,
+        dns_record_type: Option<&str>,
+        dns_record_value: Option<&str>,
+        provisioning_error: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let key = Self::domain_key(instance_id, org_id, domain);
+        let cert_state = cert_state.to_string();
+        let cert_id = cert_id.to_string();
+        let cert_map_entry = cert_map_entry.map(ToOwned::to_owned);
+        let dns_authorization_id = dns_authorization_id.map(ToOwned::to_owned);
+        let dns_record_name = dns_record_name.map(ToOwned::to_owned);
+        let dns_record_type = dns_record_type.map(ToOwned::to_owned);
+        let dns_record_value = dns_record_value.map(ToOwned::to_owned);
+        let provisioning_error = provisioning_error.map(ToOwned::to_owned);
+        Box::pin(async move {
+            if let Some(record) = self.domains.lock().unwrap().get_mut(&key) {
+                record.certificate_state = cert_state;
+                record.certificate_id = cert_id;
+                if let Some(value) = cert_map_entry {
+                    record.certificate_map_entry = value;
+                }
+                if let Some(value) = dns_authorization_id {
+                    record.dns_authorization_id = value;
+                }
+                if let Some(value) = dns_record_name {
+                    record.certificate_dns_record_name = value;
+                }
+                if let Some(value) = dns_record_type {
+                    record.certificate_dns_record_type = value;
+                }
+                if let Some(value) = dns_record_value {
+                    record.certificate_dns_record_value = value;
+                }
+                record.provisioning_error = provisioning_error.unwrap_or_default();
+            }
+            Ok(())
+        })
+    }
+
+    fn update_domain_origin_trust_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        state: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let key = Self::domain_key(instance_id, org_id, domain);
+        let state = state.to_string();
+        Box::pin(async move {
+            if let Some(record) = self.domains.lock().unwrap().get_mut(&key) {
+                record.origin_trust_state = state;
+            }
+            Ok(())
+        })
+    }
+
+    fn list_domains_for_instance(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(ToOwned::to_owned);
+        Box::pin(async move {
+            let mut items: Vec<_> = self
+                .domains
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|record| {
+                    record.instance_id == instance_id
+                        && match &org_id {
+                            Some(expected) => record.org_id.as_ref() == Some(expected),
+                            None => record.org_id.is_none(),
+                        }
+                })
+                .cloned()
+                .collect();
+            items.sort_by(|left, right| left.domain.cmp(&right.domain));
+            Ok(items)
+        })
+    }
+}
+
+#[derive(Default)]
+struct MemoryEffectRepository {
+    store: Mutex<Vec<(String, Effect)>>,
+}
+
+impl MemoryEffectRepository {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn effects_for_instance(&self, instance_id: &str) -> Vec<Effect> {
+        self.store
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(stored_instance_id, _)| stored_instance_id == instance_id)
+            .map(|(_, effect)| effect.clone())
+            .collect()
+    }
+}
+
+impl EffectRepository for MemoryEffectRepository {
+    fn enqueue_batch(
+        &self,
+        instance_id: &str,
+        effects: &[Effect],
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let instance_id = instance_id.to_string();
+        let effects = effects.to_vec();
+        Box::pin(async move {
+            let mut guard = self.store.lock().unwrap();
+            for effect in effects {
+                guard.push((instance_id.clone(), effect));
+            }
+            Ok(())
+        })
+    }
+
+    fn claim_due(
+        &self,
+        _instance_id: &str,
+        _worker_id: &str,
+        _lease_ttl_secs: u64,
+        _limit: u32,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<Effect>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn mark_completed(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn record_failure(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn mark_dead(&self, _: &str, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn cleanup(&self, _: &str, _: &str, _: u32) -> BoxFuture<'_, anyhow::Result<u64>> {
+        Box::pin(async { Ok(0) })
     }
 }
 
@@ -1593,6 +1868,177 @@ async fn revoke_own_session_does_not_require_operator_admin() {
 
     let session = app.get_session.execute_self(&ctx, "sess-1").await.unwrap();
     assert_eq!(session.revoked_at.as_deref(), Some("2026-04-06T00:00:00Z"));
+}
+
+#[tokio::test]
+async fn custom_domains_are_scoped_between_instance_and_org() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.instances = Arc::new(MemoryInstanceRepository::new());
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = test_ctx();
+
+    let instance_domain = app
+        .add_custom_domain
+        .execute(
+            &ctx,
+            "test-instance",
+            AddCustomDomainCommand {
+                domain: "Portal.Example.COM.".into(),
+                purpose: "served".into(),
+                org_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    let org_domain = app
+        .add_custom_domain
+        .execute(
+            &ctx,
+            "test-instance",
+            AddCustomDomainCommand {
+                domain: "org.example.com".into(),
+                purpose: "allowed".into(),
+                org_id: Some("org-2".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(instance_domain.domain, "portal.example.com");
+    assert_eq!(instance_domain.org_id, None);
+    assert_eq!(org_domain.org_id.as_deref(), Some("org-2"));
+
+    let instance_items = app
+        .list_custom_domains
+        .execute(&ctx, "test-instance", None)
+        .await
+        .unwrap();
+    assert_eq!(instance_items.len(), 1);
+    assert_eq!(instance_items[0].domain, "portal.example.com");
+
+    let org_items = app
+        .list_custom_domains
+        .execute(&ctx, "test-instance", Some("org-2"))
+        .await
+        .unwrap();
+    assert_eq!(org_items.len(), 1);
+    assert_eq!(org_items[0].domain, "org.example.com");
+    assert_eq!(org_items[0].purpose, "allowed");
+
+    let missing_in_org = app
+        .get_custom_domain
+        .execute(&ctx, "test-instance", Some("org-2"), "portal.example.com")
+        .await
+        .unwrap();
+    assert!(missing_in_org.is_none());
+
+    let missing_in_instance = app
+        .get_custom_domain
+        .execute(&ctx, "test-instance", None, "org.example.com")
+        .await
+        .unwrap();
+    assert!(missing_in_instance.is_none());
+}
+
+#[tokio::test]
+async fn custom_domains_reject_duplicates_across_scopes() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.instances = Arc::new(MemoryInstanceRepository::new());
+    let (app, _) = test_services_with_repositories(repos);
+    let ctx = test_ctx();
+
+    app.add_custom_domain
+        .execute(
+            &ctx,
+            "test-instance",
+            AddCustomDomainCommand {
+                domain: "duplicate.example.com".into(),
+                purpose: "served".into(),
+                org_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let err = app
+        .add_custom_domain
+        .execute(
+            &ctx,
+            "test-instance",
+            AddCustomDomainCommand {
+                domain: "DUPLICATE.EXAMPLE.COM".into(),
+                purpose: "served".into(),
+                org_id: Some("org-2".into()),
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AppError::AlreadyExists { .. }));
+}
+
+#[tokio::test]
+async fn removing_cloud_managed_domain_marks_deprovisioning_and_enqueues_cleanup_effect() {
+    let mut repos = zitadel_app::mock::mock_repositories();
+    repos.instances = Arc::new(MemoryInstanceRepository::new());
+    let effects = Arc::new(MemoryEffectRepository::new());
+    repos.effects = effects.clone();
+    let (app, _) = test_services_with_repositories_and_cloud(repos, true);
+    let ctx = test_ctx();
+
+    app.add_custom_domain
+        .execute(
+            &ctx,
+            "test-instance",
+            AddCustomDomainCommand {
+                domain: "cloud.example.com".into(),
+                purpose: "served".into(),
+                org_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    app.repos
+        .instances
+        .update_domain_certificate_state(
+            "test-instance",
+            None,
+            "cloud.example.com",
+            "active",
+            "cert-1",
+            Some("entry-1"),
+            Some("dns-auth-1"),
+            Some("_acme.example.com"),
+            Some("CNAME"),
+            Some("challenge.example.net"),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let result = app
+        .remove_custom_domain
+        .execute(&ctx, "test-instance", None, "cloud.example.com")
+        .await
+        .unwrap();
+    assert_eq!(result, DomainRemoveResult::Deleted);
+
+    let reloaded = app
+        .get_custom_domain
+        .execute(&ctx, "test-instance", None, "cloud.example.com")
+        .await
+        .unwrap()
+        .expect("domain should remain until cleanup effect completes");
+    assert_eq!(reloaded.state, "deprovisioning");
+
+    let effects = effects.effects_for_instance("test-instance");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effects[0].effect_type,
+        zitadel_app::effect::EffectType::DomainDeprovisioning
+    );
+    assert_eq!(effects[0].config["domain"], "cloud.example.com");
 }
 
 // ─── ApplicationServices wiring test ─────────────────────

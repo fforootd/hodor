@@ -504,8 +504,67 @@ impl InstanceRepository for NoopInstanceRepository {
         Box::pin(async { Ok(()) })
     }
 
-    fn remove_domain(&self, _: &str, _: &str) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>> {
+    fn remove_domain(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>> {
         Box::pin(async { anyhow::bail!("noop") })
+    }
+    fn find_domain(&self, _: &str) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn get_domain(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>> {
+        Box::pin(async { Ok(None) })
+    }
+    fn update_domain_state(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn update_domain_certificate_state(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn update_domain_origin_trust_state(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: &str,
+        _: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn list_domains_for_instance(
+        &self,
+        _: &str,
+        _: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
+        Box::pin(async { Ok(vec![]) })
     }
 }
 

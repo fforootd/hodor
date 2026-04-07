@@ -20,20 +20,6 @@ pub fn routes() -> Router<ApiState> {
             "/instances/{id}",
             get(get_one).patch(update).delete(delete_one),
         )
-        .route(
-            "/instances/{id}/domains",
-            get(list_domains).post(add_domain),
-        )
-        .route(
-            "/instances/{id}/domains/{domain}",
-            axum::routing::delete(
-                |state: State<ApiState>,
-                 identity: Extension<Identity>,
-                 path: Path<(String, String)>| async move {
-                    remove_domain(state, identity, path).await
-                },
-            ),
-        )
 }
 
 #[derive(Deserialize)]
@@ -98,12 +84,6 @@ impl From<InstanceRecord> for InstanceResponse {
             updated_at: r.updated_at,
         }
     }
-}
-
-#[derive(Deserialize)]
-struct AddDomainRequest {
-    #[serde(default)]
-    domain: String,
 }
 
 pub(crate) struct ManagementAccess {
@@ -426,106 +406,6 @@ async fn delete_one(
             response::no_content()
         }
         Err(e) => response::app_error(e),
-    }
-}
-
-// ─── Domain management ──────────────────────────────────────
-
-async fn list_domains(
-    State(s): State<ApiState>,
-    Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
-) -> Response {
-    let access = match require_parent_management(&s, &identity).await {
-        Ok(access) => access,
-        Err(response) => return response,
-    };
-    match require_instance_relation(&s, &access, &identity.principal_ref, "viewer", &id).await {
-        Ok(false) => response::not_found("instance not found"),
-        Ok(true) => {
-            let ctx = response::build_actor_context(&identity);
-            match s
-                .app
-                .runner
-                .run(&ctx, "instance.list_domains", || {
-                    s.app.list_domains.execute(&ctx, &id)
-                })
-                .await
-            {
-                Ok(items) => response::json_ok(serde_json::json!({ "items": items })),
-                Err(e) => response::app_error(e),
-            }
-        }
-        Err(response) => response,
-    }
-}
-
-async fn add_domain(
-    State(s): State<ApiState>,
-    Extension(identity): Extension<Identity>,
-    Path(id): Path<String>,
-    Json(req): Json<AddDomainRequest>,
-) -> Response {
-    let access = match require_parent_management(&s, &identity).await {
-        Ok(access) => access,
-        Err(response) => return response,
-    };
-    match require_instance_relation(&s, &access, &identity.principal_ref, "admin", &id).await {
-        Ok(false) => response::not_found("instance not found"),
-        Ok(true) => {
-            let ctx = response::build_actor_context(&identity);
-            let cmd = zitadel_app::instances::AddDomainCommand {
-                instance_id: id,
-                domain: req.domain,
-            };
-            match s
-                .app
-                .runner
-                .run(&ctx, "instance.add_domain", || {
-                    s.app.add_domain.execute(&ctx, cmd)
-                })
-                .await
-            {
-                Ok(domain) => response::json_created(domain),
-                Err(e) => response::app_error(e),
-            }
-        }
-        Err(response) => response,
-    }
-}
-
-async fn remove_domain(
-    State(s): State<ApiState>,
-    Extension(identity): Extension<Identity>,
-    Path((id, domain)): Path<(String, String)>,
-) -> Response {
-    let access = match require_parent_management(&s, &identity).await {
-        Ok(access) => access,
-        Err(response) => return response,
-    };
-    match require_instance_relation(&s, &access, &identity.principal_ref, "admin", &id).await {
-        Ok(false) => response::not_found("instance not found"),
-        Ok(true) => {
-            let ctx = response::build_actor_context(&identity);
-            match s
-                .app
-                .runner
-                .run(&ctx, "instance.remove_domain", || {
-                    s.app.remove_domain.execute(&ctx, &id, &domain)
-                })
-                .await
-            {
-                Ok(zitadel_app::repo::DomainRemoveResult::Deleted) => response::no_content(),
-                Ok(zitadel_app::repo::DomainRemoveResult::NotFound) => {
-                    response::not_found("domain not found")
-                }
-                Ok(zitadel_app::repo::DomainRemoveResult::PrimaryDomain) => {
-                    response::bad_request("cannot remove primary domain")
-                }
-                Err(e) => response::app_error(e),
-            }
-        }
-        Err(response) => response,
     }
 }
 

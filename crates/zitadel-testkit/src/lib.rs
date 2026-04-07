@@ -200,7 +200,7 @@ impl TestContext {
             storage.analytics.clone(),
         ));
         let hooks = Arc::new(HookPipeline::empty());
-        let app = Arc::new(ApplicationServices::new(repos.clone(), hooks));
+        let app = Arc::new(ApplicationServices::new(repos.clone(), hooks, false));
 
         let oidc_state = OidcState::new_runtime_with_config(
             repos.oidc.clone(),

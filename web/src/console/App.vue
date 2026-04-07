@@ -29,81 +29,6 @@
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <!-- Instance Switcher (root instances only) -->
-        <div v-if="isRootInstance" class="px-2 group-data-[collapsible=icon]:hidden">
-          <Popover v-model:open="showInstanceDropdown">
-            <PopoverTrigger as-child>
-              <button class="w-full flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-sm hover:bg-sidebar-accent transition-colors">
-                <span class="flex items-center gap-2 truncate">
-                  <Server class="size-3.5 shrink-0 text-muted-foreground" />
-                  <span class="truncate">{{ instanceDisplayLabel }}</span>
-                </span>
-                <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent class="w-64 p-0" align="start" side="bottom">
-              <Command>
-                <CommandInput placeholder="Find instance..." />
-                <CommandList>
-                  <CommandEmpty>No instance found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem value="no-instance" @select="deselectInstance">
-                      <Globe class="mr-2 size-4" />
-                      No instance selected
-                    </CommandItem>
-                    <CommandItem
-                      v-for="inst in instanceList"
-                      :key="inst.instance_id"
-                      :value="inst.primary_domain || inst.instance_id"
-                      @select="selectInstance(inst)"
-                    >
-                      <Server class="mr-2 size-4" />
-                      {{ inst.primary_domain || inst.instance_id }}
-                    </CommandItem>
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        <!-- Org Switcher -->
-        <div class="px-2 pb-1 group-data-[collapsible=icon]:hidden">
-          <Popover v-model:open="showOrgDropdown">
-            <PopoverTrigger as-child>
-              <button class="w-full flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-sm hover:bg-sidebar-accent transition-colors">
-                <span class="flex items-center gap-2 truncate">
-                  <Building2 class="size-3.5 shrink-0 text-muted-foreground" />
-                  <span class="truncate">{{ selectedOrg?.display_name || 'All Orgs' }}</span>
-                </span>
-                <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent class="w-56 p-0" align="start" side="bottom">
-              <Command>
-                <CommandInput placeholder="Search organizations..." />
-                <CommandList>
-                  <CommandEmpty>No organization found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem value="all-orgs" @select="selectOrg(null)">
-                      <Globe class="mr-2 size-4" />
-                      All Organizations
-                    </CommandItem>
-                    <CommandItem
-                      v-for="org in orgs"
-                      :key="org.id"
-                      :value="org.display_name"
-                      @select="selectOrg(org)"
-                    >
-                      <Building2 class="mr-2 size-4" />
-                      {{ org.display_name }}
-                    </CommandItem>
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
       </SidebarHeader>
 
       <SidebarContent>
@@ -140,23 +65,38 @@
 
         <!-- ─── Top-level navigation ─── -->
         <template v-else>
-          <!-- Dashboard + Instances -->
+          <!-- Instance context banner (when viewing a child instance) -->
+          <div v-if="currentInstanceId" class="px-3 py-2 group-data-[collapsible=icon]:hidden">
+            <div class="flex items-center gap-2 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary">
+              <Server class="size-3.5 shrink-0" />
+              <span class="truncate">{{ currentInstanceDomain || currentInstanceId }}</span>
+              <button
+                class="ml-auto shrink-0 rounded p-0.5 hover:bg-primary/20 transition-colors"
+                title="Back to platform"
+                @click="$router.push('/')"
+              >
+                <X class="size-3" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Top-level items -->
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton as-child :data-active="$route.name === 'dashboard' || $route.name === 'i-dashboard'" :tooltip="'Dashboard'">
-                    <router-link :to="currentInstanceId ? `/instances/${currentInstanceId}` : '/'">
+                <SidebarMenuItem v-if="currentInstanceId">
+                  <SidebarMenuButton as-child :data-active="$route.name === 'i-dashboard'" :tooltip="'Overview'">
+                    <router-link :to="`/instances/${currentInstanceId}`">
                       <LayoutDashboard class="size-4" />
-                      <span>{{ isRootInstance && !currentInstanceId ? 'Getting Started' : 'Dashboard' }}</span>
+                      <span>Overview</span>
                     </router-link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem v-if="isRootInstance">
-                  <SidebarMenuButton as-child :data-active="$route.name === 'instances' || $route.name === 'instance-create' || $route.path.startsWith('/instances/')" :tooltip="'Instances'">
+                  <SidebarMenuButton as-child :data-active="$route.name === 'instances' || $route.name === 'instance-create' || $route.name === 'dashboard'" :tooltip="'All Instances'">
                     <router-link to="/instances">
                       <Server class="size-4" />
-                      <span>Instances</span>
+                      <span>All Instances</span>
                     </router-link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -164,40 +104,7 @@
             </SidebarGroupContent>
           </SidebarGroup>
 
-          <!-- Team (platform access management, root-only) -->
-          <SidebarGroup v-if="isRootInstance">
-            <SidebarGroupLabel class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Team</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton as-child :data-active="$route.name === 'team-members'" :tooltip="'Members'">
-                    <router-link to="/team/members">
-                      <UserCog class="size-4" />
-                      <span>Members</span>
-                    </router-link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton as-child :data-active="$route.name === 'team-access'" :tooltip="'Access'">
-                    <router-link to="/team/access">
-                      <KeyRound class="size-4" />
-                      <span>Access</span>
-                    </router-link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton as-child :data-active="$route.name === 'team-grants'" :tooltip="'Staff Grants'">
-                    <router-link to="/team/grants">
-                      <ShieldAlert class="size-4" />
-                      <span>Staff Grants</span>
-                    </router-link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          <!-- Categorized navigation -->
+          <!-- Categorized navigation (instance-scoped) -->
             <template v-for="category in categorizedNav" :key="category.key">
               <!-- Flat category: label + items always visible -->
               <SidebarGroup v-if="!category.drillable">
@@ -255,12 +162,30 @@
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent class="w-56" side="top" align="start">
+                <!-- Platform management (root-only) -->
+                <template v-if="isRootInstance">
+                  <DropdownMenuLabel class="text-xs text-muted-foreground">Platform</DropdownMenuLabel>
+                  <DropdownMenuItem as-child>
+                    <router-link to="/team/members">
+                      <UserCog class="mr-2 size-4" />
+                      <span>Team Members</span>
+                    </router-link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem as-child>
+                    <router-link to="/team/access">
+                      <KeyRound class="mr-2 size-4" />
+                      <span>Access</span>
+                    </router-link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </template>
                 <DropdownMenuItem as-child>
                   <a :href="basePath + '/account'">
                     <User class="mr-2 size-4" />
                     <span>My Account</span>
                   </a>
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem as-child>
                   <a :href="basePath + '/logout'">
                     <LogOut class="mr-2 size-4" />
@@ -277,111 +202,198 @@
     </Sidebar>
 
     <SidebarInset>
-      <!-- Header -->
+      <!-- Top Navigation Bar -->
       <header class="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger class="-ml-1" />
         <Separator orientation="vertical" class="mr-2 h-4" />
 
-        <!-- Breadcrumb -->
-        <Breadcrumb>
-          <BreadcrumbList>
-            <template v-for="(crumb, i) in breadcrumbs" :key="i">
-              <BreadcrumbSeparator v-if="i > 0" />
-              <BreadcrumbItem>
-                <BreadcrumbLink v-if="i < breadcrumbs.length - 1" as-child>
-                  <router-link :to="crumb.path">{{ crumb.label }}</router-link>
-                </BreadcrumbLink>
-                <BreadcrumbPage v-else>{{ crumb.label }}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </template>
-          </BreadcrumbList>
-        </Breadcrumb>
+        <!-- Instance Selector -->
+        <Popover v-if="isRootInstance" v-model:open="showInstanceDropdown">
+          <PopoverTrigger as-child>
+            <button class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent transition-colors max-w-[200px]">
+              <Server class="size-3.5 shrink-0 text-muted-foreground" />
+              <span class="truncate">{{ instanceDisplayLabel }}</span>
+              <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent class="w-64 p-0" align="start" side="bottom">
+            <Command>
+              <CommandInput placeholder="Find instance..." />
+              <CommandList>
+                <CommandEmpty>No instance found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem value="no-instance" @select="deselectInstance">
+                    <Globe class="mr-2 size-4" />
+                    No instance selected
+                  </CommandItem>
+                  <CommandItem
+                    v-for="inst in instanceList"
+                    :key="inst.instance_id"
+                    :value="inst.primary_domain || inst.instance_id"
+                    @select="selectInstance(inst)"
+                  >
+                    <Server class="mr-2 size-4" />
+                    {{ inst.primary_domain || inst.instance_id }}
+                  </CommandItem>
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        <!-- Organization Selector -->
+        <Popover v-model:open="showOrgDropdown">
+          <PopoverTrigger as-child>
+            <button class="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent transition-colors max-w-[200px]">
+              <Building2 class="size-3.5 shrink-0 text-muted-foreground" />
+              <span class="truncate">{{ selectedOrg?.display_name || 'Select organiz...' }}</span>
+              <ChevronsUpDown class="size-3 shrink-0 opacity-50" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent class="w-56 p-0" align="start" side="bottom">
+            <Command>
+              <CommandInput placeholder="Search organizations..." />
+              <CommandList>
+                <CommandEmpty>No organization found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem value="all-orgs" @select="selectOrg(null)">
+                    <Globe class="mr-2 size-4" />
+                    All Organizations
+                  </CommandItem>
+                  <CommandItem
+                    v-for="org in orgs"
+                    :key="org.id"
+                    :value="org.display_name"
+                    @select="selectOrg(org)"
+                  >
+                    <Building2 class="mr-2 size-4" />
+                    {{ org.display_name }}
+                  </CommandItem>
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
 
         <div class="ml-auto flex items-center gap-2">
-          <!-- Command Palette Trigger -->
-          <Button
-            variant="outline"
-            size="sm"
-            class="gap-1.5 text-xs text-muted-foreground"
-            @click="showCommandPalette = true"
-          >
-            <Search class="size-3.5" />
-            <span class="hidden sm:inline">Search...</span>
-            <kbd
-              class="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex"
-              >⌘K</kbd
-            >
-          </Button>
+          <!-- Command Palette / Search -->
+          <Popover v-model:open="showCommandPalette">
+            <PopoverTrigger as-child>
+              <button
+                class="inline-flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <Search class="size-3.5" />
+                <span class="hidden sm:inline">Run a command or search...</span>
+                <kbd class="pointer-events-none ml-4 hidden h-5 select-none items-center rounded border bg-background px-1.5 font-mono text-[10px] font-medium sm:flex">⌘K</kbd>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent class="w-[420px] p-0" align="end" side="bottom">
+              <Command>
+                <CommandInput placeholder="Search or jump to…" @input="onCommandSearch" />
+                <CommandList class="max-h-80">
+                  <CommandEmpty>No results found.</CommandEmpty>
+
+                  <!-- API search results -->
+                  <CommandGroup v-if="searchResults.length" heading="Search Results">
+                    <CommandItem
+                      v-for="r in searchResults"
+                      :key="r.resource_type + r.id"
+                      :value="`result-${r.resource_type}-${r.id}-${r.title}-${r.subtitle}`"
+                      @select="goToResult(r)"
+                    >
+                      <component :is="getResultIcon(r.resource_type)" class="mr-2 size-4 shrink-0" />
+                      <div class="flex flex-col">
+                        <span class="text-sm font-medium">{{ r.title }}</span>
+                        <span class="text-xs text-muted-foreground">{{ r.subtitle }}</span>
+                      </div>
+                    </CommandItem>
+                  </CommandGroup>
+
+                  <!-- Navigation shortcuts -->
+                  <CommandGroup heading="Navigation">
+                    <CommandItem value="nav-dashboard Dashboard" @select="navigateTo('/')">
+                      <LayoutDashboard class="mr-2 size-4 shrink-0" />
+                      <span>Dashboard</span>
+                    </CommandItem>
+                    <CommandItem
+                      v-for="item in navItems"
+                      :key="item.type"
+                      :value="`nav-${item.type} ${item.label}`"
+                      @select="navigateTo(item.route)"
+                    >
+                      <component :is="getIcon(item.type)" class="mr-2 size-4 shrink-0" />
+                      <span>{{ item.label }}</span>
+                    </CommandItem>
+                  </CommandGroup>
+
+                  <CommandGroup heading="Quick Actions">
+                    <CommandItem value="action-create-user Create User" @select="navigateTo('/users/new')">
+                      <Users class="mr-2 size-4 shrink-0" />
+                      <span>Create User</span>
+                    </CommandItem>
+                    <CommandItem value="action-create-app Create Application" @select="navigateTo('/applications/new')">
+                      <AppWindow class="mr-2 size-4 shrink-0" />
+                      <span>Create Application</span>
+                    </CommandItem>
+                    <CommandItem value="action-schemas View Schemas" @select="navigateTo('/schemas')">
+                      <FileJson class="mr-2 size-4 shrink-0" />
+                      <span>View Schemas</span>
+                    </CommandItem>
+                    <CommandItem value="action-events View Audit Log" @select="navigateTo('/events')">
+                      <Activity class="mr-2 size-4 shrink-0" />
+                      <span>View Audit Log</span>
+                    </CommandItem>
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          <!-- Documentation Dropdown -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground">
+                <FileText class="size-3.5" />
+                <span class="hidden sm:inline">Documentation</span>
+                <ChevronDown class="size-3 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-52">
+              <DropdownMenuLabel class="text-xs text-muted-foreground">Resources</DropdownMenuLabel>
+              <DropdownMenuItem as-child>
+                <a href="https://zitadel.com/docs" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between">
+                  <span class="flex items-center gap-2"><FileText class="size-3.5" /> Documentation</span>
+                  <ExternalLink class="size-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <a href="https://zitadel.com/docs/apis" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between">
+                  <span class="flex items-center gap-2"><Code2 class="size-3.5" /> API Reference</span>
+                  <ExternalLink class="size-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem as-child>
+                <a href="https://zitadel.com/docs/guides" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between">
+                  <span class="flex items-center gap-2"><BookOpen class="size-3.5" /> Guides &amp; Tutorials</span>
+                  <ExternalLink class="size-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel class="text-xs text-muted-foreground">Quick Links</DropdownMenuLabel>
+              <DropdownMenuItem as-child>
+                <a href="https://github.com/zitadel/zitadel" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between">
+                  <span class="flex items-center gap-2"><Code2 class="size-3.5" /> GitHub Repository</span>
+                  <ExternalLink class="size-3 opacity-50" />
+                </a>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
-      <!-- Command Palette Dialog -->
-      <CommandDialog v-model:open="showCommandPalette">
-        <CommandInput placeholder="Search or jump to…" @input="onCommandSearch" />
-        <CommandList>
-          <CommandEmpty>No results found.</CommandEmpty>
-
-          <!-- API search results -->
-          <CommandGroup v-if="searchResults.length" heading="Search Results">
-            <CommandItem
-              v-for="r in searchResults"
-              :key="r.resource_type + r.id"
-              :value="`result-${r.resource_type}-${r.id}-${r.title}-${r.subtitle}`"
-              @select="goToResult(r)"
-            >
-              <component :is="getResultIcon(r.resource_type)" class="mr-2 size-4 shrink-0" />
-              <div class="flex flex-col">
-                <span class="text-sm font-medium">{{ r.title }}</span>
-                <span class="text-xs text-muted-foreground">{{ r.subtitle }}</span>
-              </div>
-            </CommandItem>
-          </CommandGroup>
-
-          <!-- Navigation shortcuts -->
-          <CommandGroup heading="Navigation">
-            <CommandItem value="nav-dashboard Dashboard" @select="navigateTo('/')">
-              <LayoutDashboard class="mr-2 size-4 shrink-0" />
-              <span>Dashboard</span>
-            </CommandItem>
-            <CommandItem
-              v-for="item in navItems"
-              :key="item.type"
-              :value="`nav-${item.type} ${item.label}`"
-              @select="navigateTo(item.route)"
-            >
-              <component :is="getIcon(item.type)" class="mr-2 size-4 shrink-0" />
-              <span>{{ item.label }}</span>
-            </CommandItem>
-          </CommandGroup>
-
-          <CommandGroup heading="Quick Actions">
-            <CommandItem value="action-create-user Create User" @select="navigateTo('/users/new')">
-              <Users class="mr-2 size-4 shrink-0" />
-              <span>Create User</span>
-            </CommandItem>
-            <CommandItem value="action-create-app Create Application" @select="navigateTo('/applications/new')">
-              <AppWindow class="mr-2 size-4 shrink-0" />
-              <span>Create Application</span>
-            </CommandItem>
-            <CommandItem value="action-schemas View Schemas" @select="navigateTo('/schemas')">
-              <FileJson class="mr-2 size-4 shrink-0" />
-              <span>View Schemas</span>
-            </CommandItem>
-            <CommandItem value="action-marketplace Browse Marketplace" @select="navigateTo('/marketplace')">
-              <Package class="mr-2 size-4 shrink-0" />
-              <span>Browse Marketplace</span>
-            </CommandItem>
-            <CommandItem value="action-events View Audit Log" @select="navigateTo('/events')">
-              <Activity class="mr-2 size-4 shrink-0" />
-              <span>View Audit Log</span>
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
-
       <!-- Main Content -->
       <div class="flex-1 overflow-auto p-4 md:p-6">
-        <router-view :key="`${$route.fullPath}__org_${selectedOrgId || 'all'}__inst_${currentInstanceId || 'none'}`" />
+        <router-view :key="`${$route.fullPath}__org_${selectedOrgId || 'all'}`" />
       </div>
     </SidebarInset>
   </SidebarProvider>
@@ -422,23 +434,16 @@
   import { Separator } from '@/components/ui/separator'
   import { Avatar, AvatarFallback } from '@/components/ui/avatar'
   import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbLink,
-    BreadcrumbList,
-    BreadcrumbPage,
-    BreadcrumbSeparator,
-  } from '@/components/ui/breadcrumb'
-  import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
   } from '@/components/ui/dropdown-menu'
   import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
   import {
     Command,
-    CommandDialog,
     CommandEmpty,
     CommandGroup,
     CommandInput,
@@ -481,7 +486,12 @@
     BellRing,
     ArrowLeft,
     UserCog,
-    ShieldAlert,
+    X,
+    FileText,
+    ChevronDown,
+    ExternalLink,
+    Code2,
+    BookOpen,
   } from 'lucide-vue-next'
 
   const route = useRoute()
@@ -657,6 +667,7 @@
       instance_management: boolean
       operator_admin: boolean
       billing: boolean
+      custom_domains: boolean
     }
   }
 
@@ -712,7 +723,7 @@
       icon: Settings,
       drillable: true,
       catalogGroups: ['system'],
-      explicitTypes: ['schema', 'marketplace', 'session', 'event', 'job', 'action', 'notification', 'endpoint'],
+      explicitTypes: ['instance_settings', 'schema', 'marketplace', 'session', 'event', 'job', 'action', 'notification', 'endpoint', 'domains'],
     },
   ]
 
@@ -731,9 +742,10 @@
 
       isRootInstance.value = bootstrap.instance?.is_root ?? false
       isOperatorAdmin.value = bootstrap.capabilities?.operator_admin ?? false
+      const customDomainsEnabled = bootstrap.capabilities?.custom_domains ?? false
 
       applyOrgs(bootstrap.orgs?.items || [])
-      hydrateNav(bootstrap.meta || {})
+      hydrateNav(bootstrap.meta || {}, customDomainsEnabled)
 
       // Load instances list for the instance switcher (root only).
       if (isRootInstance.value) {
@@ -861,8 +873,11 @@
     if (item.route === '/applications') {
       return name === 'applications' || name === 'application-create' || name === 'application-detail'
     }
+    if (item.route === '/settings') {
+      return name === 'instance-settings'
+    }
     if (item.route === '/instances') {
-      return name === 'instances' || name === 'instance-create' || name === 'instance-detail'
+      return name === 'instances' || name === 'instance-create'
     }
     if (item.storage === 'entities') return r.params.schemaType === item.type
     return name === item.type || r.path.includes(`/${item.route?.replace(/^\//, '')}`)
@@ -897,6 +912,7 @@
     marketplace: Package,
     endpoint: Link,
     notification: BellRing,
+    instance_settings: Settings,
     instances: Server,
   }
 
@@ -904,7 +920,7 @@
     return iconMap[type] || Database
   }
 
-  function hydrateNav(meta: Record<string, any>) {
+  function hydrateNav(meta: Record<string, any>, customDomainsEnabled: boolean = false) {
     const catalog = meta['x-catalog'] || {}
     const groups = meta['x-groups'] || {}
 
@@ -932,6 +948,32 @@
         countable: !!entry.countable,
         navGroup: entry.nav_group,
         aggregates: entry.aggregates,
+      })
+    }
+
+    // Inject "Settings" nav item under System — instance-level settings page.
+    items.push({
+      type: 'instance_settings',
+      label: 'Settings',
+      sortOrder: 0,
+      storage: 'settings',
+      route: '/settings',
+      countable: false,
+      navGroup: 'system',
+      aggregates: undefined,
+    })
+
+    // Inject "Domains" nav item when custom_domains capability is enabled.
+    if (customDomainsEnabled) {
+      items.push({
+        type: 'domains',
+        label: 'Domains',
+        sortOrder: 15,
+        storage: 'domains',
+        route: '/domains',
+        countable: false,
+        navGroup: 'system',
+        aggregates: undefined,
       })
     }
 
@@ -1000,10 +1042,9 @@
       dashboard: 'Dashboard',
       instances: 'Instances',
       'instance-create': 'New Instance',
-      'instance-detail': 'Instance',
-      'team-members': 'Members',
+      'instance-settings': 'Settings',
+      'team-members': 'Team Members',
       'team-access': 'Access',
-      'team-grants': 'Staff Grants',
       billing: 'Billing',
       'user-detail': 'User Detail',
       'identity-create': 'New User',
@@ -1046,11 +1087,10 @@
     'group-create': { label: 'Groups', path: '/groups' },
     'project-detail': { label: 'Projects', path: '/projects' },
     'project-create': { label: 'Projects', path: '/projects' },
-    'instance-detail': { label: 'Instances', path: '/instances' },
+    'instance-settings': { label: 'System', path: '/settings' },
     'instance-create': { label: 'Instances', path: '/instances' },
     'team-members': { label: 'Team', path: '/team/members' },
     'team-access': { label: 'Team', path: '/team/members' },
-    'team-grants': { label: 'Team', path: '/team/members' },
     'schema-detail': { label: 'Schemas', path: '/schemas' },
     'provider-detail': { label: 'Providers', path: '/providers' },
     'provider-create': { label: 'Providers', path: '/providers' },

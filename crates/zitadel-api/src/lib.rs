@@ -5,6 +5,7 @@ pub mod apps;
 pub mod auth;
 pub mod catalog;
 pub mod console;
+pub mod domains;
 pub mod events;
 pub mod extractors;
 pub mod fga;
@@ -96,7 +97,8 @@ pub fn routes(state: ApiState) -> Router {
         .merge(observability::routes())
         .merge(actions::routes())
         .merge(telemetry::routes())
-        .merge(catalog::routes());
+        .merge(catalog::routes())
+        .merge(domains::routes());
 
     let scoped_product_handlers =
         product_handlers

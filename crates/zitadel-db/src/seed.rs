@@ -1,11 +1,16 @@
 use crate::{
-    DEFAULT_ORG_ID, Db,
+    DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, create_org, create_pat, create_user,
+    find_active_user_by_identifier, get_oidc_client_record, get_org,
+    get_settings_record, list_login_flow_records, put_instance_settings,
+    replace_password_credential,
     provider::{
         ProviderCatalogRef, ProviderConnection, ProviderLinking, ProviderLinkingMode,
         ProviderMapping, ProviderPayload, ProviderTarget, ProviderUi, get_provider,
-        insert_provider, update_provider,
+        get_provider_for, insert_provider, insert_provider_for, update_provider,
+        update_provider_for,
     },
 };
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -259,6 +264,9 @@ pub fn validate(path: &Path) -> anyhow::Result<SeedFile> {
 /// Apply a seed file to the database.
 pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
     let seed = validate(path)?;
+    if matches!(db, Db::Spanner(_)) {
+        return apply_spanner(db, &seed).await;
+    }
     let pool = db.pool();
     let scoped = db.scoped_default();
 
@@ -563,6 +571,352 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
         login_flows = seed.login_flows.len(),
         "seed applied"
     );
+    Ok(())
+}
+
+async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
+    let org_id = match get_org(db, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID).await? {
+        Some(org) => org.id,
+        None => create_org(db, DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, "Default", "{}")
+            .await?
+            .id,
+    };
+
+    for user in &seed.users {
+        let display_name = if user.display_name.is_empty() {
+            &user.identifier
+        } else {
+            &user.display_name
+        };
+        let metadata = seed_user_metadata(user);
+        let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".into());
+
+        let existing = find_active_user_by_identifier(db, DEFAULT_INSTANCE_ID, &user.identifier).await?;
+        let user_id = if let Some(existing) = existing {
+            if user.on_conflict == "update" {
+                update_seed_user_spanner(db, DEFAULT_INSTANCE_ID, &existing.id, display_name, &metadata_json)
+                    .await?;
+            }
+            existing.id
+        } else {
+            create_user(
+                db,
+                DEFAULT_INSTANCE_ID,
+                &Uuid::new_v4().to_string(),
+                &org_id,
+                &user.identifier,
+                display_name,
+                "",
+                &metadata_json,
+            )
+            .await?
+            .id
+        };
+
+        if !user.password.is_empty() {
+            let hash = format!("$plain${}", user.password);
+            let cred_json = format!(r#"{{"hash":"{}"}}"#, hash);
+            replace_password_credential(
+                db,
+                DEFAULT_INSTANCE_ID,
+                &user_id,
+                &Uuid::new_v4().to_string(),
+                &cred_json,
+            )
+            .await?;
+        }
+
+        for pat in &user.pats {
+            let pat_hash = token_hash(&pat.token);
+            let scopes = serde_json::to_string(&pat.scopes)?;
+            if !pat_exists_spanner(db, DEFAULT_INSTANCE_ID, &pat_hash).await? {
+                create_pat(
+                    db,
+                    DEFAULT_INSTANCE_ID,
+                    &Uuid::new_v4().to_string(),
+                    &user_id,
+                    &pat.name,
+                    &pat_hash,
+                    &scopes,
+                )
+                .await?;
+            }
+        }
+
+        tracing::debug!(identifier = user.identifier, user_id, "seeded user");
+    }
+
+    for app in &seed.apps {
+        let redirect_uris = serde_json::to_string(&app.redirect_uris)?;
+        let post_logout_redirect_uris = serde_json::to_string(&app.post_logout_redirect_uris)?;
+        let grant_types = serde_json::to_string(&app.grant_types)?;
+        let response_types = serde_json::to_string(&app.response_types)?;
+
+        if let Some(existing) = get_oidc_client_record(db, DEFAULT_INSTANCE_ID, &app.client_id).await? {
+            if app.on_conflict == "update" {
+                upsert_seed_app_spanner(
+                    db,
+                    &existing.app_id,
+                    &org_id,
+                    app,
+                    &redirect_uris,
+                    &post_logout_redirect_uris,
+                    &grant_types,
+                    &response_types,
+                    true,
+                )
+                .await?;
+            }
+        } else {
+            upsert_seed_app_spanner(
+                db,
+                &Uuid::new_v4().to_string(),
+                &org_id,
+                app,
+                &redirect_uris,
+                &post_logout_redirect_uris,
+                &grant_types,
+                &response_types,
+                false,
+            )
+            .await?;
+        }
+
+        tracing::debug!(client_id = app.client_id, "seeded app");
+    }
+
+    for provider in &seed.providers {
+        let payload = provider.to_payload();
+        if get_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id).await?.is_some() {
+            update_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id, &payload).await?;
+        } else {
+            insert_provider_for(db, DEFAULT_INSTANCE_ID, &provider.id, &org_id, &payload).await?;
+        }
+        tracing::debug!(
+            id = provider.id,
+            name = payload.display_name,
+            "seeded provider"
+        );
+    }
+
+    for flow in &seed.login_flows {
+        let auth_methods =
+            serde_json::to_string(&flow.auth_methods).unwrap_or_else(|_| "{}".into());
+        let config = serde_json::to_string(&flow.config).unwrap_or_else(|_| "{}".into());
+
+        let existing = list_login_flow_records(db, DEFAULT_INSTANCE_ID, "", i64::MAX)
+            .await?
+            .into_iter()
+            .find(|record| record.name == flow.name);
+
+        if let Some(existing) = existing {
+            upsert_seed_login_flow_spanner(
+                db,
+                &existing.id,
+                flow,
+                &auth_methods,
+                &config,
+                true,
+            )
+            .await?;
+        } else {
+            upsert_seed_login_flow_spanner(
+                db,
+                &Uuid::new_v4().to_string(),
+                flow,
+                &auth_methods,
+                &config,
+                false,
+            )
+            .await?;
+        }
+
+        tracing::debug!(name = flow.name, "seeded login flow");
+    }
+
+    for setting in &seed.settings {
+        let data_str = serde_json::to_string(&setting.data).unwrap_or_else(|_| "{}".into());
+        if get_settings_record(db, DEFAULT_INSTANCE_ID, &setting.type_)
+            .await?
+            .is_some()
+        {
+            put_instance_settings(
+                db,
+                DEFAULT_INSTANCE_ID,
+                &Uuid::new_v4().to_string(),
+                &setting.type_,
+                &data_str,
+            )
+            .await?;
+        } else {
+            put_instance_settings(
+                db,
+                DEFAULT_INSTANCE_ID,
+                &Uuid::new_v4().to_string(),
+                &setting.type_,
+                &data_str,
+            )
+            .await?;
+        }
+        tracing::debug!(type_ = setting.type_, "seeded setting");
+    }
+
+    tracing::info!(
+        users = seed.users.len(),
+        apps = seed.apps.len(),
+        providers = seed.providers.len(),
+        login_flows = seed.login_flows.len(),
+        "seed applied"
+    );
+    Ok(())
+}
+
+async fn update_seed_user_spanner(
+    db: &Db,
+    instance_id: &str,
+    user_id: &str,
+    display_name: &str,
+    metadata_json: &str,
+) -> anyhow::Result<()> {
+    let spanner = db
+        .spanner()
+        .expect("spanner seed update requires native spanner backend");
+    let mut stmt = Statement::new(
+        "UPDATE users SET display_name = @display_name, metadata = @metadata, updated_at = CURRENT_TIMESTAMP() \
+         WHERE instance_id = @instance_id AND id = @id",
+    );
+    stmt.add_param("display_name", &display_name);
+    stmt.add_param("metadata", &metadata_json);
+    stmt.add_param("instance_id", &instance_id);
+    stmt.add_param("id", &user_id);
+    let _ = spanner
+        .client()
+        .read_write_transaction(|tx| {
+            let stmt = stmt.clone();
+            Box::pin(async move {
+                tx.update(stmt).await?;
+                Ok::<(), SpannerError>(())
+            })
+        })
+        .await?;
+    Ok(())
+}
+
+async fn pat_exists_spanner(db: &Db, instance_id: &str, token_hash: &str) -> anyhow::Result<bool> {
+    let spanner = db
+        .spanner()
+        .expect("spanner seed lookup requires native spanner backend");
+    let mut stmt = Statement::new(
+        "SELECT id FROM tokens \
+         WHERE instance_id = @instance_id AND type = 'pat' AND token_hash = @token_hash LIMIT 1",
+    );
+    stmt.add_param("instance_id", &instance_id);
+    stmt.add_param("token_hash", &token_hash);
+    let mut tx = spanner.client().single().await?;
+    let mut rows = tx.query(stmt).await?;
+    Ok(rows.next().await?.is_some())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn upsert_seed_app_spanner(
+    db: &Db,
+    app_id: &str,
+    org_id: &str,
+    app: &SeedApp,
+    redirect_uris: &str,
+    post_logout_redirect_uris: &str,
+    grant_types: &str,
+    response_types: &str,
+    update_existing: bool,
+) -> anyhow::Result<()> {
+    let spanner = db
+        .spanner()
+        .expect("spanner seed app upsert requires native spanner backend");
+    let mut stmt = if update_existing {
+        Statement::new(
+            "UPDATE apps SET name = @name, app_type = @app_type, client_id = @client_id, client_secret = @client_secret, \
+             redirect_uris = @redirect_uris, post_logout_redirect_uris = @post_logout_redirect_uris, \
+             grant_types = @grant_types, response_types = @response_types, updated_at = CURRENT_TIMESTAMP() \
+             WHERE instance_id = @instance_id AND id = @id",
+        )
+    } else {
+        Statement::new(
+            "INSERT INTO apps \
+             (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, post_logout_redirect_uris, grant_types, response_types, state) \
+             VALUES \
+             (@id, @instance_id, @org_id, @name, @app_type, @client_id, @client_secret, @redirect_uris, @post_logout_redirect_uris, @grant_types, @response_types, 'active')",
+        )
+    };
+    stmt.add_param("id", &app_id);
+    stmt.add_param("instance_id", &DEFAULT_INSTANCE_ID);
+    stmt.add_param("org_id", &org_id);
+    stmt.add_param("name", &app.name);
+    stmt.add_param("app_type", &app.app_type);
+    stmt.add_param("client_id", &app.client_id);
+    stmt.add_param("client_secret", &app.client_secret);
+    stmt.add_param("redirect_uris", &redirect_uris);
+    stmt.add_param("post_logout_redirect_uris", &post_logout_redirect_uris);
+    stmt.add_param("grant_types", &grant_types);
+    stmt.add_param("response_types", &response_types);
+    let _ = spanner
+        .client()
+        .read_write_transaction(|tx| {
+            let stmt = stmt.clone();
+            Box::pin(async move {
+                tx.update(stmt).await?;
+                Ok::<(), SpannerError>(())
+            })
+        })
+        .await?;
+    Ok(())
+}
+
+async fn upsert_seed_login_flow_spanner(
+    db: &Db,
+    flow_id: &str,
+    flow: &SeedLoginFlow,
+    auth_methods_json: &str,
+    config_json: &str,
+    update_existing: bool,
+) -> anyhow::Result<()> {
+    let spanner = db
+        .spanner()
+        .expect("spanner seed login flow upsert requires native spanner backend");
+    let mut stmt = if update_existing {
+        Statement::new(
+            "UPDATE login_flows SET name = @name, strategy = @strategy, is_default = @is_default, enabled = @enabled, \
+             state = @state, priority = @priority, auth_methods = @auth_methods, config = @config, \
+             updated_at = CURRENT_TIMESTAMP() \
+             WHERE instance_id = @instance_id AND id = @id",
+        )
+    } else {
+        Statement::new(
+            "INSERT INTO login_flows \
+             (id, instance_id, name, strategy, is_default, enabled, state, priority, auth_methods, config) \
+             VALUES \
+             (@id, @instance_id, @name, @strategy, @is_default, @enabled, @state, @priority, @auth_methods, @config)",
+        )
+    };
+    stmt.add_param("id", &flow_id);
+    stmt.add_param("instance_id", &DEFAULT_INSTANCE_ID);
+    stmt.add_param("name", &flow.name);
+    stmt.add_param("strategy", &flow.strategy);
+    stmt.add_param("is_default", &flow.is_default);
+    stmt.add_param("enabled", &flow.enabled);
+    stmt.add_param("state", &flow.state);
+    stmt.add_param("priority", &flow.priority);
+    stmt.add_param("auth_methods", &auth_methods_json);
+    stmt.add_param("config", &config_json);
+    let _ = spanner
+        .client()
+        .read_write_transaction(|tx| {
+            let stmt = stmt.clone();
+            Box::pin(async move {
+                tx.update(stmt).await?;
+                Ok::<(), SpannerError>(())
+            })
+        })
+        .await?;
     Ok(())
 }
 

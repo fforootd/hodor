@@ -34,6 +34,9 @@ license = "AGPL-3.0-only"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
+# DNS resolution
+hickory-resolver = { version = "0.25", features = ["tokio", "system-config"] }
+
 # Web framework
 axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5" }

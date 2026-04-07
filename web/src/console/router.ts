@@ -15,8 +15,8 @@ const userCreateProps = (route: { query: Record<string, unknown> }) => ({
 const productRoutes: RouteRecordRaw[] = [
   // Dashboard (instance-level)
   { path: '', name: 'i-dashboard', component: () => import('@/console/views/DashboardView.vue') },
-  // Instance detail (Overview, Domains, Features, Settings)
-  { path: 'detail', name: 'i-instance-detail', component: () => import('@/console/views/InstanceDetailView.vue') },
+  // Instance settings (Overview, Domains, Features, Danger Zone) — shown under System in sidebar
+  { path: 'settings', name: 'i-instance-settings', component: () => import('@/console/views/InstanceDetailView.vue') },
   // Users
   { path: 'users', name: 'i-users', component: () => import('@/console/views/UnifiedUsersView.vue') },
   {
@@ -76,6 +76,8 @@ const productRoutes: RouteRecordRaw[] = [
   // Notifications & API
   { path: 'notifications', name: 'i-notifications', component: () => import('@/console/views/NotificationsView.vue') },
   { path: 'api-protocols', name: 'i-api-protocols', component: () => import('@/console/views/ApiProtocolsView.vue') },
+  // Custom Domains (customer-facing)
+  { path: 'domains', name: 'i-domains', component: () => import('@/console/views/DomainListView.vue') },
   // Schema-type identity routes (backward compat)
   { path: 's/:schemaType', name: 'i-schema-identities', component: () => import('@/console/views/IdentityListView.vue'), props: true },
   { path: 's/:schemaType/new', name: 'i-identity-create', component: () => import('@/console/views/IdentityCreateView.vue'), props: true },
@@ -87,7 +89,7 @@ const productRoutes: RouteRecordRaw[] = [
 
 function flattenRoutes(routes: RouteRecordRaw[]): RouteRecordRaw[] {
   return routes
-    .filter((r) => r.path !== '' && r.path !== 'detail') // skip instance-only routes
+    .filter((r) => r.path !== '' && r.path !== 'settings') // skip instance-only routes
     .map((r) => ({
       ...r,
       path: '/' + r.path,
@@ -114,7 +116,7 @@ const router = createRouter({
   history: createWebHistory(basePath + '/console'),
   routes: [
     // Root-level routes
-    { path: '/', name: 'dashboard', component: () => import('@/console/views/DashboardView.vue') },
+    { path: '/', name: 'dashboard', redirect: '/instances' },
     // Instance management
     { path: '/instances', name: 'instances', component: () => import('@/console/views/InstanceListView.vue') },
     { path: '/instances/new', name: 'instance-create', component: () => import('@/console/views/InstanceCreateView.vue') },
@@ -128,7 +130,6 @@ const router = createRouter({
     { path: '/team', redirect: '/team/members' },
     { path: '/team/members', name: 'team-members', component: () => import('@/console/views/team/MembersView.vue') },
     { path: '/team/access', name: 'team-access', component: () => import('@/console/views/team/AccessView.vue') },
-    { path: '/team/grants', name: 'team-grants', component: () => import('@/console/views/team/GrantsView.vue') },
     { path: '/billing', name: 'billing', component: () => import('@/console/views/BillingView.vue') },
     // Flat product routes (single-instance dev mode / backward compat)
     ...flattenRoutes(productRoutes),

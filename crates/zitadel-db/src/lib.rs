@@ -18,6 +18,11 @@ use std::time::Duration;
 
 pub const DEFAULT_INSTANCE_ID: &str = "default";
 pub const DEFAULT_ORG_ID: &str = "1";
+
+pub(crate) fn spanner_ident(name: &str) -> String {
+    format!("`{name}`")
+}
+
 pub use context::{
     InstanceContext, current_instance_context, current_instance_id, current_instance_id_or,
     current_request_origin, current_request_origin_or, with_instance_context,
@@ -40,26 +45,29 @@ pub use retained::{
     OidcAuthRequestRecord, OidcClientRecord, OrgRecord, OrgRoleMembershipRecord, OrgSummary,
     OrgUserLinkRecord, PatRecord, RouteResolutionRecord, SavedQueryRecord, SchemaRegistryRecord,
     SearchRecord, SettingsRecord, UnshippedEventRecord, UserClaimsRecord, UserRecord,
-    add_instance_domain, add_membership, append_event, consume_oidc_auth_code_record,
-    count_users_for_schema, create_linked_identity_record, create_login_flow,
-    create_managed_instance, create_named_resource, create_oidc_auth_request_record, create_org,
-    create_pat, create_role_assignment, create_saved_query, create_schema_record, create_user,
-    delete_instance_domain, delete_instance_row, delete_provider, delete_saved_query,
-    delete_settings_record, deprovision_managed_instance, fetch_unshipped_events,
-    find_active_user_by_identifier, find_linked_identity, first_org_id, get_action,
+    add_instance_domain, add_instance_domain_full, add_membership, append_event,
+    consume_oidc_auth_code_record, count_users_for_schema, create_linked_identity_record,
+    create_login_flow, create_managed_instance, create_named_resource,
+    create_oidc_auth_request_record, create_org, create_pat, create_role_assignment,
+    create_saved_query, create_schema_record, create_user, delete_domain_for_scope,
+    delete_instance_row, delete_provider, delete_saved_query, delete_settings_record,
+    deprovision_managed_instance, fetch_unshipped_events, find_active_user_by_identifier,
+    find_domain, find_linked_identity, first_org_id, get_action, get_domain_for_scope,
     get_instance_trust_link, get_login_flow_record, get_managed_instance, get_named_resource,
     get_oidc_client_record, get_org, get_role_assignment, get_schema_record, get_settings_record,
     get_user, instance_visible, list_actions, list_active_child_instance_ownerships,
     list_active_org_role_memberships, list_active_org_users, list_active_role_bindings_for_scope,
-    list_admin_instances, list_fingerprints, list_instance_domains, list_jobs_for_instance,
-    list_login_flow_records, list_managed_instances, list_memberships, list_named_resources,
-    list_org_records, list_pats_for_instance, list_role_assignments, list_role_definitions,
-    list_saved_queries, list_schema_registry, list_users, load_console_bootstrap_data,
-    load_entity_counts, load_identity_metadata, load_instance_metadata, load_session_user_profile,
-    load_user_claims_record, mark_events_shipped, promote_schema_record, put_instance_settings,
-    remove_membership, replace_password_credential, resolve_domain_route, resolve_instance_route,
-    resolve_login_flow, revoke_pat, revoke_role_assignment, search_records,
-    seed_builtin_role_definitions, set_login_flow_state, touch_linked_identity, update_login_flow,
+    list_admin_instances, list_fingerprints, list_instance_domains, list_instance_domains_filtered,
+    list_jobs_for_instance, list_login_flow_records, list_managed_instances, list_memberships,
+    list_named_resources, list_org_records, list_pats_for_instance, list_role_assignments,
+    list_role_definitions, list_saved_queries, list_schema_registry, list_users,
+    load_console_bootstrap_data, load_entity_counts, load_identity_metadata,
+    load_instance_metadata, load_session_user_profile, load_user_claims_record,
+    mark_events_shipped, promote_schema_record, put_instance_settings, remove_membership,
+    replace_password_credential, resolve_domain_route, resolve_instance_route, resolve_login_flow,
+    revoke_pat, revoke_role_assignment, search_records, seed_builtin_role_definitions,
+    set_login_flow_state, touch_linked_identity, update_domain_certificate_state_for_scope,
+    update_domain_origin_trust_state_for_scope, update_domain_state_for_scope, update_login_flow,
     update_managed_instance, update_named_resource_name, update_org, update_password_hash,
     update_schema_record, update_session_metadata, update_user, upsert_catalog_action,
     upsert_fingerprint, user_has_capability,

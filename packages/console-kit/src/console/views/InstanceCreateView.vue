@@ -1,142 +1,173 @@
 <template>
-  <div class="mx-auto max-w-2xl space-y-8">
-    <!-- Back link -->
-    <div>
-      <router-link to="/instances" class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-        <ArrowLeft class="size-4" />
-        Back to Instances
-      </router-link>
-    </div>
-
-    <!-- Header -->
-    <div>
-      <h1 class="text-2xl font-semibold tracking-tight">Create Instance</h1>
-      <p class="text-sm text-muted-foreground mt-1">Set up a new environment for your project.</p>
-    </div>
-
-    <!-- Form -->
-    <Card>
-      <CardContent class="pt-6 space-y-6">
-        <!-- Instance ID -->
+  <WizardSheet
+    :open="open"
+    title="Create Instance"
+    description="Create your deployment instance"
+    :steps="steps"
+    :current-step="currentStep"
+    :can-proceed="canProceed"
+    :submitting="submitting"
+    submit-label="Create Instance"
+    @update:open="$emit('update:open', $event)"
+    @next="onNext"
+    @prev="prev"
+  >
+    <!-- Step 0: Configuration -->
+    <template #step-0>
+      <div class="space-y-5">
+        <div>
+          <h3 class="text-base font-medium mb-1">Instance Details</h3>
+          <p class="text-sm text-muted-foreground">Configure your instance name and region.</p>
+        </div>
         <div class="space-y-2">
-          <Label for="instance-id">Instance ID</Label>
+          <Label for="instance-name">Instance Name</Label>
           <Input
-            id="instance-id"
+            id="instance-name"
             :model-value="form.instance_id"
             placeholder="my-project-prod"
             @update:model-value="onIdInput"
           />
-          <p class="text-xs text-muted-foreground">A unique identifier. Lowercase letters, digits, and hyphens. Must contain at least one letter.</p>
+          <p class="text-xs text-muted-foreground">A friendly name to identify your instance</p>
         </div>
-
-        <!-- Domain -->
         <div class="space-y-2">
-          <Label for="domain">Domain</Label>
-          <Input
-            id="domain"
-            v-model="form.domain"
-            placeholder="my-project-prod.zitadel.cloud"
-          />
-          <p class="text-xs text-muted-foreground">The primary domain for this instance. Must be globally unique.</p>
+          <Label for="subdomain">Subdomain</Label>
+          <div class="flex">
+            <Input
+              id="subdomain"
+              v-model="form.domain_prefix"
+              placeholder="my-company"
+              class="rounded-r-none"
+            />
+            <div class="flex items-center rounded-r-md border border-l-0 bg-muted px-3 text-sm text-muted-foreground">
+              .zitadel.cloud
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">Your instance will be available at {{ form.domain_prefix || 'my-company' }}.zitadel.cloud</p>
         </div>
-
-        <!-- Region -->
         <div class="space-y-2">
           <Label>Region</Label>
-          <div class="grid grid-cols-2 gap-3">
-            <button
+          <p class="text-xs text-muted-foreground mb-2">Select the region closest to your users</p>
+          <RadioGroup v-model="form.region_key" class="grid grid-cols-2 gap-2">
+            <label
               v-for="region in regions"
               :key="region.key"
-              type="button"
-              class="flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors hover:bg-accent"
-              :class="form.region_key === region.key ? 'border-primary bg-accent' : 'border-border'"
-              @click="form.region_key = region.key"
+              class="flex items-center gap-2 rounded-lg border px-3 py-2.5 cursor-pointer text-sm transition-colors hover:bg-muted/50"
+              :class="form.region_key === region.key ? 'border-primary bg-primary/5' : ''"
             >
-              <span class="text-sm font-medium">{{ region.label }}</span>
-              <span class="text-xs text-muted-foreground">{{ region.description }}</span>
-            </button>
+              <RadioGroupItem :value="region.key" />
+              <span class="font-medium">{{ region.label }}</span>
+            </label>
+          </RadioGroup>
+        </div>
+      </div>
+    </template>
+
+    <!-- Step 1: Confirmation -->
+    <template #step-1>
+      <div class="space-y-5">
+        <div>
+          <h3 class="text-base font-medium mb-1">Review Configuration</h3>
+        </div>
+        <div class="rounded-lg border overflow-hidden text-sm">
+          <div class="grid grid-cols-[1fr_auto] p-3 border-b bg-muted/20">
+            <span class="text-muted-foreground">Instance Name</span>
+            <span class="font-medium text-right">{{ form.instance_id || '—' }}</span>
+          </div>
+          <div class="grid grid-cols-[1fr_auto] p-3 border-b">
+            <span class="text-muted-foreground">Domain</span>
+            <span class="font-medium text-right">{{ fullDomain }}</span>
+          </div>
+          <div class="grid grid-cols-[1fr_auto] p-3">
+            <span class="text-muted-foreground">Region</span>
+            <span class="font-medium text-right">{{ selectedRegionLabel }}</span>
           </div>
         </div>
-
-        <!-- Error -->
-        <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-          {{ error }}
-        </div>
-      </CardContent>
-    </Card>
-
-    <!-- Actions -->
-    <div class="flex items-center justify-end gap-3">
-      <Button variant="outline" as-child>
-        <router-link to="/instances">Cancel</router-link>
-      </Button>
-      <Button :disabled="!canSubmit || submitting" @click="submit">
-        <Spinner v-if="submitting" class="mr-2 size-4" />
-        Create Instance
-      </Button>
-    </div>
-  </div>
+        <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ error }}</div>
+      </div>
+    </template>
+  </WizardSheet>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { reactive, computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { instanceApi } from '@/api/resources'
 import { notifySuccess, notifyError } from '@/lib/notify'
-import { Card, CardContent } from '@/components/ui/card'
+import { useWizardSheet } from '@/console/composables/useWizardSheet'
+import WizardSheet from '@/console/components/WizardSheet.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
-import { Spinner } from '@/components/ui/spinner'
-import { ArrowLeft } from 'lucide-vue-next'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
+const props = withDefaults(defineProps<{ open?: boolean }>(), { open: true })
+const emit = defineEmits<{
+  'update:open': [value: boolean]
+  created: []
+}>()
+
+const steps = [
+  { title: 'Configuration', description: 'Set up your instance' },
+  { title: 'Confirmation', description: 'Review and create' },
+]
+
+const { currentStep, submitting, next, prev, reset } = useWizardSheet(steps.length)
 const router = useRouter()
-const submitting = ref(false)
 const error = ref('')
 
 const form = reactive({
   instance_id: '',
-  domain: '',
-  region_key: '',
-  placement_mode: 'global',
+  domain_prefix: '',
+  region_key: 'eu-frankfurt',
 })
 
 const regions = [
-  { key: '', label: 'Global', description: 'Replicated worldwide, lowest latency' },
-  { key: 'europe-west1', label: 'Europe (West)', description: 'Belgium, EU data residency' },
-  { key: 'us-central1', label: 'US (Central)', description: 'Iowa, US data residency' },
-  { key: 'asia-southeast1', label: 'Asia (Southeast)', description: 'Singapore, APAC data residency' },
+  { key: 'eu-frankfurt', label: 'EU (Frankfurt)' },
+  { key: 'us-virginia', label: 'US (Virginia)' },
+  { key: 'us-oregon', label: 'US (Oregon)' },
+  { key: 'asia-singapore', label: 'Asia (Singapore)' },
+  { key: 'asia-tokyo', label: 'Asia (Tokyo)' },
+  { key: 'au-sydney', label: 'Australia (Sydney)' },
 ]
 
 function onIdInput(value: string | number) {
-  // Slugify: lowercase, letters/digits/hyphens only, no leading hyphens.
   const slugged = String(value)
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '')
     .replace(/^-+/, '')
     .replace(/-+/g, '-')
   form.instance_id = slugged
-  if (!form.domain || form.domain.endsWith('.zitadel.cloud')) {
-    form.domain = slugged ? `${slugged}.zitadel.cloud` : ''
+  if (!form.domain_prefix || form.domain_prefix === slugged.slice(0, -1)) {
+    form.domain_prefix = slugged
   }
 }
 
-const canSubmit = computed(() => {
-  const id = form.instance_id.trim()
-  return id.length >= 1 && form.domain.trim().length > 0
+const fullDomain = computed(() => form.domain_prefix ? `${form.domain_prefix}.zitadel.cloud` : '')
+const selectedRegionLabel = computed(() => regions.find(r => r.key === form.region_key)?.label || '')
+
+const canProceed = computed(() => {
+  if (currentStep.value === 0) return form.instance_id.trim().length >= 1 && form.domain_prefix.trim().length > 0
+  return true
 })
 
-async function submit() {
+async function onNext() {
+  if (currentStep.value < steps.length - 1) {
+    next()
+    return
+  }
   submitting.value = true
   error.value = ''
   try {
     await instanceApi.create({
       instance_id: form.instance_id,
-      domain: form.domain,
+      domain: fullDomain.value,
       placement_mode: form.region_key ? 'regional' : 'global',
       region_key: form.region_key || undefined,
+      kind: 'managed',
     })
-    notifySuccess('Instance created', `${form.domain} is ready.`)
+    notifySuccess('Instance created', `${fullDomain.value} is ready.`)
+    emit('update:open', false)
+    emit('created')
+    reset()
     router.push('/instances')
   } catch (e: any) {
     error.value = e?.error || e?.message || 'Failed to create instance'

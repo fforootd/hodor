@@ -17,6 +17,8 @@ pub enum EffectType {
     Email,
     Sms,
     Log,
+    DomainProvisioning,
+    DomainDeprovisioning,
 }
 
 impl EffectType {
@@ -26,6 +28,8 @@ impl EffectType {
             Self::Email => "email",
             Self::Sms => "sms",
             Self::Log => "log",
+            Self::DomainProvisioning => "domain_provisioning",
+            Self::DomainDeprovisioning => "domain_deprovisioning",
         }
     }
 
@@ -35,6 +39,8 @@ impl EffectType {
             "email" => Some(Self::Email),
             "sms" => Some(Self::Sms),
             "log" => Some(Self::Log),
+            "domain_provisioning" => Some(Self::DomainProvisioning),
+            "domain_deprovisioning" => Some(Self::DomainDeprovisioning),
             _ => None,
         }
     }

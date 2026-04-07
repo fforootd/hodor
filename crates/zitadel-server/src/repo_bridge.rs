@@ -13,6 +13,7 @@ use zitadel_fga::{
     ModelRepository, ReadRequest, StoreResolver, TupleFilter, TupleKey, TupleKeySet,
     TupleRepository, WriteRequest,
 };
+use zitadel_observability::time_async;
 use zitadel_storage::{DefaultAnalyticsStorage, DefaultTransientStorage};
 
 /// Build the complete `Repositories` container from existing infrastructure.
@@ -210,12 +211,17 @@ impl FgaRepository for FgaBridge {
         };
         Box::pin(async move {
             let _ = instance_id;
-            let store = self.0.discover_platform_store().await?;
-            Ok(self
-                .0
-                .check(zitadel_fga::PLATFORM_STORE_ID, &store.id, req)
-                .await?
-                .allowed)
+            let store = time_async(
+                "fga.discover_platform_store",
+                self.0.discover_platform_store(),
+            )
+            .await?;
+            Ok(time_async(
+                "fga.evaluate_check",
+                self.0.check(zitadel_fga::PLATFORM_STORE_ID, &store.id, req),
+            )
+            .await?
+            .allowed)
         })
     }
 
@@ -243,10 +249,17 @@ impl FgaRepository for FgaBridge {
         };
         Box::pin(async move {
             let _ = instance_id;
-            let store = self.0.discover_platform_store().await?;
-            self.0
-                .write_tuples(zitadel_fga::PLATFORM_STORE_ID, &store.id, req)
-                .await?;
+            let store = time_async(
+                "fga.discover_platform_store",
+                self.0.discover_platform_store(),
+            )
+            .await?;
+            time_async(
+                "fga.write_tuples",
+                self.0
+                    .write_tuples(zitadel_fga::PLATFORM_STORE_ID, &store.id, req),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -275,10 +288,17 @@ impl FgaRepository for FgaBridge {
         };
         Box::pin(async move {
             let _ = instance_id;
-            let store = self.0.discover_platform_store().await?;
-            self.0
-                .write_tuples(zitadel_fga::PLATFORM_STORE_ID, &store.id, req)
-                .await?;
+            let store = time_async(
+                "fga.discover_platform_store",
+                self.0.discover_platform_store(),
+            )
+            .await?;
+            time_async(
+                "fga.delete_tuples",
+                self.0
+                    .write_tuples(zitadel_fga::PLATFORM_STORE_ID, &store.id, req),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -304,16 +324,22 @@ impl FgaRepository for FgaBridge {
         });
         Box::pin(async move {
             let _ = instance_id;
-            let store = self.0.discover_platform_store().await?;
+            let store = time_async(
+                "fga.discover_platform_store",
+                self.0.discover_platform_store(),
+            )
+            .await?;
             let req = ReadRequest {
                 tuple_key: tuple_filter,
                 page_size: None,
                 continuation_token: None,
             };
-            let resp = self
-                .0
-                .read_tuples(zitadel_fga::PLATFORM_STORE_ID, &store.id, req)
-                .await?;
+            let resp = time_async(
+                "fga.read_tuples",
+                self.0
+                    .read_tuples(zitadel_fga::PLATFORM_STORE_ID, &store.id, req),
+            )
+            .await?;
             Ok(resp
                 .tuples
                 .into_iter()

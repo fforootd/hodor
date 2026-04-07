@@ -133,13 +133,8 @@ impl GetUser {
             .ok_or_else(|| AppError::not_found("user", user_id))?;
 
         // Authz: caller must be viewer on the user's org
-        crate::authz::require_permission(
-            &self.repos,
-            ctx,
-            "viewer",
-            &format!("org:{}", user.org_id),
-        )
-        .await?;
+        crate::authz::require_permission(&self.repos, ctx, "viewer", &format!("org:{}", user.org_id))
+            .await?;
 
         Ok(user)
     }

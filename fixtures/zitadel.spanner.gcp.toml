@@ -1,0 +1,60 @@
+# Real GCP Spanner config for running Zitadel locally against a native Spanner database.
+#
+# Usage:
+#   export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/spanner-sa.json
+#   cargo run -p zitadel -- db migrate -c fixtures/zitadel.spanner.gcp.toml --bootstrap
+#   cargo run -p zitadel -- server start -c fixtures/zitadel.spanner.gcp.toml
+#
+# Notes:
+# - `storage.stateful.database` must be a full Spanner database resource name.
+# - Leave `url` empty for native Spanner.
+# - Use either ADC via GOOGLE_APPLICATION_CREDENTIALS or set credentials_file below.
+# - This keeps cloud routing/provisioning disabled by default. If you want to test
+#   custom-domain provisioning on GCP as well, see the commented `[cloud]` block below.
+
+[server]
+port = 8080
+external_domain = "localhost"
+cookie_secrets = ["zitadel-spanner-dev-cookie-secret-do-not-use-in-production"]
+
+[storage.stateful]
+backend = "spanner"
+url = ""
+database = "projects/YOUR_GCP_PROJECT/instances/YOUR_SPANNER_INSTANCE/databases/YOUR_DATABASE"
+
+# Choose one auth mode:
+# 1. ADC via env var:
+#    export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/spanner-sa.json
+#
+# 2. Explicit file path:
+# credentials_file = "/absolute/path/to/spanner-sa.json"
+#
+# 3. Inline service account JSON:
+# credentials_json = "{\"type\":\"service_account\",...}"
+
+migrate = "auto"
+bootstrap = "auto"
+max_open_conns = 25
+max_idle_conns = 5
+conn_max_lifetime = "1h"
+
+[observability]
+cache_path = "../data/zitadel-spanner-cache.db"
+
+[dev]
+mock_oidc = true
+seed_file = "./seeds/frontend.yaml"
+
+# Optional: enable cloud-mode routing and GCP domain provisioning on top of Spanner.
+# Requires a valid cloud license and the target GCP infra objects to already exist.
+#
+# [cloud]
+# enabled = true
+# license_key = "YOUR_CLOUD_LICENSE"
+#
+# [cloud.gcp]
+# project_id = "YOUR_GCP_PROJECT"
+# certificate_map = "YOUR_CERTIFICATE_MAP"
+# url_map = "YOUR_URL_MAP"
+# backend_service = "YOUR_BACKEND_SERVICE"
+# credentials_path = "/absolute/path/to/spanner-sa.json"

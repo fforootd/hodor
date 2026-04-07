@@ -246,26 +246,13 @@ impl DeprovisionInstance {
         // Authz: only operator admins can deprovision instances
         crate::authz::require_operator_admin(ctx)?;
 
-        let instance = self
-            .repos
+        // Verify instance exists before deleting.
+        self.repos
             .instances
             .get(instance_id)
             .await
             .map_err(AppError::Internal)?
             .ok_or_else(|| AppError::not_found("instance", instance_id))?;
-
-        if instance.state == "deprovisioning" {
-            return Ok(());
-        }
-
-        if instance.state != "active" && instance.state != "created" {
-            return Err(AppError::InvalidState {
-                entity: "instance".to_string(),
-                id: instance_id.to_string(),
-                current_state: instance.state.clone(),
-                expected_state: "active or created".to_string(),
-            });
-        }
 
         self.repos
             .instances
@@ -356,10 +343,24 @@ impl AddDomain {
 
         let now = crate::users::chrono_now();
         let record = DomainRecord {
+            instance_id: cmd.instance_id.clone(),
+            org_id: None,
             domain: cmd.domain.clone(),
             is_primary: false,
+            purpose: "served".to_string(),
             state: "active".to_string(),
             verified: false,
+            verification_token: String::new(),
+            dns_challenge_host: String::new(),
+            dns_authorization_id: String::new(),
+            certificate_dns_record_name: String::new(),
+            certificate_dns_record_type: String::new(),
+            certificate_dns_record_value: String::new(),
+            certificate_state: String::new(),
+            certificate_id: String::new(),
+            certificate_map_entry: String::new(),
+            origin_trust_state: String::new(),
+            provisioning_error: String::new(),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -422,7 +423,7 @@ impl RemoveDomain {
         let result = self
             .repos
             .instances
-            .remove_domain(instance_id, domain)
+            .remove_domain(instance_id, None, domain)
             .await
             .map_err(AppError::Internal)?;
 

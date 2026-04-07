@@ -178,7 +178,11 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
             }),
     );
 
-    let app = Arc::new(ApplicationServices::new(repos.clone(), hooks.clone()));
+    let app = Arc::new(ApplicationServices::new(
+        repos.clone(),
+        hooks.clone(),
+        zitadel_cloud::is_enabled(&config.cloud, config.is_dev()),
+    ));
     tracing::info!("application services initialized (ADR-032)");
 
     let passwords = Arc::new(passwords);

@@ -7,7 +7,7 @@ use super::entities::{
     org_from_spanner_row, org_from_sql_row, spanner_query_all, spanner_query_optional,
     write_spanner_count, write_spanner_stmt,
 };
-use crate::{Db, Dialect, delete_instance_row, first_org_id};
+use crate::{Db, Dialect, delete_instance_row, first_org_id, spanner_ident};
 use zitadel_app::repo::{
     BoxFuture, GroupRecord, GroupRepository, ListParams, ListResult, OrgRecord, OrgRepository,
 };
@@ -230,6 +230,7 @@ impl OrgRepository for SqlOrgRepository {
                 }
                 Db::Spanner(spanner) => {
                     for table in DETACH_TABLES {
+                        let table = spanner_ident(table);
                         let mut stmt = Statement::new(format!(
                             "UPDATE {table} SET org_id = NULL WHERE instance_id = @instance_id AND org_id = @org_id"
                         ));
@@ -301,10 +302,11 @@ impl GroupRepository for SqlGroupRepository {
                         .await?;
                 }
                 Db::Spanner(spanner) => {
-                    let mut stmt = Statement::new(
-                        "INSERT INTO groups (id, instance_id, org_id, name, state, metadata) \
-                         VALUES (@id, @instance_id, @org_id, @name, @state, @metadata)",
-                    );
+                    let groups = spanner_ident("groups");
+                    let mut stmt = Statement::new(format!(
+                        "INSERT INTO {groups} (id, instance_id, org_id, name, state, metadata) \
+                         VALUES (@id, @instance_id, @org_id, @name, @state, @metadata)"
+                    ));
                     stmt.add_param("id", &group.id);
                     stmt.add_param("instance_id", &instance_id);
                     stmt.add_param("org_id", &group.org_id);
@@ -384,10 +386,11 @@ impl GroupRepository for SqlGroupRepository {
                         .collect::<Vec<_>>()
                 }
                 Db::Spanner(spanner) => {
-                    let mut sql = String::from(
-                        "SELECT id, IFNULL(org_id, '') AS org_id, name, state, IFNULL(metadata, '{}') AS metadata, \
-                                CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at \
-                         FROM groups WHERE instance_id = @instance_id AND id > @cursor",
+                    let groups = spanner_ident("groups");
+                    let mut sql = format!(
+                        "SELECT id, IFNULL(org_id, '') AS org_id, name, state, IFNULL(metadata, '{{}}') AS metadata, \
+                         CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at \
+                         FROM {groups} WHERE instance_id = @instance_id AND id > @cursor"
                     );
                     if org_id.is_some() {
                         sql.push_str(" AND org_id = @org_id");
@@ -453,10 +456,11 @@ impl GroupRepository for SqlGroupRepository {
                         > 0
                 }
                 Db::Spanner(spanner) => {
-                    let mut stmt = Statement::new(
-                        "UPDATE groups SET org_id = @org_id, name = @name, state = @state, metadata = @metadata, \
-                             updated_at = CURRENT_TIMESTAMP() WHERE instance_id = @instance_id AND id = @id",
-                    );
+                    let groups = spanner_ident("groups");
+                    let mut stmt = Statement::new(format!(
+                        "UPDATE {groups} SET org_id = @org_id, name = @name, state = @state, metadata = @metadata, \
+                         updated_at = CURRENT_TIMESTAMP() WHERE instance_id = @instance_id AND id = @id"
+                    ));
                     stmt.add_param("org_id", &group.org_id);
                     stmt.add_param("name", &group.name);
                     stmt.add_param("state", &group.state);

@@ -22,6 +22,9 @@ thiserror = { workspace = true }
 # IDs
 uuid = { workspace = true }
 
+# DNS resolution
+hickory-resolver = { workspace = true }
+
 # Workspace crates (for shared types)
 zitadel-expr = { workspace = true }
 zitadel-authz = { workspace = true }

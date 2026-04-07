@@ -14,6 +14,7 @@ use zitadel_db::{
     user_has_capability as db_user_has_capability,
 };
 use zitadel_fga::PLATFORM_STORE_ID;
+use zitadel_observability::time_async;
 
 use crate::ApiState;
 use crate::response;
@@ -31,6 +32,12 @@ pub struct Identity {
     pub operator_admin: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TokenSource {
+    Bearer,
+    SessionCookie,
+}
+
 /// AuthGate middleware — validates Bearer token or session cookie.
 /// Injects `Identity` into request extensions on success.
 /// Public routes (healthz, readyz, OIDC discovery) bypass auth.
@@ -40,17 +47,22 @@ pub async fn auth_gate(
     next: Next,
 ) -> Response {
     // Extract token from Authorization header or cookie.
-    let raw_token = extract_token(&req, &state);
+    let token = extract_token(&req, &state);
 
-    let raw_token = match raw_token {
-        Some(t) => t,
+    let (raw_token, token_source) = match token {
+        Some(token) => token,
         None => {
             return response::error(StatusCode::UNAUTHORIZED, "authentication required");
         }
     };
 
     // Resolve token against database.
-    match resolve_token(&state, &raw_token).await {
+    match time_async(
+        "auth.resolve_token",
+        resolve_token(&state, &raw_token, token_source),
+    )
+    .await
+    {
         Ok(Some(identity)) => {
             let span = Span::current();
             span.record("actor_id", tracing::field::display(&identity.user_id));
@@ -131,7 +143,9 @@ pub async fn require_scoped_instance_access(
             if !seen.insert(candidate.relation_name.clone()) {
                 continue;
             }
-            match state
+        match time_async(
+            "auth.scoped_instance_fga_check",
+            state
                 .app
                 .repos
                 .fga
@@ -140,9 +154,10 @@ pub async fn require_scoped_instance_access(
                     &identity.principal_ref,
                     &candidate.relation_name,
                     &format!("instance:{target_instance_id}"),
-                )
-                .await
-            {
+                ),
+        )
+        .await
+        {
                 Ok(true) => return next.run(req).await,
                 Ok(false) => {}
                 Err(error) => {
@@ -162,13 +177,13 @@ pub async fn require_scoped_instance_access(
     response::not_found("instance not found")
 }
 
-fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
+fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<(String, TokenSource)> {
     // 1. Authorization: Bearer <token>
     if let Some(auth) = req.headers().get(header::AUTHORIZATION)
         && let Ok(val) = auth.to_str()
         && let Some(token) = val.strip_prefix("Bearer ")
     {
-        return Some(token.to_string());
+        return Some((token.to_string(), TokenSource::Bearer));
     }
 
     // 2. Session cookie (HMAC-verified).
@@ -180,7 +195,7 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
                 && let Some(token) =
                     zitadel_authn::cookie::verify(value, &state.cookie_config.secrets)
             {
-                return Some(token);
+                return Some((token, TokenSource::SessionCookie));
             }
         }
     }
@@ -193,7 +208,11 @@ fn extract_token(req: &Request<Body>, state: &ApiState) -> Option<String> {
 /// For path-based instance scoping (/v1/instances/:id/...), the user
 /// authenticated against the root instance but is querying a child.
 /// Auth must resolve against the root; only data queries use the child.
-async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Option<Identity>> {
+async fn resolve_token(
+    state: &ApiState,
+    raw_token: &str,
+    token_source: TokenSource,
+) -> anyhow::Result<Option<Identity>> {
     let ctx = current_instance_context();
     let scoped_instance_id = current_instance_id();
     let auth_instance_id: Cow<'_, str> = match &ctx {
@@ -201,28 +220,32 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
         _ => scoped_instance_id.clone(),
     };
 
-    if let Some(identity) = state
-        .stateful
-        .resolve_pat_token(&auth_instance_id, raw_token)
+    if token_source == TokenSource::Bearer {
+        if let Some(identity) = time_async(
+            "auth.resolve_pat_token",
+            state.stateful.resolve_pat_token(&auth_instance_id, raw_token),
+        )
         .await?
-    {
-        return Ok(Some(
-            build_identity(
-                state,
-                &auth_instance_id,
-                identity.user_id,
-                identity.session_id,
-                identity.token_type,
-                identity.org_id,
-            )
-            .await?,
-        ));
+        {
+            return Ok(Some(
+                build_identity(
+                    state,
+                    &auth_instance_id,
+                    identity.user_id,
+                    identity.session_id,
+                    identity.token_type,
+                    identity.org_id,
+                )
+                .await?,
+            ));
+        }
     }
 
-    if let Some(session) = state
-        .transient
-        .find_session_by_token(&auth_instance_id, raw_token)
-        .await?
+    if let Some(session) = time_async(
+        "auth.resolve_session_token",
+        state.transient.find_session_by_token(&auth_instance_id, raw_token),
+    )
+    .await?
     {
         return Ok(Some(
             build_identity(
@@ -237,10 +260,15 @@ async fn resolve_token(state: &ApiState, raw_token: &str) -> anyhow::Result<Opti
         ));
     }
 
-    if let Some(identity) =
-        resolve_support_grant_token(state, scoped_instance_id.as_ref(), raw_token).await?
-    {
-        return Ok(Some(identity));
+    if token_source == TokenSource::Bearer {
+        if let Some(identity) = time_async(
+            "auth.resolve_support_grant",
+            resolve_support_grant_token(state, scoped_instance_id.as_ref(), raw_token),
+        )
+        .await?
+        {
+            return Ok(Some(identity));
+        }
     }
 
     Ok(None)
@@ -254,8 +282,11 @@ async fn build_identity(
     token_type: String,
     org_id: String,
 ) -> anyhow::Result<Identity> {
-    let operator_admin =
-        user_has_capability(state, instance_id, &user_id, "operator_admin").await?;
+    let operator_admin = time_async(
+        "auth.operator_admin_lookup",
+        user_has_capability(state, instance_id, &user_id, "operator_admin"),
+    )
+    .await?;
     let principal_ref = format!("user:{user_id}");
     Ok(Identity {
         user_id,
@@ -427,6 +458,7 @@ mod tests {
         let app = Arc::new(ApplicationServices::new(
             Arc::new(zitadel_app::mock::mock_repositories()),
             Arc::new(HookPipeline::empty()),
+            false,
         ));
         let oidc = zitadel_oidc::OidcState::new_with_config(
             Arc::new(DbOidcRepository::new(db.clone())),

@@ -67,10 +67,24 @@ pub struct ManagedInstanceRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DomainRecord {
+    pub instance_id: String,
+    pub org_id: Option<String>,
     pub domain: String,
     pub is_primary: bool,
+    pub purpose: String,
     pub state: String,
     pub verified: bool,
+    pub verification_token: String,
+    pub dns_challenge_host: String,
+    pub dns_authorization_id: String,
+    pub certificate_dns_record_name: String,
+    pub certificate_dns_record_type: String,
+    pub certificate_dns_record_value: String,
+    pub certificate_state: String,
+    pub certificate_id: String,
+    pub certificate_map_entry: String,
+    pub origin_trust_state: String,
+    pub provisioning_error: String,
     pub created_at: String,
     pub updated_at: String,
 }

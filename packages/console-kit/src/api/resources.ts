@@ -904,3 +904,37 @@ export const instanceApi = {
   removeDomain: (id: string, domain: string): Promise<void> =>
     api.delete(`/v1/instances/${encodeURIComponent(id)}/domains/${encodeURIComponent(domain)}`),
 }
+
+// ------------------------------------------------------------------
+// Custom Domains (customer-facing, operates within instance context)
+// ------------------------------------------------------------------
+export interface CustomDomain {
+  domain: string
+  purpose: 'allowed' | 'served'
+  is_primary: boolean
+  state: string
+  verified: boolean
+  verification_token: string
+  dns_challenge_host: string
+  certificate_state: string
+  origin_trust_state: string
+  created_at: string
+  updated_at: string
+}
+
+export const domainApi = {
+  list: (params?: { org_id?: string }): Promise<{ items: CustomDomain[] }> => {
+    const query = new URLSearchParams()
+    if (params?.org_id) query.set('org_id', params.org_id)
+    const qs = query.toString()
+    return api.get<{ items: CustomDomain[] }>(`/v1/domains${qs ? `?${qs}` : ''}`)
+  },
+  get: (domain: string): Promise<CustomDomain> =>
+    api.get<CustomDomain>(`/v1/domains/${encodeURIComponent(domain)}`),
+  add: (domain: string, purpose: 'allowed' | 'served' = 'served'): Promise<CustomDomain> =>
+    api.post<CustomDomain>('/v1/domains', { domain, purpose }),
+  remove: (domain: string): Promise<void> =>
+    api.delete(`/v1/domains/${encodeURIComponent(domain)}`),
+  verify: (domain: string): Promise<CustomDomain> =>
+    api.post<CustomDomain>(`/v1/domains/${encodeURIComponent(domain)}/verify`, {}),
+}

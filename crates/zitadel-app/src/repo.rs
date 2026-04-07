@@ -156,10 +156,24 @@ pub struct InstanceRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DomainRecord {
+    pub instance_id: String,
+    pub org_id: Option<String>,
     pub domain: String,
     pub is_primary: bool,
+    pub purpose: String,
     pub state: String,
     pub verified: bool,
+    pub verification_token: String,
+    pub dns_challenge_host: String,
+    pub dns_authorization_id: String,
+    pub certificate_dns_record_name: String,
+    pub certificate_dns_record_type: String,
+    pub certificate_dns_record_value: String,
+    pub certificate_state: String,
+    pub certificate_id: String,
+    pub certificate_map_entry: String,
+    pub origin_trust_state: String,
+    pub provisioning_error: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -718,8 +732,64 @@ pub trait InstanceRepository: Send + Sync {
     fn remove_domain(
         &self,
         instance_id: &str,
+        org_id: Option<&str>,
         domain: &str,
     ) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>>;
+
+    /// Find a domain globally by hostname. This is only for uniqueness checks
+    /// and routing metadata lookups; request-serving CRUD must use the scoped APIs below.
+    fn find_domain(&self, domain: &str) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>>;
+
+    /// Get a single domain owned by the given instance/org scope.
+    fn get_domain(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>>;
+
+    /// Update domain state and verification flag within a specific scope.
+    fn update_domain_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        new_state: &str,
+        verified: bool,
+        provisioning_error: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Update cloud certificate provisioning state within a specific scope.
+    fn update_domain_certificate_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        cert_state: &str,
+        cert_id: &str,
+        cert_map_entry: Option<&str>,
+        dns_authorization_id: Option<&str>,
+        dns_record_name: Option<&str>,
+        dns_record_type: Option<&str>,
+        dns_record_value: Option<&str>,
+        provisioning_error: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// Update origin trust state (for allowed domains) within a specific scope.
+    fn update_domain_origin_trust_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        state: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>>;
+
+    /// List domains for an instance, optionally filtered by org_id.
+    fn list_domains_for_instance(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>>;
 }
 
 /// Outcome of a domain-removal attempt.

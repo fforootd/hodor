@@ -10,6 +10,7 @@ const stubComponents = {
   CardTitle: { template: '<div class="card-title"><slot /></div>' },
   CardContent: { template: '<div class="card-content"><slot /></div>' },
   Badge: { template: '<span class="badge"><slot /></span>' },
+  Button: { template: '<button><slot /></button>' },
   Table: { template: '<table><slot /></table>' },
   TableHeader: { template: '<thead><slot /></thead>' },
   TableBody: { template: '<tbody><slot /></tbody>' },
@@ -38,20 +39,14 @@ vi.mock('@/console/composables/useInstanceContext', () => ({
 }))
 
 // Stub lucide icons as simple spans.
-vi.mock('lucide-vue-next', () => {
+vi.mock('lucide-vue-next', async (importOriginal) => {
   const Icon = { template: '<span class="icon" />' }
-  return {
-    Users: Icon,
-    Building2: Icon,
-    AppWindow: Icon,
-    FileJson: Icon,
-    Globe: Icon,
-    Activity: Icon,
-    Server: Icon,
-    Plus: Icon,
-    Search: Icon,
-    LayoutGrid: Icon,
+  const actual = await importOriginal() as Record<string, unknown>
+  const mocked: Record<string, unknown> = {}
+  for (const key of Object.keys(actual)) {
+    mocked[key] = Icon
   }
+  return mocked
 })
 
 // Mock the resources module — this is the actual import used by DashboardView.

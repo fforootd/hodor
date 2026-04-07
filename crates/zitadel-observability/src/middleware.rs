@@ -1,4 +1,9 @@
-use std::time::Instant;
+use std::{
+    collections::BTreeMap,
+    future::Future,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use axum::{
     body::Body,
@@ -6,6 +11,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use tokio::task_local;
 use tracing::{Instrument, info_span};
 use uuid::Uuid;
 
@@ -13,12 +19,17 @@ use crate::Stream;
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
+task_local! {
+    static SERVER_TIMING: ServerTimingCollector;
+}
+
 pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> Response {
     let Some(event_type) = classify_request(req.uri().path()) else {
         return next.run(req).await;
     };
 
     let start = Instant::now();
+    let server_timing = ServerTimingCollector::default();
     let (request_id, parent_span_id) = extract_request_context(&req);
     let fingerprint = header_value(&req, "x-fingerprint");
     let flow_id = header_value(&req, "x-flow-id");
@@ -59,7 +70,10 @@ pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> R
         duration_ms = tracing::field::Empty,
     );
 
-    let mut response = next.run(req).instrument(span.clone()).await;
+    let mut response = SERVER_TIMING
+        .scope(server_timing.clone(), next.run(req).instrument(span.clone()))
+        .await;
+    server_timing.record("request.total", start.elapsed());
     span.record("status", response.status().as_u16());
     span.record("duration_ms", start.elapsed().as_millis() as u64);
     tracing::info!(
@@ -73,12 +87,71 @@ pub async fn request_context_middleware(mut req: Request<Body>, next: Next) -> R
             .headers_mut()
             .insert(HeaderName::from_static(REQUEST_ID_HEADER), value);
     }
+    if let Some(value) = server_timing.header_value() {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("server-timing"), value);
+    }
     response
 }
 
 #[derive(Clone, Debug)]
 pub struct RequestContext {
     pub request_id: String,
+}
+
+#[derive(Clone, Default)]
+struct ServerTimingCollector {
+    stats: Arc<Mutex<BTreeMap<String, TimingStat>>>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TimingStat {
+    duration: Duration,
+    count: u32,
+}
+
+impl ServerTimingCollector {
+    fn record(&self, name: &str, duration: Duration) {
+        let mut stats = self.stats.lock().expect("server timing mutex poisoned");
+        let entry = stats.entry(name.to_string()).or_default();
+        entry.duration += duration;
+        entry.count = entry.count.saturating_add(1);
+    }
+
+    fn header_value(&self) -> Option<HeaderValue> {
+        let stats = self.stats.lock().expect("server timing mutex poisoned");
+        if stats.is_empty() {
+            return None;
+        }
+        let value = stats
+            .iter()
+            .map(|(name, stat)| {
+                let millis = stat.duration.as_secs_f64() * 1000.0;
+                if stat.count > 1 {
+                    format!(r#"{name};dur={millis:.2};desc="count={count}""#, count = stat.count)
+                } else {
+                    format!("{name};dur={millis:.2}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        HeaderValue::from_str(&value).ok()
+    }
+}
+
+pub fn record_server_timing(name: &str, duration: Duration) {
+    let _ = SERVER_TIMING.try_with(|collector| collector.record(name, duration));
+}
+
+pub async fn time_async<T, F>(name: &str, future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let start = Instant::now();
+    let output = future.await;
+    record_server_timing(name, start.elapsed());
+    output
 }
 
 pub fn classify_request(path: &str) -> Option<&'static str> {
@@ -161,5 +234,20 @@ mod tests {
             parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
         assert_eq!(parsed.0, "4bf92f3577b34da6a3ce929d0e0e4736");
         assert_eq!(parsed.1, "00f067aa0ba902b7");
+    }
+
+    #[test]
+    fn formats_server_timing_header() {
+        let collector = ServerTimingCollector::default();
+        collector.record("auth.resolve_token", Duration::from_millis(12));
+        collector.record("auth.resolve_token", Duration::from_millis(8));
+        collector.record("user.repo_get", Duration::from_millis(5));
+
+        let value = collector
+            .header_value()
+            .expect("expected populated server-timing header");
+        let rendered = value.to_str().unwrap();
+        assert!(rendered.contains(r#"auth.resolve_token;dur=20.00;desc="count=2""#));
+        assert!(rendered.contains("user.repo_get;dur=5.00"));
     }
 }

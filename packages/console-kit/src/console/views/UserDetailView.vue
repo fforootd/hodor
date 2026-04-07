@@ -174,15 +174,25 @@
                     </div>
                     <div class="flex items-center justify-between gap-4">
                       <dt class="text-muted-foreground">Sessions</dt>
-                      <dd class="text-right font-medium">{{ activeSessionCount }} active / {{ sessions.length }} total</dd>
+                      <dd class="text-right font-medium">
+                        {{
+                          securityLoading && !securityLoaded
+                            ? 'Loading…'
+                            : `${activeSessionCount} active / ${sessions.length} total`
+                        }}
+                      </dd>
                     </div>
                     <div class="flex items-center justify-between gap-4">
                       <dt class="text-muted-foreground">Last event</dt>
-                      <dd class="text-right font-medium">{{ formatDateTime(lastEventAt) }}</dd>
+                      <dd class="text-right font-medium">
+                        {{ activityLoading && !activityLoaded ? 'Loading…' : formatDateTime(lastEventAt) }}
+                      </dd>
                     </div>
                     <div class="flex items-center justify-between gap-4">
                       <dt class="text-muted-foreground">Last trace</dt>
-                      <dd class="text-right font-medium">{{ formatDateTime(lastTraceAt) }}</dd>
+                      <dd class="text-right font-medium">
+                        {{ activityLoading && !activityLoaded ? 'Loading…' : formatDateTime(lastTraceAt) }}
+                      </dd>
                     </div>
                   </dl>
                 </CardContent>
@@ -200,11 +210,15 @@
                 <CardContent class="space-y-3">
                   <div class="rounded-2xl border bg-muted/20 px-4 py-3">
                     <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Last event</p>
-                    <p class="mt-1 text-sm font-medium">{{ lastEventSummary }}</p>
+                    <p class="mt-1 text-sm font-medium">
+                      {{ activityLoading && !activityLoaded ? 'Loading recent events…' : lastEventSummary }}
+                    </p>
                   </div>
                   <div class="rounded-2xl border bg-muted/20 px-4 py-3">
                     <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Trace signal</p>
-                    <p class="mt-1 text-sm font-medium">{{ lastTraceSummary }}</p>
+                    <p class="mt-1 text-sm font-medium">
+                      {{ activityLoading && !activityLoaded ? 'Loading trace groups…' : lastTraceSummary }}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -655,6 +669,12 @@ const sessions = ref<SessionPreview[]>([])
 const recentEvents = ref<Event[]>([])
 const recentTraces = ref<TracePreview[]>([])
 const activeTab = ref('overview')
+const schemaLoading = ref(false)
+const securityLoading = ref(false)
+const activityLoading = ref(false)
+const schemaLoaded = ref(false)
+const securityLoaded = ref(false)
+const activityLoaded = ref(false)
 const removingOrgId = ref('')
 const revokingSessionId = ref('')
 const jsonValid = ref(true)
@@ -759,6 +779,7 @@ const lastTraceSummary = computed(() =>
     : 'No recent traces'
 )
 const securitySummary = computed(() => {
+  if (schemaLoading.value && !schemaLoaded.value) return 'Loading authentication methods…'
   if (!enabledAuthMethodItems.value.length) return 'No enabled authentication methods'
   return enabledAuthMethodItems.value.map((method) => method.label).join(', ')
 })
@@ -778,38 +799,26 @@ async function loadIdentity() {
     identity.value = loaded
     formData.value = normalizeResourceData(loaded.data || {})
     userOrgs.value = ((loaded.orgs as OrgMembership[] | undefined) || []).map((membership) => ({ ...membership }))
+    allOrgs.value = []
     sessions.value = []
     recentEvents.value = []
     recentTraces.value = []
-
-    const [schemaResult, orgsResult, sessionsResult, eventsResult, tracesResult] = await Promise.allSettled([
-      loadResourceSchemaContext(loaded.schema_type || routeSchemaType.value || 'human_user', loaded.schema_id || ''),
-      orgApi.list(),
-      sessionApi.list({ user_id: loaded.id }),
-      eventApi.list({ aggregate_id: loaded.id, limit: 8 }),
-      loadTracePreview(loaded.id),
-    ])
-
-    if (schemaResult.status === 'fulfilled') {
-      schemaContext.value = schemaResult.value
-    }
-    if (orgsResult.status === 'fulfilled') {
-      allOrgs.value = orgsResult.value
-    }
-    if (sessionsResult.status === 'fulfilled') {
-      sessions.value = normalizeSessions(sessionsResult.value)
-    }
-    if (eventsResult.status === 'fulfilled') {
-      recentEvents.value = [...eventsResult.value].sort(sortByNewest).slice(0, 8)
-    }
-    if (tracesResult.status === 'fulfilled') {
-      recentTraces.value = tracesResult.value
-    }
+    schemaLoaded.value = false
+    securityLoaded.value = false
+    activityLoaded.value = false
+    schemaLoading.value = false
+    securityLoading.value = false
+    activityLoading.value = false
   } catch (err: any) {
     loadError.value = err?.message || 'Failed to load identity'
   } finally {
     loading.value = false
   }
+
+  await nextTick()
+  void ensureSchemaContext()
+  void ensureSecurityData()
+  void ensureActivityData()
 }
 
 async function refreshIdentity() {
@@ -833,7 +842,7 @@ async function loadTracePreview(userId: string): Promise<TracePreview[]> {
       MAX(NULLIF(fingerprint, '')) AS fingerprint,
       MAX(payload) AS sample_payload
     FROM events
-    WHERE created_at >= '${cutoff}'
+    WHERE created_at >= TIMESTAMP('${cutoff}')
       AND actor_id = '${escapeSqlLiteral(userId)}'
     GROUP BY COALESCE(NULLIF(request_id, ''), NULLIF(session_id, ''), id)
     ORDER BY started_at DESC
@@ -873,6 +882,64 @@ async function loadTracePreview(userId: string): Promise<TracePreview[]> {
       fingerprint: record.fingerprint || '',
     } satisfies TracePreview
   })
+}
+
+async function ensureSchemaContext() {
+  if (!identity.value || schemaLoading.value || schemaLoaded.value) return
+  schemaLoading.value = true
+  try {
+    schemaContext.value = await loadResourceSchemaContext(
+      identity.value.schema_type || routeSchemaType.value || 'human_user',
+      identity.value.schema_id || '',
+    )
+    schemaLoaded.value = true
+  } catch {
+    // Keep the page usable even when schema metadata is unavailable.
+  } finally {
+    schemaLoading.value = false
+  }
+}
+
+async function ensureSecurityData() {
+  if (!identity.value || securityLoading.value || securityLoaded.value) return
+  securityLoading.value = true
+  try {
+    const [orgsResult, sessionsResult] = await Promise.allSettled([
+      orgApi.list(),
+      sessionApi.list({ user_id: identity.value.id }),
+    ])
+
+    if (orgsResult.status === 'fulfilled') {
+      allOrgs.value = orgsResult.value
+    }
+    if (sessionsResult.status === 'fulfilled') {
+      sessions.value = normalizeSessions(sessionsResult.value)
+    }
+    securityLoaded.value = true
+  } finally {
+    securityLoading.value = false
+  }
+}
+
+async function ensureActivityData() {
+  if (!identity.value || activityLoading.value || activityLoaded.value) return
+  activityLoading.value = true
+  try {
+    const [eventsResult, tracesResult] = await Promise.allSettled([
+      eventApi.list({ aggregate_id: identity.value.id, limit: 8 }),
+      loadTracePreview(identity.value.id),
+    ])
+
+    if (eventsResult.status === 'fulfilled') {
+      recentEvents.value = [...eventsResult.value].sort(sortByNewest).slice(0, 8)
+    }
+    if (tracesResult.status === 'fulfilled') {
+      recentTraces.value = tracesResult.value
+    }
+    activityLoaded.value = true
+  } finally {
+    activityLoading.value = false
+  }
 }
 
 async function save() {
@@ -1146,4 +1213,15 @@ function sortByNewest<T extends { created_at?: string }>(left: T, right: T): num
 
 onMounted(loadIdentity)
 watch(identityId, loadIdentity)
+watch(activeTab, (tab) => {
+  if (tab === 'security') {
+    void ensureSecurityData()
+  }
+  if (tab === 'activity') {
+    void ensureActivityData()
+  }
+  if (tab === 'edit') {
+    void ensureSchemaContext()
+  }
+})
 </script>

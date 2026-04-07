@@ -9,12 +9,24 @@
     :columns="columns"
     :search-fields="['name', 'id']"
   >
+    <template #header-actions>
+      <Button @click="showCreate = true">
+        <Plus class="mr-2 size-4" />
+        New Project
+      </Button>
+    </template>
     <template #empty-icon><FolderKanban /></template>
   </ResourceListView>
+
+  <ProjectCreateView
+    :open="showCreate"
+    @update:open="showCreate = $event"
+    @created="fetch"
+  />
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, watch } from 'vue'
+import { h, ref, onMounted, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { createColumnHelper } from '@tanstack/vue-table'
 import { projectApi, type Project } from '@/api/resources'
@@ -22,10 +34,14 @@ import { useResourceList } from '@/console/composables/useResourceList'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import { formatDate } from '@/console/utils/format'
 import ResourceListView from '@/console/components/ResourceListView.vue'
+import ProjectCreateView from '@/console/views/ProjectCreateView.vue'
 import { StateBadge } from '@/components/ui/state-badge'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import { FolderKanban } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { FolderKanban, Plus } from 'lucide-vue-next'
+
+const showCreate = ref(false)
 
 const { currentOrgId } = useOrgContext()
 const { items, loading, searchQuery, fetch } = useResourceList<Project>({

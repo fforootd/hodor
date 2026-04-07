@@ -11,6 +11,7 @@ use std::{
 };
 
 use anyhow::Context as _;
+use google_cloud_spanner::{client::Error as SpannerError, statement::Statement};
 use middleware::REQUEST_ID_HEADER;
 use opentelemetry::{
     KeyValue,
@@ -42,7 +43,9 @@ use uuid::Uuid;
 use zitadel_config::{ObservabilityConfig, StreamConfig};
 use zitadel_db::{DEFAULT_INSTANCE_ID, Db, Dialect};
 
-pub use middleware::{RequestContext, classify_request, request_context_middleware};
+pub use middleware::{
+    RequestContext, classify_request, record_server_timing, request_context_middleware, time_async,
+};
 
 const SERVICE_NAME: &str = "zitadel";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -937,6 +940,33 @@ impl CircuitBreaker {
     }
 }
 
+#[derive(Clone, Debug)]
+struct BufferedEventRow {
+    buffer_id: i64,
+    instance_id: String,
+    id: String,
+    event_type: String,
+    category: String,
+    org_id: String,
+    actor_id: Option<String>,
+    actor_type: Option<String>,
+    aggregate_id: Option<String>,
+    aggregate_type: Option<String>,
+    resource_type: Option<String>,
+    payload: String,
+    metadata: String,
+    request_id: Option<String>,
+    session_id: Option<String>,
+    flow_id: Option<String>,
+    fingerprint: String,
+    client_id: String,
+    token_id: String,
+    delegation_type: String,
+    sdk_name: String,
+    sdk_version: String,
+    created_at_ms: i64,
+}
+
 async fn drain_once(
     cache_pool: &sqlx::SqlitePool,
     analytics_db: &Db,
@@ -959,27 +989,75 @@ async fn drain_once(
         return Ok(0);
     }
 
-    let mut tx = analytics_db.pool().begin().await?;
-    for row in &rows {
-        insert_event_row(&mut tx, analytics_db.dialect(), row).await?;
-    }
-    tx.commit().await?;
+    let events: Vec<BufferedEventRow> = rows.iter().map(buffered_event_row).collect();
 
-    for row in &rows {
-        let id: i64 = row.get(0);
+    match analytics_db {
+        Db::Sql(_) => {
+            let mut tx = analytics_db.pool().begin().await?;
+            for event in &events {
+                insert_event_row_sql(&mut tx, analytics_db.dialect(), event).await?;
+            }
+            tx.commit().await?;
+        }
+        Db::Spanner(spanner) => {
+            let events = events.clone();
+            let _ = spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let events = events.clone();
+                    Box::pin(async move {
+                        for event in &events {
+                            tx.update(spanner_insert_event_stmt(event)).await?;
+                        }
+                        Ok::<(), SpannerError>(())
+                    })
+                })
+                .await?;
+        }
+    }
+
+    for event in &events {
         sqlx::query("DELETE FROM log_buffer WHERE id = ?")
-            .bind(id)
+            .bind(event.buffer_id)
             .execute(cache_pool)
             .await?;
     }
 
-    Ok(rows.len())
+    Ok(events.len())
 }
 
-async fn insert_event_row(
+fn buffered_event_row(row: &SqliteRow) -> BufferedEventRow {
+    BufferedEventRow {
+        buffer_id: row.get(0),
+        instance_id: row.get(1),
+        id: row.get(2),
+        event_type: row.get(3),
+        category: row.get(4),
+        payload: row.get(7),
+        metadata: row.get(8),
+        org_id: row.get(9),
+        actor_id: row.try_get::<Option<String>, _>(10).ok().flatten(),
+        actor_type: row.try_get::<Option<String>, _>(11).ok().flatten(),
+        aggregate_id: row.try_get::<Option<String>, _>(12).ok().flatten(),
+        aggregate_type: row.try_get::<Option<String>, _>(13).ok().flatten(),
+        resource_type: row.try_get::<Option<String>, _>(14).ok().flatten(),
+        request_id: row.try_get::<Option<String>, _>(15).ok().flatten(),
+        session_id: row.try_get::<Option<String>, _>(16).ok().flatten(),
+        flow_id: row.try_get::<Option<String>, _>(17).ok().flatten(),
+        fingerprint: row.get(18),
+        client_id: row.get(19),
+        token_id: row.get(20),
+        delegation_type: row.get(21),
+        sdk_name: row.get(22),
+        sdk_version: row.get(23),
+        created_at_ms: row.get(24),
+    }
+}
+
+async fn insert_event_row_sql(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     dialect: Dialect,
-    row: &SqliteRow,
+    event: &BufferedEventRow,
 ) -> anyhow::Result<()> {
     let insert_sql = match dialect {
         Dialect::Sqlite => {
@@ -1004,45 +1082,72 @@ async fn insert_event_row(
                 $16, $17, $18, $19, $20, $21, to_timestamp($22::double precision / 1000.0)
             )"
         }
-        Dialect::Spanner => {
-            "INSERT INTO events (
-                id, instance_id, event_type, category, org_id, actor_id, actor_type, aggregate_id,
-                aggregate_type, resource_type, payload, metadata, request_id, session_id, flow_id,
-                fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8,
-                $9, $10, $11, $12, $13, $14, $15,
-                $16, $17, $18, $19, $20, $21, TIMESTAMP_MILLIS($22)
-            )"
-        }
+        Dialect::Spanner => unreachable!("native Spanner uses spanner_insert_event_stmt"),
     };
 
     sqlx::query(insert_sql)
-        .bind(row.get::<String, _>(2))
-        .bind(row.get::<String, _>(1))
-        .bind(row.get::<String, _>(3))
-        .bind(row.get::<String, _>(4))
-        .bind(row.get::<String, _>(9))
-        .bind(row.try_get::<Option<String>, _>(10).ok().flatten())
-        .bind(row.try_get::<Option<String>, _>(11).ok().flatten())
-        .bind(row.try_get::<Option<String>, _>(12).ok().flatten())
-        .bind(row.try_get::<Option<String>, _>(13).ok().flatten())
-        .bind(row.try_get::<Option<String>, _>(14).ok().flatten())
-        .bind(row.get::<String, _>(7))
-        .bind(row.get::<String, _>(8))
-        .bind(row.try_get::<Option<String>, _>(15).ok().flatten())
-        .bind(row.try_get::<Option<String>, _>(16).ok().flatten())
-        .bind(row.try_get::<Option<String>, _>(17).ok().flatten())
-        .bind(row.get::<String, _>(18))
-        .bind(row.get::<String, _>(19))
-        .bind(row.get::<String, _>(20))
-        .bind(row.get::<String, _>(21))
-        .bind(row.get::<String, _>(22))
-        .bind(row.get::<String, _>(23))
-        .bind(row.get::<i64, _>(24))
+        .bind(&event.id)
+        .bind(&event.instance_id)
+        .bind(&event.event_type)
+        .bind(&event.category)
+        .bind(&event.org_id)
+        .bind(event.actor_id.clone())
+        .bind(event.actor_type.clone())
+        .bind(event.aggregate_id.clone())
+        .bind(event.aggregate_type.clone())
+        .bind(event.resource_type.clone())
+        .bind(&event.payload)
+        .bind(&event.metadata)
+        .bind(event.request_id.clone())
+        .bind(event.session_id.clone())
+        .bind(event.flow_id.clone())
+        .bind(&event.fingerprint)
+        .bind(&event.client_id)
+        .bind(&event.token_id)
+        .bind(&event.delegation_type)
+        .bind(&event.sdk_name)
+        .bind(&event.sdk_version)
+        .bind(event.created_at_ms)
         .execute(&mut **tx)
         .await?;
     Ok(())
+}
+
+fn spanner_insert_event_stmt(event: &BufferedEventRow) -> Statement {
+    let mut stmt = Statement::new(
+        "INSERT INTO events (
+            id, instance_id, event_type, category, org_id, actor_id, actor_type, aggregate_id,
+            aggregate_type, resource_type, payload, metadata, request_id, session_id, flow_id,
+            fingerprint, client_id, token_id, delegation_type, sdk_name, sdk_version, created_at
+        ) VALUES (
+            @id, @instance_id, @event_type, @category, @org_id, @actor_id, @actor_type, @aggregate_id,
+            @aggregate_type, @resource_type, @payload, @metadata, @request_id, @session_id, @flow_id,
+            @fingerprint, @client_id, @token_id, @delegation_type, @sdk_name, @sdk_version, TIMESTAMP_MILLIS(@created_at_ms)
+        )",
+    );
+    stmt.add_param("id", &event.id);
+    stmt.add_param("instance_id", &event.instance_id);
+    stmt.add_param("event_type", &event.event_type);
+    stmt.add_param("category", &event.category);
+    stmt.add_param("org_id", &event.org_id);
+    stmt.add_param("actor_id", &event.actor_id.clone().unwrap_or_default());
+    stmt.add_param("actor_type", &event.actor_type.clone().unwrap_or_default());
+    stmt.add_param("aggregate_id", &event.aggregate_id.clone().unwrap_or_default());
+    stmt.add_param("aggregate_type", &event.aggregate_type.clone().unwrap_or_default());
+    stmt.add_param("resource_type", &event.resource_type.clone().unwrap_or_default());
+    stmt.add_param("payload", &event.payload);
+    stmt.add_param("metadata", &event.metadata);
+    stmt.add_param("request_id", &event.request_id.clone().unwrap_or_default());
+    stmt.add_param("session_id", &event.session_id.clone().unwrap_or_default());
+    stmt.add_param("flow_id", &event.flow_id.clone().unwrap_or_default());
+    stmt.add_param("fingerprint", &event.fingerprint);
+    stmt.add_param("client_id", &event.client_id);
+    stmt.add_param("token_id", &event.token_id);
+    stmt.add_param("delegation_type", &event.delegation_type);
+    stmt.add_param("sdk_name", &event.sdk_name);
+    stmt.add_param("sdk_version", &event.sdk_version);
+    stmt.add_param("created_at_ms", &event.created_at_ms);
+    stmt
 }
 
 async fn start_otel_pipeline(

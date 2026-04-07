@@ -467,6 +467,38 @@ describe('UserDetailView', () => {
     }))
   })
 
+  it('renders the identity shell before secondary lookups settle', async () => {
+    const identity = makeIdentity()
+    mocked.userApiGet.mockResolvedValue(identity)
+    mocked.userApiUpdate.mockResolvedValue(identity)
+    mocked.userApiSetPassword.mockResolvedValue(undefined)
+    mocked.userApiDelete.mockResolvedValue(undefined)
+    mocked.sessionApiList.mockReturnValue(new Promise(() => {}))
+    mocked.eventApiList.mockReturnValue(new Promise(() => {}))
+    mocked.orgApiList.mockReturnValue(new Promise(() => {}))
+    mocked.analyticsPost.mockReturnValue(new Promise(() => {}))
+    mocked.loadResourceSchemaContext.mockReturnValue(new Promise(() => {}))
+    mocked.orgMembersAdd.mockResolvedValue(undefined)
+    mocked.orgMembersRemove.mockResolvedValue(undefined)
+    mocked.magicLinkSend.mockResolvedValue(undefined)
+
+    const router = await makeRouter('/users/user-1')
+    const wrapper = mount(UserDetailView, {
+      global: {
+        plugins: [router],
+        stubs,
+      },
+    })
+
+    for (let index = 0; index < 5; index += 1) {
+      await flushPromises()
+    }
+
+    expect(wrapper.text()).toContain('James Smith')
+    expect(wrapper.text()).not.toContain('Loading identity…')
+    expect(wrapper.text()).toContain('Loading…')
+  })
+
   it('keeps facts and drilldowns visible for service users and AI agents while hiding unsupported actions', async () => {
     const service = await mountView({
       identity: {

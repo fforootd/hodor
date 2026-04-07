@@ -14,11 +14,9 @@
             View API &amp; Protocols
           </router-link>
         </Button>
-        <Button as-child>
-          <router-link to="/applications/new">
+        <Button @click="showCreate = true">
             <Plus class="mr-2 size-4" />
             New Application
-          </router-link>
         </Button>
       </div>
     </div>
@@ -54,11 +52,9 @@
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button as-child>
-          <router-link to="/applications/new">
-            <Plus class="mr-2 size-4" />
-            New Application
-          </router-link>
+        <Button @click="showCreate = true">
+          <Plus class="mr-2 size-4" />
+          New Application
         </Button>
       </EmptyContent>
     </Empty>
@@ -108,6 +104,12 @@
         <DataTablePagination :table="table" />
       </template>
     </DataTable>
+
+    <AppCreateView
+      :open="showCreate"
+      @update:open="showCreate = $event"
+      @created="loadApps"
+    />
   </div>
 </template>
 
@@ -150,7 +152,9 @@
     Link2,
   } from 'lucide-vue-next'
   import { createColumnHelper } from '@tanstack/vue-table'
+  import AppCreateView from '@/console/views/AppCreateView.vue'
 
+  const showCreate = ref(false)
   const activeTab = ref('all')
   const allApps = ref<App[]>([])
   const selectedRows = ref({})

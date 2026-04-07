@@ -235,7 +235,7 @@ impl EffectRepository for DbEffectRepository {
                                 }
 
                                 for effect_id in &ids {
-                                    let mut stmt = Statement::new(&format!(
+                                    let mut stmt = Statement::new(format!(
                                         "UPDATE effects \
                                          SET status = 'processing', \
                                              lease_owner = @lease_owner, \

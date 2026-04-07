@@ -1,4 +1,5 @@
 pub mod billing;
+pub mod gcp;
 pub mod infra;
 pub mod license;
 pub mod staff;
@@ -36,13 +37,24 @@ pub async fn register(
         "cloud features enabled"
     );
 
+    // Log GCP infra config if set.
+    if !config.gcp.project_id.is_empty() {
+        tracing::info!(
+            project_id = %config.gcp.project_id,
+            certificate_map = %config.gcp.certificate_map,
+            url_map = %config.gcp.url_map,
+            "GCP infrastructure provisioning configured"
+        );
+    }
+
     // TODO: register cloud-specific routes and background workers
     //
     // Planned:
     //   - POST /v1/cloud/subscriptions      (billing)
     //   - POST /v1/cloud/usage              (usage reporting)
     //   - Staff admin endpoints             (staff)
-    //   - GCP LB/TLS cert provisioning      (infra)
+    //   - DomainProvisioningDispatcher       (infra) ← registered here when
+    //     the effects worker supports pluggable dispatchers
     //   - HubSpot sync workers              (support)
 
     Ok(true)

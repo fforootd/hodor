@@ -6,7 +6,10 @@ use super::entities::{
     limit_from_params, load_instance, next_cursor, upsert_domain, write_spanner_count,
     write_spanner_many,
 };
-use crate::{Db, list_instance_domains, list_managed_instances, resolve_domain_route};
+use crate::{
+    Db, list_instance_domains, list_instance_domains_filtered, list_managed_instances,
+    resolve_domain_route,
+};
 use zitadel_app::repo::{
     BoxFuture, DomainRecord, DomainRemoveResult, InstanceRecord, InstanceRepository, ListParams,
     ListResult, RouteResolution,
@@ -193,10 +196,24 @@ impl InstanceRepository for SqlInstanceRepository {
             }
             if let Some(primary_domain) = &instance.primary_domain {
                 let domain = DomainRecord {
+                    instance_id: instance.instance_id.clone(),
+                    org_id: None,
                     domain: primary_domain.clone(),
                     is_primary: true,
+                    purpose: "served".to_string(),
                     state: "active".to_string(),
                     verified: false,
+                    verification_token: String::new(),
+                    dns_challenge_host: String::new(),
+                    dns_authorization_id: String::new(),
+                    certificate_dns_record_name: String::new(),
+                    certificate_dns_record_type: String::new(),
+                    certificate_dns_record_value: String::new(),
+                    certificate_state: String::new(),
+                    certificate_id: String::new(),
+                    certificate_map_entry: String::new(),
+                    origin_trust_state: String::new(),
+                    provisioning_error: String::new(),
                     created_at: String::new(),
                     updated_at: String::new(),
                 };
@@ -215,20 +232,15 @@ impl InstanceRepository for SqlInstanceRepository {
             match &db {
                 Db::Sql(_) => {
                     let scoped = db.scoped(instance_id.clone());
-                    sqlx::query(
-                        "UPDATE instances SET state = $1, updated_at = CURRENT_TIMESTAMP WHERE instance_id = $2",
-                    )
-                    .bind("deprovisioning")
-                    .bind(&instance_id)
-                    .execute(scoped.pool())
-                    .await?;
+                    sqlx::query("DELETE FROM instances WHERE instance_id = $1")
+                        .bind(&instance_id)
+                        .execute(scoped.pool())
+                        .await?;
                 }
                 Db::Spanner(spanner) => {
                     let mut stmt = Statement::new(
-                        "UPDATE instances SET state = @state, updated_at = CURRENT_TIMESTAMP() \
-                         WHERE instance_id = @instance_id",
+                        "DELETE FROM instances WHERE instance_id = @instance_id",
                     );
-                    stmt.add_param("state", &"deprovisioning");
                     stmt.add_param("instance_id", &instance_id);
                     let _ = write_spanner_count(spanner, stmt).await?;
                 }
@@ -281,17 +293,170 @@ impl InstanceRepository for SqlInstanceRepository {
     fn remove_domain(
         &self,
         instance_id: &str,
+        org_id: Option<&str>,
         domain: &str,
     ) -> BoxFuture<'_, anyhow::Result<DomainRemoveResult>> {
         let db = self.db.clone();
         let instance_id = instance_id.to_string();
+        let org_id = org_id.map(|value| value.to_string());
         let domain = domain.to_string();
         Box::pin(async move {
-            match crate::delete_instance_domain(&db, &instance_id, &domain).await? {
+            match crate::delete_domain_for_scope(&db, &instance_id, org_id.as_deref(), &domain)
+                .await?
+            {
                 crate::DomainDeleteOutcome::Deleted => Ok(DomainRemoveResult::Deleted),
                 crate::DomainDeleteOutcome::NotFound => Ok(DomainRemoveResult::NotFound),
                 crate::DomainDeleteOutcome::PrimaryDomain => Ok(DomainRemoveResult::PrimaryDomain),
             }
+        })
+    }
+
+    fn find_domain(&self, domain: &str) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>> {
+        let db = self.db.clone();
+        let domain = domain.to_string();
+        Box::pin(async move {
+            Ok(crate::find_domain(&db, &domain)
+                .await?
+                .map(domain_from_retained))
+        })
+    }
+
+    fn get_domain(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+    ) -> BoxFuture<'_, anyhow::Result<Option<DomainRecord>>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(|value| value.to_string());
+        let domain = domain.to_string();
+        Box::pin(async move {
+            Ok(
+                crate::get_domain_for_scope(&db, &instance_id, org_id.as_deref(), &domain)
+                    .await?
+                    .map(domain_from_retained),
+            )
+        })
+    }
+
+    fn update_domain_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        new_state: &str,
+        verified: bool,
+        provisioning_error: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(|value| value.to_string());
+        let domain = domain.to_string();
+        let new_state = new_state.to_string();
+        let provisioning_error = provisioning_error.map(|value| value.to_string());
+        Box::pin(async move {
+            crate::update_domain_state_for_scope(
+                &db,
+                &instance_id,
+                org_id.as_deref(),
+                &domain,
+                &new_state,
+                verified,
+                provisioning_error.as_deref(),
+            )
+            .await
+        })
+    }
+
+    fn update_domain_certificate_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        cert_state: &str,
+        cert_id: &str,
+        cert_map_entry: Option<&str>,
+        dns_authorization_id: Option<&str>,
+        dns_record_name: Option<&str>,
+        dns_record_type: Option<&str>,
+        dns_record_value: Option<&str>,
+        provisioning_error: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(|value| value.to_string());
+        let domain = domain.to_string();
+        let cert_state = cert_state.to_string();
+        let cert_id = cert_id.to_string();
+        let cert_map_entry = cert_map_entry.map(|value| value.to_string());
+        let dns_authorization_id = dns_authorization_id.map(|value| value.to_string());
+        let dns_record_name = dns_record_name.map(|value| value.to_string());
+        let dns_record_type = dns_record_type.map(|value| value.to_string());
+        let dns_record_value = dns_record_value.map(|value| value.to_string());
+        let provisioning_error = provisioning_error.map(|value| value.to_string());
+        Box::pin(async move {
+            crate::update_domain_certificate_state_for_scope(
+                &db,
+                &instance_id,
+                org_id.as_deref(),
+                &domain,
+                &cert_state,
+                &cert_id,
+                cert_map_entry.as_deref(),
+                dns_authorization_id.as_deref(),
+                dns_record_name.as_deref(),
+                dns_record_type.as_deref(),
+                dns_record_value.as_deref(),
+                provisioning_error.as_deref(),
+            )
+            .await
+        })
+    }
+
+    fn update_domain_origin_trust_state(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+        domain: &str,
+        state: &str,
+    ) -> BoxFuture<'_, anyhow::Result<()>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(|value| value.to_string());
+        let domain = domain.to_string();
+        let state = state.to_string();
+        Box::pin(async move {
+            crate::update_domain_origin_trust_state_for_scope(
+                &db,
+                &instance_id,
+                org_id.as_deref(),
+                &domain,
+                &state,
+            )
+            .await
+        })
+    }
+
+    fn list_domains_for_instance(
+        &self,
+        instance_id: &str,
+        org_id: Option<&str>,
+    ) -> BoxFuture<'_, anyhow::Result<Vec<DomainRecord>>> {
+        let db = self.db.clone();
+        let instance_id = instance_id.to_string();
+        let org_id = org_id.map(|s| s.to_string());
+        Box::pin(async move {
+            Ok(list_instance_domains_filtered(
+                &db,
+                &instance_id,
+                org_id.as_deref(),
+                org_id.is_none(),
+            )
+            .await?
+            .into_iter()
+            .map(domain_from_retained)
+            .collect())
         })
     }
 }

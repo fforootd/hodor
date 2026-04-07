@@ -13,6 +13,7 @@ zitadel-observability = { workspace = true }
 zitadel-storage = { workspace = true }
 zitadel-api = { workspace = true }
 zitadel-catalog = { workspace = true }
+zitadel-cloud = { workspace = true }
 zitadel-authn = { workspace = true }
 zitadel-oidc = { workspace = true }
 zitadel-login = { workspace = true }

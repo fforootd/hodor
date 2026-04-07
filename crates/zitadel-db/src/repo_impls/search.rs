@@ -1,7 +1,7 @@
 use google_cloud_spanner::statement::Statement;
 
 use super::entities::{SqlSearchRepository, normalized_resource_types, spanner_query_all};
-use crate::{Db, list_schema_registry, provider};
+use crate::{Db, list_schema_registry, provider, spanner_ident};
 use zitadel_app::repo::{BoxFuture, SearchRepository, SearchResult};
 
 impl SearchRepository for SqlSearchRepository {
@@ -130,10 +130,11 @@ impl SearchRepository for SqlSearchRepository {
                         }));
                     }
                     Db::Spanner(spanner) => {
-                        let mut stmt = Statement::new(
-                            "SELECT id, IFNULL(org_id, '') AS org_id, name FROM groups \
-                             WHERE instance_id = @instance_id AND name LIKE @pattern ORDER BY name, id LIMIT @limit",
-                        );
+                        let groups = spanner_ident("groups");
+                        let mut stmt = Statement::new(format!(
+                            "SELECT id, IFNULL(org_id, '') AS org_id, name FROM {groups} \
+                             WHERE instance_id = @instance_id AND name LIKE @pattern ORDER BY name, id LIMIT @limit"
+                        ));
                         stmt.add_param("instance_id", &instance_id);
                         stmt.add_param("pattern", &pattern);
                         stmt.add_param("limit", &limit);

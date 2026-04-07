@@ -3,7 +3,7 @@ use axum::{Extension, Router, extract::State, response::Response, routing::get};
 use zitadel_app::{FeatureMap, feature_enabled, merge_feature_overrides};
 
 const META_SCHEMA: &str = include_str!("meta_schema.json");
-const ALLOWED_INSTANCE_FEATURES: &[&str] = &["instance_management", "billing"];
+const ALLOWED_INSTANCE_FEATURES: &[&str] = &["instance_management", "billing", "custom_domains"];
 
 pub fn routes() -> Router<ApiState> {
     Router::new()
@@ -112,10 +112,22 @@ async fn bootstrap(
             .get("billing")
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
+    let custom_domains = feature_enabled(
+        &default_features,
+        &feature_overrides,
+        ALLOWED_INSTANCE_FEATURES,
+        "custom_domains",
+    )
+    .unwrap_or(false)
+        || feature_overrides
+            .get("custom_domains")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
     let capabilities = serde_json::json!({
         "instance_management": instance_management,
         "operator_admin": is_root && identity.operator_admin,
         "billing": billing,
+        "custom_domains": custom_domains,
     });
 
     response::json_ok(serde_json::json!({

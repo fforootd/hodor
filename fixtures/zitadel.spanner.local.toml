@@ -1,0 +1,45 @@
+# Local config for running Zitadel against the real GCP Spanner database shown in your screenshot.
+#
+# Usage:
+#   export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/spanner-sa.json
+#   cargo run -p zitadel -- db migrate -c fixtures/zitadel.spanner.local.toml --bootstrap
+#   cargo run -p zitadel -- server start -c fixtures/zitadel.spanner.local.toml
+#
+# Spanner target:
+#   project  = ffo-test-27661
+#   instance = test
+#   database = a1
+
+[server]
+port = 8080
+external_domain = "localhost"
+cookie_secrets = ["zitadel-spanner-local-cookie-secret-do-not-use-in-production"]
+
+[storage.stateful]
+backend = "spanner"
+url = ""
+database = "projects/ffo-test-27661/instances/test/databases/a1"
+
+# Recommended local auth path:
+# export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/spanner-sa.json
+#
+# Or uncomment this:
+# credentials_file = "/absolute/path/to/spanner-sa.json"
+
+migrate = "auto"
+bootstrap = "auto"
+max_open_conns = 25
+max_idle_conns = 5
+conn_max_lifetime = "1h"
+
+[observability]
+cache_path = "../data/zitadel-spanner-local-cache.db"
+
+[dev]
+mock_oidc = true
+seed_file = "./seeds/frontend.yaml"
+
+# Leave cloud-mode off unless you also want to exercise GCP custom-domain
+# provisioning on this local run.
+[cloud]
+enabled = false

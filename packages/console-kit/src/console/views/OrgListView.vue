@@ -9,12 +9,24 @@
     :columns="columns"
     :search-fields="['name', 'id']"
   >
+    <template #header-actions>
+      <Button @click="showCreate = true">
+        <Plus class="mr-2 size-4" />
+        New Organization
+      </Button>
+    </template>
     <template #empty-icon><Building2 /></template>
   </ResourceListView>
+
+  <OrgCreateView
+    :open="showCreate"
+    @update:open="showCreate = $event"
+    @created="fetch"
+  />
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, watch } from 'vue'
+import { h, ref, onMounted, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { createColumnHelper } from '@tanstack/vue-table'
 import { orgApi, type Org } from '@/api/resources'
@@ -22,9 +34,13 @@ import { useResourceList } from '@/console/composables/useResourceList'
 import { useOrgContext } from '@/console/composables/useOrgContext'
 import { formatDate } from '@/console/utils/format'
 import ResourceListView from '@/console/components/ResourceListView.vue'
+import OrgCreateView from '@/console/views/OrgCreateView.vue'
 import { StateBadge } from '@/components/ui/state-badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Building2 } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { Building2, Plus } from 'lucide-vue-next'
+
+const showCreate = ref(false)
 
 const { currentOrgId } = useOrgContext()
 const { items, loading, searchQuery, fetch } = useResourceList<Org>({

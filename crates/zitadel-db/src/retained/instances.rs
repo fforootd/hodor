@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 
-use google_cloud_spanner::{client::Error as SpannerError, mutation::insert, statement::Statement};
+use google_cloud_spanner::{
+    client::Error as SpannerError,
+    mutation::insert,
+    statement::{Statement, ToKind},
+};
 
 use super::{
     ChildInstanceOwnershipRecord, ConsoleBootstrapData, CreateManagedInstanceInput,
@@ -9,7 +13,31 @@ use super::{
     instance_from_spanner_row, instance_from_sql_row, spanner_query_all, spanner_query_optional,
     spanner_query_scalar_i64,
 };
-use crate::Db;
+use crate::{Db, spanner_ident};
+
+#[derive(sqlx::FromRow)]
+struct DomainSqlRow {
+    instance_id: String,
+    org_id: Option<String>,
+    domain: String,
+    is_primary: i64,
+    purpose: String,
+    state: String,
+    verified: i64,
+    verification_token: String,
+    dns_challenge_host: String,
+    dns_authorization_id: String,
+    certificate_dns_record_name: String,
+    certificate_dns_record_type: String,
+    certificate_dns_record_value: String,
+    certificate_state: String,
+    certificate_id: String,
+    certificate_map_entry: String,
+    origin_trust_state: String,
+    provisioning_error: String,
+    created_at: String,
+    updated_at: String,
+}
 
 pub async fn load_instance_metadata(
     db: &Db,
@@ -114,7 +142,7 @@ pub async fn load_entity_counts(
         ),
         (
             "group",
-            "SELECT COUNT(*) AS total FROM groups WHERE instance_id = @instance_id",
+            "SELECT COUNT(*) AS total FROM `groups` WHERE instance_id = @instance_id",
             "SELECT COUNT(*) FROM groups WHERE instance_id = $1",
         ),
         (
@@ -582,59 +610,468 @@ pub async fn list_instance_domains(
     db: &Db,
     instance_id: &str,
 ) -> anyhow::Result<Vec<DomainRecord>> {
+    list_instance_domains_filtered(db, instance_id, None, true).await
+}
+
+/// List domains for an instance, optionally filtered by org_id.
+/// When `org_null_only` is true, only returns instance-level domains (org_id IS NULL).
+pub async fn list_instance_domains_filtered(
+    db: &Db,
+    instance_id: &str,
+    org_id: Option<&str>,
+    org_null_only: bool,
+) -> anyhow::Result<Vec<DomainRecord>> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
             let (created_at, updated_at) = scoped.select_timestamps();
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $2"
+            } else if org_null_only {
+                "AND org_id IS NULL"
+            } else {
+                ""
+            };
             let sql = format!(
-                "SELECT domain, {}, state, {}, {created_at}, {updated_at} \
-                 FROM domains WHERE instance_id = $1 AND org_id IS NULL \
+                "SELECT instance_id, org_id, domain, {} AS is_primary, purpose, state, {} AS verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, \
+                 certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                 certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error, \
+                 {created_at} AS created_at, {updated_at} AS updated_at \
+                 FROM domains WHERE instance_id = $1 {org_filter} \
                  ORDER BY is_primary DESC, domain",
                 scoped.bool_as_int("is_primary"),
                 scoped.bool_as_int("verified"),
             );
-            let rows: Vec<(String, i32, String, i32, String, String)> = sqlx::query_as(&sql)
-                .bind(instance_id)
-                .fetch_all(scoped.pool())
-                .await?;
-            Ok(rows
-                .into_iter()
-                .map(|row| DomainRecord {
-                    domain: row.0,
-                    is_primary: row.1 != 0,
-                    state: row.2,
-                    verified: row.3 != 0,
-                    created_at: row.4,
-                    updated_at: row.5,
-                })
-                .collect())
+            let query = sqlx::query_as(&sql).bind(instance_id);
+            let query = if let Some(oid) = org_id {
+                query.bind(oid)
+            } else {
+                query
+            };
+            let rows: Vec<DomainSqlRow> = query.fetch_all(scoped.pool()).await?;
+            Ok(rows.into_iter().map(domain_from_sql_row).collect())
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(
-                "SELECT domain, is_primary, state, verified, CAST(created_at AS STRING) AS created_at, \
-                        CAST(updated_at AS STRING) AS updated_at \
-                 FROM domains WHERE instance_id = @instance_id AND org_id IS NULL \
-                 ORDER BY is_primary DESC, domain",
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else if org_null_only {
+                "AND org_id IS NULL"
+            } else {
+                ""
+            };
+            let sql = format!(
+                "SELECT instance_id, org_id, domain, is_primary, purpose, state, verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, \
+                 certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                 certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error, \
+                 CAST(created_at AS STRING) AS created_at, \
+                 CAST(updated_at AS STRING) AS updated_at \
+                 FROM domains WHERE instance_id = @instance_id {org_filter} \
+                 ORDER BY is_primary DESC, domain"
             );
+            let mut stmt = Statement::new(&sql);
             stmt.add_param("instance_id", &instance_id);
+            if let Some(oid) = org_id {
+                stmt.add_param("org_id", &oid);
+            }
             Ok(spanner_query_all(spanner, stmt)
                 .await?
                 .into_iter()
-                .map(|row| DomainRecord {
-                    domain: row.column_by_name::<String>("domain").unwrap_or_default(),
-                    is_primary: row.column_by_name::<bool>("is_primary").unwrap_or(false),
-                    state: row.column_by_name::<String>("state").unwrap_or_default(),
-                    verified: row.column_by_name::<bool>("verified").unwrap_or(false),
-                    created_at: row
-                        .column_by_name::<String>("created_at")
-                        .unwrap_or_default(),
-                    updated_at: row
-                        .column_by_name::<String>("updated_at")
-                        .unwrap_or_default(),
-                })
+                .map(|row| domain_from_spanner_row(&row))
                 .collect())
         }
     }
+}
+
+fn domain_from_sql_row(row: DomainSqlRow) -> DomainRecord {
+    DomainRecord {
+        instance_id: row.instance_id,
+        org_id: row.org_id,
+        domain: row.domain,
+        is_primary: row.is_primary != 0,
+        purpose: row.purpose,
+        state: row.state,
+        verified: row.verified != 0,
+        verification_token: row.verification_token,
+        dns_challenge_host: row.dns_challenge_host,
+        dns_authorization_id: row.dns_authorization_id,
+        certificate_dns_record_name: row.certificate_dns_record_name,
+        certificate_dns_record_type: row.certificate_dns_record_type,
+        certificate_dns_record_value: row.certificate_dns_record_value,
+        certificate_state: row.certificate_state,
+        certificate_id: row.certificate_id,
+        certificate_map_entry: row.certificate_map_entry,
+        origin_trust_state: row.origin_trust_state,
+        provisioning_error: row.provisioning_error,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+fn domain_from_spanner_row(row: &google_cloud_spanner::row::Row) -> DomainRecord {
+    DomainRecord {
+        instance_id: row
+            .column_by_name::<String>("instance_id")
+            .unwrap_or_default(),
+        org_id: row
+            .column_by_name::<Option<String>>("org_id")
+            .unwrap_or(None),
+        domain: row.column_by_name::<String>("domain").unwrap_or_default(),
+        is_primary: row.column_by_name::<bool>("is_primary").unwrap_or(false),
+        purpose: row
+            .column_by_name::<String>("purpose")
+            .unwrap_or_else(|_| "served".to_string()),
+        state: row.column_by_name::<String>("state").unwrap_or_default(),
+        verified: row.column_by_name::<bool>("verified").unwrap_or(false),
+        verification_token: row
+            .column_by_name::<String>("verification_token")
+            .unwrap_or_default(),
+        dns_challenge_host: row
+            .column_by_name::<String>("dns_challenge_host")
+            .unwrap_or_default(),
+        dns_authorization_id: row
+            .column_by_name::<String>("dns_authorization_id")
+            .unwrap_or_default(),
+        certificate_dns_record_name: row
+            .column_by_name::<String>("certificate_dns_record_name")
+            .unwrap_or_default(),
+        certificate_dns_record_type: row
+            .column_by_name::<String>("certificate_dns_record_type")
+            .unwrap_or_default(),
+        certificate_dns_record_value: row
+            .column_by_name::<String>("certificate_dns_record_value")
+            .unwrap_or_default(),
+        certificate_state: row
+            .column_by_name::<String>("certificate_state")
+            .unwrap_or_default(),
+        certificate_id: row
+            .column_by_name::<String>("certificate_id")
+            .unwrap_or_default(),
+        certificate_map_entry: row
+            .column_by_name::<String>("certificate_map_entry")
+            .unwrap_or_default(),
+        origin_trust_state: row
+            .column_by_name::<String>("origin_trust_state")
+            .unwrap_or_default(),
+        provisioning_error: row
+            .column_by_name::<String>("provisioning_error")
+            .unwrap_or_default(),
+        created_at: row
+            .column_by_name::<String>("created_at")
+            .unwrap_or_default(),
+        updated_at: row
+            .column_by_name::<String>("updated_at")
+            .unwrap_or_default(),
+    }
+}
+
+/// Find a single domain globally by name.
+pub async fn find_domain(db: &Db, domain: &str) -> anyhow::Result<Option<DomainRecord>> {
+    match db {
+        Db::Sql(_) => {
+            let sql = "SELECT instance_id, org_id, domain, \
+                CASE WHEN is_primary THEN 1 ELSE 0 END AS is_primary, \
+                purpose, state, \
+                CASE WHEN verified THEN 1 ELSE 0 END AS verified, \
+                verification_token, dns_challenge_host, dns_authorization_id, \
+                certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error, \
+                CAST(created_at AS TEXT) AS created_at, \
+                CAST(updated_at AS TEXT) AS updated_at \
+                FROM domains WHERE domain = $1 LIMIT 1";
+            let row: Option<DomainSqlRow> = sqlx::query_as(sql)
+                .bind(domain)
+                .fetch_optional(db.pool())
+                .await?;
+            Ok(row.map(domain_from_sql_row))
+        }
+        Db::Spanner(spanner) => {
+            let mut stmt = Statement::new(
+                "SELECT instance_id, org_id, domain, is_primary, purpose, state, verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, \
+                 certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                 certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error, \
+                 CAST(created_at AS STRING) AS created_at, \
+                 CAST(updated_at AS STRING) AS updated_at \
+                 FROM domains WHERE domain = @domain LIMIT 1",
+            );
+            stmt.add_param("domain", &domain);
+            Ok(spanner_query_optional(spanner, stmt)
+                .await?
+                .map(|row| domain_from_spanner_row(&row)))
+        }
+    }
+}
+
+/// Get a single domain by name within a specific instance/org scope.
+pub async fn get_domain_for_scope(
+    db: &Db,
+    instance_id: &str,
+    org_id: Option<&str>,
+    domain: &str,
+) -> anyhow::Result<Option<DomainRecord>> {
+    match db {
+        Db::Sql(_) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $3"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "SELECT instance_id, org_id, domain, \
+                 CASE WHEN is_primary THEN 1 ELSE 0 END AS is_primary, \
+                 purpose, state, CASE WHEN verified THEN 1 ELSE 0 END AS verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, \
+                 certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                 certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error, \
+                 CAST(created_at AS TEXT) AS created_at, CAST(updated_at AS TEXT) AS updated_at \
+                 FROM domains WHERE instance_id = $1 AND domain = $2 {org_filter} LIMIT 1"
+            );
+            let query = sqlx::query_as::<_, DomainSqlRow>(&sql)
+                .bind(instance_id)
+                .bind(domain);
+            let query = if let Some(org_id) = org_id {
+                query.bind(org_id)
+            } else {
+                query
+            };
+            Ok(query
+                .fetch_optional(db.pool())
+                .await?
+                .map(domain_from_sql_row))
+        }
+        Db::Spanner(spanner) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "SELECT instance_id, org_id, domain, is_primary, purpose, state, verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, \
+                 certificate_dns_record_name, certificate_dns_record_type, certificate_dns_record_value, \
+                 certificate_state, certificate_id, certificate_map_entry, origin_trust_state, provisioning_error, \
+                 CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at \
+                 FROM domains WHERE instance_id = @instance_id AND domain = @domain {org_filter} LIMIT 1"
+            );
+            let mut stmt = Statement::new(&sql);
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("domain", &domain);
+            if let Some(org_id) = org_id {
+                stmt.add_param("org_id", &org_id);
+            }
+            Ok(spanner_query_optional(spanner, stmt)
+                .await?
+                .map(|row| domain_from_spanner_row(&row)))
+        }
+    }
+}
+
+/// Update domain state and verified flag.
+pub async fn update_domain_state_for_scope(
+    db: &Db,
+    instance_id: &str,
+    org_id: Option<&str>,
+    domain: &str,
+    new_state: &str,
+    verified: bool,
+    provisioning_error: Option<&str>,
+) -> anyhow::Result<()> {
+    match db {
+        Db::Sql(_) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $6"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "UPDATE domains SET state = $1, verified = $2, provisioning_error = $3, \
+                 updated_at = CURRENT_TIMESTAMP WHERE instance_id = $4 AND domain = $5 {org_filter}"
+            );
+            let query = sqlx::query(&sql)
+                .bind(new_state)
+                .bind(verified)
+                .bind(provisioning_error.unwrap_or(""))
+                .bind(instance_id)
+                .bind(domain);
+            let query = if let Some(org_id) = org_id {
+                query.bind(org_id)
+            } else {
+                query
+            };
+            query.execute(db.pool()).await?;
+        }
+        Db::Spanner(spanner) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "UPDATE domains SET state = @state, verified = @verified, provisioning_error = @provisioning_error, \
+                 updated_at = CURRENT_TIMESTAMP() WHERE instance_id = @instance_id AND domain = @domain {org_filter}"
+            );
+            let mut stmt = Statement::new(&sql);
+            stmt.add_param("state", &new_state);
+            stmt.add_param("verified", &verified);
+            stmt.add_param("provisioning_error", &provisioning_error.unwrap_or(""));
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("domain", &domain);
+            if let Some(org_id) = org_id {
+                stmt.add_param("org_id", &org_id);
+            }
+            spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let stmt = stmt.clone();
+                    Box::pin(async move { Ok::<i64, SpannerError>(tx.update(stmt).await?) })
+                })
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Update cloud certificate provisioning state.
+pub async fn update_domain_certificate_state_for_scope(
+    db: &Db,
+    instance_id: &str,
+    org_id: Option<&str>,
+    domain: &str,
+    cert_state: &str,
+    cert_id: &str,
+    cert_map_entry: Option<&str>,
+    dns_authorization_id: Option<&str>,
+    dns_record_name: Option<&str>,
+    dns_record_type: Option<&str>,
+    dns_record_value: Option<&str>,
+    provisioning_error: Option<&str>,
+) -> anyhow::Result<()> {
+    match db {
+        Db::Sql(_) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $11"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "UPDATE domains SET certificate_state = $1, certificate_id = $2, certificate_map_entry = $3, \
+                 dns_authorization_id = $4, certificate_dns_record_name = $5, certificate_dns_record_type = $6, \
+                 certificate_dns_record_value = $7, provisioning_error = $8, updated_at = CURRENT_TIMESTAMP \
+                 WHERE instance_id = $9 AND domain = $10 {org_filter}"
+            );
+            let query = sqlx::query(&sql)
+                .bind(cert_state)
+                .bind(cert_id)
+                .bind(cert_map_entry.unwrap_or(""))
+                .bind(dns_authorization_id.unwrap_or(""))
+                .bind(dns_record_name.unwrap_or(""))
+                .bind(dns_record_type.unwrap_or(""))
+                .bind(dns_record_value.unwrap_or(""))
+                .bind(provisioning_error.unwrap_or(""))
+                .bind(instance_id)
+                .bind(domain);
+            let query = if let Some(org_id) = org_id {
+                query.bind(org_id)
+            } else {
+                query
+            };
+            query.execute(db.pool()).await?;
+        }
+        Db::Spanner(spanner) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "UPDATE domains SET certificate_state = @cert_state, certificate_id = @cert_id, \
+                 certificate_map_entry = @certificate_map_entry, dns_authorization_id = @dns_authorization_id, \
+                 certificate_dns_record_name = @dns_record_name, certificate_dns_record_type = @dns_record_type, \
+                 certificate_dns_record_value = @dns_record_value, provisioning_error = @provisioning_error, \
+                 updated_at = CURRENT_TIMESTAMP() WHERE instance_id = @instance_id AND domain = @domain {org_filter}"
+            );
+            let mut stmt = Statement::new(&sql);
+            stmt.add_param("cert_state", &cert_state);
+            stmt.add_param("cert_id", &cert_id);
+            stmt.add_param("certificate_map_entry", &cert_map_entry.unwrap_or(""));
+            stmt.add_param("dns_authorization_id", &dns_authorization_id.unwrap_or(""));
+            stmt.add_param("dns_record_name", &dns_record_name.unwrap_or(""));
+            stmt.add_param("dns_record_type", &dns_record_type.unwrap_or(""));
+            stmt.add_param("dns_record_value", &dns_record_value.unwrap_or(""));
+            stmt.add_param("provisioning_error", &provisioning_error.unwrap_or(""));
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("domain", &domain);
+            if let Some(org_id) = org_id {
+                stmt.add_param("org_id", &org_id);
+            }
+            spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let stmt = stmt.clone();
+                    Box::pin(async move { Ok::<i64, SpannerError>(tx.update(stmt).await?) })
+                })
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Update origin trust state (for allowed domains).
+pub async fn update_domain_origin_trust_state_for_scope(
+    db: &Db,
+    instance_id: &str,
+    org_id: Option<&str>,
+    domain: &str,
+    state: &str,
+) -> anyhow::Result<()> {
+    match db {
+        Db::Sql(_) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $4"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "UPDATE domains SET origin_trust_state = $1, updated_at = CURRENT_TIMESTAMP \
+                 WHERE instance_id = $2 AND domain = $3 {org_filter}"
+            );
+            let query = sqlx::query(&sql).bind(state).bind(instance_id).bind(domain);
+            let query = if let Some(org_id) = org_id {
+                query.bind(org_id)
+            } else {
+                query
+            };
+            query.execute(db.pool()).await?;
+        }
+        Db::Spanner(spanner) => {
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "UPDATE domains SET origin_trust_state = @state, updated_at = CURRENT_TIMESTAMP() \
+                 WHERE instance_id = @instance_id AND domain = @domain {org_filter}"
+            );
+            let mut stmt = Statement::new(&sql);
+            stmt.add_param("state", &state);
+            stmt.add_param("instance_id", &instance_id);
+            stmt.add_param("domain", &domain);
+            if let Some(org_id) = org_id {
+                stmt.add_param("org_id", &org_id);
+            }
+            spanner
+                .client()
+                .read_write_transaction(|tx| {
+                    let stmt = stmt.clone();
+                    Box::pin(async move { Ok::<i64, SpannerError>(tx.update(stmt).await?) })
+                })
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn add_instance_domain(
@@ -642,61 +1079,154 @@ pub async fn add_instance_domain(
     instance_id: &str,
     domain: &str,
 ) -> anyhow::Result<DomainRecord> {
+    add_instance_domain_full(
+        db,
+        instance_id,
+        domain,
+        None,
+        "served",
+        "active",
+        false,
+        "",
+        "",
+    )
+    .await
+}
+
+/// Add a domain with full control over all fields.
+#[allow(clippy::too_many_arguments)]
+pub async fn add_instance_domain_full(
+    db: &Db,
+    instance_id: &str,
+    domain: &str,
+    org_id: Option<&str>,
+    purpose: &str,
+    state: &str,
+    verified: bool,
+    verification_token: &str,
+    dns_challenge_host: &str,
+) -> anyhow::Result<DomainRecord> {
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
             sqlx::query(
-                "INSERT INTO domains (domain, instance_id, is_primary, state, verified) \
-                 VALUES ($1, $2, 0, 'active', 0)",
+                "INSERT INTO domains (domain, instance_id, org_id, is_primary, purpose, state, verified, \
+                 verification_token, dns_challenge_host, dns_authorization_id, certificate_dns_record_name, \
+                 certificate_dns_record_type, certificate_dns_record_value, certificate_state, certificate_id, \
+                 certificate_map_entry, origin_trust_state, provisioning_error) \
+                 VALUES ($1, $2, $3, 0, $4, $5, $6, $7, $8, '', '', '', '', '', '', '', '')",
             )
             .bind(domain)
             .bind(instance_id)
+            .bind(org_id)
+            .bind(purpose)
+            .bind(state)
+            .bind(verified)
+            .bind(verification_token)
+            .bind(dns_challenge_host)
             .execute(scoped.pool())
             .await?;
         }
         Db::Spanner(spanner) => {
+            let org_id = org_id.map(|value| value.to_string());
+            let cols = &[
+                "domain",
+                "instance_id",
+                "org_id",
+                "is_primary",
+                "purpose",
+                "state",
+                "verified",
+                "verification_token",
+                "dns_challenge_host",
+                "dns_authorization_id",
+                "certificate_dns_record_name",
+                "certificate_dns_record_type",
+                "certificate_dns_record_value",
+                "certificate_state",
+                "certificate_id",
+                "certificate_map_entry",
+                "origin_trust_state",
+                "provisioning_error",
+            ];
             let mutation = insert(
                 "domains",
-                &["domain", "instance_id", "is_primary", "state", "verified"],
-                &[&domain, &instance_id, &false, &"active", &false],
+                cols,
+                &[
+                    &domain,
+                    &instance_id,
+                    &org_id as &dyn ToKind,
+                    &false,
+                    &purpose,
+                    &state,
+                    &verified,
+                    &verification_token,
+                    &dns_challenge_host,
+                    &"",
+                    &"",
+                    &"",
+                    &"",
+                    &"",
+                    &"",
+                    &"",
+                    &"",
+                    &"",
+                ],
             );
             spanner.client().apply(vec![mutation]).await?;
         }
     }
 
-    let items = list_instance_domains(db, instance_id).await?;
-    items
-        .into_iter()
-        .find(|item| item.domain == domain)
+    get_domain_for_scope(db, instance_id, org_id, domain)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("created domain but could not reload it"))
 }
 
-pub async fn delete_instance_domain(
+pub async fn delete_domain_for_scope(
     db: &Db,
     instance_id: &str,
+    org_id: Option<&str>,
     domain: &str,
 ) -> anyhow::Result<DomainDeleteOutcome> {
     let current = match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $3"
+            } else {
+                "AND org_id IS NULL"
+            };
             let sql = format!(
-                "SELECT {}, state FROM domains WHERE domain = $1 AND instance_id = $2 AND org_id IS NULL",
+                "SELECT {}, state FROM domains WHERE domain = $1 AND instance_id = $2 {org_filter}",
                 scoped.bool_as_int("is_primary"),
             );
-            let row: Option<(i32, String)> = sqlx::query_as(&sql)
+            let query = sqlx::query_as::<_, (i32, String)>(&sql)
                 .bind(domain)
-                .bind(instance_id)
-                .fetch_optional(scoped.pool())
-                .await?;
+                .bind(instance_id);
+            let query = if let Some(org_id) = org_id {
+                query.bind(org_id)
+            } else {
+                query
+            };
+            let row = query.fetch_optional(scoped.pool()).await?;
             row.map(|(is_primary, state)| (is_primary != 0, state))
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
                 "SELECT is_primary, state FROM domains \
-                 WHERE domain = @domain AND instance_id = @instance_id AND org_id IS NULL LIMIT 1",
+                 WHERE domain = @domain AND instance_id = @instance_id {org_filter} LIMIT 1"
             );
+            let mut stmt = Statement::new(&sql);
             stmt.add_param("domain", &domain);
             stmt.add_param("instance_id", &instance_id);
+            if let Some(org_id) = org_id {
+                stmt.add_param("org_id", &org_id);
+            }
             spanner_query_optional(spanner, stmt).await?.map(|row| {
                 (
                     row.column_by_name::<bool>("is_primary").unwrap_or(false),
@@ -716,20 +1246,36 @@ pub async fn delete_instance_domain(
     match db {
         Db::Sql(_) => {
             let scoped = db.scoped(instance_id.to_string());
-            sqlx::query(
-                "DELETE FROM domains WHERE domain = $1 AND instance_id = $2 AND org_id IS NULL",
-            )
-            .bind(domain)
-            .bind(instance_id)
-            .execute(scoped.pool())
-            .await?;
+            let org_filter = if org_id.is_some() {
+                "AND org_id = $3"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql =
+                format!("DELETE FROM domains WHERE domain = $1 AND instance_id = $2 {org_filter}");
+            let query = sqlx::query(&sql).bind(domain).bind(instance_id);
+            let query = if let Some(org_id) = org_id {
+                query.bind(org_id)
+            } else {
+                query
+            };
+            query.execute(scoped.pool()).await?;
         }
         Db::Spanner(spanner) => {
-            let mut stmt = Statement::new(
-                "DELETE FROM domains WHERE domain = @domain AND instance_id = @instance_id AND org_id IS NULL",
+            let org_filter = if org_id.is_some() {
+                "AND org_id = @org_id"
+            } else {
+                "AND org_id IS NULL"
+            };
+            let sql = format!(
+                "DELETE FROM domains WHERE domain = @domain AND instance_id = @instance_id {org_filter}"
             );
+            let mut stmt = Statement::new(&sql);
             stmt.add_param("domain", &domain);
             stmt.add_param("instance_id", &instance_id);
+            if let Some(org_id) = org_id {
+                stmt.add_param("org_id", &org_id);
+            }
             let _ = spanner
                 .client()
                 .read_write_transaction(|tx| {
@@ -764,6 +1310,7 @@ pub async fn delete_instance_row(
                 > 0)
         }
         Db::Spanner(spanner) => {
+            let table = spanner_ident(table);
             let mut exists_stmt = Statement::new(format!(
                 "SELECT id FROM {table} WHERE instance_id = @instance_id AND id = @id LIMIT 1"
             ));
@@ -885,6 +1432,7 @@ pub async fn create_named_resource(
                 stmt.add_param("response_types", &"[\"code\"]");
                 stmt
             } else {
+                let table = spanner_ident(table);
                 Statement::new(format!(
                     "INSERT INTO {table} (id, instance_id, org_id, name, state) \
                      VALUES (@id, @instance_id, @org_id, @name, 'active')"
@@ -942,6 +1490,7 @@ pub async fn get_named_resource(
             )
         }
         Db::Spanner(spanner) => {
+            let table = spanner_ident(table);
             let mut stmt = Statement::new(format!(
                 "SELECT id, name, state, CAST(created_at AS STRING) AS created_at, \
                         CAST(updated_at AS STRING) AS updated_at \
@@ -999,6 +1548,7 @@ pub async fn list_named_resources(
                 .collect())
         }
         Db::Spanner(spanner) => {
+            let table = spanner_ident(table);
             let mut stmt = Statement::new(format!(
                 "SELECT id, name, state, CAST(created_at AS STRING) AS created_at, \
                         CAST(updated_at AS STRING) AS updated_at \
@@ -1051,6 +1601,7 @@ pub async fn update_named_resource_name(
                 > 0)
         }
         Db::Spanner(spanner) => {
+            let table = spanner_ident(table);
             let mut stmt = Statement::new(format!(
                 "UPDATE {table} SET name = @name, updated_at = CURRENT_TIMESTAMP() \
                  WHERE instance_id = @instance_id AND id = @id"

@@ -6,7 +6,7 @@ use google_cloud_spanner::statement::Statement;
 use serde_json::json;
 use tracing::{Instrument, warn};
 use uuid::Uuid;
-use zitadel_app::effect::{Effect, EffectType};
+use zitadel_app::effect::{Effect, EffectDispatcher, EffectType};
 use zitadel_app::hook::{HookContext, HookPhase, HookPipeline};
 use zitadel_app::repo::EffectRepository;
 use zitadel_app::usecase::{plan_durable_effects, run_effects};
@@ -115,15 +115,23 @@ pub async fn start(
     {
         let effects_repo = DbEffectRepository::new(db.clone());
         let worker_id = format!("effects:{}:{}", std::process::id(), Uuid::new_v4());
+        let domain_provisioning_dispatcher = build_domain_provisioning_dispatcher(config, &db);
+        let domain_deprovisioning_dispatcher = build_domain_deprovisioning_dispatcher(config, &db);
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
         tokio::spawn(async move {
             let poll_interval = Duration::from_secs(2);
             loop {
-                if let Err(error) =
-                    process_pending_effects(&effects_repo, &client, DEFAULT_INSTANCE_ID, &worker_id)
-                        .await
+                if let Err(error) = process_pending_effects(
+                    &effects_repo,
+                    &client,
+                    domain_provisioning_dispatcher.as_deref(),
+                    domain_deprovisioning_dispatcher.as_deref(),
+                    DEFAULT_INSTANCE_ID,
+                    &worker_id,
+                )
+                .await
                 {
                     warn!(%error, "effects worker tick failed");
                 }
@@ -570,6 +578,8 @@ fn parse_duration_spec(raw: &str) -> Option<Duration> {
 async fn process_pending_effects(
     repo: &DbEffectRepository,
     client: &reqwest::Client,
+    domain_provisioning_dispatcher: Option<&dyn EffectDispatcher>,
+    domain_deprovisioning_dispatcher: Option<&dyn EffectDispatcher>,
     instance_id: &str,
     worker_id: &str,
 ) -> anyhow::Result<()> {
@@ -594,7 +604,14 @@ async fn process_pending_effects(
             effect.attempt = effect.attempt,
         );
 
-        let result = dispatch_effect(client, effect).instrument(span).await;
+        let result = dispatch_effect(
+            client,
+            effect,
+            domain_provisioning_dispatcher,
+            domain_deprovisioning_dispatcher,
+        )
+        .instrument(span)
+        .await;
 
         match result {
             Ok(()) => {
@@ -643,7 +660,12 @@ async fn process_pending_effects(
 }
 
 /// Dispatch a single effect based on its type.
-async fn dispatch_effect(client: &reqwest::Client, effect: &Effect) -> anyhow::Result<()> {
+async fn dispatch_effect(
+    client: &reqwest::Client,
+    effect: &Effect,
+    domain_provisioning_dispatcher: Option<&dyn EffectDispatcher>,
+    domain_deprovisioning_dispatcher: Option<&dyn EffectDispatcher>,
+) -> anyhow::Result<()> {
     match effect.effect_type {
         EffectType::Log => {
             tracing::info!(
@@ -715,7 +737,67 @@ async fn dispatch_effect(client: &reqwest::Client, effect: &Effect) -> anyhow::R
             );
             Ok(())
         }
+        EffectType::DomainProvisioning => {
+            let dispatcher = domain_provisioning_dispatcher.ok_or_else(|| {
+                anyhow::anyhow!("domain provisioning dispatcher unavailable for this runtime")
+            })?;
+            dispatcher.dispatch(effect).await
+        }
+        EffectType::DomainDeprovisioning => {
+            let dispatcher = domain_deprovisioning_dispatcher.ok_or_else(|| {
+                anyhow::anyhow!("domain deprovisioning dispatcher unavailable for this runtime")
+            })?;
+            dispatcher.dispatch(effect).await
+        }
     }
+}
+
+fn build_domain_provisioning_dispatcher(
+    config: &Config,
+    db: &Db,
+) -> Option<Arc<dyn EffectDispatcher>> {
+    if !zitadel_cloud::is_enabled(&config.cloud, config.is_dev()) {
+        return None;
+    }
+    let gcp = &config.cloud.gcp;
+    if gcp.project_id.is_empty()
+        || gcp.certificate_map.is_empty()
+        || gcp.url_map.is_empty()
+        || gcp.backend_service.is_empty()
+    {
+        warn!("cloud is enabled but GCP domain provisioning config is incomplete");
+        return None;
+    }
+    Some(Arc::new(
+        zitadel_cloud::infra::DomainProvisioningDispatcher::new(
+            Arc::new(zitadel_cloud::gcp::GcpClient::new(gcp.clone())),
+            db.clone(),
+        ),
+    ))
+}
+
+fn build_domain_deprovisioning_dispatcher(
+    config: &Config,
+    db: &Db,
+) -> Option<Arc<dyn EffectDispatcher>> {
+    if !zitadel_cloud::is_enabled(&config.cloud, config.is_dev()) {
+        return None;
+    }
+    let gcp = &config.cloud.gcp;
+    if gcp.project_id.is_empty()
+        || gcp.certificate_map.is_empty()
+        || gcp.url_map.is_empty()
+        || gcp.backend_service.is_empty()
+    {
+        warn!("cloud is enabled but GCP domain deprovisioning config is incomplete");
+        return None;
+    }
+    Some(Arc::new(
+        zitadel_cloud::infra::DomainDeprovisioningDispatcher::new(
+            Arc::new(zitadel_cloud::gcp::GcpClient::new(gcp.clone())),
+            db.clone(),
+        ),
+    ))
 }
 
 /// Compute a concrete UTC timestamp for retry scheduling.

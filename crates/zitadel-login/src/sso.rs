@@ -658,6 +658,7 @@ mod tests {
         let app = Arc::new(ApplicationServices::new(
             repos,
             Arc::new(HookPipeline::empty()),
+            false,
         ));
 
         LoginState {
