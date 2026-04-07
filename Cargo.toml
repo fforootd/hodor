@@ -86,7 +86,7 @@ jsonschema = "0.29"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 anyhow = "1"
 thiserror = "2"
-rust-embed = { version = "8", features = ["compression", "include-exclude"] }
+rust-embed = { version = "8", features = ["compression", "include-exclude", "debug-embed"] }
 mime_guess = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 webbrowser = "1"
