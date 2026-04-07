@@ -626,21 +626,14 @@ mod tests {
     use crate::DefaultRpService;
     use zitadel_app::{ApplicationServices, HookPipeline};
     use zitadel_authn::{cookie::CookieConfig, password::Swapper};
-    use zitadel_db::{DEFAULT_INSTANCE_ID, InstanceContext, with_instance_context};
+    use zitadel_db::{DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, InstanceContext, with_instance_context};
     use zitadel_fga::FgaService;
     use zitadel_storage::StorageRuntime;
 
     async fn test_state() -> LoginState {
         let db = zitadel_db::Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
-        let scoped = db.scoped_default();
-        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
-            .bind("org-1")
-            .bind(scoped.instance_id())
-            .bind("Default")
-            .execute(scoped.pool())
-            .await
-            .unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         let storage = StorageRuntime::from_config(
             &zitadel_config::Config::default().storage,
             db.clone(),
@@ -742,7 +735,7 @@ mod tests {
         let state = test_state().await;
         let provider = ProviderDefinitionRecord {
             id: "provider-1".into(),
-            org_id: "org-1".into(),
+            org_id: DEFAULT_ORG_ID.into(),
             created_at: String::new(),
             updated_at: String::new(),
             payload: provider_payload(ProviderLinkingMode::LinkOnly),

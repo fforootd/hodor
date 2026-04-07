@@ -235,7 +235,7 @@ fn _assert_json_value_send_sync(_: &Value) {}
 mod tests {
     use super::*;
     use crate::op::{AuthRequestStore, ClientStore};
-    use zitadel_db::Db;
+    use zitadel_db::{DEFAULT_ORG_ID, Db};
     use zitadel_db::repos::adapters::DbOidcRepository;
 
     fn make_store(db: Db) -> ZitadelOpStore {
@@ -246,15 +246,8 @@ mod tests {
     async fn finds_client_and_parses_registered_redirect_uris() {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         let scoped = db.scoped_default();
-
-        // Create the org that the app references.
-        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, 'Test Org')")
-            .bind("org-1")
-            .bind(scoped.instance_id())
-            .execute(scoped.pool())
-            .await
-            .unwrap();
 
         let redirect_uris = r#"["https://app.example/callback","https://app.example/alt"]"#;
         let grant_types = r#"["authorization_code","client_credentials"]"#;
@@ -270,7 +263,7 @@ mod tests {
         sqlx::query(&sql)
             .bind("app-1")
             .bind(scoped.instance_id())
-            .bind("org-1")
+            .bind(DEFAULT_ORG_ID)
             .bind("Example App")
             .bind("web")
             .bind("client-1")

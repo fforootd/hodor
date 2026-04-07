@@ -337,6 +337,7 @@ mod tests {
     async fn authorization_error_redirect_points_back_to_client() {
         let db = zitadel_db::Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
         let repo: std::sync::Arc<dyn zitadel_app::repo::OidcRepository> = std::sync::Arc::new(
             zitadel_db::repos::adapters::DbOidcRepository::new(db.clone()),
         );
@@ -348,14 +349,6 @@ mod tests {
 
         let scoped = db.scoped_default();
 
-        // Create the org that the app references.
-        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, 'Test Org')")
-            .bind("org-1")
-            .bind(scoped.instance_id())
-            .execute(scoped.pool())
-            .await
-            .unwrap();
-
         let sql = format!(
             "INSERT INTO apps (id, instance_id, org_id, name, app_type, client_id, client_secret, redirect_uris, grant_types, response_types, state) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, {}, {}, {}, $11)",
@@ -366,7 +359,7 @@ mod tests {
         sqlx::query(&sql)
             .bind("app-1")
             .bind(scoped.instance_id())
-            .bind("org-1")
+            .bind(zitadel_db::DEFAULT_ORG_ID)
             .bind("Example App")
             .bind("web")
             .bind("client")

@@ -223,6 +223,7 @@ mod tests {
     async fn session_create_and_find() {
         let db = zitadel_db::Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
 
         // Create a user first (needed for FK).
         let scoped = db.scoped_default();
@@ -257,11 +258,12 @@ mod tests {
     async fn session_lookup_is_scoped_by_instance() {
         let db = zitadel_db::Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
 
         let default_scoped = db.scoped_default();
         let other_scoped = db.scoped("other".to_string());
 
-        // Setup: default instance org + user first (default instance is seeded by migration).
+        // Setup: default instance org + user first.
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
             .bind("org-default")
             .bind(default_scoped.instance_id())
