@@ -66,137 +66,7 @@ impl SpannerDb {
     }
 
     pub async fn ensure_database(&self, ddl: &[String]) -> anyhow::Result<()> {
-        let exists = match self
-            .admin
-            .database()
-            .get_database(
-                GetDatabaseRequest {
-                    name: self.database.full_name.clone(),
-                },
-                None,
-            )
-            .await
-        {
-            Ok(_) => true,
-            Err(status) if status.code() == Code::NotFound => false,
-            Err(status) => return Err(status).context("lookup spanner database"),
-        };
-
-        if !exists {
-            let request = CreateDatabaseRequest {
-                parent: self.database.parent.clone(),
-                create_statement: format!("CREATE DATABASE `{}`", self.database.database_id),
-                extra_statements: ddl.to_vec(),
-                encryption_config: None,
-                database_dialect: DatabaseDialect::GoogleStandardSql.into(),
-                proto_descriptors: vec![],
-            };
-            let mut operation = self
-                .admin
-                .database()
-                .create_database(request, None)
-                .await
-                .context("create spanner database")?;
-            operation
-                .wait(None)
-                .await
-                .context("wait for spanner database creation")?
-                .context("spanner database creation returned no database")?;
-            return Ok(());
-        }
-
-        let existing = self.current_ddl().await?;
-        let normalized_existing = normalize_ddl(&existing);
-        let normalized_target = normalize_ddl(ddl);
-        if normalized_existing.is_empty() && !ddl.is_empty() {
-            let request = UpdateDatabaseDdlRequest {
-                database: self.database.full_name.clone(),
-                statements: ddl.to_vec(),
-                operation_id: String::new(),
-                proto_descriptors: vec![],
-            };
-            let mut operation = self
-                .admin
-                .database()
-                .update_database_ddl(request, None)
-                .await
-                .context("apply spanner baseline DDL")?;
-            operation
-                .wait(None)
-                .await
-                .context("wait for spanner DDL operation")?;
-            return Ok(());
-        }
-
-        if normalized_existing == normalized_target {
-            return Ok(());
-        }
-
-        let existing_keys = ddl_object_keys(&normalized_existing);
-        let target_keys = ddl_object_keys(&normalized_target);
-
-        if !target_keys.is_empty() && target_keys.is_subset(&existing_keys) {
-            return Ok(());
-        }
-
-        if let Some(missing) = normalized_target
-            .as_slice()
-            .strip_prefix(normalized_existing.as_slice())
-        {
-            if !missing.is_empty() {
-                let request = UpdateDatabaseDdlRequest {
-                    database: self.database.full_name.clone(),
-                    statements: ddl[normalized_existing.len()..].to_vec(),
-                    operation_id: String::new(),
-                    proto_descriptors: vec![],
-                };
-                let mut operation = self
-                    .admin
-                    .database()
-                    .update_database_ddl(request, None)
-                    .await
-                    .context("apply spanner suffix DDL")?;
-                operation
-                    .wait(None)
-                    .await
-                    .context("wait for spanner suffix DDL operation")?;
-            }
-            return Ok(());
-        }
-
-        if !existing_keys.is_empty() && existing_keys.is_subset(&target_keys) {
-            let missing = ddl
-                .iter()
-                .filter(|statement| {
-                    ddl_object_key(&normalize_statement(statement))
-                        .is_some_and(|key| !existing_keys.contains(&key))
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
-                let request = UpdateDatabaseDdlRequest {
-                    database: self.database.full_name.clone(),
-                    statements: missing,
-                    operation_id: String::new(),
-                    proto_descriptors: vec![],
-                };
-                let mut operation = self
-                    .admin
-                    .database()
-                    .update_database_ddl(request, None)
-                    .await
-                    .context("apply spanner object-set DDL")?;
-                operation
-                    .wait(None)
-                    .await
-                    .context("wait for spanner object-set DDL operation")?;
-            }
-            return Ok(());
-        }
-
-        anyhow::bail!(
-            "existing Spanner database schema does not match the prototype baseline; delete the database and retry"
-        );
+        ensure_database_with_admin(&self.database, &self.admin, ddl).await
     }
 
     pub async fn current_ddl(&self) -> anyhow::Result<Vec<String>> {
@@ -213,6 +83,17 @@ impl SpannerDb {
             .context("read spanner database DDL")?;
         Ok(ddl.into_inner().statements)
     }
+}
+
+pub async fn ensure_database_from_config(
+    config: &StatefulStorageConfig,
+    ddl: &[String],
+) -> anyhow::Result<()> {
+    let database = ParsedDatabaseName::parse(&config.database)?;
+    let admin = AdminClient::new(build_admin_config(config).await?)
+        .await
+        .context("open spanner admin client")?;
+    ensure_database_with_admin(&database, &admin, ddl).await
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -329,6 +210,150 @@ async fn build_admin_config(config: &StatefulStorageConfig) -> anyhow::Result<Ad
         .with_auth()
         .await
         .context("configure spanner admin ADC auth")
+}
+
+async fn ensure_database_with_admin(
+    database: &ParsedDatabaseName,
+    admin: &AdminClient,
+    target_ddl: &[String],
+) -> anyhow::Result<()> {
+    let exists = match admin
+        .database()
+        .get_database(
+            GetDatabaseRequest {
+                name: database.full_name.clone(),
+            },
+            None,
+        )
+        .await
+    {
+        Ok(_) => true,
+        Err(status) if status.code() == Code::NotFound => false,
+        Err(status) => return Err(status).context("lookup spanner database"),
+    };
+
+    if !exists {
+        let request = CreateDatabaseRequest {
+            parent: database.parent.clone(),
+            create_statement: format!("CREATE DATABASE `{}`", database.database_id),
+            extra_statements: target_ddl.to_vec(),
+            encryption_config: None,
+            database_dialect: DatabaseDialect::GoogleStandardSql.into(),
+            proto_descriptors: vec![],
+        };
+        let mut operation = admin
+            .database()
+            .create_database(request, None)
+            .await
+            .context("create spanner database")?;
+        operation
+            .wait(None)
+            .await
+            .context("wait for spanner database creation")?
+            .context("spanner database creation returned no database")?;
+        return Ok(());
+    }
+
+    let existing_ddl = admin
+        .database()
+        .get_database_ddl(
+            GetDatabaseDdlRequest {
+                database: database.full_name.clone(),
+            },
+            None,
+        )
+        .await
+        .context("read spanner database DDL")?
+        .into_inner()
+        .statements;
+    let normalized_existing = normalize_ddl(&existing_ddl);
+    let normalized_target = normalize_ddl(target_ddl);
+    if normalized_existing.is_empty() && !target_ddl.is_empty() {
+        let request = UpdateDatabaseDdlRequest {
+            database: database.full_name.clone(),
+            statements: target_ddl.to_vec(),
+            operation_id: String::new(),
+            proto_descriptors: vec![],
+        };
+        let mut operation = admin
+            .database()
+            .update_database_ddl(request, None)
+            .await
+            .context("apply spanner baseline DDL")?;
+        operation
+            .wait(None)
+            .await
+            .context("wait for spanner DDL operation")?;
+        return Ok(());
+    }
+
+    if normalized_existing == normalized_target {
+        return Ok(());
+    }
+
+    let existing_keys = ddl_object_keys(&normalized_existing);
+    let target_keys = ddl_object_keys(&normalized_target);
+
+    if !target_keys.is_empty() && target_keys.is_subset(&existing_keys) {
+        return Ok(());
+    }
+
+    if let Some(missing) = normalized_target
+        .as_slice()
+        .strip_prefix(normalized_existing.as_slice())
+    {
+        if !missing.is_empty() {
+            let request = UpdateDatabaseDdlRequest {
+                database: database.full_name.clone(),
+                statements: target_ddl[normalized_existing.len()..].to_vec(),
+                operation_id: String::new(),
+                proto_descriptors: vec![],
+            };
+            let mut operation = admin
+                .database()
+                .update_database_ddl(request, None)
+                .await
+                .context("apply spanner suffix DDL")?;
+            operation
+                .wait(None)
+                .await
+                .context("wait for spanner suffix DDL operation")?;
+        }
+        return Ok(());
+    }
+
+    if !existing_keys.is_empty() && existing_keys.is_subset(&target_keys) {
+        let missing = target_ddl
+            .iter()
+            .filter(|statement| {
+                ddl_object_key(&normalize_statement(statement))
+                    .is_some_and(|key| !existing_keys.contains(&key))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            let request = UpdateDatabaseDdlRequest {
+                database: database.full_name.clone(),
+                statements: missing,
+                operation_id: String::new(),
+                proto_descriptors: vec![],
+            };
+            let mut operation = admin
+                .database()
+                .update_database_ddl(request, None)
+                .await
+                .context("apply spanner object-set DDL")?;
+            operation
+                .wait(None)
+                .await
+                .context("wait for spanner object-set DDL operation")?;
+        }
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "existing Spanner database schema does not match the prototype baseline; delete the database and retry"
+    );
 }
 
 fn normalize_ddl(statements: &[String]) -> Vec<String> {

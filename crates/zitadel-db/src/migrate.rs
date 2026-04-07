@@ -1,7 +1,18 @@
 use crate::{BackendKind, Db, schema};
 use sqlx::{Connection, Executor};
+use zitadel_config::StatefulStorageConfig;
 
 const POSTGRES_MIGRATION_LOCK_ID: i64 = 6_900_181_427_071;
+
+/// Ensure a Spanner database exists and matches the embedded baseline before
+/// opening a normal data client.
+pub async fn prepare_spanner(config: &StatefulStorageConfig) -> anyhow::Result<()> {
+    let statements = schema::embedded_migrations(BackendKind::Spanner)
+        .iter()
+        .flat_map(|(_, sql)| split_statements(&extract_goose_up(sql)))
+        .collect::<Vec<_>>();
+    crate::spanner::ensure_database_from_config(config, &statements).await
+}
 
 /// Run all pending migrations.
 pub async fn migrate(db: &Db) -> anyhow::Result<()> {

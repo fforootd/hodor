@@ -35,8 +35,12 @@ pub(crate) fn run_start(args: StartArgs) -> anyhow::Result<()> {
 pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
     let mut cfg = load_config(args.config.as_deref())?;
     resolve_paths(&mut cfg, args.config.as_deref());
+    let backend = zitadel_db::BackendKind::parse(cfg.storage.stateful.resolve_backend())?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
+        if backend == zitadel_db::BackendKind::Spanner && !args.status {
+            zitadel_db::migrate::prepare_spanner(&cfg.storage.stateful).await?;
+        }
         let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
             .await?;
         let _observability =
