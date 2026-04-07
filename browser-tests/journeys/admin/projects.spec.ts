@@ -16,7 +16,7 @@ test.describe('Admin projects journey', () => {
     const name = `Journey Project ${suffix}`
 
     await page.goto('/console/projects/new')
-    await page.getByRole('textbox', { name: 'Name' }).fill(name)
+    await page.getByPlaceholder('My Project').fill(name)
     await page.getByRole('button', { name: /Create Project/i }).click()
 
     await expect(page).toHaveURL(/\/console\/projects\/.+/)
