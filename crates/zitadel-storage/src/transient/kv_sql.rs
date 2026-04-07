@@ -11,14 +11,17 @@ use super::{
 pub struct SqlKvStore {
     primary_db: Db,
     authoritative_db: Option<Db>,
+    validate_local_users: bool,
     session_max_age_secs: u64,
 }
 
 impl SqlKvStore {
     pub fn new(primary_db: Db, authoritative_db: Option<Db>, session_max_age_secs: u64) -> Self {
+        let validate_local_users = authoritative_db.is_none();
         Self {
             primary_db,
             authoritative_db,
+            validate_local_users,
             session_max_age_secs,
         }
     }
@@ -38,6 +41,10 @@ impl SqlKvStore {
         self.authoritative_db
             .as_ref()
             .map(|db| db.scoped(instance_id.to_string()))
+    }
+
+    pub(crate) fn validate_local_users(&self) -> bool {
+        self.validate_local_users
     }
 
     pub(crate) fn session_max_age_secs(&self) -> u64 {

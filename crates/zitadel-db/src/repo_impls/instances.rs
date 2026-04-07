@@ -232,14 +232,21 @@ impl InstanceRepository for SqlInstanceRepository {
             match &db {
                 Db::Sql(_) => {
                     let scoped = db.scoped(instance_id.clone());
-                    sqlx::query("DELETE FROM instances WHERE instance_id = $1")
-                        .bind(&instance_id)
-                        .execute(scoped.pool())
-                        .await?;
+                    sqlx::query(
+                        "UPDATE instances \
+                         SET state = 'deprovisioning', updated_at = CURRENT_TIMESTAMP \
+                         WHERE instance_id = $1",
+                    )
+                    .bind(&instance_id)
+                    .execute(scoped.pool())
+                    .await?;
                 }
                 Db::Spanner(spanner) => {
-                    let mut stmt =
-                        Statement::new("DELETE FROM instances WHERE instance_id = @instance_id");
+                    let mut stmt = Statement::new(
+                        "UPDATE instances \
+                         SET state = 'deprovisioning', updated_at = CURRENT_TIMESTAMP() \
+                         WHERE instance_id = @instance_id",
+                    );
                     stmt.add_param("instance_id", &instance_id);
                     let _ = write_spanner_count(spanner, stmt).await?;
                 }

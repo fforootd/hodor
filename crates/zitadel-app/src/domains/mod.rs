@@ -228,7 +228,7 @@ impl VerifyCustomDomain {
 
         // Must be in a verifiable state.
         if record.state != "pending_verification" && record.state != "verification_failed" {
-            return Err(AppError::validation(&format!(
+            return Err(AppError::validation(format!(
                 "domain is in state '{}', cannot verify",
                 record.state
             )));
@@ -238,7 +238,7 @@ impl VerifyCustomDomain {
         let expected_value = format!("zitadel-verify={}", record.verification_token);
         let found = dns::verify_txt_record(&record.dns_challenge_host, &expected_value)
             .await
-            .map_err(|e| AppError::Internal(e.into()))?;
+            .map_err(AppError::Internal)?;
 
         if !found {
             // Update state to verification_failed.
@@ -274,7 +274,7 @@ impl VerifyCustomDomain {
                 .await
                 .map_err(AppError::Internal)?;
 
-            return Err(AppError::validation(&format!(
+            return Err(AppError::validation(format!(
                 "DNS verification failed. Add a TXT record at '{}' with value '{}'",
                 record.dns_challenge_host, expected_value
             )));
@@ -453,13 +453,11 @@ impl RemoveCustomDomain {
                 DomainRemoveResult::Deleted
             }
         } else {
-            let result = self
-                .repos
+            self.repos
                 .instances
                 .remove_domain(instance_id, org_id, &normalized_domain)
                 .await
-                .map_err(AppError::Internal)?;
-            result
+                .map_err(AppError::Internal)?
         };
 
         if result == DomainRemoveResult::Deleted {

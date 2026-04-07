@@ -48,10 +48,10 @@ impl GcpClient {
         // Check cache.
         {
             let cached = self.access_token.read().await;
-            if let Some(ref t) = *cached {
-                if t.expires_at > std::time::Instant::now() {
-                    return Ok(t.token.clone());
-                }
+            if let Some(ref t) = *cached
+                && t.expires_at > std::time::Instant::now()
+            {
+                return Ok(t.token.clone());
             }
         }
 
@@ -300,11 +300,11 @@ impl GcpClient {
         // Check if host rule already exists.
         if let Some(host_rules) = url_map.get("hostRules").and_then(|v| v.as_array()) {
             for rule in host_rules {
-                if let Some(hosts) = rule.get("hosts").and_then(|v| v.as_array()) {
-                    if hosts.iter().any(|h| h.as_str() == Some(domain)) {
-                        tracing::info!(domain = %domain, "host rule already exists in URL map");
-                        return Ok(());
-                    }
+                if let Some(hosts) = rule.get("hosts").and_then(|v| v.as_array())
+                    && hosts.iter().any(|h| h.as_str() == Some(domain))
+                {
+                    tracing::info!(domain = %domain, "host rule already exists in URL map");
+                    return Ok(());
                 }
             }
         }
@@ -466,7 +466,7 @@ impl GcpClient {
 // ── Helpers ──
 
 pub(crate) fn sanitize_for_gcp(domain: &str) -> String {
-    domain.replace('.', "-").replace('_', "-")
+    domain.replace(['.', '_'], "-")
 }
 
 pub(crate) fn dns_auth_id(domain: &str) -> String {

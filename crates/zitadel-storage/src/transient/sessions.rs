@@ -127,18 +127,23 @@ pub(crate) async fn lookup_session_by_token_impl(
     raw_token: &str,
 ) -> anyhow::Result<SessionLookupOutcome> {
     let hashed = token_hash(raw_token);
-    if let Some(row) = fetch_session_by_token_unfiltered(&kv.scoped(instance_id), &hashed).await? {
-        return Ok(classify_session_row(row));
+    let local_scoped = kv.scoped(instance_id);
+    if let Some(row) = fetch_session_by_token_unfiltered(&local_scoped, &hashed).await? {
+        let outcome = classify_session_row(row);
+        return maybe_require_active_user(outcome, Some(local_scoped), kv.validate_local_users())
+            .await;
     }
 
-    let row = match kv.authoritative_scoped(instance_id) {
-        Some(scoped) => fetch_session_by_token_unfiltered(&scoped, &hashed).await?,
-        None => None,
+    let authoritative = match kv.authoritative_scoped(instance_id) {
+        Some(scoped) => scoped,
+        None => return Ok(SessionLookupOutcome::Missing),
     };
 
-    Ok(row
+    let row = fetch_session_by_token_unfiltered(&authoritative, &hashed).await?;
+    let outcome = row
         .map(classify_session_row)
-        .unwrap_or(SessionLookupOutcome::Missing))
+        .unwrap_or(SessionLookupOutcome::Missing);
+    maybe_require_active_user(outcome, Some(authoritative), true).await
 }
 
 pub(crate) async fn list_sessions_impl(
@@ -209,8 +214,7 @@ async fn fetch_session_by_token_unfiltered(
     let sql = format!(
         "SELECT s.id, s.user_id, COALESCE(s.org_id, ''), s.token_hash, s.user_agent, s.ip_address, COALESCE(s.fingerprint, ''), {created_at}, {created_at_epoch}, {expires_at}, {revoked_at}, {expires_at_epoch} \
          FROM sessions s \
-         JOIN users u ON u.instance_id = s.instance_id AND u.id = s.user_id \
-         WHERE s.instance_id = $1 AND s.token_hash = $2 AND u.state = 'active'"
+         WHERE s.instance_id = $1 AND s.token_hash = $2"
     );
 
     let row = sqlx::query_as(&sql)
@@ -220,6 +224,47 @@ async fn fetch_session_by_token_unfiltered(
         .await?;
 
     Ok(row)
+}
+
+async fn maybe_require_active_user(
+    outcome: SessionLookupOutcome,
+    scoped: Option<zitadel_db::scoped::ScopedDb>,
+    require_active_user: bool,
+) -> anyhow::Result<SessionLookupOutcome> {
+    let SessionLookupOutcome::Active(record) = outcome else {
+        return Ok(outcome);
+    };
+
+    if !require_active_user {
+        return Ok(SessionLookupOutcome::Active(record));
+    }
+
+    let Some(scoped) = scoped else {
+        return Ok(SessionLookupOutcome::Active(record));
+    };
+
+    if user_is_active(&scoped, &record.user_id).await? {
+        Ok(SessionLookupOutcome::Active(record))
+    } else {
+        Ok(SessionLookupOutcome::Inactive)
+    }
+}
+
+async fn user_is_active(
+    scoped: &zitadel_db::scoped::ScopedDb,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let active = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+            SELECT 1 FROM users WHERE instance_id = $1 AND id = $2 AND state = 'active'
+        )",
+    )
+    .bind(scoped.instance_id())
+    .bind(user_id)
+    .fetch_one(scoped.pool())
+    .await?;
+
+    Ok(active)
 }
 
 async fn fetch_session_by_id(

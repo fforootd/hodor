@@ -934,6 +934,7 @@ pub async fn update_domain_state_for_scope(
 }
 
 /// Update cloud certificate provisioning state.
+#[allow(clippy::too_many_arguments)]
 pub async fn update_domain_certificate_state_for_scope(
     db: &Db,
     instance_id: &str,

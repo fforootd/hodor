@@ -760,6 +760,7 @@ pub trait InstanceRepository: Send + Sync {
     ) -> BoxFuture<'_, anyhow::Result<()>>;
 
     /// Update cloud certificate provisioning state within a specific scope.
+    #[allow(clippy::too_many_arguments)]
     fn update_domain_certificate_state(
         &self,
         instance_id: &str,

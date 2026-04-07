@@ -58,3 +58,7 @@
 - Implement L4 HTTP caching: ETag for OIDC Discovery, JWKS, schema definitions
 - Implement SQLite kv_cache + query_cache tables (ADR-017 L2 expansion)
 - Generic Cache[K,V] interface implementation (SQLite + in-memory + Redis backends)
+
+
+
+- Implement soft delete?

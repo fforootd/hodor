@@ -1,7 +1,6 @@
 use crate::{
     DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db, create_org, create_pat, create_user,
-    find_active_user_by_identifier, get_oidc_client_record, get_org, get_settings_record,
-    list_login_flow_records,
+    find_active_user_by_identifier, get_oidc_client_record, get_org, list_login_flow_records,
     provider::{
         ProviderCatalogRef, ProviderConnection, ProviderLinking, ProviderLinkingMode,
         ProviderMapping, ProviderPayload, ProviderTarget, ProviderUi, get_provider,
@@ -743,28 +742,14 @@ async fn apply_spanner(db: &Db, seed: &SeedFile) -> anyhow::Result<()> {
 
     for setting in &seed.settings {
         let data_str = serde_json::to_string(&setting.data).unwrap_or_else(|_| "{}".into());
-        if get_settings_record(db, DEFAULT_INSTANCE_ID, &setting.type_)
-            .await?
-            .is_some()
-        {
-            put_instance_settings(
-                db,
-                DEFAULT_INSTANCE_ID,
-                &Uuid::new_v4().to_string(),
-                &setting.type_,
-                &data_str,
-            )
-            .await?;
-        } else {
-            put_instance_settings(
-                db,
-                DEFAULT_INSTANCE_ID,
-                &Uuid::new_v4().to_string(),
-                &setting.type_,
-                &data_str,
-            )
-            .await?;
-        }
+        put_instance_settings(
+            db,
+            DEFAULT_INSTANCE_ID,
+            &Uuid::new_v4().to_string(),
+            &setting.type_,
+            &data_str,
+        )
+        .await?;
         tracing::debug!(type_ = setting.type_, "seeded setting");
     }
 

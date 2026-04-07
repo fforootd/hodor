@@ -1,19 +1,66 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 import { browserJSON } from '../browser'
 
+async function loginPageDiagnostics(page: Page) {
+  const [title, bodyText, headings, buttons] = await Promise.all([
+    page.title().catch(() => ''),
+    page.locator('body').innerText().catch(() => ''),
+    page
+      .locator('h1, h2, h3, [role="heading"]')
+      .evaluateAll((nodes) =>
+        nodes
+          .map((node) => node.textContent?.trim() || '')
+          .filter(Boolean)
+          .slice(0, 8),
+      )
+      .catch(() => [] as string[]),
+    page
+      .locator('button, [role="button"]')
+      .evaluateAll((nodes) =>
+        nodes
+          .map((node) => node.textContent?.trim() || '')
+          .filter(Boolean)
+          .slice(0, 8),
+      )
+      .catch(() => [] as string[]),
+  ])
+
+  return [
+    `URL: ${page.url()}`,
+    title ? `Title: ${title}` : '',
+    headings.length > 0 ? `Headings: ${headings.join(' | ')}` : '',
+    buttons.length > 0 ? `Buttons: ${buttons.join(' | ')}` : '',
+    `Body: ${bodyText.slice(0, 800)}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+async function expectVisibleWithDiagnostics(page: Page, locator: Locator, target: string) {
+  try {
+    await expect(locator).toBeVisible({ timeout: 15_000 })
+  } catch (error) {
+    const details = await loginPageDiagnostics(page)
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`${target} did not appear on the login page.\n${details}\nCause: ${reason}`)
+  }
+}
+
 export async function visitLogin(page: Page) {
   await page.goto('/login')
-  await expect(
+  await expectVisibleWithDiagnostics(
+    page,
     page.locator('input[name="identifier"], input[type="text"], input[type="email"]').first(),
-  ).toBeVisible({ timeout: 15_000 })
+    'identifier input',
+  )
 }
 
 export async function submitIdentifierStep(page: Page, identifier: string) {
   const identifierInput = page
     .locator('input[name="identifier"], input[type="text"], input[type="email"]')
     .first()
-  await expect(identifierInput).toBeVisible({ timeout: 15_000 })
+  await expectVisibleWithDiagnostics(page, identifierInput, 'identifier input')
   await identifierInput.fill(identifier)
   const continueButton = page.locator('button:visible').filter({ hasText: /^Continue$/i }).first()
   if (await continueButton.isVisible().catch(() => false)) {
@@ -21,14 +68,16 @@ export async function submitIdentifierStep(page: Page, identifier: string) {
   } else {
     await identifierInput.press('Enter')
   }
-  await expect(
+  await expectVisibleWithDiagnostics(
+    page,
     page.locator('input[name="password"], input[type="password"]').first(),
-  ).toBeVisible({ timeout: 15_000 })
+    'password input',
+  )
 }
 
 export async function submitPasswordStep(page: Page, password: string) {
   const passwordInput = page.locator('input[name="password"], input[type="password"]').first()
-  await expect(passwordInput).toBeVisible({ timeout: 15_000 })
+  await expectVisibleWithDiagnostics(page, passwordInput, 'password input')
   await passwordInput.fill(password)
   const signInButton = page.locator('button:visible').filter({ hasText: /^Sign in$/i }).first()
   if (await signInButton.isVisible().catch(() => false)) {

@@ -216,27 +216,26 @@ async fn resolve_token(
         _ => scoped_instance_id.clone(),
     };
 
-    if token_source == TokenSource::Bearer {
-        if let Some(identity) = time_async(
+    if token_source == TokenSource::Bearer
+        && let Some(identity) = time_async(
             "auth.resolve_pat_token",
             state
                 .stateful
                 .resolve_pat_token(&auth_instance_id, raw_token),
         )
         .await?
-        {
-            return Ok(Some(
-                build_identity(
-                    state,
-                    &auth_instance_id,
-                    identity.user_id,
-                    identity.session_id,
-                    identity.token_type,
-                    identity.org_id,
-                )
-                .await?,
-            ));
-        }
+    {
+        return Ok(Some(
+            build_identity(
+                state,
+                &auth_instance_id,
+                identity.user_id,
+                identity.session_id,
+                identity.token_type,
+                identity.org_id,
+            )
+            .await?,
+        ));
     }
 
     if let Some(session) = time_async(
@@ -260,15 +259,14 @@ async fn resolve_token(
         ));
     }
 
-    if token_source == TokenSource::Bearer {
-        if let Some(identity) = time_async(
+    if token_source == TokenSource::Bearer
+        && let Some(identity) = time_async(
             "auth.resolve_support_grant",
             resolve_support_grant_token(state, scoped_instance_id.as_ref(), raw_token),
         )
         .await?
-        {
-            return Ok(Some(identity));
-        }
+    {
+        return Ok(Some(identity));
     }
 
     Ok(None)

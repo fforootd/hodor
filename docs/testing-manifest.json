@@ -68,7 +68,7 @@
       "run_contracts: true",
       "run_invariants: true",
       "run_subsystems: true",
-      "run_resilience: false",
+      "run_resilience: true",
       "artifact_prefix: pr"
     ],
     ".github/workflows/ci-main.yml": [
@@ -85,7 +85,7 @@
       "run_contracts: true",
       "run_invariants: true",
       "run_subsystems: true",
-      "run_resilience: false",
+      "run_resilience: true",
       "artifact_prefix: main"
     ],
     ".github/workflows/nightly-families.yml": [
