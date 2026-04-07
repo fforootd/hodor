@@ -26,7 +26,7 @@ async fn build_seeded_spanner_test_app(suite: &str) -> anyhow::Result<Option<Tes
     };
 
     let mut config = Config::default();
-    config.storage.stateful = stateful;
+    config.storage.primary = stateful;
     config.dev.seed_file = frontend_seed_file().to_string_lossy().into_owned();
 
     let ctx = TestContext::with_config(config).await?;

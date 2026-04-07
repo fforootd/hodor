@@ -1,12 +1,12 @@
 use crate::{BackendKind, Db, schema};
 use sqlx::{Connection, Executor};
-use zitadel_config::StatefulStorageConfig;
+use zitadel_config::DatabaseConnectConfig;
 
 const POSTGRES_MIGRATION_LOCK_ID: i64 = 6_900_181_427_071;
 
 /// Verify a Spanner database exists and reconcile its schema to the embedded
 /// baseline before opening a normal data client.
-pub async fn prepare_spanner(config: &StatefulStorageConfig) -> anyhow::Result<()> {
+pub async fn prepare_spanner(config: &impl DatabaseConnectConfig) -> anyhow::Result<()> {
     let statements = schema::embedded_migrations(BackendKind::Spanner)
         .iter()
         .flat_map(|(_, sql)| split_statements(&extract_goose_up(sql)))

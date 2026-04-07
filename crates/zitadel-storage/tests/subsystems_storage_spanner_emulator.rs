@@ -12,10 +12,10 @@ async fn spanner_runtime() -> anyhow::Result<Option<StorageRuntime>> {
     };
 
     let config = StorageConfig {
-        stateful,
+        primary: stateful,
         ..Default::default()
     };
-    let db = Db::open_with_config("", &config.stateful).await?;
+    let db = Db::open_with_config("", &config.primary).await?;
     migrate::migrate(&db).await?;
     StorageRuntime::from_config(&config, db, 86_400)
         .await
@@ -32,7 +32,7 @@ async fn seed_active_user(
     user_id: &str,
     identifier: &str,
 ) -> anyhow::Result<()> {
-    let db = runtime.stateful.db();
+    let db = runtime.primary.db();
     create_org(db, DEFAULT_INSTANCE_ID, org_id, org_id, "{}").await?;
     create_user(
         db,
@@ -74,7 +74,7 @@ async fn spanner_runtime_supports_sessions_pats_and_schema_queries_when_configur
 
     let pat_token = unique("pat-token");
     create_pat(
-        runtime.stateful.db(),
+        runtime.primary.db(),
         DEFAULT_INSTANCE_ID,
         &unique("pat"),
         &user_id,
@@ -94,7 +94,7 @@ async fn spanner_runtime_supports_sessions_pats_and_schema_queries_when_configur
     );
     assert!(
         runtime
-            .stateful
+            .primary
             .resolve_pat_token(DEFAULT_INSTANCE_ID, &pat_token)
             .await?
             .is_some(),

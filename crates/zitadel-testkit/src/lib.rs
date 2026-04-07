@@ -159,12 +159,12 @@ pub struct TestContext {
 impl TestContext {
     pub async fn new() -> anyhow::Result<Self> {
         let mut config = Config::default();
-        config.storage.stateful.url = "sqlite://:memory:".into();
+        config.storage.primary.url = "sqlite://:memory:".into();
         Self::with_config(config).await
     }
 
     pub async fn with_config(mut config: Config) -> anyhow::Result<Self> {
-        let db = TestDb::open_with_config(&config.storage.stateful).await?;
+        let db = TestDb::open_with_config(&config.storage.primary).await?;
 
         if !config.dev.seed_file.is_empty() {
             zitadel_db::seed::apply(&db.db, Path::new(&config.dev.seed_file))
@@ -207,6 +207,7 @@ impl TestContext {
         // Build application services (ADR-032).
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
             db.db.clone(),
+            storage.primary.as_ref().replica_db().cloned(),
             storage.transient.clone(),
             fga.clone(),
             storage.analytics.clone(),
@@ -231,7 +232,7 @@ impl TestContext {
         let api_state = ApiState {
             db: db.db.clone(),
             fga,
-            stateful: storage.stateful.clone(),
+            primary: storage.primary.clone(),
             transient: storage.transient.clone(),
             analytics: storage.analytics.clone(),
             oidc: oidc_state.clone(),
@@ -251,7 +252,7 @@ impl TestContext {
         };
 
         let login_state = LoginState {
-            stateful: storage.stateful.clone(),
+            primary: storage.primary.clone(),
             transient: storage.transient.clone(),
             passwords,
             cookie_config: cookie_config.clone(),
@@ -284,7 +285,7 @@ impl TestContext {
         };
 
         let mut config = Config::default();
-        config.storage.stateful = stateful;
+        config.storage.primary = stateful;
         Self::with_config(config).await.map(Some)
     }
 

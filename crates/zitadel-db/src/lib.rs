@@ -16,6 +16,7 @@ use anyhow::Context;
 use sqlx::{AnyPool, any::AnyPoolOptions};
 use std::fmt;
 use std::time::Duration;
+use zitadel_config::DatabaseConnectConfig;
 
 pub const DEFAULT_INSTANCE_ID: &str = "default";
 pub const DEFAULT_ORG_ID: &str = "1";
@@ -114,7 +115,7 @@ impl BackendKind {
             "sqlite" => Ok(Self::Sqlite),
             "postgres" => Ok(Self::Postgres),
             "spanner" => Ok(Self::Spanner),
-            other => anyhow::bail!("unsupported storage.stateful.backend: {other}"),
+            other => anyhow::bail!("unsupported storage backend: {other}"),
         }
     }
 
@@ -165,17 +166,15 @@ impl Db {
     }
 
     /// Open with explicit backend settings from config.
-    pub async fn open_with_config(
+    pub async fn open_with_config<T: DatabaseConnectConfig>(
         conn_str: &str,
-        config: &zitadel_config::StatefulStorageConfig,
+        config: &T,
     ) -> anyhow::Result<Self> {
         let backend = BackendKind::parse(config.resolve_backend())?;
         match backend {
             BackendKind::Spanner => {
-                if config.database.is_empty() {
-                    anyhow::bail!(
-                        "storage.stateful.database is required when storage.stateful.backend = \"spanner\""
-                    );
+                if config.database().is_empty() {
+                    anyhow::bail!("storage database is required when backend = \"spanner\"");
                 }
                 Ok(Self::Spanner(SpannerDb::open(config).await?))
             }
@@ -276,7 +275,7 @@ async fn open_sql(
     url: String,
     dialect: Dialect,
     backend: BackendKind,
-    config: Option<&zitadel_config::StatefulStorageConfig>,
+    config: Option<&dyn DatabaseConnectConfig>,
 ) -> anyhow::Result<SqlDb> {
     sqlx::any::install_default_drivers();
 
@@ -286,20 +285,22 @@ async fn open_sql(
     } else if dialect == Dialect::Sqlite {
         16
     } else {
-        config.map(|cfg| cfg.max_open_conns).unwrap_or(25)
+        config
+            .map(DatabaseConnectConfig::max_open_conns)
+            .unwrap_or(25)
     };
     let max_idle_conns = if is_memory {
         1
     } else {
         config
-            .map(|cfg| cfg.max_idle_conns.max(1).min(max_conns))
+            .map(|cfg| cfg.max_idle_conns().max(1).min(max_conns))
             .unwrap_or(5)
             .min(max_conns)
     };
     let conn_max_lifetime = config
-        .map(|cfg| parse_duration_setting(&cfg.conn_max_lifetime))
+        .map(|cfg| parse_duration_setting(cfg.conn_max_lifetime()))
         .transpose()
-        .context("parse storage.stateful.conn_max_lifetime")?
+        .context("parse storage conn_max_lifetime")?
         .or(Some(Duration::from_secs(60 * 60)));
 
     let idle_connections = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -441,7 +442,7 @@ fn infer_backend(dialect: Dialect) -> BackendKind {
 fn validate_backend_dialect(backend: BackendKind, dialect: Dialect) -> anyhow::Result<()> {
     if backend.dialect() != dialect {
         anyhow::bail!(
-            "storage.stateful.backend = \"{backend}\" requires a {} connection URL",
+            "storage backend \"{backend}\" requires a {} connection URL",
             backend.dialect()
         );
     }

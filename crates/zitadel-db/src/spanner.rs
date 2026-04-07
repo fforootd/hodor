@@ -11,7 +11,7 @@ use google_cloud_spanner::{
     admin::{AdminClientConfig, client::Client as AdminClient},
     client::{Client, ClientConfig},
 };
-use zitadel_config::StatefulStorageConfig;
+use zitadel_config::DatabaseConnectConfig;
 
 #[derive(Clone)]
 pub struct SpannerDb {
@@ -21,8 +21,8 @@ pub struct SpannerDb {
 }
 
 impl SpannerDb {
-    pub async fn open(config: &StatefulStorageConfig) -> anyhow::Result<Self> {
-        let database = ParsedDatabaseName::parse(&config.database)?;
+    pub async fn open<T: DatabaseConnectConfig>(config: &T) -> anyhow::Result<Self> {
+        let database = ParsedDatabaseName::parse(config.database())?;
         let client = Client::new(
             database.full_name.clone(),
             build_client_config(config).await?,
@@ -85,10 +85,10 @@ impl SpannerDb {
 }
 
 pub async fn ensure_database_from_config(
-    config: &StatefulStorageConfig,
+    config: &impl DatabaseConnectConfig,
     ddl: &[String],
 ) -> anyhow::Result<()> {
-    let database = ParsedDatabaseName::parse(&config.database)?;
+    let database = ParsedDatabaseName::parse(config.database())?;
     let admin = AdminClient::new(build_admin_config(config).await?)
         .await
         .context("open spanner admin client")?;
@@ -114,7 +114,7 @@ impl ParsedDatabaseName {
             || parts[5].is_empty()
         {
             anyhow::bail!(
-                "storage.stateful.database must be projects/<project>/instances/<instance>/databases/<database>"
+                "storage database must be projects/<project>/instances/<instance>/databases/<database>"
             );
         }
 
@@ -126,38 +126,38 @@ impl ParsedDatabaseName {
     }
 }
 
-async fn build_client_config(config: &StatefulStorageConfig) -> anyhow::Result<ClientConfig> {
+async fn build_client_config(config: &impl DatabaseConnectConfig) -> anyhow::Result<ClientConfig> {
     let mut client_config = ClientConfig::default();
     client_config.channel_config.num_channels =
-        (config.max_open_conns as usize).clamp(1usize, 8usize);
+        (config.max_open_conns() as usize).clamp(1usize, 8usize);
     client_config.session_config.min_opened = client_config.channel_config.num_channels;
     client_config.session_config.max_opened = cmp::max(
         client_config.channel_config.num_channels,
-        config.max_open_conns as usize,
+        config.max_open_conns() as usize,
     );
 
-    if !config.emulator_host.is_empty() {
-        client_config.environment = Environment::Emulator(config.emulator_host.clone());
+    if !config.emulator_host().is_empty() {
+        client_config.environment = Environment::Emulator(config.emulator_host().to_string());
         return Ok(client_config);
     }
 
-    if !config.credentials_json.is_empty() {
-        let credentials = CredentialsFile::new_from_str(&config.credentials_json)
+    if !config.credentials_json().is_empty() {
+        let credentials = CredentialsFile::new_from_str(config.credentials_json())
             .await
-            .context("parse storage.stateful.credentials_json")?;
+            .context("parse storage credentials_json")?;
         return client_config
             .with_credentials(credentials)
             .await
             .context("configure spanner credentials_json");
     }
 
-    if !config.credentials_file.is_empty() {
-        let credentials = CredentialsFile::new_from_file(config.credentials_file.clone())
+    if !config.credentials_file().is_empty() {
+        let credentials = CredentialsFile::new_from_file(config.credentials_file().to_string())
             .await
             .with_context(|| {
                 format!(
-                    "read storage.stateful.credentials_file {}",
-                    config.credentials_file
+                    "read storage credentials_file {}",
+                    config.credentials_file()
                 )
             })?;
         return client_config
@@ -172,31 +172,33 @@ async fn build_client_config(config: &StatefulStorageConfig) -> anyhow::Result<C
         .context("configure spanner ADC auth")
 }
 
-async fn build_admin_config(config: &StatefulStorageConfig) -> anyhow::Result<AdminClientConfig> {
+async fn build_admin_config(
+    config: &impl DatabaseConnectConfig,
+) -> anyhow::Result<AdminClientConfig> {
     let client_config = AdminClientConfig::default();
-    if !config.emulator_host.is_empty() {
+    if !config.emulator_host().is_empty() {
         return Ok(AdminClientConfig {
-            environment: Environment::Emulator(config.emulator_host.clone()),
+            environment: Environment::Emulator(config.emulator_host().to_string()),
         });
     }
 
-    if !config.credentials_json.is_empty() {
-        let credentials = CredentialsFile::new_from_str(&config.credentials_json)
+    if !config.credentials_json().is_empty() {
+        let credentials = CredentialsFile::new_from_str(config.credentials_json())
             .await
-            .context("parse storage.stateful.credentials_json")?;
+            .context("parse storage credentials_json")?;
         return client_config
             .with_credentials(credentials)
             .await
             .context("configure spanner admin credentials_json");
     }
 
-    if !config.credentials_file.is_empty() {
-        let credentials = CredentialsFile::new_from_file(config.credentials_file.clone())
+    if !config.credentials_file().is_empty() {
+        let credentials = CredentialsFile::new_from_file(config.credentials_file().to_string())
             .await
             .with_context(|| {
                 format!(
-                    "read storage.stateful.credentials_file {}",
-                    config.credentials_file
+                    "read storage credentials_file {}",
+                    config.credentials_file()
                 )
             })?;
         return client_config

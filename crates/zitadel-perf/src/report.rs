@@ -12,11 +12,8 @@ use crate::PerfBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StorageRolesSnapshot {
-    pub stateful: String,
-    pub read: String,
-    pub kv: String,
-    pub sink: String,
-    pub process_cache: String,
+    pub primary: String,
+    pub transient: String,
     pub analytics: String,
 }
 
@@ -104,13 +101,10 @@ pub fn render_markdown_summary(current: &[DbPerfReport], previous: &[DbPerfRepor
     for report in &current_reports {
         output.push_str(&format!("## {}\n\n", report.backend.display_name()));
         output.push_str(&format!(
-            "- Profile: `{}`\n- Storage roles: `stateful={}`, `read={}`, `kv={}`, `sink={}`, `process_cache={}`, `analytics={}`\n- Dataset: `{}` users, `{}` active sessions, `{}` revoked sessions, `{}` expired sessions, `{}` FGA tuples\n\n",
+            "- Profile: `{}`\n- Storage roles: `primary={}`, `transient={}`, `analytics={}`\n- Dataset: `{}` users, `{}` active sessions, `{}` revoked sessions, `{}` expired sessions, `{}` FGA tuples\n\n",
             report.profile,
-            report.storage_roles.stateful,
-            report.storage_roles.read,
-            report.storage_roles.kv,
-            report.storage_roles.sink,
-            report.storage_roles.process_cache,
+            report.storage_roles.primary,
+            report.storage_roles.transient,
             report.storage_roles.analytics,
             report.dataset.users,
             report.dataset.active_sessions,
@@ -258,12 +252,9 @@ mod tests {
             backend,
             profile: "ci".into(),
             storage_roles: StorageRolesSnapshot {
-                stateful: backend.as_str().into(),
-                read: "same".into(),
-                kv: "memory".into(),
-                sink: "channel".into(),
-                process_cache: "memory".into(),
-                analytics: "same_stateful".into(),
+                primary: backend.as_str().into(),
+                transient: format!("inherit({})", backend.as_str()),
+                analytics: backend.as_str().into(),
             },
             dataset: DatasetProfile {
                 name: "ci".into(),

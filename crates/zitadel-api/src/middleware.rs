@@ -220,7 +220,7 @@ async fn resolve_token(
         && let Some(identity) = time_async(
             "auth.resolve_pat_token",
             state
-                .stateful
+                .primary
                 .resolve_pat_token(&auth_instance_id, raw_token),
         )
         .await?
@@ -469,7 +469,7 @@ mod tests {
             db,
             app,
             fga,
-            stateful: storage.stateful.clone(),
+            primary: storage.primary.clone(),
             transient: storage.transient.clone(),
             analytics: storage.analytics.clone(),
             oidc,

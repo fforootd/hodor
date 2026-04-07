@@ -2,6 +2,12 @@ use google_cloud_spanner::statement::Statement;
 use zitadel_crypto::token_hash;
 use zitadel_db::Db;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadConsistency {
+    Strong,
+    StaleOk,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserIdentity {
     pub user_id: String,
@@ -39,6 +45,10 @@ pub trait StatefulStore: Clone + Send + Sync + 'static {
 }
 
 pub trait ReadStore: Clone + Send + Sync + 'static {
+    fn db(&self) -> Option<&Db> {
+        None
+    }
+
     async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
@@ -104,6 +114,10 @@ impl SqlReadStore {
 }
 
 impl ReadStore for SqlReadStore {
+    fn db(&self) -> Option<&Db> {
+        Some(&self.db)
+    }
+
     async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
@@ -194,6 +208,10 @@ impl SpannerReadStore {
 }
 
 impl ReadStore for SpannerReadStore {
+    fn db(&self) -> Option<&Db> {
+        Some(&self.db)
+    }
+
     async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
@@ -308,11 +326,24 @@ impl ReadStore for SpannerReadStore {
 pub struct StatefulStorage<S, R> {
     stateful: S,
     read: R,
+    replica: Option<R>,
 }
 
 impl<S, R> StatefulStorage<S, R> {
     pub fn new(stateful: S, read: R) -> Self {
-        Self { stateful, read }
+        Self {
+            stateful,
+            read,
+            replica: None,
+        }
+    }
+
+    pub fn with_replica(stateful: S, read: R, replica: R) -> Self {
+        Self {
+            stateful,
+            read,
+            replica: Some(replica),
+        }
     }
 
     pub fn stateful(&self) -> &S {
@@ -321,6 +352,10 @@ impl<S, R> StatefulStorage<S, R> {
 
     pub fn read(&self) -> &R {
         &self.read
+    }
+
+    pub fn replica(&self) -> Option<&R> {
+        self.replica.as_ref()
     }
 }
 
@@ -333,11 +368,47 @@ where
         self.stateful.db()
     }
 
+    pub fn replica_db(&self) -> Option<&Db> {
+        self.replica.as_ref().and_then(ReadStore::db)
+    }
+
     pub async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
         identifier: &str,
     ) -> anyhow::Result<Option<UserIdentity>> {
+        self.find_active_user_by_identifier_with_consistency(
+            instance_id,
+            identifier,
+            ReadConsistency::Strong,
+        )
+        .await
+    }
+
+    pub async fn find_active_user_by_identifier_with_consistency(
+        &self,
+        instance_id: &str,
+        identifier: &str,
+        consistency: ReadConsistency,
+    ) -> anyhow::Result<Option<UserIdentity>> {
+        if consistency == ReadConsistency::StaleOk
+            && let Some(replica) = self.replica()
+        {
+            match replica
+                .find_active_user_by_identifier(instance_id, identifier)
+                .await
+            {
+                Ok(found) => return Ok(found),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        instance_id,
+                        identifier,
+                        "replica read failed, falling back to primary"
+                    );
+                }
+            }
+        }
         self.read
             .find_active_user_by_identifier(instance_id, identifier)
             .await
@@ -348,6 +419,31 @@ where
         instance_id: &str,
         user_id: &str,
     ) -> anyhow::Result<Option<String>> {
+        self.load_password_hash_with_consistency(instance_id, user_id, ReadConsistency::Strong)
+            .await
+    }
+
+    pub async fn load_password_hash_with_consistency(
+        &self,
+        instance_id: &str,
+        user_id: &str,
+        consistency: ReadConsistency,
+    ) -> anyhow::Result<Option<String>> {
+        if consistency == ReadConsistency::StaleOk
+            && let Some(replica) = self.replica()
+        {
+            match replica.load_password_hash(instance_id, user_id).await {
+                Ok(found) => return Ok(found),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        instance_id,
+                        user_id,
+                        "replica read failed, falling back to primary"
+                    );
+                }
+            }
+        }
         self.read.load_password_hash(instance_id, user_id).await
     }
 
@@ -356,6 +452,30 @@ where
         instance_id: &str,
         raw_token: &str,
     ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
+        self.resolve_pat_token_with_consistency(instance_id, raw_token, ReadConsistency::Strong)
+            .await
+    }
+
+    pub async fn resolve_pat_token_with_consistency(
+        &self,
+        instance_id: &str,
+        raw_token: &str,
+        consistency: ReadConsistency,
+    ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
+        if consistency == ReadConsistency::StaleOk
+            && let Some(replica) = self.replica()
+        {
+            match replica.resolve_pat_token(instance_id, raw_token).await {
+                Ok(found) => return Ok(found),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        instance_id,
+                        "replica read failed, falling back to primary"
+                    );
+                }
+            }
+        }
         self.read.resolve_pat_token(instance_id, raw_token).await
     }
 }
@@ -371,6 +491,14 @@ impl DefaultStatefulStorage {
         Self::Sql(StatefulStorage::new(stateful, read))
     }
 
+    pub fn new_sql_with_replica(
+        stateful: SqlStatefulStore,
+        read: SqlReadStore,
+        replica: SqlReadStore,
+    ) -> Self {
+        Self::Sql(StatefulStorage::with_replica(stateful, read, replica))
+    }
+
     pub fn new_spanner(stateful: SpannerStatefulStore, read: SpannerReadStore) -> Self {
         Self::Spanner(StatefulStorage::new(stateful, read))
     }
@@ -382,20 +510,49 @@ impl DefaultStatefulStorage {
         }
     }
 
+    pub fn replica_db(&self) -> Option<&Db> {
+        match self {
+            Self::Sql(storage) => storage.replica_db(),
+            Self::Spanner(storage) => storage.replica_db(),
+        }
+    }
+
     pub async fn find_active_user_by_identifier(
         &self,
         instance_id: &str,
         identifier: &str,
     ) -> anyhow::Result<Option<UserIdentity>> {
+        self.find_active_user_by_identifier_with_consistency(
+            instance_id,
+            identifier,
+            ReadConsistency::Strong,
+        )
+        .await
+    }
+
+    pub async fn find_active_user_by_identifier_with_consistency(
+        &self,
+        instance_id: &str,
+        identifier: &str,
+        consistency: ReadConsistency,
+    ) -> anyhow::Result<Option<UserIdentity>> {
         match self {
             Self::Sql(storage) => {
                 storage
-                    .find_active_user_by_identifier(instance_id, identifier)
+                    .find_active_user_by_identifier_with_consistency(
+                        instance_id,
+                        identifier,
+                        consistency,
+                    )
                     .await
             }
             Self::Spanner(storage) => {
                 storage
-                    .find_active_user_by_identifier(instance_id, identifier)
+                    .find_active_user_by_identifier_with_consistency(
+                        instance_id,
+                        identifier,
+                        consistency,
+                    )
                     .await
             }
         }
@@ -406,9 +563,27 @@ impl DefaultStatefulStorage {
         instance_id: &str,
         user_id: &str,
     ) -> anyhow::Result<Option<String>> {
+        self.load_password_hash_with_consistency(instance_id, user_id, ReadConsistency::Strong)
+            .await
+    }
+
+    pub async fn load_password_hash_with_consistency(
+        &self,
+        instance_id: &str,
+        user_id: &str,
+        consistency: ReadConsistency,
+    ) -> anyhow::Result<Option<String>> {
         match self {
-            Self::Sql(storage) => storage.load_password_hash(instance_id, user_id).await,
-            Self::Spanner(storage) => storage.load_password_hash(instance_id, user_id).await,
+            Self::Sql(storage) => {
+                storage
+                    .load_password_hash_with_consistency(instance_id, user_id, consistency)
+                    .await
+            }
+            Self::Spanner(storage) => {
+                storage
+                    .load_password_hash_with_consistency(instance_id, user_id, consistency)
+                    .await
+            }
         }
     }
 
@@ -417,12 +592,32 @@ impl DefaultStatefulStorage {
         instance_id: &str,
         raw_token: &str,
     ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
+        self.resolve_pat_token_with_consistency(instance_id, raw_token, ReadConsistency::Strong)
+            .await
+    }
+
+    pub async fn resolve_pat_token_with_consistency(
+        &self,
+        instance_id: &str,
+        raw_token: &str,
+        consistency: ReadConsistency,
+    ) -> anyhow::Result<Option<ResolvedPatIdentity>> {
         match self {
-            Self::Sql(storage) => storage.resolve_pat_token(instance_id, raw_token).await,
-            Self::Spanner(storage) => storage.resolve_pat_token(instance_id, raw_token).await,
+            Self::Sql(storage) => {
+                storage
+                    .resolve_pat_token_with_consistency(instance_id, raw_token, consistency)
+                    .await
+            }
+            Self::Spanner(storage) => {
+                storage
+                    .resolve_pat_token_with_consistency(instance_id, raw_token, consistency)
+                    .await
+            }
         }
     }
 }
+
+pub type DefaultPrimaryStorage = DefaultStatefulStorage;
 
 #[cfg(test)]
 mod tests {

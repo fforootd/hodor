@@ -22,7 +22,7 @@ use std::sync::Arc;
 use zitadel_app::ApplicationServices;
 use zitadel_authn::password::Swapper;
 use zitadel_db::current_request_origin_or;
-use zitadel_storage::{DefaultStatefulStorage, DefaultTransientStorage};
+use zitadel_storage::{DefaultPrimaryStorage, DefaultTransientStorage};
 
 pub(crate) type DefaultRpService = zitadel_oidc::rp::RpService<
     zitadel_oidc::rp::ReqwestHttpClient,
@@ -31,7 +31,7 @@ pub(crate) type DefaultRpService = zitadel_oidc::rp::RpService<
 
 #[derive(Clone)]
 pub struct LoginState {
-    pub stateful: Arc<DefaultStatefulStorage>,
+    pub primary: Arc<DefaultPrimaryStorage>,
     pub transient: Arc<DefaultTransientStorage>,
     pub passwords: Arc<Swapper>,
     pub cookie_config: Arc<zitadel_authn::cookie::CookieConfig>,
@@ -141,6 +141,7 @@ mod tests {
         let fga = Arc::new(FgaService::new(db.clone()));
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
             db.clone(),
+            storage.primary.as_ref().replica_db().cloned(),
             storage.transient.clone(),
             fga,
             storage.analytics.clone(),
@@ -151,7 +152,7 @@ mod tests {
             false,
         ));
         LoginState {
-            stateful: storage.stateful.clone(),
+            primary: storage.primary.clone(),
             transient: storage.transient.clone(),
             passwords: Arc::new(Swapper::dev()),
             cookie_config: Arc::new(CookieConfig::new(
@@ -179,7 +180,7 @@ mod tests {
         identifier: &str,
         password: &str,
     ) {
-        let scoped = state.stateful.db().scoped(instance_id.to_string());
+        let scoped = state.primary.db().scoped(instance_id.to_string());
         // Ensure the instance row exists (no-op if it's "default" which is seeded by migration).
         // Managed children need (parent_instance_id, owner_org_id) pointing to an
         // existing org in the parent — bootstrap creates org "1" in "default".
@@ -248,7 +249,7 @@ mod tests {
     }
 
     async fn wait_for_session_count(state: &LoginState, user_id: &str, expected: i64) {
-        let scoped = state.stateful.db().scoped_default();
+        let scoped = state.primary.db().scoped_default();
         for _ in 0..40 {
             let count: (i64,) = sqlx::query_as(
                 "SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2",
@@ -406,7 +407,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
 
         // No session should be created.
-        let scoped = state.stateful.db().scoped_default();
+        let scoped = state.primary.db().scoped_default();
         let count: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND user_id = $2")
                 .bind(scoped.instance_id())
@@ -457,7 +458,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK); // returns error in UI nodes
 
         // No session.
-        let scoped = state.stateful.db().scoped_default();
+        let scoped = state.primary.db().scoped_default();
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1")
             .bind(scoped.instance_id())
             .fetch_one(scoped.pool())
@@ -536,7 +537,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK); // error in nodes
 
         // No session in default instance.
-        let scoped = state.stateful.db().scoped_default();
+        let scoped = state.primary.db().scoped_default();
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE instance_id = $1")
             .bind(scoped.instance_id())
             .fetch_one(scoped.pool())
@@ -552,8 +553,8 @@ mod tests {
         let state = test_state().await;
         insert_user(&state, "default", "user-1", "org-1", "alice", "secret").await;
 
-        let flow_scoped = state.stateful.db().scoped_default();
-        let foreign_scoped = state.stateful.db().scoped("other".to_string());
+        let flow_scoped = state.primary.db().scoped_default();
+        let foreign_scoped = state.primary.db().scoped("other".to_string());
 
         let flow_data = serde_json::json!({
             "identifier": "alice",
@@ -625,7 +626,7 @@ mod tests {
         let state = test_state().await;
         insert_user(&state, "default", "user-1", "org-1", "alice", "secret").await;
 
-        let scoped = state.stateful.db().scoped_default();
+        let scoped = state.primary.db().scoped_default();
         let flow_data = serde_json::json!({
             "identifier": "alice",
             "auth_request_id": "auth-1",

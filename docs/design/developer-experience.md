@@ -35,13 +35,13 @@ The root instance (`inst_root`) is the operator's own instance, but it is still 
 
 **Startup lifecycle** (see [ADR-018](../adr/018-startup-lifecycle.md)):
 
-| `storage.stateful.migrate` | Behavior |
+| `storage.primary.migrate` | Behavior |
 |---|---|
 | `"auto"` (default) | Run the built-in migration runner before serving |
 | `"check"` | Version check only, fail if behind — opt-in for production PG |
 | `"skip"` | No check — fastest cold-start for autoscaler pods |
 
-For production Postgres: run `zitadel db migrate` as a K8s Job, then `zitadel server start` with `storage.stateful.migrate=check`.
+For production Postgres: run `zitadel db migrate` as a K8s Job, then `zitadel server start` with `storage.primary.migrate=check`.
 
 ### 2. Single Rust Binary
 
@@ -54,7 +54,7 @@ One Rust binary, cross-compiles to common platforms, and keeps Level 0 local sta
 | Embedded assets | `rust-embed` serves `web/dist` from the binary |
 | Self-contained CLI/config | `clap` + `figment` keep startup, config, subcommands, and remote client flows in one binary |
 
-> **Scaling beyond a single process:** As deployments grow, the same binary connects to external infrastructure — Postgres, Redis/Valkey, and dedicated sink backends — without code changes. The runtime derives `read`, `kv`, `sink`, `process_cache`, and `analytics` roles from `storage.stateful`, and advanced deployments can override individual roles under `storage.*`. See [Storage Architecture](storage-architecture.md) for the full progression.
+> **Scaling beyond a single process:** As deployments grow, the same binary connects to external infrastructure without code changes. The public model stays `storage.primary`, `storage.transient`, `storage.analytics`, plus optional `cache.shared` and explicit Postgres replica reads. See [Storage Architecture](storage-architecture.md) for the current progression.
 >
 > For the current POC reality check, see [Storage Implementation Status](storage-implementation-status.md). The edge-first storage split described in the architecture docs is not fully implemented end-to-end yet.
 
@@ -98,7 +98,7 @@ Remote commands: CLI flags → Environment vars → Client profile → Defaults
 port = 8080
 external_domain = "auth.example.com"
 
-[storage.stateful]
+[storage.primary]
 url = "sqlite://./data/zitadel.db"
 
 [observability]

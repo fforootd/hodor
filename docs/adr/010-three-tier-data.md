@@ -12,10 +12,11 @@ Zitadel is an identity platform that serves three distinct domains. Each has dif
 
 The later `storage.*` role model overlays this ADR rather than replacing it:
 
-- `storage.stateful`, `storage.read`, `storage.kv`, and `storage.sink` shape transactional and transient runtime paths
-- `storage.analytics` aligns analytical storage with the same config namespace
+- `storage.primary` and `storage.transient` now shape transactional and auth-runtime paths in the POC
+- `storage.analytics` keeps analytical storage in the same operator-facing namespace
+- `storage.primary.replica` allows explicitly stale reads without adding a fourth public store
 - the observability SQLite buffer remains the durable analytics ingest path in the current POC
-- ADR-029 defines how those roles participate in control-plane vs auth data-plane continuity
+- ADR-029 still captures future continuity semantics, but the POC defaults currently prefer direct stores over `kv + sink`
 
 ## The Three Tiers
 
@@ -169,8 +170,8 @@ The analytics backend defaults to the same OLTP database. For larger deployments
 
 ```toml
 [storage.analytics]
-backend = "same_stateful"              # default: same DB
-# backend = "postgres"                 # dedicated analytics Postgres (future)
+backend = "inherit"                    # default: same DB as storage.primary
+# backend = "postgres"                 # dedicated analytics Postgres
 # url = "postgres://analytics:5432/z"
 # backend = "clickhouse"               # ClickHouse (future)
 # url = "clickhouse://localhost:9000"

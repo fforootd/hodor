@@ -11,7 +11,7 @@ use axum::http::{Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use lru::LruCache;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tower::{Layer, Service};
 use zitadel_config::Config;
 use zitadel_db::{
@@ -26,6 +26,7 @@ pub struct InstanceResolver {
     cloud_enabled: bool,
     trusted_proxies: Vec<IpNet>,
     cache: Arc<Mutex<LruCache<String, CacheEntry>>>,
+    shared_cache: Option<SharedResolverCache>,
     positive_ttl: Duration,
     negative_ttl: Duration,
 }
@@ -55,6 +56,16 @@ struct RequestRoutingInput {
     path_instance_id: Option<String>,
 }
 
+#[derive(Clone)]
+enum SharedResolverCache {
+    Db(Db),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SharedCacheEnvelope {
+    value: Option<InstanceContext>,
+}
+
 #[derive(Serialize)]
 struct ErrorBody {
     error: String,
@@ -63,14 +74,48 @@ struct ErrorBody {
 
 impl InstanceResolver {
     pub fn new(config: &Config, db: Db) -> Self {
-        Self::from_parts(config, db)
+        Self::from_parts(config, db, None)
     }
 
     pub async fn from_config(config: &Config, stateful_db: Db) -> anyhow::Result<Self> {
-        Ok(Self::from_parts(config, stateful_db))
+        let shared_cache = match config.cache.shared.resolve_backend() {
+            "db" => {
+                let db = if config.cache.shared.url.is_empty()
+                    || config.cache.shared.url == config.storage.primary.url
+                {
+                    Some(stateful_db.clone())
+                } else {
+                    match Db::open(&config.cache.shared.url).await {
+                        Ok(db) => Some(db),
+                        Err(error) => {
+                            tracing::warn!(
+                                %error,
+                                url = %config.cache.shared.url,
+                                "shared cache unavailable, continuing without it"
+                            );
+                            None
+                        }
+                    }
+                };
+                db.map(SharedResolverCache::Db)
+            }
+            "redis" => {
+                tracing::warn!(
+                    "cache.shared.backend = \"redis\" is not implemented yet; continuing without shared cache"
+                );
+                None
+            }
+            _ => None,
+        };
+
+        Ok(Self::from_parts(config, stateful_db, shared_cache))
     }
 
-    fn from_parts(config: &Config, routing_db: Db) -> Self {
+    fn from_parts(
+        config: &Config,
+        routing_db: Db,
+        shared_cache: Option<SharedResolverCache>,
+    ) -> Self {
         let capacity = NonZeroUsize::new(config.cloud.resolve_cache_capacity()).unwrap();
         Self {
             routing_db,
@@ -82,6 +127,7 @@ impl InstanceResolver {
                 .filter_map(|value| value.parse().ok())
                 .collect(),
             cache: Arc::new(Mutex::new(LruCache::new(capacity))),
+            shared_cache,
             positive_ttl: Duration::from_secs(config.cloud.resolve_positive_cache_ttl_secs()),
             negative_ttl: Duration::from_secs(config.cloud.resolve_negative_cache_ttl_secs()),
         }
@@ -115,12 +161,26 @@ impl InstanceResolver {
                 return cached
                     .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "path_param"));
             }
+            if let Some(cached) = self.shared_cached(&cache_key).await {
+                return match cached {
+                    Ok(ctx) => {
+                        self.remember(cache_key.clone(), Some(ctx.clone()));
+                        Ok(hydrate_request_context(ctx, &scheme, &host, "path_param"))
+                    }
+                    Err(error) => {
+                        self.remember(cache_key.clone(), None);
+                        Err(error)
+                    }
+                };
+            }
 
             let resolved = self
                 .load_by_instance_id(&instance_id)
                 .await?
                 .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "path_param"));
             self.remember(cache_key, resolved.clone());
+            self.remember_shared(format!("instance:{instance_id}"), resolved.clone())
+                .await;
             return resolved.ok_or_else(|| anyhow::anyhow!("instance not found"));
         }
 
@@ -141,12 +201,31 @@ impl InstanceResolver {
                 return cached
                     .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "trusted_header"));
             }
+            if let Some(cached) = self.shared_cached(&cache_key).await {
+                return match cached {
+                    Ok(ctx) => {
+                        self.remember(cache_key.clone(), Some(ctx.clone()));
+                        Ok(hydrate_request_context(
+                            ctx,
+                            &scheme,
+                            &host,
+                            "trusted_header",
+                        ))
+                    }
+                    Err(error) => {
+                        self.remember(cache_key.clone(), None);
+                        Err(error)
+                    }
+                };
+            }
 
             let resolved = self
                 .load_by_instance_id(&instance_id)
                 .await?
                 .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "trusted_header"));
             self.remember(cache_key, resolved.clone());
+            self.remember_shared(format!("instance:{instance_id}"), resolved.clone())
+                .await;
             return resolved.ok_or_else(|| anyhow::anyhow!("instance not found"));
         }
 
@@ -158,12 +237,26 @@ impl InstanceResolver {
         if let Some(cached) = self.cached(&cache_key) {
             return cached.map(|ctx| hydrate_request_context(ctx, &scheme, &host, "host"));
         }
+        if let Some(cached) = self.shared_cached(&cache_key).await {
+            return match cached {
+                Ok(ctx) => {
+                    self.remember(cache_key.clone(), Some(ctx.clone()));
+                    Ok(hydrate_request_context(ctx, &scheme, &host, "host"))
+                }
+                Err(error) => {
+                    self.remember(cache_key.clone(), None);
+                    Err(error)
+                }
+            };
+        }
 
         let resolved = self
             .load_by_host(&host)
             .await?
             .map(|ctx| hydrate_request_context(ctx, &scheme, &host, "host"));
         self.remember(cache_key, resolved.clone());
+        self.remember_shared(format!("host:{host}"), resolved.clone())
+            .await;
         resolved.ok_or_else(|| anyhow::anyhow!("instance not found"))
     }
 
@@ -195,6 +288,36 @@ impl InstanceResolver {
                 value,
             },
         );
+    }
+
+    async fn shared_cached(&self, key: &str) -> Option<anyhow::Result<InstanceContext>> {
+        match &self.shared_cache {
+            Some(SharedResolverCache::Db(db)) => match load_shared_cache_entry(db, key).await {
+                Ok(Some(value)) => Some(value.ok_or_else(|| anyhow::anyhow!("instance not found"))),
+                Ok(None) => None,
+                Err(error) => {
+                    tracing::warn!(%error, key, "shared cache read failed");
+                    None
+                }
+            },
+            None => None,
+        }
+    }
+
+    async fn remember_shared(&self, key: String, value: Option<InstanceContext>) {
+        let Some(SharedResolverCache::Db(db)) = &self.shared_cache else {
+            return;
+        };
+
+        let ttl = if value.is_some() {
+            self.positive_ttl
+        } else {
+            self.negative_ttl
+        };
+
+        if let Err(error) = store_shared_cache_entry(db, &key, value, ttl).await {
+            tracing::warn!(%error, key, "shared cache write failed");
+        }
     }
 
     async fn load_by_host(&self, host: &str) -> anyhow::Result<Option<InstanceContext>> {
@@ -232,6 +355,79 @@ impl InstanceResolver {
 
 fn is_reserved_instance_id(instance_id: &str) -> bool {
     instance_id == PLATFORM_STORE_ID
+}
+
+async fn load_shared_cache_entry(
+    db: &Db,
+    key: &str,
+) -> anyhow::Result<Option<Option<InstanceContext>>> {
+    let Db::Sql(_) = db else {
+        return Ok(None);
+    };
+
+    let scoped = db.scoped_default();
+    let data = scoped.as_text("data");
+    let sql = format!(
+        "SELECT {data} FROM cache \
+         WHERE instance_id = $1 AND namespace = $2 AND key = $3 \
+           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
+    );
+    let row: Option<(String,)> = sqlx::query_as(&sql)
+        .bind(scoped.instance_id())
+        .bind("instance_routing")
+        .bind(key)
+        .fetch_optional(scoped.pool())
+        .await?;
+
+    match row {
+        Some((payload,)) => {
+            let envelope: SharedCacheEnvelope = serde_json::from_str(&payload)?;
+            Ok(Some(envelope.value))
+        }
+        None => Ok(None),
+    }
+}
+
+async fn store_shared_cache_entry(
+    db: &Db,
+    key: &str,
+    value: Option<InstanceContext>,
+    ttl: Duration,
+) -> anyhow::Result<()> {
+    let Db::Sql(_) = db else {
+        return Ok(());
+    };
+
+    let scoped = db.scoped_default();
+    let expires_expr = match scoped.dialect() {
+        zitadel_db::Dialect::Postgres => {
+            format!("CURRENT_TIMESTAMP + INTERVAL '{} seconds'", ttl.as_secs())
+        }
+        zitadel_db::Dialect::Sqlite => {
+            format!("datetime(CURRENT_TIMESTAMP, '+{} seconds')", ttl.as_secs())
+        }
+        zitadel_db::Dialect::Spanner => return Ok(()),
+    };
+    let payload = serde_json::to_string(&SharedCacheEnvelope { value })?;
+    let sql = format!(
+        "INSERT INTO cache (instance_id, namespace, key, data, fetched_at, expires_at) \
+         VALUES ($1, $2, $3, {}, {}, {}) \
+         ON CONFLICT(instance_id, namespace, key) DO UPDATE SET \
+           data = excluded.data, \
+           fetched_at = excluded.fetched_at, \
+           expires_at = excluded.expires_at",
+        scoped.json_bind(4),
+        scoped.timestamp_now(),
+        expires_expr,
+    );
+    sqlx::query(&sql)
+        .bind(scoped.instance_id())
+        .bind("instance_routing")
+        .bind(key)
+        .bind(payload)
+        .execute(scoped.pool())
+        .await?;
+    Ok(())
 }
 
 impl InstanceContextLayer {
@@ -523,6 +719,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_cache_can_reuse_routing_metadata_across_resolvers() {
+        let (db_path, db_url) = temp_sqlite_url("shared-routing-cache");
+        let db = Db::open(&db_url).await.unwrap();
+        zitadel_db::migrate::migrate(&db).await.unwrap();
+        zitadel_db::bootstrap::bootstrap(&db, None).await.unwrap();
+        sqlx::query(
+            "INSERT INTO instances (instance_id, parent_instance_id, owner_org_id, kind, state, placement_mode, region_key, feature_overrides) \
+             VALUES ('inst_shared', 'default', '1', 'managed', 'active', 'regional', 'us-east1', '{}')",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO domains (domain, instance_id, org_id, is_primary, state, verified) \
+             VALUES ('shared.example.com', 'inst_shared', NULL, 1, 'active', 1)",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let mut config = Config::default();
+        config.cloud.enabled = true;
+        config.storage.primary.url = db_url.clone();
+        config.cache.shared.backend = "db".into();
+
+        let resolver_a = InstanceResolver::from_config(&config, db.clone())
+            .await
+            .unwrap();
+        let req = Request::builder()
+            .header(header::HOST, "shared.example.com")
+            .body(Body::empty())
+            .unwrap();
+
+        let first = resolver_a
+            .resolve(resolver_a.request_input(&req))
+            .await
+            .unwrap();
+        assert_eq!(first.instance_id, "inst_shared");
+
+        sqlx::query("DELETE FROM domains WHERE domain = 'shared.example.com'")
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let resolver_b = InstanceResolver::from_config(&config, db.clone())
+            .await
+            .unwrap();
+        let cached = resolver_b
+            .resolve(resolver_b.request_input(&req))
+            .await
+            .unwrap();
+        assert_eq!(cached.instance_id, "inst_shared");
+
+        drop(resolver_a);
+        drop(resolver_b);
+        db.close().await;
+        cleanup_sqlite_path(&db_path);
+    }
+
+    #[tokio::test]
     async fn resolves_default_instance_when_root_domain_mapping_exists() {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
@@ -642,7 +898,7 @@ mod tests {
 
         let mut config = Config::default();
         config.cloud.enabled = true;
-        config.storage.stateful.url = stateful_url.clone();
+        config.storage.primary.url = stateful_url.clone();
         config.cloud.control_plane.url = control_plane_url.clone();
         let resolver = InstanceResolver::from_config(&config, stateful_db.clone())
             .await

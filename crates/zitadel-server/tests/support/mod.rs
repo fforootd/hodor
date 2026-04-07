@@ -30,7 +30,7 @@ pub const CHILD_ORG_ID: &str = "child-org";
 pub async fn build_cloud_test_app() -> anyhow::Result<TestApp> {
     let mut config = Config::default();
     config.cloud.enabled = true;
-    config.storage.stateful.url = "sqlite://:memory:".into();
+    config.storage.primary.url = "sqlite://:memory:".into();
     let ctx = TestContext::with_config(config).await?;
 
     let scoped = ctx.db.scoped_default();

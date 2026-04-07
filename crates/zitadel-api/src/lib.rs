@@ -37,7 +37,7 @@ use zitadel_authn::cookie::CookieConfig;
 use zitadel_db::Db;
 use zitadel_fga::FgaService;
 use zitadel_oidc::OidcState;
-use zitadel_storage::{DefaultAnalyticsStorage, DefaultStatefulStorage, DefaultTransientStorage};
+use zitadel_storage::{DefaultAnalyticsStorage, DefaultPrimaryStorage, DefaultTransientStorage};
 
 /// Shared API state.
 #[derive(Clone)]
@@ -49,7 +49,7 @@ pub struct ApiState {
     /// FGA service — used by instance management for parent-relation checks.
     /// Prefer `app.repos.fga_admin` for store rebuild and admin operations.
     pub fga: Arc<FgaService>,
-    pub stateful: Arc<DefaultStatefulStorage>,
+    pub primary: Arc<DefaultPrimaryStorage>,
     pub transient: Arc<DefaultTransientStorage>,
     pub analytics: Arc<DefaultAnalyticsStorage>,
     pub oidc: OidcState,

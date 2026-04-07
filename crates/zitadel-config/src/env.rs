@@ -48,59 +48,180 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
     }
 
     // Storage
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_URL") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_URL") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "url"],
+            &["storage", "primary", "url"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_DATABASE") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_DATABASE") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "database"],
+            &["storage", "primary", "database"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_EMULATOR_HOST") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_EMULATOR_HOST") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "emulator_host"],
+            &["storage", "primary", "emulator_host"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_CREDENTIALS_FILE") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_CREDENTIALS_FILE") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "credentials_file"],
+            &["storage", "primary", "credentials_file"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_CREDENTIALS_JSON") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_CREDENTIALS_JSON") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "credentials_json"],
+            &["storage", "primary", "credentials_json"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_BACKEND") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_BACKEND") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "backend"],
+            &["storage", "primary", "backend"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_MIGRATE") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_MIGRATE") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "migrate"],
+            &["storage", "primary", "migrate"],
             Value::String(v),
         );
     }
-    if let Ok(v) = env::var("ZITADEL_STORAGE_STATEFUL_BOOTSTRAP") {
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_BOOTSTRAP") {
         merge_path(
             &mut overrides,
-            &["storage", "stateful", "bootstrap"],
+            &["storage", "primary", "bootstrap"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_REPLICA_URL") {
+        merge_path(
+            &mut overrides,
+            &["storage", "primary", "replica", "url"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_REPLICA_ENABLED")
+        && let Some(value) = parse_boolish(&v)
+    {
+        merge_path(
+            &mut overrides,
+            &["storage", "primary", "replica", "enabled"],
+            Value::Bool(value),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_PRIMARY_REPLICA_MODE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "primary", "replica", "mode"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_TRANSIENT_URL") {
+        merge_path(
+            &mut overrides,
+            &["storage", "transient", "url"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_TRANSIENT_DATABASE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "transient", "database"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_TRANSIENT_EMULATOR_HOST") {
+        merge_path(
+            &mut overrides,
+            &["storage", "transient", "emulator_host"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_TRANSIENT_CREDENTIALS_FILE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "transient", "credentials_file"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_TRANSIENT_CREDENTIALS_JSON") {
+        merge_path(
+            &mut overrides,
+            &["storage", "transient", "credentials_json"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_TRANSIENT_BACKEND") {
+        merge_path(
+            &mut overrides,
+            &["storage", "transient", "backend"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_ANALYTICS_URL") {
+        merge_path(
+            &mut overrides,
+            &["storage", "analytics", "url"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_ANALYTICS_DATABASE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "analytics", "database"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_ANALYTICS_EMULATOR_HOST") {
+        merge_path(
+            &mut overrides,
+            &["storage", "analytics", "emulator_host"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_ANALYTICS_CREDENTIALS_FILE") {
+        merge_path(
+            &mut overrides,
+            &["storage", "analytics", "credentials_file"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_ANALYTICS_CREDENTIALS_JSON") {
+        merge_path(
+            &mut overrides,
+            &["storage", "analytics", "credentials_json"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_STORAGE_ANALYTICS_BACKEND") {
+        merge_path(
+            &mut overrides,
+            &["storage", "analytics", "backend"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_CACHE_SHARED_BACKEND") {
+        merge_path(
+            &mut overrides,
+            &["cache", "shared", "backend"],
+            Value::String(v),
+        );
+    }
+    if let Ok(v) = env::var("ZITADEL_CACHE_SHARED_URL") {
+        merge_path(
+            &mut overrides,
+            &["cache", "shared", "url"],
             Value::String(v),
         );
     }

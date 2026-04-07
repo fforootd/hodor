@@ -60,20 +60,14 @@ impl PerfBackend {
     fn default_roles(self) -> StorageRolesSnapshot {
         match self {
             Self::Sqlite => StorageRolesSnapshot {
-                stateful: "sqlite".into(),
-                read: "same_connection".into(),
-                kv: "memory".into(),
-                sink: "channel".into(),
-                process_cache: "memory".into(),
-                analytics: "same_stateful".into(),
+                primary: "sqlite".into(),
+                transient: "inherit(sqlite)".into(),
+                analytics: "sqlite".into(),
             },
             Self::Postgres => StorageRolesSnapshot {
-                stateful: "postgres".into(),
-                read: "same_primary".into(),
-                kv: "postgres_unlogged".into(),
-                sink: "postgres".into(),
-                process_cache: "memory".into(),
-                analytics: "same_stateful".into(),
+                primary: "postgres".into(),
+                transient: "inherit(postgres)".into(),
+                analytics: "postgres".into(),
             },
         }
     }
@@ -231,19 +225,19 @@ fn benchmark_config(
     config.server.public_origin = "http://localhost:18080".into();
     config.server.force_insecure_cookies = true;
     config.password_hasher = PasswordHasherConfig::dev_defaults();
-    config.storage.stateful.migrate = "auto".into();
-    config.storage.stateful.bootstrap = "auto".into();
+    config.storage.primary.migrate = "auto".into();
+    config.storage.primary.bootstrap = "auto".into();
 
     match backend {
         PerfBackend::Sqlite => {
             let sqlite_file =
                 std::env::temp_dir().join(format!("zitadel-perf-{}.db", Uuid::new_v4().simple()));
-            config.storage.stateful.url =
+            config.storage.primary.url =
                 database_url.unwrap_or_else(|| format!("sqlite://{}", sqlite_file.display()));
             (config, Some(sqlite_file))
         }
         PerfBackend::Postgres => {
-            config.storage.stateful.url =
+            config.storage.primary.url =
                 database_url.unwrap_or_else(|| DEFAULT_POSTGRES_URL.to_string());
             (config, None)
         }
@@ -653,7 +647,7 @@ async fn collect_scenarios(
 ) -> anyhow::Result<Vec<ScenarioReport>> {
     let mut reports = Vec::new();
 
-    let stateful = env.ctx().login_state.stateful.clone();
+    let primary = env.ctx().login_state.primary.clone();
     let transient = env.ctx().login_state.transient.clone();
     let passwords = env.ctx().login_state.passwords.clone();
     let identifier = env.hot_user.identifier.clone();
@@ -667,7 +661,7 @@ async fn collect_scenarios(
             tuning.serial_warmup_rounds,
             tuning.serial_rounds,
             move || {
-                let stateful = stateful.clone();
+                let primary = primary.clone();
                 let transient = transient.clone();
                 let passwords = passwords.clone();
                 let identifier = identifier.clone();
@@ -675,14 +669,14 @@ async fn collect_scenarios(
                 let user_id = user_id.clone();
                 let org_id = org_id.clone();
                 async move {
-                    let user = stateful
+                    let user = primary
                         .find_active_user_by_identifier(DEFAULT_INSTANCE_ID, &identifier)
                         .await?
                         .ok_or_else(|| anyhow::anyhow!("hot perf user missing"))?;
                     if user.user_id != user_id {
                         bail!("perf user lookup returned unexpected user id");
                     }
-                    let hash = stateful
+                    let hash = primary
                         .load_password_hash(DEFAULT_INSTANCE_ID, &user.user_id)
                         .await?
                         .ok_or_else(|| anyhow::anyhow!("hot perf password hash missing"))?;

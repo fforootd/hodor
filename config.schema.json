@@ -4,6 +4,19 @@
   "description": "Runtime configuration for the Zitadel server. Covers infrastructure-level settings only. Domain-specific configuration (policies, whitelabeling) lives in seed YAML.",
   "type": "object",
   "properties": {
+    "cache": {
+      "default": {
+        "shared": {
+          "backend": "disabled",
+          "url": ""
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/CacheConfig"
+        }
+      ]
+    },
     "catalog": {
       "default": {
         "local_path": "",
@@ -16,18 +29,28 @@
         }
       ]
     },
-    "database": {
+    "cloud": {
       "default": {
-        "bootstrap": "",
-        "conn_max_lifetime": "1h",
-        "max_idle_conns": 5,
-        "max_open_conns": 25,
-        "migrate": "",
-        "url": "sqlite://./data/zitadel.db"
+        "control_plane": {
+          "secret_ref": "",
+          "url": ""
+        },
+        "enabled": false,
+        "gcp": {
+          "backend_service": "",
+          "certificate_map": "",
+          "credentials_path": "",
+          "project_id": "",
+          "url_map": ""
+        },
+        "license_key": "",
+        "negative_cache_ttl_secs": 10,
+        "positive_cache_ttl_secs": 60,
+        "resolver_cache_capacity": 50000
       },
       "allOf": [
         {
-          "$ref": "#/definitions/DatabaseConfig"
+          "$ref": "#/definitions/CloudConfig"
         }
       ]
     },
@@ -67,6 +90,8 @@
       "default": {
         "cache_max": 50000,
         "cache_path": "./data/zitadel-cache.db",
+        "gcp_cloud_logging": false,
+        "gcp_project_id": "",
         "log_format": "text",
         "log_level": "info",
         "redaction": {
@@ -87,8 +112,15 @@
             "enabled": true
           },
           "otel": {
+            "auth": "none",
             "endpoint": "",
-            "protocol": "http"
+            "logs_enabled": true,
+            "metrics_enabled": true,
+            "metrics_endpoint": "",
+            "metrics_interval": "60s",
+            "protocol": "http",
+            "traces_enabled": true,
+            "traces_endpoint": ""
           }
         },
         "streams": {
@@ -268,6 +300,63 @@
         }
       ]
     },
+    "storage": {
+      "default": {
+        "analytics": {
+          "backend": "inherit",
+          "credentials_file": "",
+          "credentials_json": "",
+          "database": "",
+          "emulator_host": "",
+          "url": ""
+        },
+        "primary": {
+          "backend": "",
+          "bootstrap": "",
+          "conn_max_lifetime": "1h",
+          "credentials_file": "",
+          "credentials_json": "",
+          "database": "",
+          "emulator_host": "",
+          "max_idle_conns": 5,
+          "max_open_conns": 25,
+          "migrate": "",
+          "replica": {
+            "enabled": false,
+            "mode": "explicit",
+            "url": ""
+          },
+          "url": "sqlite://./data/zitadel.db"
+        },
+        "retention": {
+          "events": {
+            "keep_for": "14d"
+          },
+          "sessions": {
+            "retain_terminal_for": "7d"
+          },
+          "tokens": {
+            "retain_terminal_for": "7d"
+          },
+          "transient_auth_state": {
+            "retain_after_expiry": "1h"
+          }
+        },
+        "transient": {
+          "backend": "inherit",
+          "credentials_file": "",
+          "credentials_json": "",
+          "database": "",
+          "emulator_host": "",
+          "url": ""
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/StorageConfig"
+        }
+      ]
+    },
     "tls": {
       "default": {
         "ca_dir": "",
@@ -284,10 +373,18 @@
     },
     "workers": {
       "default": {
+        "cleanup_batch_size": 500,
+        "cleanup_max_rows_per_run": 2000,
+        "cleanup_max_run_duration": "2s",
+        "event_consumer_poll_interval": "5s",
+        "event_partition_premake_days": 3,
         "event_workers": 1,
         "lake_batch_size": 1000,
         "lake_batch_window_secs": 5,
-        "notification_workers": 1
+        "notification_workers": 1,
+        "scheduler_enabled": true,
+        "scheduler_lease_ttl": "90s",
+        "scheduler_poll_interval": "30s"
       },
       "allOf": [
         {
@@ -313,6 +410,35 @@
         "enabled": {
           "default": true,
           "type": "boolean"
+        }
+      }
+    },
+    "AnalyticsStorageConfig": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "default": "inherit",
+          "type": "string"
+        },
+        "credentials_file": {
+          "default": "",
+          "type": "string"
+        },
+        "credentials_json": {
+          "default": "",
+          "type": "string"
+        },
+        "database": {
+          "default": "",
+          "type": "string"
+        },
+        "emulator_host": {
+          "default": "",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "type": "string"
         }
       }
     },
@@ -381,6 +507,22 @@
         }
       }
     },
+    "CacheConfig": {
+      "type": "object",
+      "properties": {
+        "shared": {
+          "default": {
+            "backend": "disabled",
+            "url": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/SharedCacheConfig"
+            }
+          ]
+        }
+      }
+    },
     "CatalogConfig": {
       "type": "object",
       "properties": {
@@ -398,35 +540,72 @@
         }
       }
     },
-    "DatabaseConfig": {
+    "CloudConfig": {
       "type": "object",
       "properties": {
-        "bootstrap": {
+        "control_plane": {
+          "default": {
+            "secret_ref": "",
+            "url": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/CloudControlPlaneConfig"
+            }
+          ]
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gcp": {
+          "default": {
+            "backend_service": "",
+            "certificate_map": "",
+            "credentials_path": "",
+            "project_id": "",
+            "url_map": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/GcpInfraConfig"
+            }
+          ]
+        },
+        "license_key": {
+          "description": "License key for cloud features. Required when `enabled = true`. Cloud functionality will not activate without a valid key.",
           "default": "",
           "type": "string"
         },
-        "conn_max_lifetime": {
-          "default": "1h",
-          "type": "string"
+        "negative_cache_ttl_secs": {
+          "default": 10,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         },
-        "max_idle_conns": {
-          "default": 5,
+        "positive_cache_ttl_secs": {
+          "default": 60,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "resolver_cache_capacity": {
+          "default": 50000,
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
-        },
-        "max_open_conns": {
-          "default": 25,
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "migrate": {
+        }
+      }
+    },
+    "CloudControlPlaneConfig": {
+      "type": "object",
+      "properties": {
+        "secret_ref": {
           "default": "",
           "type": "string"
         },
         "url": {
-          "default": "sqlite://./data/zitadel.db",
+          "default": "",
           "type": "string"
         }
       }
@@ -481,6 +660,55 @@
           "type": "string"
         },
         "secret": {
+          "type": "string"
+        }
+      }
+    },
+    "EventRetentionConfig": {
+      "type": "object",
+      "properties": {
+        "keep_for": {
+          "default": "14d",
+          "type": "string"
+        }
+      }
+    },
+    "ExpiredDataRetentionConfig": {
+      "type": "object",
+      "properties": {
+        "retain_after_expiry": {
+          "default": "1h",
+          "type": "string"
+        }
+      }
+    },
+    "GcpInfraConfig": {
+      "description": "GCP infrastructure configuration for domain provisioning.",
+      "type": "object",
+      "properties": {
+        "backend_service": {
+          "description": "Backend service name (e.g. \"zitadel-backend\").",
+          "default": "",
+          "type": "string"
+        },
+        "certificate_map": {
+          "description": "Certificate map name (e.g. \"zitadel-cert-map\").",
+          "default": "",
+          "type": "string"
+        },
+        "credentials_path": {
+          "description": "Path to service account JSON. Empty = use workload identity.",
+          "default": "",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "GCP project ID.",
+          "default": "",
+          "type": "string"
+        },
+        "url_map": {
+          "description": "URL map name for the GLB (e.g. \"zitadel-lb\").",
+          "default": "",
           "type": "string"
         }
       }
@@ -552,6 +780,14 @@
           "default": "./data/zitadel-cache.db",
           "type": "string"
         },
+        "gcp_cloud_logging": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gcp_project_id": {
+          "default": "",
+          "type": "string"
+        },
         "log_format": {
           "default": "text",
           "type": "string"
@@ -586,8 +822,15 @@
               "enabled": true
             },
             "otel": {
+              "auth": "none",
               "endpoint": "",
-              "protocol": "http"
+              "logs_enabled": true,
+              "metrics_enabled": true,
+              "metrics_endpoint": "",
+              "metrics_interval": "60s",
+              "protocol": "http",
+              "traces_enabled": true,
+              "traces_endpoint": ""
             }
           },
           "allOf": [
@@ -715,12 +958,40 @@
     "OtelSinkConfig": {
       "type": "object",
       "properties": {
+        "auth": {
+          "default": "none",
+          "type": "string"
+        },
         "endpoint": {
           "default": "",
           "type": "string"
         },
+        "logs_enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "metrics_enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "metrics_endpoint": {
+          "default": "",
+          "type": "string"
+        },
+        "metrics_interval": {
+          "default": "60s",
+          "type": "string"
+        },
         "protocol": {
           "default": "http",
+          "type": "string"
+        },
+        "traces_enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "traces_endpoint": {
+          "default": "",
           "type": "string"
         }
       }
@@ -796,6 +1067,71 @@
         }
       }
     },
+    "PrimaryStorageConfig": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "default": "",
+          "type": "string"
+        },
+        "bootstrap": {
+          "default": "",
+          "type": "string"
+        },
+        "conn_max_lifetime": {
+          "default": "1h",
+          "type": "string"
+        },
+        "credentials_file": {
+          "default": "",
+          "type": "string"
+        },
+        "credentials_json": {
+          "default": "",
+          "type": "string"
+        },
+        "database": {
+          "default": "",
+          "type": "string"
+        },
+        "emulator_host": {
+          "default": "",
+          "type": "string"
+        },
+        "max_idle_conns": {
+          "default": 5,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_open_conns": {
+          "default": 25,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "migrate": {
+          "default": "",
+          "type": "string"
+        },
+        "replica": {
+          "default": {
+            "enabled": false,
+            "mode": "explicit",
+            "url": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReplicaReadConfig"
+            }
+          ]
+        },
+        "url": {
+          "default": "sqlite://./data/zitadel.db",
+          "type": "string"
+        }
+      }
+    },
     "RateLimitConfig": {
       "type": "object",
       "properties": {
@@ -842,6 +1178,68 @@
         "mask": {
           "default": "***REDACTED***",
           "type": "string"
+        }
+      }
+    },
+    "ReplicaReadConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "default": "explicit",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "RetentionConfig": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "default": {
+            "keep_for": "14d"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/EventRetentionConfig"
+            }
+          ]
+        },
+        "sessions": {
+          "default": {
+            "retain_terminal_for": "7d"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/TerminalDataRetentionConfig"
+            }
+          ]
+        },
+        "tokens": {
+          "default": {
+            "retain_terminal_for": "7d"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/TerminalDataRetentionConfig"
+            }
+          ]
+        },
+        "transient_auth_state": {
+          "default": {
+            "retain_after_expiry": "1h"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExpiredDataRetentionConfig"
+            }
+          ]
         }
       }
     },
@@ -1059,6 +1457,19 @@
         }
       }
     },
+    "SharedCacheConfig": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "default": "disabled",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
     "SigningAlgorithm": {
       "description": "OIDC signing algorithm.",
       "type": "string",
@@ -1085,12 +1496,100 @@
         },
         "otel": {
           "default": {
+            "auth": "none",
             "endpoint": "",
-            "protocol": "http"
+            "logs_enabled": true,
+            "metrics_enabled": true,
+            "metrics_endpoint": "",
+            "metrics_interval": "60s",
+            "protocol": "http",
+            "traces_enabled": true,
+            "traces_endpoint": ""
           },
           "allOf": [
             {
               "$ref": "#/definitions/OtelSinkConfig"
+            }
+          ]
+        }
+      }
+    },
+    "StorageConfig": {
+      "type": "object",
+      "properties": {
+        "analytics": {
+          "default": {
+            "backend": "inherit",
+            "credentials_file": "",
+            "credentials_json": "",
+            "database": "",
+            "emulator_host": "",
+            "url": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnalyticsStorageConfig"
+            }
+          ]
+        },
+        "primary": {
+          "default": {
+            "backend": "",
+            "bootstrap": "",
+            "conn_max_lifetime": "1h",
+            "credentials_file": "",
+            "credentials_json": "",
+            "database": "",
+            "emulator_host": "",
+            "max_idle_conns": 5,
+            "max_open_conns": 25,
+            "migrate": "",
+            "replica": {
+              "enabled": false,
+              "mode": "explicit",
+              "url": ""
+            },
+            "url": "sqlite://./data/zitadel.db"
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/PrimaryStorageConfig"
+            }
+          ]
+        },
+        "retention": {
+          "default": {
+            "events": {
+              "keep_for": "14d"
+            },
+            "sessions": {
+              "retain_terminal_for": "7d"
+            },
+            "tokens": {
+              "retain_terminal_for": "7d"
+            },
+            "transient_auth_state": {
+              "retain_after_expiry": "1h"
+            }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/RetentionConfig"
+            }
+          ]
+        },
+        "transient": {
+          "default": {
+            "backend": "inherit",
+            "credentials_file": "",
+            "credentials_json": "",
+            "database": "",
+            "emulator_host": "",
+            "url": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/TransientStorageConfig"
             }
           ]
         }
@@ -1210,6 +1709,15 @@
         }
       }
     },
+    "TerminalDataRetentionConfig": {
+      "type": "object",
+      "properties": {
+        "retain_terminal_for": {
+          "default": "7d",
+          "type": "string"
+        }
+      }
+    },
     "TlsConfig": {
       "type": "object",
       "properties": {
@@ -1239,9 +1747,64 @@
         }
       }
     },
+    "TransientStorageConfig": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "default": "inherit",
+          "type": "string"
+        },
+        "credentials_file": {
+          "default": "",
+          "type": "string"
+        },
+        "credentials_json": {
+          "default": "",
+          "type": "string"
+        },
+        "database": {
+          "default": "",
+          "type": "string"
+        },
+        "emulator_host": {
+          "default": "",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
     "WorkersConfig": {
       "type": "object",
       "properties": {
+        "cleanup_batch_size": {
+          "default": 500,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "cleanup_max_rows_per_run": {
+          "default": 2000,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "cleanup_max_run_duration": {
+          "default": "2s",
+          "type": "string"
+        },
+        "event_consumer_poll_interval": {
+          "default": "5s",
+          "type": "string"
+        },
+        "event_partition_premake_days": {
+          "default": 3,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "event_workers": {
           "default": 1,
           "type": "integer",
@@ -1265,6 +1828,18 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
+        },
+        "scheduler_enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "scheduler_lease_ttl": {
+          "default": "90s",
+          "type": "string"
+        },
+        "scheduler_poll_interval": {
+          "default": "30s",
+          "type": "string"
         }
       }
     }

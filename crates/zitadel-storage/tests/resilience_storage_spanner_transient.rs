@@ -18,10 +18,10 @@ async fn spanner_runtime() -> anyhow::Result<Option<StorageRuntime>> {
     };
 
     let config = StorageConfig {
-        stateful,
+        primary: stateful,
         ..Default::default()
     };
-    let db = Db::open_with_config("", &config.stateful).await?;
+    let db = Db::open_with_config("", &config.primary).await?;
     migrate::migrate(&db).await?;
     StorageRuntime::from_config(&config, db, 86_400)
         .await
@@ -38,7 +38,7 @@ async fn seed_active_user(
     user_id: &str,
     identifier: &str,
 ) -> anyhow::Result<()> {
-    let db = runtime.stateful.db();
+    let db = runtime.primary.db();
     create_org(db, DEFAULT_INSTANCE_ID, org_id, org_id, "{}").await?;
     create_user(
         db,
@@ -56,7 +56,7 @@ async fn seed_active_user(
 
 async fn disable_user(runtime: &StorageRuntime, user_id: &str) -> anyhow::Result<()> {
     let spanner = runtime
-        .stateful
+        .primary
         .db()
         .spanner()
         .expect("runtime uses native spanner backend");
@@ -83,7 +83,7 @@ async fn insert_spanner_events(
     event_types: &[String],
 ) -> anyhow::Result<()> {
     let spanner = runtime
-        .stateful
+        .primary
         .db()
         .spanner()
         .expect("runtime uses native spanner backend");
@@ -186,7 +186,7 @@ async fn completed_auth_request_cannot_be_reused_on_spanner_emulator_when_config
 
     let auth_request_id = unique("authreq");
     create_oidc_auth_request_record(
-        runtime.stateful.db(),
+        runtime.primary.db(),
         DEFAULT_INSTANCE_ID,
         &auth_request_id,
         "client-1",
@@ -281,7 +281,7 @@ async fn disabled_users_cannot_authenticate_with_session_or_pat_on_spanner_emula
 
     let pat_token = unique("pat-token");
     create_pat(
-        runtime.stateful.db(),
+        runtime.primary.db(),
         DEFAULT_INSTANCE_ID,
         &unique("pat"),
         &user_id,
@@ -302,7 +302,7 @@ async fn disabled_users_cannot_authenticate_with_session_or_pat_on_spanner_emula
     );
     assert!(
         runtime
-            .stateful
+            .primary
             .resolve_pat_token(DEFAULT_INSTANCE_ID, &pat_token)
             .await?
             .is_none()

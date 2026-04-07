@@ -7,6 +7,8 @@
 
 ## Context
 
+POC note: the current runtime defaults have been simplified since this ADR was written. The shipping prototype now uses direct `storage.primary`, `storage.transient`, and `storage.analytics` stores, with optional shared cache and explicit replica reads. The older `kv + sink` continuity model remains future architectural direction rather than default runtime behavior.
+
 The current repository already defines:
 
 - `instance_id` as the runtime boundary
@@ -70,6 +72,14 @@ This table is normative for architecture docs and future implementation work.
 The auth data plane may issue new sessions during degraded mode. Those sessions are still part of the identity system's correctness model, but they are allowed to reconcile back to the authoritative plane asynchronously.
 
 ## Storage Role Implications
+
+For the current POC:
+
+- `storage.primary.replica` is an explicit stale-read capability, not a separate storage role
+- `storage.transient` is the direct auth-runtime authority by default
+- `cache.shared` is an accelerator only
+
+For future distributed continuity work:
 
 - `storage.read` is not only a performance optimization; it can be part of the regional auth continuity path.
 - `storage.kv` is the writable regional auth-runtime layer for transient state with TTL and consume-once semantics.

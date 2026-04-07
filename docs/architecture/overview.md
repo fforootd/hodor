@@ -223,7 +223,7 @@ The authoritative routing data is root-managed control-plane state. The runtime 
 
 ## Deployment Topologies
 
-The system uses one role-based storage runtime with different defaults by operating mode. Most operators only configure `storage.stateful`; the runtime derives `read`, `kv`, `sink`, `process_cache`, and `analytics`. See [Storage Architecture](../design/storage-architecture.md) for full details.
+The system uses one storage runtime with three operator-facing stores: `storage.primary`, `storage.transient`, and `storage.analytics`. Most operators only configure `storage.primary`; `transient` and `analytics` inherit it by default. Optional `cache.shared` accelerates safe metadata reads, and Postgres replicas can serve explicitly stale-tolerant queries. See [Storage Architecture](../design/storage-architecture.md) for full details.
 
 | Mode | Primary backend | Instance model | Placement |
 |---|---|---|---|
@@ -240,10 +240,10 @@ The architecture separates the management side of the system from the end-user a
 | Consistency class | Typical examples | Default behavior |
 |---|---|---|
 | **Strong / control-plane authoritative** | user creation, provider config, policy edits, placement changes | writes go to the authoritative plane; if unavailable, the mutation fails |
-| **Bounded eventual / auth continuity** | session creation, login runtime state, auth request progress, regional auth projections | regional auth may continue; state lands in `storage.kv` and is reconciled via `storage.sink` |
-| **Freshness-critical / priority path** | disable user, logout-all, token or session revocation, factor removal, emergency policy changes | use a priority invalidation path; if freshness cannot be proven within budget, fail closed |
+| **Explicitly stale-tolerant reads** | search, browse views, metadata queries, non-critical lists | default remains strong reads; replica reads are opt-in and may return stale data |
+| **Freshness-critical / priority path** | disable user, logout-all, token or session revocation, factor removal, emergency policy changes | read from authoritative stores only; if freshness cannot be proven within budget, fail closed |
 
-This is why the storage-role split exists even when multiple roles may map to the same physical backend in small deployments.
+In the current POC, the simplified default wins over degraded-mode auth continuity: transient auth state writes directly to `storage.transient`, and if the required DB is unavailable the operation fails.
 
 ## Degraded-Mode Defaults
 
@@ -251,7 +251,7 @@ The design goal is explicit: brief control-plane outages are acceptable, and log
 
 | Operation | Planned maintenance | Unplanned central outage |
 |---|---|---|
-| **New login** | allowed after control-plane writes are frozen and regional reads are known-good | allowed with bounded stale-data risk through regional read models plus `kv + sink` |
+| **New login** | allowed after control-plane writes are frozen and required primary/transient stores are healthy | blocked if the required primary or transient authority is unavailable |
 | **Existing session validation** | allowed regionally | allowed regionally |
 | **Control-plane mutation** | blocked until the authoritative plane returns | blocked until the authoritative plane returns |
 | **Revocation / disable / logout-all** | routed through the priority invalidation path; if freshness budget is not met, fail closed | routed through the priority invalidation path; if freshness budget is not met, fail closed |

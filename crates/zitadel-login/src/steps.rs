@@ -532,7 +532,7 @@ pub(crate) async fn handle_identifier_step(
     }
 
     let user = match state
-        .stateful
+        .primary
         .find_active_user_by_identifier(&instance_id, &req.identifier)
         .await
     {
@@ -607,7 +607,7 @@ pub(crate) async fn handle_password_step(
         .unwrap_or_default();
 
     let user = match state
-        .stateful
+        .primary
         .find_active_user_by_identifier(&instance_id, identifier)
         .await
     {

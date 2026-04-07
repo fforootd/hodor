@@ -57,9 +57,8 @@ pub fn build_router(
 /// Start the HTTP server and block until shutdown signal.
 pub async fn run(config: Config) -> anyhow::Result<()> {
     // Open database.
-    let db =
-        zitadel_db::Db::open_with_config(&config.storage.stateful.url, &config.storage.stateful)
-            .await?;
+    let db = zitadel_db::Db::open_with_config(&config.storage.primary.url, &config.storage.primary)
+        .await?;
     run_with_db(config, db).await
 }
 
@@ -68,12 +67,12 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     tracing::info!(
         backend = %db.backend(),
         dialect = %db.dialect(),
-        url = %config.storage.stateful.url,
+        url = %config.storage.primary.url,
         "database connected"
     );
 
     // Run migrations based on mode.
-    match config.storage.stateful.resolve_migrate_mode() {
+    match config.storage.primary.resolve_migrate_mode() {
         "auto" => zitadel_db::migrate::migrate(&db).await?,
         "check" => zitadel_db::migrate::check_version(&db).await?,
         "skip" => tracing::info!("migration skipped"),
@@ -82,7 +81,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
 
     // Bootstrap (create default org + admin if empty).
     let mut bootstrap_password: Option<String> = None;
-    if config.storage.stateful.resolve_bootstrap_mode() == "auto" {
+    if config.storage.primary.resolve_bootstrap_mode() == "auto" {
         let ext_domain = Some(config.server.external_domain.as_str()).filter(|d| !d.is_empty());
         let result = zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
         // Only surface the generated password if no seed file will override it.
@@ -101,7 +100,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
         }
     }
 
-    zitadel_storage::prepare_postgres_role_databases(&config.storage, &db).await?;
+    zitadel_storage::prepare_auxiliary_databases(&config.storage, &db).await?;
 
     // Jobs start is deferred until after hooks are built (see below).
 
@@ -168,6 +167,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     // ── ADR-032: Build application layer ──
     let repos = Arc::new(repo_bridge::build_repositories(
         db.clone(),
+        storage.primary.as_ref().replica_db().cloned(),
         storage.transient.clone(),
         fga.clone(),
         storage.analytics.clone(),
@@ -222,7 +222,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     let api_state = zitadel_api::ApiState {
         db: db.clone(),
         fga,
-        stateful: storage.stateful.clone(),
+        primary: storage.primary.clone(),
         transient: storage.transient.clone(),
         analytics: storage.analytics.clone(),
         oidc: oidc_state.clone(),
@@ -234,7 +234,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     };
 
     let login_state = zitadel_login::LoginState {
-        stateful: storage.stateful.clone(),
+        primary: storage.primary.clone(),
         transient: storage.transient.clone(),
         passwords: passwords.clone(),
         cookie_config: cookie_config.clone(),

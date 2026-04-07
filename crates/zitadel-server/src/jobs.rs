@@ -14,10 +14,10 @@ use zitadel_config::{Config, RetentionConfig, WorkersConfig};
 use zitadel_db::repos::adapters::DbEffectRepository;
 use zitadel_db::{
     BackendKind, DEFAULT_INSTANCE_ID, Db, Dialect, JobBudget, JobReconcileSpec, bool_true_sql,
-    complete_job_run, current_timestamp_sql, delete_sink_inbox_records,
-    delete_terminal_sessions_records, delete_terminal_tokens_records,
-    delete_transient_state_records, due_job_names, ensure_event_partitions, fetch_unshipped_events,
-    mark_events_shipped, timestamp_plus_expr, try_acquire_job_lease,
+    complete_job_run, current_timestamp_sql, delete_terminal_sessions_records,
+    delete_terminal_tokens_records, delete_transient_state_records, due_job_names,
+    ensure_event_partitions, fetch_unshipped_events, mark_events_shipped, timestamp_plus_expr,
+    try_acquire_job_lease,
 };
 
 #[derive(Clone)]
@@ -183,21 +183,6 @@ fn builtins(config: &Config, backend: BackendKind) -> Vec<JobSpec> {
                 .retention
                 .transient_auth_state
                 .retain_after_expiry
-                .clone(),
-        },
-        JobSpec {
-            name: "sink_inbox_gc",
-            display_name: "Sink Inbox Cleanup",
-            description: "Deletes stale sink inbox rows after bounded retry retention.",
-            cron: "*/5 * * * *",
-            cadence: "5m",
-            strategy: "chunked_delete",
-            targets: &["storage_sink_inbox"],
-            retention: config
-                .storage
-                .retention
-                .sink_inbox
-                .retain_failed_for
                 .clone(),
         },
         JobSpec {
@@ -429,7 +414,6 @@ async fn execute_job(db: &Db, config: &Config, job: &JobSpec) -> anyhow::Result<
         "transient_state_gc" => {
             delete_transient_state(db, &config.storage.retention, &budget).await?
         }
-        "sink_inbox_gc" => delete_sink_inbox(db, &config.storage.retention, &budget).await?,
         "event_partition_maint" => maintain_event_storage(db, config, &budget).await?,
         "effects_gc" => delete_effects(db, job, &budget).await?,
         other => anyhow::bail!("unsupported built-in job: {other}"),
@@ -478,20 +462,6 @@ async fn delete_transient_state(
         DEFAULT_INSTANCE_ID,
         parse_duration_spec(&retention.transient_auth_state.retain_after_expiry)
             .unwrap_or_else(|| Duration::from_secs(60 * 60)),
-        budget,
-    )
-    .await
-}
-
-async fn delete_sink_inbox(
-    db: &Db,
-    retention: &RetentionConfig,
-    budget: &JobBudget,
-) -> anyhow::Result<i64> {
-    delete_sink_inbox_records(
-        db,
-        parse_duration_spec(&retention.sink_inbox.retain_failed_for)
-            .unwrap_or_else(|| Duration::from_secs(24 * 60 * 60)),
         budget,
     )
     .await

@@ -93,7 +93,7 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 - **Schema-driven resources** — JSON Schema with annotations (`x-claim-mapping`, `x-user-editable`, `x-sensitive`, `x-hidden`)
 - **SSO Federation** — Protocol-agnostic providers (OIDC, SAML, SCIM) with `expr`-based claim mapping
 - **Embedded OpenFGA** — Zanzibar-style authorization in-process
-- **Role-based storage runtime** — `storage.stateful` is canonical, with derived `read`, `kv`, `sink`, `process_cache`, and `analytics` roles. The current POC already wires SQLite and Postgres defaults through that runtime; see [Storage Architecture](docs/design/storage-architecture.md) and [Storage Implementation Status](docs/design/storage-implementation-status.md).
+- **Three-store storage runtime** — `storage.primary`, `storage.transient`, and `storage.analytics` are the public model, with optional `cache.shared` and opt-in Postgres replica reads for stale-tolerant queries. See [Storage Architecture](docs/design/storage-architecture.md) and [Storage Implementation Status](docs/design/storage-implementation-status.md).
 - **Event-sourced audit** — every mutation emitted as an event with field-level redaction
 - **Import & Seed** — `POST /v1/import` for migrations, `--seed` YAML files for CI/dev
 

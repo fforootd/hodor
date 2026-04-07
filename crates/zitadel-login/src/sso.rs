@@ -644,6 +644,7 @@ mod tests {
         let fga = Arc::new(FgaService::new(db.clone()));
         let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
             db.clone(),
+            storage.primary.as_ref().replica_db().cloned(),
             storage.transient.clone(),
             fga,
             storage.analytics.clone(),
@@ -655,7 +656,7 @@ mod tests {
         ));
 
         LoginState {
-            stateful: storage.stateful.clone(),
+            primary: storage.primary.clone(),
             transient: storage.transient.clone(),
             passwords: Arc::new(Swapper::dev()),
             cookie_config: Arc::new(CookieConfig::new(

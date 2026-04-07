@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 use std::future::Future;
 
+use serde::{Deserialize, Serialize};
 use tokio::task_local;
 
 use crate::DEFAULT_INSTANCE_ID;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceContext {
     pub instance_id: String,
     pub resolved_org_id: Option<String>,

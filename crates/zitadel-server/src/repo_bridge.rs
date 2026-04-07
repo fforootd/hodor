@@ -20,6 +20,7 @@ use zitadel_storage::{DefaultAnalyticsStorage, DefaultTransientStorage};
 /// Build the complete `Repositories` container from existing infrastructure.
 pub fn build_repositories(
     db: Db,
+    search_replica: Option<Db>,
     transient: Arc<DefaultTransientStorage>,
     fga: Arc<FgaService>,
     analytics: Arc<DefaultAnalyticsStorage>,
@@ -41,7 +42,7 @@ pub fn build_repositories(
         schemas: Arc::new(SqlSchemaRepository::new(db.clone())),
         groups: Arc::new(SqlGroupRepository::new(db.clone())),
         pats: Arc::new(DbPatRepository::new(db.clone())),
-        search: Arc::new(SqlSearchRepository::new(db.clone())),
+        search: Arc::new(sql_search_repository(db.clone(), search_replica)),
         actions: Arc::new(DbActionRepository::new(db.clone())),
         memberships: Arc::new(DbMembershipRepository::new(db.clone())),
         console_queries: Arc::new(DbConsoleQueryRepository::new(db.clone())),

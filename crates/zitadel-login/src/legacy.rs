@@ -34,7 +34,7 @@ pub(crate) async fn login(
 ) -> Response {
     let instance_id = current_instance_id();
     let user = match state
-        .stateful
+        .primary
         .find_active_user_by_identifier(&instance_id, &req.identifier)
         .await
     {
@@ -58,7 +58,7 @@ pub(crate) async fn login(
         }
     };
     let hash = match state
-        .stateful
+        .primary
         .load_password_hash(&instance_id, &user.user_id)
         .await
     {

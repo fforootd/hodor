@@ -106,11 +106,10 @@ permissions_policy = "camera=(), microphone=(), geolocation=(), payment=()"
 cross_origin_opener = "same-origin"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STORAGE — Stateful store and derived storage roles
+# STORAGE — Primary, transient, and analytics stores
 # ═══════════════════════════════════════════════════════════════════════════════
-[storage.stateful]
-# Previously `[database]`. Search for "database" in older docs and examples if
-# you are migrating an older local config.
+[storage.primary]
+# The authoritative durable database. Most deployments only configure this block.
 #
 # SQLite (default, good for dev/single-node/edge/homelab). Prefix with "sqlite://".
 # PostgreSQL (scale-out): "postgres://user:pass@host:5432/zitadel?sslmode=require"
@@ -145,7 +144,7 @@ url = "sqlite://./data/zitadel.db"
 # "auto"  — run migrations before serving (default for all dialects)
 # "check" — verify schema version only, fail if behind (opt-in for production PG)
 # "skip"  — no version check, no migration (fastest cold-start for autoscaling)
-# Env: ZITADEL_STORAGE__STATEFUL__MIGRATE
+# Env: ZITADEL_STORAGE__PRIMARY__MIGRATE
 # migrate = "auto"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,7 +152,7 @@ url = "sqlite://./data/zitadel.db"
 # ─────────────────────────────────────────────────────────────────────────────
 # "auto"  — create admin if no entities exist (default)
 # "skip"  — never bootstrap (production: admin created via 'zitadel migrate --bootstrap')
-# Env: ZITADEL_STORAGE__STATEFUL__BOOTSTRAP
+# Env: ZITADEL_STORAGE__PRIMARY__BOOTSTRAP
 # bootstrap = "auto"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -178,39 +177,34 @@ url = "sqlite://./data/zitadel.db"
 #   Supabase:     "postgres://postgres.xxx:pass@pooler.supabase.com:6543/postgres?sslmode=verify-full"
 #   Self-hosted:  "postgres://user:pass@pg-primary:5432/zitadel?sslmode=disable"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Advanced Storage Role Overrides — optional
-# ─────────────────────────────────────────────────────────────────────────────
-# Most users only set `[storage.stateful]`.
-# The runtime derives the read, KV, sink, and process-cache roles automatically:
-#   - SQLite:  read=same_connection, kv=memory, sink=channel, process_cache=memory
-#   - Postgres: read=same_primary, kv=postgres_unlogged, sink=postgres, process_cache=memory
-
-[storage.read]
-# backend = "postgres_replica"
+[storage.primary.replica]
+# Optional Postgres read replica for explicitly stale-tolerant reads only.
+enabled = false
+mode = "explicit"
 # url = "postgres://readonly@pg-replica:5432/zitadel"
 
-[storage.kv]
-# backend = "memory"              # default for SQLite
-# backend = "postgres_unlogged"   # default for Postgres
-# backend = "redis"               # Redis or Valkey-compatible server (not yet implemented)
-# url = "redis://localhost:6379"
-
-[storage.sink]
-# backend = "channel"             # default for SQLite
-# backend = "postgres"            # default for Postgres
-# backend = "redis"               # Redis or Valkey-compatible server (not yet implemented)
-# url = "redis://localhost:6379"
-buffer_size = 4096
-batch_size = 128
-flush_interval = "100ms"
-
-[storage.process_cache]
-backend = "memory"
+[storage.transient]
+# Authoritative auth-runtime storage. Defaults to inheriting `storage.primary`.
+backend = "inherit"
+# backend = "sqlite"
+# backend = "postgres"
+# backend = "spanner"
+# url = "postgres://transient@pg:5432/zitadel_transient"
 
 [storage.analytics]
-# Reserved for future dedicated analytics storage.
-# backend = "same_stateful"
+# Analytics storage. Defaults to inheriting `storage.primary`.
+backend = "inherit"
+# backend = "sqlite"
+# backend = "postgres"
+# backend = "spanner"
+# url = "postgres://analytics@pg:5432/zitadel_analytics"
+
+[cache.shared]
+# Optional non-authoritative shared cache for safe metadata lookups.
+backend = "disabled"
+# backend = "db"
+# backend = "redis"   # reserved, not implemented in this POC
+# url = "sqlite://./data/zitadel-cache.db"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLOUD — Instance routing and backend registry for managed cloud deployments
@@ -230,7 +224,7 @@ positive_cache_ttl_secs = 60
 negative_cache_ttl_secs = 10
 
 # Bootstrap connection for the cloud control plane. Leave `url` empty to read
-# control-plane tables from the main `[storage.stateful]` database. In managed
+# control-plane tables from the main `[storage.primary]` database. In managed
 # cloud this is typically a separate Spanner/Postgres control-plane database.
 #
 # The Customer Portal owns the authoritative `instances`, `instance_domains`,
@@ -251,9 +245,6 @@ retain_terminal_for = "7d"
 
 [storage.retention.transient_auth_state]
 retain_after_expiry = "1h"
-
-[storage.retention.sink_inbox]
-retain_failed_for = "24h"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OBSERVABILITY — Logging and telemetry

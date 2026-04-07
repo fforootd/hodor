@@ -13,10 +13,14 @@ pub use analytics::{
     SqlAnalyticsQueryBackend,
 };
 pub use backend_capabilities::{StorageBackendCapabilities, storage_backend_capabilities};
-pub use runtime::{StorageRoleSummary, StorageRuntime, prepare_postgres_role_databases};
+pub use runtime::prepare_auxiliary_databases as prepare_postgres_role_databases;
+pub use runtime::{
+    StorageRoleSummary, StorageRuntime, open_analytics_db, prepare_auxiliary_databases,
+};
 pub use stateful::{
-    DefaultStatefulStorage, ReadStore, ResolvedPatIdentity, SpannerReadStore, SpannerStatefulStore,
-    SqlReadStore, SqlStatefulStore, StatefulStorage, StatefulStore, UserIdentity,
+    DefaultPrimaryStorage, DefaultStatefulStorage, ReadConsistency, ReadStore, ResolvedPatIdentity,
+    SpannerReadStore, SpannerStatefulStore, SqlReadStore, SqlStatefulStore, StatefulStorage,
+    StatefulStore, UserIdentity,
 };
 pub use transient::{
     AuthRequestRedirect, AuthRequestRequirements, ChannelSink, CreatedSession, DefaultKvStore,

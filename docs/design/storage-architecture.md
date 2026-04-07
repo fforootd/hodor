@@ -1,285 +1,153 @@
-# Storage Architecture — Role-Based Runtime, Database-First Defaults
+# Storage Architecture — Three Stores, Optional Shared Cache
 
-**Date**: 2026-04-02  
-**Builds on**: ADR-010 (Three-Tier Data), ADR-017 (Process Cache Semantics), ADR-034 (Multi-Tenancy)  
+**Date**: 2026-04-07  
+**Builds on**: ADR-010 (Three-Tier Data), ADR-017 (Caching Tiers), ADR-034 (Multi-Tenancy)  
 **Related**: [Storage Implementation Status](storage-implementation-status.md), [Architecture Overview](../architecture/overview.md)
 
 This document is the canonical storage design for the current Rust prototype.
 
-The key reset is simple:
-
-- operators configure `storage.*`
-- most deployments only set `[storage.stateful]`
-- the runtime derives the remaining storage roles automatically
-
-That keeps the common path simple while still giving us a stable internal model that can grow toward read replicas, Redis/Valkey, and dedicated analytics backends later.
-
 ## Operator Model
 
-The default operator story is database-first:
+The operator-facing model is intentionally small:
 
-- choose SQLite for local or single-node operation
-- choose Postgres for shared or multi-container operation
-- let the runtime derive the rest
+- `storage.primary` is the authoritative durable database
+- `storage.transient` is the authoritative auth-runtime database
+- `storage.analytics` is the analytics database
+- `cache.shared` is an optional accelerator for safe metadata reads
 
-The canonical config shape is:
+Most deployments only set `storage.primary`. `transient` and `analytics` inherit `primary` by default.
 
 ```toml
-[storage.stateful]
+[storage.primary]
 url = "sqlite://./data/zitadel.db"
-# or:
-# url = "postgres://user:pass@host:5432/zitadel"
 migrate = "auto"
 bootstrap = "auto"
 
-[storage.read]
-# optional override
+[storage.primary.replica]
+enabled = false
+mode = "explicit"
+# url = "postgres://readonly@pg-replica:5432/zitadel"
 
-[storage.kv]
-# optional override
-
-[storage.sink]
-# optional override
-
-[storage.process_cache]
-# optional override
+[storage.transient]
+backend = "inherit"
 
 [storage.analytics]
-# reserved now, advanced analytics backends later
+backend = "inherit"
+
+[cache.shared]
+backend = "disabled"
+# backend = "db"
+# url = "sqlite://./data/zitadel-cache.db"
 ```
 
-Only `storage.stateful` is required.
+## Defaults
 
-## Runtime Roles
+### SQLite
 
-Internally the runtime is always built from the same role set:
+If only `storage.primary.url = "sqlite://..."` is set:
 
-| Config role | Code interface | Purpose | Implementations in this phase |
-|---|---|---|---|
-| `storage.stateful` | `StatefulStore` | Durable transactional source of truth for stable relational data | SQLite, Postgres |
-| `storage.read` | `ReadStore` | Stable-data read path | same connection, same primary, Postgres replica |
-| `storage.kv` | `KvStore` | Live transient state with TTL and consume-once semantics | memory, Postgres-backed transient tables, Redis family reserved |
-| `storage.sink` | `Sink` | Async promotion path from transient writes into durable state | in-process channel, Postgres inbox, Redis family reserved |
-| `storage.process_cache` | `ProcessCache` | Local read acceleration only | memory |
-| `storage.analytics` | analytics backend | Analytical query/storage role | same stateful store today |
+- `primary` uses SQLite
+- `transient` inherits the same SQLite database
+- `analytics` inherits the same SQLite database
+- `cache.shared` is disabled
+- local per-process caching stays memory-only
 
-These roles are semantic. Backends are implementation choices underneath them.
+### Postgres
 
-## Control Plane And Auth Data Plane
+If only `storage.primary.url = "postgres://..."` is set:
 
-The storage-role model exists partly to support a specific failure model:
+- `primary` uses Postgres
+- `transient` inherits the same Postgres database
+- `analytics` inherits the same Postgres database
+- optional `storage.primary.replica` can serve explicitly stale-tolerant reads
+- local per-process caching stays memory-only
 
-- the **control plane** owns admin mutations, routing, placement, provider and policy authoring
-- the **auth data plane** owns end-user login, session and token handling, and auth runtime state
+### Spanner
 
-That means `storage.read`, `storage.kv`, and `storage.sink` are not only about performance. They are also the building blocks for regional auth continuity when the authoritative control-plane or home-region write path is degraded.
+If `storage.primary.backend = "spanner"` or `storage.primary.database` is set:
 
-## Derived Defaults
+- `primary` uses native Spanner
+- `transient` and `analytics` inherit Spanner by default
+- replica reads are not part of the Spanner path in this POC
+- shared cache stays optional and best-effort
 
-### SQLite default
+## Semantics
 
-If only `storage.stateful.url = "sqlite://..."` is set, the runtime derives:
+The simplified public model does not collapse the data semantics.
 
-| Role | Default |
-|---|---|
-| `stateful` | SQLite |
-| `read` | `same_connection` |
-| `kv` | `memory` |
-| `sink` | `channel` + in-process batch ingestor |
-| `process_cache` | `memory` |
-| `analytics` | same SQLite database |
+### Primary
 
-This is the Level 0 local/single-node profile:
-
-- transient auth state stays fast and in-memory
-- sink batching persists that transient state back into SQLite asynchronously
-- no external dependencies are required
-
-### Postgres default
-
-If only `storage.stateful.url = "postgres://..."` is set, the runtime derives:
-
-| Role | Default |
-|---|---|
-| `stateful` | Postgres |
-| `read` | `same_primary` |
-| `kv` | `postgres_unlogged` |
-| `sink` | Postgres inbox/spool + ingestor |
-| `process_cache` | `memory` |
-| `analytics` | same Postgres database |
-
-This is the default shared/multi-container profile:
-
-- transient auth state is immediately visible across instances
-- the sink remains a separate ingestion boundary
-- Redis/Valkey is optional, not required on day one
-
-## Advanced Overrides
-
-Advanced deployments can override individual roles without replacing the whole model.
-
-Supported first-growth patterns:
-
-```toml
-[storage.stateful]
-url = "postgres://primary/zitadel"
-
-[storage.read]
-backend = "postgres_replica"
-url = "postgres://replica/zitadel"
-
-[storage.kv]
-backend = "redis"
-url = "redis://cache.internal:6379"
-
-[storage.sink]
-backend = "redis"
-url = "redis://cache.internal:6379"
-```
-
-Current runtime status:
-
-- `postgres_replica` is supported as a read override
-- `redis` is reserved as the backend family name for Redis and Valkey-compatible servers
-- Redis/Valkey-backed `kv` and `sink` are not implemented yet in this POC and fail clearly at startup
-
-## Data Families
-
-### Stable data
-
-Stable data is written synchronously to `StatefulStore` and read through `ReadStore`.
-
-Examples:
+`storage.primary` owns durable relational state:
 
 - users
 - orgs
 - providers
-- passwords and MFA configuration
-- OIDC client definitions
-- FGA tuples and authorization models
+- settings
+- passwords and factors
 - PATs
+- routing metadata
 
-Properties:
+Default read behavior is strong. If the primary DB is unavailable, these operations fail.
 
-- relational integrity matters
-- uniqueness matters
-- write volume is relatively low
-- if `StatefulStore` is unavailable, management writes fail
+### Transient
 
-### Transient auth state
-
-Transient auth state is written to `KvStore` first and promoted via `Sink`.
-
-Examples:
+`storage.transient` owns auth-runtime state directly:
 
 - sessions
-- login flow runtime state
-- auth request redirect/progress state
-- OIDC authorization codes and related auth request state
-- provider auth state
+- login flow state
+- provider callback state
+- auth-request progression
 
-Properties:
+The POC favors simplicity over degraded-mode auth continuity. There is no default `kv + sink` replay path in the runtime anymore. If the configured transient DB is unavailable, those operations fail.
 
-- TTL and consume-once behavior matter
-- the hot path should avoid blocking on durable persistence
-- local correctness comes from `KvStore`
-- durable retention comes from `Sink` ingesting into `StatefulStore`
-- in regional continuity mode, this layer can continue even when control-plane writes are paused
+### Analytics
 
-### Analytics and observability
+`storage.analytics` owns analytical queries and observability ingestion targets.
 
-Observability remains governed by ADR-010:
+The observability SQLite buffer remains separate under `observability.cache_path`. It is not part of the generic cache model.
 
-- request and runtime logs go through the observability SQLite buffer
-- analytical queries use the analytics role
-- `storage.analytics` is reserved now so analytics storage can join the same operator-facing namespace later
+## Replica Reads
 
-## Sink Semantics
+Replica reads are a capability of `storage.primary`, not a fourth storage type.
 
-`Sink` is not “blindly batch-insert rows into the main database.”
+- only Postgres supports this path in the current POC
+- the config lives under `storage.primary.replica`
+- `mode = "explicit"` means queries must opt in
+- default reads remain strong and hit the primary
+- on replica failure, the runtime falls back to the primary and logs the fallback
 
-Internally it is split into three responsibilities:
+Examples of good `StaleOk` candidates:
 
-| Component | Responsibility |
-|---|---|
-| `SinkEmitter` | called by the hot path, returns quickly |
-| `SinkBuffer` | bounded queue/spool/inbox for retry and replay |
-| `StatefulIngestor` | background worker that applies idempotent updates into `StatefulStore` |
+- search
+- browse views
+- non-critical admin lists
+- metadata reads where slight lag is acceptable
 
-That separation matters because the sink is the fault-isolation boundary between:
+Examples that must remain strong:
 
-- transient hot-path state
-- durable retained state
-- future archive/export paths
-- regional auth continuity and authoritative reconciliation
+- session validation
+- revocation checks
+- logout-all
+- consume-once auth state
+- provider and policy changes that affect active auth
 
-## Process Cache
+## Shared Cache
 
-`ProcessCache` is a first-class role, but it is intentionally narrow:
+`cache.shared` is optional and non-authoritative.
 
-- local read acceleration only
-- never a distributed correctness mechanism
-- memory-only in this phase
+- cache failures must not fail requests
+- write-through or invalidate-on-write is preferred
+- stale cache reads are only safe for stable metadata
+- local caching remains per-process memory TTL/LRU
 
-This keeps it distinct from:
+The current POC wires `cache.shared.backend = "db"` into instance-routing metadata. Redis/Valkey remains future work.
 
-- `KvStore`, which owns transient auth correctness
-- the observability SQLite buffer, which is a durable analytics drain path
-- the control-plane routing cache, which must not become an auth correctness dependency
+## Internal Boundary
 
-## Regional Continuity
+The runtime still keeps separate code paths for:
 
-For larger managed deployments, regional read models and replicas exist for auth continuity, not only for lower latency:
+- durable primary reads and writes
+- transient auth-runtime operations
+- analytics queries
 
-- `storage.read` can provide the regional stable-data read path during control-plane or home-region degradation
-- `storage.kv` is the writable regional auth-runtime layer
-- `storage.sink` is the replay and reconciliation path back to the authoritative plane
-
-This is why `process_cache` remains intentionally narrow. It is not allowed to stand in for distributed auth correctness.
-
-SQLite-backed process cache is a valid future optimization, but not part of the default runtime in this pass.
-
-## Multi-Tenancy
-
-Multi-tenancy still layers on top of the same runtime roles:
-
-| Role | Shared infrastructure | Dedicated infrastructure |
-|---|---|---|
-| `stateful` | shared DB with `instance_id` scoping | dedicated DB per tenant |
-| `read` | same shared DB or replica with `instance_id` scoping | dedicated read path |
-| `kv` | shared KV namespace/prefixes by `instance_id` | dedicated KV per tenant |
-| `sink` | shared inbox/stream tagged by `instance_id` | dedicated inbox/stream |
-| `analytics` | shared analytics backend filtered by `instance_id` | dedicated analytics store |
-
-The runtime model stays the same. Only the concrete backend topology changes.
-
-## Growth Path
-
-The intended progression is additive:
-
-1. SQLite only
-2. Postgres only
-3. Postgres + Redis/Valkey KV
-4. Postgres + Redis/Valkey KV + Redis sink + read replicas
-5. Dedicated analytics backend under `storage.analytics`
-
-| Profile | `stateful` | `read` | `kv` | `sink` | `analytics` |
-|---|---|---|---|---|---|
-| Local SQLite | SQLite | same connection | memory | channel | same SQLite |
-| Shared Postgres | Postgres | same primary | Postgres transient tables | Postgres inbox | same Postgres |
-| Split hot path | Postgres | same primary or replica | Redis/Valkey | Postgres or Redis | same Postgres |
-| Distributed | Postgres | replicas | Redis/Valkey | Redis/stream or platform queue | dedicated backend |
-
-## Relationship to ADRs
-
-- **ADR-010** still governs the analytical and observability domains. `storage.analytics` aligns the config namespace, but it does not replace the three-tier data model.
-- **ADR-017** now covers `ProcessCache` specifically, rather than trying to describe KV, sink, and analytics buffering all as one “cache” concept.
-- **ADR-026** remains one deployment-specific interpretation of these same roles.
-
-## Practical Rule
-
-When documenting or explaining storage:
-
-- say “configure `storage.stateful`” for the common path
-- say “override `storage.read`, `storage.kv`, or `storage.sink`” for advanced paths
-- keep backend names like SQLite, Postgres, Redis, and Valkey as implementation details under those roles
+That internal separation preserves room for future evolution, but it is no longer the first thing operators need to learn.

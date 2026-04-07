@@ -134,16 +134,7 @@ pub(crate) async fn lookup_session_by_token_impl(
             .await;
     }
 
-    let authoritative = match kv.authoritative_scoped(instance_id) {
-        Some(scoped) => scoped,
-        None => return Ok(SessionLookupOutcome::Missing),
-    };
-
-    let row = fetch_session_by_token_unfiltered(&authoritative, &hashed).await?;
-    let outcome = row
-        .map(classify_session_row)
-        .unwrap_or(SessionLookupOutcome::Missing);
-    maybe_require_active_user(outcome, Some(authoritative), true).await
+    Ok(SessionLookupOutcome::Missing)
 }
 
 pub(crate) async fn list_sessions_impl(
@@ -177,12 +168,7 @@ pub(crate) async fn get_session_impl(
         return Ok(Some(map_session_row(row)));
     }
 
-    let row = match kv.authoritative_scoped(instance_id) {
-        Some(scoped) => fetch_session_by_id(&scoped, session_id).await?,
-        None => None,
-    };
-
-    Ok(row.map(map_session_row))
+    Ok(None)
 }
 
 pub(crate) async fn revoke_session_impl(

@@ -1,19 +1,16 @@
-use std::time::Duration;
-
 use sqlx::{Executor, postgres::PgPoolOptions};
 use uuid::Uuid;
 use zitadel_config::{
-    KvStoreConfig, ReadStoreConfig, SinkConfig, StatefulStorageConfig, StorageConfig,
+    AnalyticsStorageConfig, PrimaryStorageConfig, ReplicaReadConfig, StorageConfig,
+    TransientStorageConfig,
 };
 use zitadel_crypto::token_hash;
 use zitadel_db::{Db, migrate};
-use zitadel_storage::{
-    SessionRecord, Sink, SqlKvStore, SqlSink, StorageRuntime, TransientRecord, TransientStorage,
-    prepare_postgres_role_databases,
-};
+use zitadel_storage::{ReadConsistency, StorageRuntime, prepare_auxiliary_databases};
 
 #[tokio::test]
-async fn postgres_role_preparation_only_touches_kv_and_sink_databases() -> anyhow::Result<()> {
+async fn auxiliary_preparation_only_migrates_transient_and_analytics_databases()
+-> anyhow::Result<()> {
     let Some(env) = PostgresTestEnv::new().await? else {
         return Ok(());
     };
@@ -21,90 +18,107 @@ async fn postgres_role_preparation_only_touches_kv_and_sink_databases() -> anyho
     let primary_db = Db::open(&env.primary_url).await?;
     migrate::migrate(&primary_db).await?;
 
-    let config = env.storage_config();
-    prepare_postgres_role_databases(&config, &primary_db).await?;
+    prepare_auxiliary_databases(&env.storage_config(), &primary_db).await?;
 
-    let kv_db = Db::open(&env.kv_url).await?;
-    let sink_db = Db::open(&env.sink_url).await?;
-    let read_db = Db::open(&env.read_url).await?;
+    let transient_db = Db::open(&env.transient_url).await?;
+    let analytics_db = Db::open(&env.analytics_url).await?;
+    let replica_db = Db::open(&env.replica_url).await?;
 
-    assert!(table_exists(&kv_db, "sessions").await?);
-    assert!(table_exists(&kv_db, "auth_states").await?);
-    assert!(table_exists(&kv_db, "oidc_auth_requests").await?);
-    assert!(table_exists(&kv_db, "oidc_rp_auth_states").await?);
-    assert!(!table_exists(&kv_db, "users").await?);
-
-    assert_eq!(
-        table_persistence(&kv_db, "sessions").await?.as_deref(),
-        Some("u")
-    );
-
-    assert!(table_exists(&sink_db, "storage_sink_inbox").await?);
-    assert!(!table_exists(&sink_db, "users").await?);
-
-    assert!(!table_exists(&read_db, "sessions").await?);
-    assert!(!table_exists(&read_db, "users").await?);
+    assert!(table_exists(&transient_db, "sessions").await?);
+    assert!(table_exists(&transient_db, "oidc_auth_requests").await?);
+    assert!(table_exists(&analytics_db, "events").await?);
+    assert!(table_exists(&analytics_db, "users").await?);
+    assert!(!table_exists(&replica_db, "sessions").await?);
+    assert!(!table_exists(&replica_db, "users").await?);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn storage_runtime_uses_distinct_postgres_roles_and_session_fallback() -> anyhow::Result<()> {
+async fn storage_runtime_uses_explicit_replica_reads_and_authoritative_transient_db()
+-> anyhow::Result<()> {
     let Some(env) = PostgresTestEnv::new().await? else {
         return Ok(());
     };
 
     let primary_db = Db::open(&env.primary_url).await?;
-    let read_db = Db::open(&env.read_url).await?;
+    let replica_db = Db::open(&env.replica_url).await?;
     migrate::migrate(&primary_db).await?;
-    migrate::migrate(&read_db).await?;
+    migrate::migrate(&replica_db).await?;
 
     let config = env.storage_config();
-    prepare_postgres_role_databases(&config, &primary_db).await?;
+    prepare_auxiliary_databases(&config, &primary_db).await?;
 
     seed_user(
         &primary_db,
         "instance-a",
         "org-a",
-        "user-a",
+        "user-primary",
         "authoritative@example.com",
     )
     .await?;
     seed_user(
-        &read_db,
+        &replica_db,
         "instance-a",
         "org-a",
-        "reader-a",
+        "user-replica",
         "reader@example.com",
     )
     .await?;
 
-    let fallback_token = "primary-only-token";
+    seed_user(
+        &primary_db,
+        "instance-a",
+        "org-a",
+        "user-session",
+        "session@example.com",
+    )
+    .await?;
     seed_session(
         &primary_db,
         "instance-a",
-        "session-primary",
-        "user-a",
+        "session-primary-only",
+        "user-session",
         "org-a",
-        fallback_token,
+        "primary-only-token",
     )
     .await?;
 
     let runtime = StorageRuntime::from_config(&config, primary_db.clone(), 86_400).await?;
 
-    let user = runtime
-        .stateful
-        .find_active_user_by_identifier("instance-a", "reader@example.com")
+    assert!(
+        runtime
+            .primary
+            .find_active_user_by_identifier("instance-a", "reader@example.com")
+            .await?
+            .is_none(),
+        "strong reads should stay on the primary DB",
+    );
+
+    let replica_user = runtime
+        .primary
+        .find_active_user_by_identifier_with_consistency(
+            "instance-a",
+            "reader@example.com",
+            ReadConsistency::StaleOk,
+        )
         .await?;
-    assert_eq!(user.unwrap().user_id, "reader-a");
+    assert_eq!(replica_user.unwrap().user_id, "user-replica");
 
     let created = runtime
         .transient
-        .create_session("instance-a", "user-a", "org-a", "ua", "127.0.0.1", "fp")
+        .create_session(
+            "instance-a",
+            "user-session",
+            "org-a",
+            "ua",
+            "127.0.0.1",
+            "fp",
+        )
         .await?;
 
-    let kv_db = Db::open(&env.kv_url).await?;
-    assert!(session_exists(&kv_db, "instance-a", &created.session_id).await?);
+    let transient_db = Db::open(&env.transient_url).await?;
+    assert!(session_exists(&transient_db, "instance-a", &created.session_id).await?);
     assert!(!session_exists(&primary_db, "instance-a", &created.session_id).await?);
 
     let found_local = runtime
@@ -113,29 +127,20 @@ async fn storage_runtime_uses_distinct_postgres_roles_and_session_fallback() -> 
         .await?;
     assert_eq!(found_local.unwrap().id, created.session_id);
 
-    let found_fallback = runtime
+    let primary_only = runtime
         .transient
-        .find_session_by_token("instance-a", fallback_token)
+        .find_session_by_token("instance-a", "primary-only-token")
         .await?;
-    assert_eq!(found_fallback.unwrap().id, "session-primary");
-
-    let fallback_by_id = runtime
-        .transient
-        .get_session("instance-a", "session-primary")
-        .await?;
-    assert_eq!(fallback_by_id.unwrap().id, "session-primary");
-
-    let foreign = runtime
-        .transient
-        .find_session_by_token("instance-b", fallback_token)
-        .await?;
-    assert!(foreign.is_none());
+    assert!(
+        primary_only.is_none(),
+        "transient session reads should not fall back to the primary DB",
+    );
 
     Ok(())
 }
 
 #[tokio::test]
-async fn inactive_kv_session_does_not_fall_back_to_authoritative_postgres() -> anyhow::Result<()> {
+async fn stale_ok_replica_reads_fall_back_to_primary_on_failure() -> anyhow::Result<()> {
     let Some(env) = PostgresTestEnv::new().await? else {
         return Ok(());
     };
@@ -143,178 +148,38 @@ async fn inactive_kv_session_does_not_fall_back_to_authoritative_postgres() -> a
     let primary_db = Db::open(&env.primary_url).await?;
     migrate::migrate(&primary_db).await?;
 
-    let config = env.storage_config();
-    prepare_postgres_role_databases(&config, &primary_db).await?;
-
-    let kv_db = Db::open(&env.kv_url).await?;
-
     seed_user(
         &primary_db,
         "instance-a",
         "org-a",
-        "user-a",
+        "user-primary",
         "authoritative@example.com",
     )
     .await?;
 
-    let revoked_token = "kv-revoked-token";
-    seed_session(
-        &primary_db,
-        "instance-a",
-        "session-revoked",
-        "user-a",
-        "org-a",
-        revoked_token,
-    )
-    .await?;
-    seed_session(
-        &kv_db,
-        "instance-a",
-        "session-revoked",
-        "user-a",
-        "org-a",
-        revoked_token,
-    )
-    .await?;
-    sqlx::query(
-        "UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE instance_id = $1 AND id = $2",
-    )
-    .bind("instance-a")
-    .bind("session-revoked")
-    .execute(kv_db.pool())
-    .await?;
-
-    let expired_token = "kv-expired-token";
-    seed_session(
-        &primary_db,
-        "instance-a",
-        "session-expired",
-        "user-a",
-        "org-a",
-        expired_token,
-    )
-    .await?;
-    seed_session(
-        &kv_db,
-        "instance-a",
-        "session-expired",
-        "user-a",
-        "org-a",
-        expired_token,
-    )
-    .await?;
-    sqlx::query(
-        "UPDATE sessions SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE instance_id = $1 AND id = $2",
-    )
-    .bind("instance-a")
-    .bind("session-expired")
-    .execute(kv_db.pool())
-    .await?;
+    let config = env.storage_config();
+    prepare_auxiliary_databases(&config, &primary_db).await?;
 
     let runtime = StorageRuntime::from_config(&config, primary_db.clone(), 86_400).await?;
-
-    let revoked = runtime
-        .transient
-        .find_session_by_token("instance-a", revoked_token)
-        .await?;
-    assert!(revoked.is_none());
-
-    let expired = runtime
-        .transient
-        .find_session_by_token("instance-a", expired_token)
-        .await?;
-    assert!(expired.is_none());
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn degraded_mode_buffers_in_sink_and_replays_to_authoritative_postgres() -> anyhow::Result<()>
-{
-    let Some(env) = PostgresTestEnv::new().await? else {
-        return Ok(());
-    };
-
-    let primary_db = Db::open(&env.primary_url).await?;
-    let bad_target_db = Db::open(&env.read_url).await?;
-    let kv_db = Db::open(&env.kv_url).await?;
-    let sink_db = Db::open(&env.sink_url).await?;
-    migrate::migrate(&primary_db).await?;
-
-    seed_user(
-        &primary_db,
-        "instance-a",
-        "org-a",
-        "user-a",
-        "alice@example.com",
-    )
-    .await?;
-    zitadel_storage::prepare_postgres_kv_schema(&kv_db, true).await?;
-    zitadel_storage::prepare_postgres_sink_schema(&sink_db).await?;
-
-    let bad_sink = SqlSink::new(
-        sink_db.clone(),
-        bad_target_db.clone(),
-        32,
-        Duration::from_secs(3600),
-    )
-    .await?;
-    let storage = TransientStorage::new(
-        SqlKvStore::new(kv_db.clone(), Some(primary_db.clone()), 86_400),
-        bad_sink.clone(),
-    );
-
-    let created = storage
-        .create_session("instance-a", "user-a", "org-a", "ua", "127.0.0.1", "fp")
-        .await?;
-    let local = storage
-        .find_session_by_token("instance-a", &created.token)
-        .await?;
-    assert_eq!(local.unwrap().id, created.session_id);
-
-    assert!(bad_sink.drain_once().await.is_err());
-    assert_eq!(sink_inbox_count(&sink_db).await?, 1);
-    assert!(!session_exists(&primary_db, "instance-a", &created.session_id).await?);
-
-    let good_sink = SqlSink::new(
-        sink_db.clone(),
-        primary_db.clone(),
-        32,
-        Duration::from_secs(3600),
-    )
-    .await?;
-    good_sink.drain_once().await?;
-
-    assert_eq!(sink_inbox_count(&sink_db).await?, 0);
-    assert!(session_exists(&primary_db, "instance-a", &created.session_id).await?);
-
-    let replay_record = TransientRecord::SessionCreated {
-        instance_id: "instance-a".into(),
-        session: PersistedSessionRecordForTest::from_session(
-            &storage
-                .get_session("instance-a", &created.session_id)
-                .await?
-                .expect("session present in kv"),
+    let user = runtime
+        .primary
+        .find_active_user_by_identifier_with_consistency(
+            "instance-a",
+            "authoritative@example.com",
+            ReadConsistency::StaleOk,
         )
-        .into(),
-    };
-    good_sink.emit(replay_record).await?;
-    good_sink.drain_once().await?;
+        .await?;
 
-    assert_eq!(
-        session_count_for_id(&primary_db, "instance-a", &created.session_id).await?,
-        1
-    );
-
+    assert_eq!(user.unwrap().user_id, "user-primary");
     Ok(())
 }
 
 #[derive(Clone)]
 struct PostgresTestEnv {
     primary_url: String,
-    read_url: String,
-    kv_url: String,
-    sink_url: String,
+    replica_url: String,
+    transient_url: String,
+    analytics_url: String,
 }
 
 impl PostgresTestEnv {
@@ -331,12 +196,12 @@ impl PostgresTestEnv {
             .await?;
 
         let suffix = Uuid::new_v4().simple().to_string();
-        let primary = format!("auth_primary_{suffix}");
-        let read = format!("auth_read_{suffix}");
-        let kv = format!("auth_kv_{suffix}");
-        let sink = format!("auth_sink_{suffix}");
+        let primary = format!("storage_primary_{suffix}");
+        let replica = format!("storage_replica_{suffix}");
+        let transient = format!("storage_transient_{suffix}");
+        let analytics = format!("storage_analytics_{suffix}");
 
-        for db_name in [&primary, &read, &kv, &sink] {
+        for db_name in [&primary, &replica, &transient, &analytics] {
             admin
                 .execute(sqlx::query(&format!("CREATE DATABASE \"{db_name}\"")))
                 .await?;
@@ -344,31 +209,32 @@ impl PostgresTestEnv {
 
         Ok(Some(Self {
             primary_url: replace_database_name(&base_url, &primary),
-            read_url: replace_database_name(&base_url, &read),
-            kv_url: replace_database_name(&base_url, &kv),
-            sink_url: replace_database_name(&base_url, &sink),
+            replica_url: replace_database_name(&base_url, &replica),
+            transient_url: replace_database_name(&base_url, &transient),
+            analytics_url: replace_database_name(&base_url, &analytics),
         }))
     }
 
     fn storage_config(&self) -> StorageConfig {
         StorageConfig {
-            stateful: StatefulStorageConfig {
+            primary: PrimaryStorageConfig {
                 url: self.primary_url.clone(),
+                backend: "postgres".into(),
+                replica: ReplicaReadConfig {
+                    enabled: true,
+                    url: self.replica_url.clone(),
+                    mode: "explicit".into(),
+                },
                 ..Default::default()
             },
-            read: ReadStoreConfig {
-                backend: "postgres_replica".into(),
-                url: self.read_url.clone(),
-            },
-            kv: KvStoreConfig {
-                backend: "postgres_unlogged".into(),
-                url: self.kv_url.clone(),
-            },
-            sink: SinkConfig {
+            transient: TransientStorageConfig {
                 backend: "postgres".into(),
-                url: self.sink_url.clone(),
-                batch_size: 32,
-                flush_interval: "1h".into(),
+                url: self.transient_url.clone(),
+                ..Default::default()
+            },
+            analytics: AnalyticsStorageConfig {
+                backend: "postgres".into(),
+                url: self.analytics_url.clone(),
                 ..Default::default()
             },
             ..Default::default()
@@ -398,7 +264,8 @@ async fn seed_user(
     .execute(db.pool())
     .await?;
     sqlx::query(
-        "INSERT INTO users (id, instance_id, org_id, identifier, user_type) VALUES ($1, $2, $3, $4, 'human') ON CONFLICT DO NOTHING",
+        "INSERT INTO users (id, instance_id, org_id, identifier, user_type, state) \
+         VALUES ($1, $2, $3, $4, 'human', 'active') ON CONFLICT DO NOTHING",
     )
     .bind(user_id)
     .bind(instance_id)
@@ -445,16 +312,6 @@ async fn table_exists(db: &Db, table: &str) -> anyhow::Result<bool> {
     Ok(exists)
 }
 
-async fn table_persistence(db: &Db, table: &str) -> anyhow::Result<Option<String>> {
-    let persistence = sqlx::query_scalar::<_, String>(
-        "SELECT relpersistence::text FROM pg_class WHERE relname = $1 LIMIT 1",
-    )
-    .bind(table)
-    .fetch_optional(db.pool())
-    .await?;
-    Ok(persistence)
-}
-
 async fn session_exists(db: &Db, instance_id: &str, session_id: &str) -> anyhow::Result<bool> {
     let exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM sessions WHERE instance_id = $1 AND id = $2)",
@@ -464,24 +321,6 @@ async fn session_exists(db: &Db, instance_id: &str, session_id: &str) -> anyhow:
     .fetch_one(db.pool())
     .await?;
     Ok(exists)
-}
-
-async fn session_count_for_id(db: &Db, instance_id: &str, session_id: &str) -> anyhow::Result<i64> {
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND id = $2",
-    )
-    .bind(instance_id)
-    .bind(session_id)
-    .fetch_one(db.pool())
-    .await?;
-    Ok(count)
-}
-
-async fn sink_inbox_count(db: &Db) -> anyhow::Result<i64> {
-    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM storage_sink_inbox")
-        .fetch_one(db.pool())
-        .await?;
-    Ok(count)
 }
 
 fn replace_database_name(url: &str, db_name: &str) -> String {
@@ -498,52 +337,4 @@ fn replace_database_name(url: &str, db_name: &str) -> String {
         rewritten.push_str(query);
     }
     rewritten
-}
-
-#[derive(Clone)]
-struct PersistedSessionRecordForTest {
-    id: String,
-    user_id: String,
-    org_id: String,
-    token_hash: String,
-    user_agent: String,
-    ip_address: String,
-    fingerprint: String,
-    metadata: serde_json::Value,
-    created_at: String,
-    expires_at: Option<String>,
-}
-
-impl PersistedSessionRecordForTest {
-    fn from_session(session: &SessionRecord) -> Self {
-        Self {
-            id: session.id.clone(),
-            user_id: session.user_id.clone(),
-            org_id: session.org_id.clone(),
-            token_hash: session.token_hash.clone(),
-            user_agent: session.user_agent.clone(),
-            ip_address: session.ip_address.clone(),
-            fingerprint: session.fingerprint.clone(),
-            metadata: session.metadata.clone(),
-            created_at: session.created_at.clone(),
-            expires_at: session.expires_at.clone(),
-        }
-    }
-}
-
-impl From<PersistedSessionRecordForTest> for zitadel_storage::PersistedSessionRecord {
-    fn from(value: PersistedSessionRecordForTest) -> Self {
-        Self {
-            id: value.id,
-            user_id: value.user_id,
-            org_id: value.org_id,
-            token_hash: value.token_hash,
-            user_agent: value.user_agent,
-            ip_address: value.ip_address,
-            fingerprint: value.fingerprint,
-            metadata: value.metadata,
-            created_at: value.created_at,
-            expires_at: value.expires_at,
-        }
-    }
 }

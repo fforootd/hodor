@@ -27,7 +27,7 @@ zitadel db migrate status # Print schema version info
 ### 2. Config-Driven Lifecycle
 
 ```toml
-[storage.stateful]
+[storage.primary]
 url = "sqlite://./data/zitadel.db"
 migrate = "auto"       # "auto" | "check" | "skip"
 bootstrap = "auto"     # "auto" | "skip"
@@ -105,14 +105,14 @@ spec:
               valueFrom: { secretKeyRef: { name: db, key: app-url } }
             - name: ZITADEL_STORAGE_STATEFUL_MIGRATE
               value: "check"
-            - name: ZITADEL_STORAGE_STATEFUL_BOOTSTRAP
+            - name: ZITADEL_STORAGE_PRIMARY_BOOTSTRAP
               value: "skip"
 ```
 
 ### DevOps / Autoscaling
 
 ```toml
-[storage.stateful]
+[storage.primary]
 migrate = "skip"      # fastest cold-start
 bootstrap = "skip"
 ```

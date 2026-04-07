@@ -67,14 +67,15 @@ The default implementation in this phase is:
 - scope: per process
 - lifecycle: disposable
 
-The role exists in config now:
+The local cache exists implicitly in the runtime now, and the operator-facing shared cache is configured separately:
 
 ```toml
-[storage.process_cache]
-backend = "memory"
+[cache.shared]
+backend = "disabled"
+# backend = "db"
 ```
 
-Only `memory` is implemented in this pass.
+Only the per-process memory cache is universal in this pass. `cache.shared.backend = "db"` is currently used for safe metadata lookups such as instance routing.
 
 ## Candidate Uses
 
@@ -92,7 +93,7 @@ Only `memory` is implemented in this pass.
 - consume-once security state
 - durable buffering before ingest
 
-Those belong to `kv` or `sink`, not `process_cache`.
+Those do not belong in a local cache at all.
 
 ## SQLite-Backed Cache
 
@@ -110,15 +111,11 @@ That makes it useful for:
 - faster warm starts on one machine
 - bounded query/result caches
 
-But even then it must remain distinct from:
-
-- `storage.kv`
-- `storage.sink`
-- `observability.cache_path`
+But even then it must remain distinct from `storage.transient`, `cache.shared`, and `observability.cache_path`.
 
 ## Consequences
 
 - the common storage story is clearer
-- Redis/Valkey is positioned under `storage.kv` or `storage.sink`, not as a blanket cache
+- Redis/Valkey remains future shared-cache work, not a blanket correctness layer
 - the observability cache can keep its own lifecycle and settings
 - future SQLite-backed local caching can be added without re-blurring the role model

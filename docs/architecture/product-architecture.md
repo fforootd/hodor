@@ -41,7 +41,7 @@ Everything runs in one process. No Postgres, no Redis, no Docker. Database auto-
 ### Level 1 — Small Production
 
 ```toml
-[storage.stateful]
+[storage.primary]
 url = "postgres://zitadel:secret@db:5432/zitadel"
 ```
 
@@ -52,33 +52,35 @@ url = "postgres://zitadel:secret@db:5432/zitadel"
 | **External deps** | Postgres |
 | **Use cases** | Startup in production, small enterprise, multi-env (dev/staging/prod as child instances) |
 
-Same binary, different connection string. The runtime derives read replicas, KV, and sink roles from the primary Postgres connection. Migrations run as a separate `zitadel db migrate` step in production (controlled via `storage.stateful.migrate = "check"`).
+Same binary, different connection string. The public model stays `primary`, `transient`, and `analytics`, with optional explicit replica reads. Migrations run as a separate `zitadel db migrate` step in production (controlled via `storage.primary.migrate = "check"`).
 
 ### Level 2 — Enterprise
 
 ```toml
-[storage.stateful]
+[storage.primary]
 url = "postgres://..."
 
-[storage.kv]
-url = "redis://..."
+[storage.primary.replica]
+enabled = true
+mode = "explicit"
+# url = "postgres://readonly@pg-replica:5432/zitadel"
 ```
 
 | Aspect | Detail |
 |---|---|
-| **Storage** | Postgres + Redis/Valkey |
+| **Storage** | Postgres, optionally with replica reads and separate transient / analytics DBs |
 | **Instances** | Root + child instances for tenants or environments |
-| **External deps** | Postgres, Redis/Valkey |
+| **External deps** | Postgres |
 | **Use cases** | High-scale self-hosted, multi-node deployments, SaaS vendors giving each customer a dedicated instance |
 
-Redis takes over session tokens, rate limits, and auth request state (`storage.kv` role). Postgres handles durable writes. Multiple Zitadel processes can run behind a load balancer.
+Postgres remains the authority. Replica reads are opt-in for stale-tolerant queries, and a separate transient DB can hold auth-runtime state directly when operators want that split.
 
-See [Storage Architecture](../design/storage-architecture.md) for the full role model (`stateful`, `read`, `kv`, `sink`, `process_cache`, `analytics`).
+See [Storage Architecture](../design/storage-architecture.md) for the full current model.
 
 ### Level 3 — Zitadel Cloud
 
 ```toml
-[storage.stateful]
+[storage.primary]
 url = "spanner://projects/zitadel-cloud/instances/global/databases/zitadel"
 
 [cloud]
@@ -173,17 +175,16 @@ See [ADR-029](../adr/029-control-plane-auth-data-plane.md) for the full consiste
 
 ## Storage Topology (Summary)
 
-The binary exposes six storage roles, all derived from `storage.stateful` by default:
+The binary exposes three operator-facing stores plus optional accelerators:
 
-| Role | Purpose | Default | Override example |
-|---|---|---|---|
-| `stateful` | Primary read/write | SQLite or Postgres | Spanner |
-| `read` | Read replicas | = stateful | Postgres replica |
-| `kv` | Session state, rate limits, auth requests | SQLite table | Redis/Valkey |
-| `sink` | Event export, audit drain | SQLite table | Kafka, S3 |
-| `process_cache` | Hot-path in-memory cache | In-process | — |
-| `analytics` | Query-optimized analytics store | = stateful | ClickHouse, BigQuery |
+| Store | Purpose | Default |
+|---|---|---|
+| `primary` | Durable read/write authority | SQLite, Postgres, or Spanner |
+| `transient` | Auth-runtime authority | inherits `primary` |
+| `analytics` | Analytics and observability target | inherits `primary` |
+| `cache.shared` | Safe metadata acceleration | disabled |
+| `primary.replica` | Explicit stale reads | disabled |
 
-At Level 0, all six roles collapse into a single SQLite file. At Level 3, each role may point to a different backend. The transition is purely configuration — no code changes.
+At Level 0, all three stores collapse into one SQLite file. At larger levels, operators can split transient and analytics DBs or add Postgres replicas without changing the application code.
 
-See [Storage Architecture](../design/storage-architecture.md) for the full role model and [Storage Implementation Status](../design/storage-implementation-status.md) for what is actually implemented today.
+See [Storage Architecture](../design/storage-architecture.md) for the full model and [Storage Implementation Status](../design/storage-implementation-status.md) for what is implemented today.

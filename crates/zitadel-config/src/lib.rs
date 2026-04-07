@@ -1,3 +1,4 @@
+mod cache;
 mod cloud;
 mod crypto;
 mod env;
@@ -9,6 +10,7 @@ mod server;
 pub mod session;
 mod storage;
 
+pub use cache::*;
 pub use cloud::*;
 pub use crypto::*;
 pub use generators::*;
@@ -35,6 +37,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub tls: TlsConfig,
     pub encryption: EncryptionConfig,
+    pub cache: CacheConfig,
     pub storage: StorageConfig,
     pub observability: ObservabilityConfig,
     pub workers: WorkersConfig,
@@ -61,7 +64,7 @@ impl Config {
     ///   ZITADEL_PORT, ZITADEL_STORAGE_STATEFUL_URL, etc.
     #[allow(clippy::result_large_err)]
     pub fn load(path: Option<&Path>) -> Result<Self, figment::Error> {
-        validate_no_legacy_database_config(path).map_err(figment::Error::from)?;
+        validate_no_legacy_storage_config(path).map_err(figment::Error::from)?;
         let mut figment = Figment::from(Serialized::defaults(Config::default()));
 
         if let Some(p) = path {
@@ -93,15 +96,24 @@ impl Config {
     }
 }
 
-fn validate_no_legacy_database_config(path: Option<&Path>) -> Result<(), String> {
+fn validate_no_legacy_storage_config(path: Option<&Path>) -> Result<(), String> {
     if let Some(path) = path {
         let raw = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let parsed: toml::Value = raw.parse().map_err(|e: toml::de::Error| e.to_string())?;
         if parsed.get("database").is_some() {
             return Err(
-                "legacy [database] config is no longer supported; move it to [storage.stateful]"
+                "legacy [database] config is no longer supported; move it to [storage.primary]"
                     .into(),
             );
+        }
+        if let Some(storage) = parsed.get("storage").and_then(toml::Value::as_table) {
+            for legacy_key in ["stateful", "read", "kv", "sink", "process_cache"] {
+                if storage.contains_key(legacy_key) {
+                    return Err(format!(
+                        "legacy [storage.{legacy_key}] config is no longer supported; use [storage.primary], [storage.transient], [storage.analytics], or [cache.shared]"
+                    ));
+                }
+            }
         }
     }
 
@@ -115,7 +127,39 @@ fn validate_no_legacy_database_config(path: Option<&Path>) -> Result<(), String>
     ] {
         if std::env::var_os(key).is_some() {
             return Err(format!(
-                "legacy {key} is no longer supported; use ZITADEL_STORAGE__STATEFUL__URL, ZITADEL_STORAGE__STATEFUL__MIGRATE, or ZITADEL_STORAGE__STATEFUL__BOOTSTRAP"
+                "legacy {key} is no longer supported; use ZITADEL_STORAGE__PRIMARY__URL, ZITADEL_STORAGE__PRIMARY__MIGRATE, or ZITADEL_STORAGE__PRIMARY__BOOTSTRAP"
+            ));
+        }
+    }
+
+    for key in [
+        "ZITADEL_STORAGE__STATEFUL__URL",
+        "ZITADEL_STORAGE__STATEFUL__DATABASE",
+        "ZITADEL_STORAGE__STATEFUL__EMULATOR_HOST",
+        "ZITADEL_STORAGE__STATEFUL__CREDENTIALS_FILE",
+        "ZITADEL_STORAGE__STATEFUL__CREDENTIALS_JSON",
+        "ZITADEL_STORAGE__STATEFUL__BACKEND",
+        "ZITADEL_STORAGE__STATEFUL__MIGRATE",
+        "ZITADEL_STORAGE__STATEFUL__BOOTSTRAP",
+        "ZITADEL_STORAGE_STATEFUL_URL",
+        "ZITADEL_STORAGE_STATEFUL_DATABASE",
+        "ZITADEL_STORAGE_STATEFUL_EMULATOR_HOST",
+        "ZITADEL_STORAGE_STATEFUL_CREDENTIALS_FILE",
+        "ZITADEL_STORAGE_STATEFUL_CREDENTIALS_JSON",
+        "ZITADEL_STORAGE_STATEFUL_BACKEND",
+        "ZITADEL_STORAGE_STATEFUL_MIGRATE",
+        "ZITADEL_STORAGE_STATEFUL_BOOTSTRAP",
+        "ZITADEL_STORAGE__READ__BACKEND",
+        "ZITADEL_STORAGE__READ__URL",
+        "ZITADEL_STORAGE__KV__BACKEND",
+        "ZITADEL_STORAGE__KV__URL",
+        "ZITADEL_STORAGE__SINK__BACKEND",
+        "ZITADEL_STORAGE__SINK__URL",
+        "ZITADEL_STORAGE__PROCESS_CACHE__BACKEND",
+    ] {
+        if std::env::var_os(key).is_some() {
+            return Err(format!(
+                "legacy {key} is no longer supported; use ZITADEL_STORAGE__PRIMARY__*, ZITADEL_STORAGE__TRANSIENT__*, ZITADEL_STORAGE__ANALYTICS__*, or ZITADEL_CACHE__SHARED__*"
             ));
         }
     }
@@ -207,12 +251,12 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(cfg.server.port, 8080);
         assert_eq!(cfg.server.external_domain, "localhost");
-        assert_eq!(cfg.storage.stateful.url, "sqlite://./data/zitadel.db");
+        assert_eq!(cfg.storage.primary.url, "sqlite://./data/zitadel.db");
         assert_eq!(cfg.observability.log_level, "info");
         assert_eq!(cfg.observability.streams.request.mode, "sampled");
         assert_eq!(cfg.observability.streams.request.sample_rate, 0.01);
-        assert_eq!(cfg.storage.stateful.resolve_migrate_mode(), "auto");
-        assert_eq!(cfg.storage.stateful.resolve_bootstrap_mode(), "auto");
+        assert_eq!(cfg.storage.primary.resolve_migrate_mode(), "auto");
+        assert_eq!(cfg.storage.primary.resolve_bootstrap_mode(), "auto");
     }
 
     #[test]
@@ -255,7 +299,7 @@ mod tests {
     fn reference_toml_loads() {
         let cfg: Config = toml::from_str(reference_toml()).expect("reference TOML should parse");
         assert_eq!(cfg.server.port, 8080);
-        assert_eq!(cfg.storage.stateful.url, "sqlite://./data/zitadel.db");
+        assert_eq!(cfg.storage.primary.url, "sqlite://./data/zitadel.db");
         assert_eq!(cfg.observability.log_level, "info");
         assert_eq!(cfg.observability.cache_path, "./data/zitadel-cache.db");
         assert_eq!(cfg.observability.streams.request.mode, "sampled");

@@ -178,7 +178,7 @@ pub(crate) async fn login_post(
     }
 
     let user = match state
-        .stateful
+        .primary
         .find_active_user_by_identifier(&instance_id, &form.identifier)
         .await
     {
@@ -202,7 +202,7 @@ pub(crate) async fn login_post(
     };
 
     let hash = match state
-        .stateful
+        .primary
         .load_password_hash(&instance_id, &user.user_id)
         .await
     {

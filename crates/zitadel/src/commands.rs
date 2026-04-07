@@ -10,18 +10,19 @@ pub(crate) fn run_start(args: StartArgs) -> anyhow::Result<()> {
         cfg.dev.seed_file = seed_path.to_string_lossy().into_owned();
     }
     if args.skip_migrate {
-        cfg.storage.stateful.migrate = "skip".into();
+        cfg.storage.primary.migrate = "skip".into();
     }
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.primary.url, &cfg.storage.primary)
             .await?;
+        let analytics_db = zitadel_storage::open_analytics_db(&cfg.storage, &db).await?;
         let _observability =
-            zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
+            zitadel_observability::install(&cfg.observability, Some(analytics_db)).await?;
         tracing::info!(
             port = cfg.server.port,
-            db = %cfg.storage.stateful.url,
+            db = %cfg.storage.primary.url,
             "starting zitadel server"
         );
         zitadel_server::run_with_db(cfg, db).await
@@ -32,16 +33,17 @@ pub(crate) fn run_start(args: StartArgs) -> anyhow::Result<()> {
 pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
     let mut cfg = load_config(args.config.as_deref())?;
     resolve_paths(&mut cfg, args.config.as_deref());
-    let backend = zitadel_db::BackendKind::parse(cfg.storage.stateful.resolve_backend())?;
+    let backend = zitadel_db::BackendKind::parse(cfg.storage.primary.resolve_backend())?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         if backend == zitadel_db::BackendKind::Spanner && !args.status {
-            zitadel_db::migrate::prepare_spanner(&cfg.storage.stateful).await?;
+            zitadel_db::migrate::prepare_spanner(&cfg.storage.primary).await?;
         }
-        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.primary.url, &cfg.storage.primary)
             .await?;
+        let analytics_db = zitadel_storage::open_analytics_db(&cfg.storage, &db).await?;
         let _observability =
-            zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
+            zitadel_observability::install(&cfg.observability, Some(analytics_db)).await?;
 
         if args.status {
             zitadel_db::migrate::check_version(&db).await?;
@@ -51,7 +53,7 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
                 zitadel_db::migrate::migrate(&db).await?;
             }
             let seeded_roles = zitadel_db::seed_builtin_role_definitions(&db).await?;
-            zitadel_storage::prepare_postgres_role_databases(&cfg.storage, &db).await?;
+            zitadel_storage::prepare_auxiliary_databases(&cfg.storage, &db).await?;
             if args.bootstrap {
                 let ext_domain =
                     Some(cfg.server.external_domain.as_str()).filter(|d| !d.is_empty());
@@ -89,10 +91,11 @@ pub(crate) fn run_seed_apply(config: Option<PathBuf>, file: PathBuf) -> anyhow::
         std::env::current_dir()?.join(file)
     };
     rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.primary.url, &cfg.storage.primary)
             .await?;
+        let analytics_db = zitadel_storage::open_analytics_db(&cfg.storage, &db).await?;
         let _observability =
-            zitadel_observability::install(&cfg.observability, Some(db.clone())).await?;
+            zitadel_observability::install(&cfg.observability, Some(analytics_db)).await?;
         zitadel_db::seed::apply(&db, &file).await?;
         db.close().await;
         tracing::info!(file = %file.display(), "seed applied");
@@ -127,7 +130,7 @@ pub(crate) fn run_openapi_export(args: OpenapiExportArgs) -> anyhow::Result<()> 
     resolve_paths(&mut cfg, args.config.as_deref());
     let rt = tokio::runtime::Runtime::new()?;
     let document = rt.block_on(async move {
-        let db = zitadel_db::Db::open_with_config(&cfg.storage.stateful.url, &cfg.storage.stateful)
+        let db = zitadel_db::Db::open_with_config(&cfg.storage.primary.url, &cfg.storage.primary)
             .await?;
         let schema_registry = zitadel_server::repo_bridge::schema_registry_repo(db.clone());
         let document =
@@ -205,11 +208,11 @@ pub(crate) fn resolve_paths(cfg: &mut zitadel_config::Config, config_path: Optio
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    resolve_sqlite_url(&mut cfg.storage.stateful.url, &base_dir);
-    resolve_sqlite_url(&mut cfg.storage.read.url, &base_dir);
-    resolve_sqlite_url(&mut cfg.storage.kv.url, &base_dir);
-    resolve_sqlite_url(&mut cfg.storage.sink.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.primary.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.primary.replica.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.storage.transient.url, &base_dir);
     resolve_sqlite_url(&mut cfg.storage.analytics.url, &base_dir);
+    resolve_sqlite_url(&mut cfg.cache.shared.url, &base_dir);
 
     if !cfg.dev.seed_file.is_empty() && !Path::new(&cfg.dev.seed_file).is_absolute() {
         let cwd_path = std::env::current_dir()
