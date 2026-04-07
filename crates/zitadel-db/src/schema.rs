@@ -1396,7 +1396,10 @@ async fn list_tables(db: &Db) -> anyhow::Result<Vec<String>> {
         }
         Dialect::Postgres => {
             let rows: Vec<(String,)> = sqlx::query_as(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name",
+                "SELECT CAST(table_name AS TEXT) AS table_name \
+                 FROM information_schema.tables \
+                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE' \
+                 ORDER BY table_name",
             )
             .fetch_all(db.pool())
             .await?;
@@ -1446,7 +1449,10 @@ async fn list_columns(
         }
         Dialect::Postgres => {
             let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
-                "SELECT column_name, data_type, is_nullable, column_default \
+                "SELECT CAST(column_name AS TEXT) AS column_name, \
+                        CAST(data_type AS TEXT) AS data_type, \
+                        CAST(is_nullable AS TEXT) AS is_nullable, \
+                        CAST(column_default AS TEXT) AS column_default \
                  FROM information_schema.columns \
                  WHERE table_schema = 'public' AND table_name = $1 \
                  ORDER BY ordinal_position",
@@ -1524,7 +1530,7 @@ async fn list_primary_key_columns(db: &Db, table_name: &str) -> anyhow::Result<V
         }
         Dialect::Postgres => {
             let rows: Vec<(String,)> = sqlx::query_as(
-                "SELECT kcu.column_name \
+                "SELECT CAST(kcu.column_name AS TEXT) AS column_name \
                  FROM information_schema.table_constraints tc \
                  JOIN information_schema.key_column_usage kcu \
                    ON tc.constraint_name = kcu.constraint_name \
@@ -1597,11 +1603,11 @@ async fn list_named_secondary_indexes(
         }
         Dialect::Postgres => {
             let rows: Vec<(String, bool, String, i64, Option<String>)> = sqlx::query_as(
-                "SELECT idxcls.relname AS index_name, \
+                "SELECT CAST(idxcls.relname AS TEXT) AS index_name, \
                         idx.indisunique AS is_unique, \
-                        att.attname AS column_name, \
+                        CAST(att.attname AS TEXT) AS column_name, \
                         ord.ordinality::bigint AS position, \
-                        pg_get_expr(idx.indpred, idx.indrelid) AS predicate \
+                        CAST(pg_get_expr(idx.indpred, idx.indrelid) AS TEXT) AS predicate \
                  FROM pg_class tbl \
                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
                  JOIN pg_index idx ON idx.indrelid = tbl.oid \
@@ -1752,11 +1758,11 @@ async fn list_foreign_keys(
         }
         Dialect::Postgres => {
             let rows: Vec<(String, i64, String, String, String, String)> = sqlx::query_as(
-                "SELECT con.conname, \
+                "SELECT CAST(con.conname AS TEXT) AS constraint_name, \
                         lcols.ordinality::bigint AS position, \
-                        latt.attname AS column_name, \
-                        frel.relname AS referenced_table, \
-                        ratt.attname AS referenced_column, \
+                        CAST(latt.attname AS TEXT) AS column_name, \
+                        CAST(frel.relname AS TEXT) AS referenced_table, \
+                        CAST(ratt.attname AS TEXT) AS referenced_column, \
                         con.confdeltype::text AS delete_action \
                  FROM pg_constraint con \
                  JOIN pg_class rel ON rel.oid = con.conrelid \
@@ -1846,10 +1852,10 @@ async fn list_unique_keys(db: &Db, table_name: &str) -> anyhow::Result<Vec<Uniqu
         }
         Dialect::Postgres => {
             let rows: Vec<(String, String, i64, Option<String>)> = sqlx::query_as(
-                "SELECT idxcls.relname AS index_name, \
-                        att.attname AS column_name, \
+                "SELECT CAST(idxcls.relname AS TEXT) AS index_name, \
+                        CAST(att.attname AS TEXT) AS column_name, \
                         ord.ordinality::bigint AS position, \
-                        pg_get_expr(idx.indpred, idx.indrelid) AS predicate \
+                        CAST(pg_get_expr(idx.indpred, idx.indrelid) AS TEXT) AS predicate \
                  FROM pg_class tbl \
                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
                  JOIN pg_index idx ON idx.indrelid = tbl.oid \
@@ -1958,7 +1964,7 @@ async fn list_check_constraints(
         }
         Dialect::Postgres => {
             let rows: Vec<(String,)> = sqlx::query_as(
-                "SELECT pg_get_constraintdef(con.oid, true) AS definition \
+                "SELECT CAST(pg_get_constraintdef(con.oid, true) AS TEXT) AS definition \
                  FROM pg_constraint con \
                  JOIN pg_class rel ON rel.oid = con.conrelid \
                  JOIN pg_namespace ns ON ns.oid = rel.relnamespace \
@@ -2054,6 +2060,20 @@ mod tests {
             logical_type_family("login_flows", "audience", "TEXT"),
             ColumnTypeFamily::Json
         );
+    }
+
+    #[test]
+    fn canonical_role_definitions_builtin_stays_boolean() {
+        let role_definitions =
+            canonical_table_manifest("role_definitions").expect("role_definitions table");
+        let builtin = role_definitions
+            .columns
+            .iter()
+            .find(|column| column.name == "builtin")
+            .expect("builtin column");
+
+        assert_eq!(builtin.family, ColumnTypeFamily::Bool);
+        assert_eq!(builtin.default, Some(DefaultValueManifest::Bool(true)));
     }
 
     #[test]

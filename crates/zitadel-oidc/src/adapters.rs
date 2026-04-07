@@ -235,8 +235,8 @@ fn _assert_json_value_send_sync(_: &Value) {}
 mod tests {
     use super::*;
     use crate::op::{AuthRequestStore, ClientStore};
-    use zitadel_db::{DEFAULT_ORG_ID, Db};
     use zitadel_db::repos::adapters::DbOidcRepository;
+    use zitadel_db::{DEFAULT_ORG_ID, Db};
 
     fn make_store(db: Db) -> ZitadelOpStore {
         ZitadelOpStore::new(Arc::new(DbOidcRepository::new(db)))

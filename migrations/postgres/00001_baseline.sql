@@ -472,7 +472,7 @@ CREATE TABLE IF NOT EXISTS role_assignments (
 );
 
 CREATE TABLE IF NOT EXISTS role_definitions (
-    builtin INTEGER NOT NULL DEFAULT 1,
+    builtin BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     permissions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     relation_name TEXT NOT NULL,

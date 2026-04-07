@@ -488,7 +488,7 @@ CREATE TABLE IF NOT EXISTS role_assignments (
 );
 
 CREATE TABLE IF NOT EXISTS role_definitions (
-    builtin INT64 NOT NULL DEFAULT (1),
+    builtin BOOL NOT NULL DEFAULT (TRUE),
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     permissions_json STRING(MAX) NOT NULL DEFAULT ('[]'),
     relation_name STRING(MAX) NOT NULL,
