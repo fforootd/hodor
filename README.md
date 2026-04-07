@@ -162,3 +162,4 @@ Three-layer precedence: `CLI flags > env vars > TOML config > defaults`
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE)
+
