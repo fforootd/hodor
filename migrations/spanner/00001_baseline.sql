@@ -62,8 +62,8 @@ CREATE TABLE IF NOT EXISTS auth_states (
     step STRING(MAX) DEFAULT (''),
     type STRING(MAX) NOT NULL,
     user_id STRING(MAX) DEFAULT (''),
-    __spx_2db8f54e942ce572_m BOOL AS (IF(state != '', TRUE, NULL)) STORED,
-    __spx_8f77f43702bb7948_m BOOL AS (IF(code != '', TRUE, NULL)) STORED,
+    spx_2db8f54e942ce572_m BOOL AS (IF(state != '', TRUE, NULL)) STORED,
+    spx_8f77f43702bb7948_m BOOL AS (IF(code != '', TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS cache (
     instance_id STRING(MAX) NOT NULL,
     key STRING(MAX) NOT NULL,
     namespace STRING(MAX) NOT NULL DEFAULT ('default'),
-    __spx_48a38ab3fc5d5532_m BOOL AS (IF(expires_at IS NOT NULL, TRUE, NULL)) STORED,
+    spx_48a38ab3fc5d5532_m BOOL AS (IF(expires_at IS NOT NULL, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, namespace, key)
 );
 
@@ -118,8 +118,8 @@ CREATE TABLE IF NOT EXISTS domains (
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     verification_token STRING(MAX) NOT NULL DEFAULT (''),
     verified BOOL NOT NULL DEFAULT (FALSE),
-    __spx_4d952f654d511ed6_m BOOL AS (IF(org_id IS NOT NULL AND is_primary = TRUE, TRUE, NULL)) STORED,
-    __spx_a4a0c49196eac339_m BOOL AS (IF(org_id IS NULL AND is_primary = TRUE, TRUE, NULL)) STORED,
+    spx_4d952f654d511ed6_m BOOL AS (IF(org_id IS NOT NULL AND is_primary = TRUE, TRUE, NULL)) STORED,
+    spx_a4a0c49196eac339_m BOOL AS (IF(org_id IS NULL AND is_primary = TRUE, TRUE, NULL)) STORED,
     PRIMARY KEY (domain)
 );
 
@@ -168,12 +168,12 @@ CREATE TABLE IF NOT EXISTS events (
     session_id STRING(MAX),
     shipped_at TIMESTAMP,
     token_id STRING(MAX) DEFAULT (''),
-    __spx_008e7a4af975252b_m BOOL AS (IF(shipped_at IS NULL, TRUE, NULL)) STORED,
-    __spx_36df21b0222c6b5b_m BOOL AS (IF(delegation_type != '', TRUE, NULL)) STORED,
-    __spx_7284230623d631ba_m BOOL AS (IF(client_id != '', TRUE, NULL)) STORED,
-    __spx_87db3dfee055a026_m BOOL AS (IF(request_id IS NOT NULL, TRUE, NULL)) STORED,
-    __spx_8b9bddb838e0747e_m BOOL AS (IF(actor_id IS NOT NULL, TRUE, NULL)) STORED,
-    __spx_d166a9f8bccbf4b1_m BOOL AS (IF(flow_id IS NOT NULL, TRUE, NULL)) STORED,
+    spx_008e7a4af975252b_m BOOL AS (IF(shipped_at IS NULL, TRUE, NULL)) STORED,
+    spx_36df21b0222c6b5b_m BOOL AS (IF(delegation_type != '', TRUE, NULL)) STORED,
+    spx_7284230623d631ba_m BOOL AS (IF(client_id != '', TRUE, NULL)) STORED,
+    spx_87db3dfee055a026_m BOOL AS (IF(request_id IS NOT NULL, TRUE, NULL)) STORED,
+    spx_8b9bddb838e0747e_m BOOL AS (IF(actor_id IS NOT NULL, TRUE, NULL)) STORED,
+    spx_d166a9f8bccbf4b1_m BOOL AS (IF(flow_id IS NOT NULL, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -249,7 +249,7 @@ CREATE TABLE IF NOT EXISTS `groups` (
     schema_id STRING(MAX) DEFAULT (''),
     state STRING(MAX) NOT NULL DEFAULT ('active'),
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
-    __spx_6ec06a62084df108_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
+    spx_6ec06a62084df108_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -354,7 +354,7 @@ CREATE TABLE IF NOT EXISTS login_flows (
     steps STRING(MAX) NOT NULL DEFAULT ('[]'),
     strategy STRING(MAX) NOT NULL DEFAULT ('identifier_first'),
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
-    __spx_7b74940375556728_m BOOL AS (IF(is_default = TRUE, TRUE, NULL)) STORED,
+    spx_7b74940375556728_m BOOL AS (IF(is_default = TRUE, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -389,7 +389,7 @@ CREATE TABLE IF NOT EXISTS oidc_auth_requests (
     session_id STRING(MAX) NOT NULL DEFAULT (''),
     state STRING(MAX) NOT NULL DEFAULT (''),
     user_id STRING(MAX) NOT NULL DEFAULT (''),
-    __spx_21d48265031a895a_m BOOL AS (IF(code != '', TRUE, NULL)) STORED,
+    spx_21d48265031a895a_m BOOL AS (IF(code != '', TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -432,7 +432,7 @@ CREATE TABLE IF NOT EXISTS projects (
     schema_id STRING(MAX) DEFAULT (''),
     state STRING(MAX) NOT NULL DEFAULT ('active'),
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
-    __spx_3c82cf40a95bc1ce_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
+    spx_3c82cf40a95bc1ce_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -454,7 +454,7 @@ CREATE TABLE IF NOT EXISTS providers (
     target STRING(MAX) NOT NULL DEFAULT ('{}'),
     ui STRING(MAX) NOT NULL DEFAULT ('{}'),
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
-    __spx_2721e3196171e498_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
+    spx_2721e3196171e498_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -552,9 +552,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     token_hash STRING(MAX) NOT NULL DEFAULT (''),
     user_agent STRING(MAX) DEFAULT (''),
     user_id STRING(MAX) NOT NULL,
-    __spx_25a174e7612ab805_m BOOL AS (IF(expires_at IS NOT NULL, TRUE, NULL)) STORED,
-    __spx_ebaaca7f82ec20ff_m BOOL AS (IF(revoked_at IS NOT NULL, TRUE, NULL)) STORED,
-    __spx_f44732e7743e5266_m BOOL AS (IF(token_hash != '', TRUE, NULL)) STORED,
+    spx_25a174e7612ab805_m BOOL AS (IF(expires_at IS NOT NULL, TRUE, NULL)) STORED,
+    spx_ebaaca7f82ec20ff_m BOOL AS (IF(revoked_at IS NOT NULL, TRUE, NULL)) STORED,
+    spx_f44732e7743e5266_m BOOL AS (IF(token_hash != '', TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -588,9 +588,9 @@ CREATE TABLE IF NOT EXISTS tokens (
     token_hash STRING(MAX) NOT NULL,
     type STRING(MAX) NOT NULL,
     user_id STRING(MAX),
-    __spx_00dfb2ef603f2554_m BOOL AS (IF(expires_at IS NOT NULL, TRUE, NULL)) STORED,
-    __spx_3b0e5789b3a74766_m BOOL AS (IF(revoked_at IS NOT NULL, TRUE, NULL)) STORED,
-    __spx_9f4d778a49b8edbb_m BOOL AS (IF(application_id != '', TRUE, NULL)) STORED,
+    spx_00dfb2ef603f2554_m BOOL AS (IF(expires_at IS NOT NULL, TRUE, NULL)) STORED,
+    spx_3b0e5789b3a74766_m BOOL AS (IF(revoked_at IS NOT NULL, TRUE, NULL)) STORED,
+    spx_9f4d778a49b8edbb_m BOOL AS (IF(application_id != '', TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -616,7 +616,7 @@ CREATE TABLE IF NOT EXISTS users (
     state STRING(MAX) NOT NULL DEFAULT ('active'),
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     user_type STRING(MAX) NOT NULL DEFAULT ('human'),
-    __spx_1118f7aa842bd33a_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
+    spx_1118f7aa842bd33a_m BOOL AS (IF(org_id IS NULL, TRUE, NULL)) STORED,
     PRIMARY KEY (instance_id, id)
 );
 
@@ -630,15 +630,15 @@ CREATE INDEX IF NOT EXISTS idx_apps_instance_client ON apps(instance_id, client_
 
 CREATE INDEX IF NOT EXISTS idx_apps_instance_org ON apps(instance_id, org_id);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_auth_states_instance_code ON auth_states(instance_id, code, __spx_8f77f43702bb7948_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_auth_states_instance_code ON auth_states(instance_id, code, spx_8f77f43702bb7948_m);
 
 CREATE INDEX IF NOT EXISTS idx_auth_states_instance_expires ON auth_states(instance_id, expires_at);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_auth_states_instance_state ON auth_states(instance_id, state, __spx_2db8f54e942ce572_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_auth_states_instance_state ON auth_states(instance_id, state, spx_2db8f54e942ce572_m);
 
 CREATE INDEX IF NOT EXISTS idx_auth_states_instance_type ON auth_states(instance_id, type);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_cache_instance_expires ON cache(instance_id, expires_at, __spx_48a38ab3fc5d5532_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_cache_instance_expires ON cache(instance_id, expires_at, spx_48a38ab3fc5d5532_m);
 
 ALTER TABLE credentials ADD CONSTRAINT fk_credentials_cc01f17609fb580d FOREIGN KEY (instance_id, user_id) REFERENCES users(instance_id, id) ON DELETE CASCADE;
 
@@ -652,9 +652,9 @@ CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 
 CREATE INDEX IF NOT EXISTS idx_domains_instance_org ON domains(instance_id, org_id);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_domains_instance_primary ON domains(instance_id, __spx_a4a0c49196eac339_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_domains_instance_primary ON domains(instance_id, spx_a4a0c49196eac339_m);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_domains_org_primary ON domains(instance_id, org_id, __spx_4d952f654d511ed6_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_domains_org_primary ON domains(instance_id, org_id, spx_4d952f654d511ed6_m);
 
 CREATE INDEX IF NOT EXISTS idx_effects_cleanup ON effects(instance_id, status, completed_at);
 
@@ -664,17 +664,17 @@ CREATE INDEX IF NOT EXISTS idx_effects_event ON effects(instance_id, event_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_effects_source_key ON effects(instance_id, source_key);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_actor ON events(instance_id, actor_id, __spx_8b9bddb838e0747e_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_actor ON events(instance_id, actor_id, spx_8b9bddb838e0747e_m);
 
 CREATE INDEX IF NOT EXISTS idx_events_aggregate ON events(instance_id, aggregate_id, aggregate_type);
 
 CREATE INDEX IF NOT EXISTS idx_events_category ON events(instance_id, category, created_at);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_client ON events(instance_id, client_id, __spx_7284230623d631ba_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_client ON events(instance_id, client_id, spx_7284230623d631ba_m);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_delegation ON events(instance_id, delegation_type, __spx_36df21b0222c6b5b_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_delegation ON events(instance_id, delegation_type, spx_36df21b0222c6b5b_m);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_flow ON events(instance_id, flow_id, __spx_d166a9f8bccbf4b1_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_flow ON events(instance_id, flow_id, spx_d166a9f8bccbf4b1_m);
 
 CREATE INDEX IF NOT EXISTS idx_events_instance_created ON events(instance_id, created_at);
 
@@ -682,9 +682,9 @@ CREATE INDEX IF NOT EXISTS idx_events_instance_type_created ON events(instance_i
 
 CREATE INDEX IF NOT EXISTS idx_events_org ON events(instance_id, org_id, created_at);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_request ON events(instance_id, request_id, __spx_87db3dfee055a026_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_request ON events(instance_id, request_id, spx_87db3dfee055a026_m);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_ship ON events(instance_id, __spx_008e7a4af975252b_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_events_ship ON events(instance_id, spx_008e7a4af975252b_m);
 
 CREATE INDEX IF NOT EXISTS idx_fga_models_active ON fga_authorization_models(scope_id, store_id, is_active, created_at);
 
@@ -700,7 +700,7 @@ CREATE INDEX IF NOT EXISTS idx_fingerprints_instance_type ON fingerprints(instan
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_groups_4f9e372ac213e76f ON `groups`(instance_id, org_id, name);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_groups_instance_name_no_org ON `groups`(instance_id, name, __spx_6ec06a62084df108_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_groups_instance_name_no_org ON `groups`(instance_id, name, spx_6ec06a62084df108_m);
 
 CREATE INDEX IF NOT EXISTS idx_groups_instance_org ON `groups`(instance_id, org_id);
 
@@ -726,7 +726,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_login_flow_assets_fe47ca5fd93c1632 ON login
 
 CREATE INDEX IF NOT EXISTS idx_login_flow_assets_instance_flow ON login_flow_assets(instance_id, login_flow_id);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_login_flows_instance_default ON login_flows(instance_id, __spx_7b74940375556728_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_login_flows_instance_default ON login_flows(instance_id, spx_7b74940375556728_m);
 
 CREATE INDEX IF NOT EXISTS idx_login_flows_instance_org ON login_flows(instance_id, org_id);
 
@@ -738,7 +738,7 @@ CREATE INDEX IF NOT EXISTS idx_memberships_instance_resource ON memberships(inst
 
 CREATE INDEX IF NOT EXISTS idx_memberships_instance_user ON memberships(instance_id, user_id, resource_type);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_oidc_auth_requests_code ON oidc_auth_requests(instance_id, code, __spx_21d48265031a895a_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_oidc_auth_requests_code ON oidc_auth_requests(instance_id, code, spx_21d48265031a895a_m);
 
 CREATE INDEX IF NOT EXISTS idx_oidc_auth_requests_instance_client ON oidc_auth_requests(instance_id, client_id);
 
@@ -760,13 +760,13 @@ CREATE INDEX IF NOT EXISTS idx_orgs_instance_state ON orgs(instance_id, state);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_projects_1da32ee6b9e06ee5 ON projects(instance_id, org_id, name);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_projects_instance_name_no_org ON projects(instance_id, name, __spx_3c82cf40a95bc1ce_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_projects_instance_name_no_org ON projects(instance_id, name, spx_3c82cf40a95bc1ce_m);
 
 CREATE INDEX IF NOT EXISTS idx_projects_instance_org ON projects(instance_id, org_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_providers_f22536697181dc2e ON providers(instance_id, org_id, display_name);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_providers_instance_name_no_org ON providers(instance_id, display_name, __spx_2721e3196171e498_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_providers_instance_name_no_org ON providers(instance_id, display_name, spx_2721e3196171e498_m);
 
 CREATE INDEX IF NOT EXISTS idx_providers_instance_org ON providers(instance_id, org_id);
 
@@ -802,11 +802,11 @@ CREATE INDEX IF NOT EXISTS idx_secrets_instance_type ON secrets(instance_id, sec
 
 ALTER TABLE sessions ADD CONSTRAINT fk_sessions_ca7ce9e77ef4176a FOREIGN KEY (instance_id, user_id) REFERENCES users(instance_id, id) ON DELETE CASCADE;
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_expires ON sessions(instance_id, expires_at, __spx_25a174e7612ab805_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_expires ON sessions(instance_id, expires_at, spx_25a174e7612ab805_m);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_revoked ON sessions(instance_id, revoked_at, __spx_ebaaca7f82ec20ff_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_revoked ON sessions(instance_id, revoked_at, spx_ebaaca7f82ec20ff_m);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_token_unique ON sessions(instance_id, token_hash, __spx_f44732e7743e5266_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_sessions_instance_token_unique ON sessions(instance_id, token_hash, spx_f44732e7743e5266_m);
 
 CREATE INDEX IF NOT EXISTS idx_sessions_instance_user ON sessions(instance_id, user_id);
 
@@ -820,11 +820,11 @@ ALTER TABLE tokens ADD CONSTRAINT fk_tokens_8552810c8e4aefe0 FOREIGN KEY (instan
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_tokens_4c7bc010dabe07b4 ON tokens(instance_id, token_hash);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_tokens_instance_app ON tokens(instance_id, application_id, __spx_9f4d778a49b8edbb_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_tokens_instance_app ON tokens(instance_id, application_id, spx_9f4d778a49b8edbb_m);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_tokens_instance_expires ON tokens(instance_id, expires_at, __spx_00dfb2ef603f2554_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_tokens_instance_expires ON tokens(instance_id, expires_at, spx_00dfb2ef603f2554_m);
 
-CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_tokens_instance_revoked ON tokens(instance_id, revoked_at, __spx_3b0e5789b3a74766_m);
+CREATE NULL_FILTERED INDEX IF NOT EXISTS idx_tokens_instance_revoked ON tokens(instance_id, revoked_at, spx_3b0e5789b3a74766_m);
 
 CREATE INDEX IF NOT EXISTS idx_tokens_instance_session ON tokens(instance_id, session_id);
 
@@ -840,7 +840,7 @@ CREATE INDEX IF NOT EXISTS idx_unique_fields_instance_resource ON unique_fields(
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_users_8fa36ca7c7768f49 ON users(instance_id, org_id, identifier);
 
-CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_users_instance_identifier_no_org ON users(instance_id, identifier, __spx_1118f7aa842bd33a_m);
+CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS idx_users_instance_identifier_no_org ON users(instance_id, identifier, spx_1118f7aa842bd33a_m);
 
 CREATE INDEX IF NOT EXISTS idx_users_instance_org ON users(instance_id, org_id);
 

@@ -8,7 +8,7 @@ use crate::{BackendKind, Db, Dialect};
 const CANONICAL_SCHEMA_MANIFEST_JSON: &str = include_str!("schema_manifest.json");
 
 const UNIQUE_INDEX_PREFIX: &str = "uk_";
-const SPANNER_HELPER_PREFIX: &str = "__spx_";
+const SPANNER_HELPER_PREFIX: &str = "spx_";
 
 const JSON_COLUMN_NAMES: &[&str] = &[
     "allowed_scopes",
@@ -2114,5 +2114,17 @@ mod tests {
     #[test]
     fn canonical_manifest_is_available() {
         assert!(!canonical_manifest().tables.is_empty());
+    }
+
+    #[test]
+    fn spanner_partial_helper_names_start_with_a_letter() {
+        let name = spanner_partial_marker_name("idx_auth_states_instance_state");
+        let first = name
+            .chars()
+            .next()
+            .expect("helper marker names should not be empty");
+
+        assert!(first.is_ascii_alphabetic(), "{name}");
+        assert!(name.starts_with(SPANNER_HELPER_PREFIX), "{name}");
     }
 }
