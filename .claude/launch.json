@@ -4,7 +4,7 @@
     {
       "name": "dev",
       "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && source $HOME/.nvm/nvm.sh && source $HOME/.cargo/env && just dev"],
+      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && source $HOME/.nvm/nvm.sh && source $HOME/.cargo/env && cargo build -p zitadel && (./target/debug/zitadel start --seed fixtures/seeds/frontend.yaml & npm run dev -w web)"],
       "port": 5173
     }
   ]
