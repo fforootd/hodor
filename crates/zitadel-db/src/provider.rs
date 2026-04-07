@@ -523,6 +523,14 @@ mod tests {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
         let scoped = db.scoped_default();
+        sqlx::query(
+            "INSERT INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}')",
+        )
+        .bind(scoped.instance_id())
+        .execute(scoped.pool())
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO orgs (instance_id, id, name) VALUES ($1, $2, $3)")
             .bind(scoped.instance_id())
             .bind("org-1")

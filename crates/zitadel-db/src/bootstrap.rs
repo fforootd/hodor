@@ -19,6 +19,26 @@ pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result
     let mut changed = false;
 
     let operator_metadata = r#"{"capabilities":["operator_admin"]}"#;
+    let instance_insert_sql = match db.dialect() {
+        crate::Dialect::Postgres => {
+            "INSERT INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}') \
+             ON CONFLICT (instance_id) DO NOTHING"
+        }
+        crate::Dialect::Sqlite => {
+            "INSERT OR IGNORE INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}')"
+        }
+        crate::Dialect::Spanner => unreachable!(),
+    };
+    let instance_inserted = sqlx::query(instance_insert_sql)
+        .bind(DEFAULT_INSTANCE_ID)
+        .execute(&mut *tx)
+        .await?;
+    if instance_inserted.rows_affected() > 0 {
+        changed = true;
+    }
+
     let root_updated = sqlx::query(
         "UPDATE instances \
          SET kind = 'root', state = 'active', placement_mode = 'global', updated_at = CURRENT_TIMESTAMP \

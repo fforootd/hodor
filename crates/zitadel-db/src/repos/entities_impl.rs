@@ -3,7 +3,6 @@ use google_cloud_spanner::{
     client::Error as SpannerError, row::Row as SpannerRow, statement::Statement,
 };
 use serde_json::{Map, Value};
-use std::collections::HashSet;
 
 use crate::{
     Db, SpannerDb, get_org, get_schema_record, get_user, list_instance_domains, provider,
@@ -53,11 +52,6 @@ pub struct SqlSettingsRepository {
     pub(super) db: Db,
 }
 
-#[derive(Clone)]
-pub struct SqlSearchRepository {
-    pub(super) db: Db,
-}
-
 impl SqlUserRepository {
     pub fn new(db: Db) -> Self {
         Self { db }
@@ -95,12 +89,6 @@ impl SqlSchemaRepository {
 }
 
 impl SqlSettingsRepository {
-    pub fn new(db: Db) -> Self {
-        Self { db }
-    }
-}
-
-impl SqlSearchRepository {
     pub fn new(db: Db) -> Self {
         Self { db }
     }
@@ -396,14 +384,6 @@ where
     } else {
         items.last().map(|item| f(item).to_string())
     }
-}
-
-pub(super) fn normalized_resource_types(resource_types: Option<&[&str]>) -> HashSet<String> {
-    resource_types
-        .into_iter()
-        .flatten()
-        .map(|value| value.to_ascii_lowercase())
-        .collect()
 }
 
 // ---------------------------------------------------------------------------

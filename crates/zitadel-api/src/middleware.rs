@@ -425,7 +425,7 @@ mod tests {
         session::hash_token,
     };
     use zitadel_config::{Config, password::PasswordHasherConfig};
-    use zitadel_db::repo_impls::DbOidcRepository;
+    use zitadel_db::repos::adapters::DbOidcRepository;
     use zitadel_db::{DEFAULT_INSTANCE_ID, Db};
     use zitadel_fga::{FgaService, StoreResolver};
     use zitadel_oidc::op::{ClientAuthMethod, ClientAuthentication, TokenExchangeRequest};

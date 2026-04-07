@@ -49,7 +49,6 @@ fn observability_auth_and_effect_lookup_indexes_remain_present() {
         "idx_events_org",
         "idx_sessions_instance_user",
         "idx_sessions_instance_token_unique",
-        "idx_tokens_instance_token_hash",
         "idx_tokens_instance_session",
         "idx_effects_due",
         "idx_effects_event",
@@ -59,4 +58,10 @@ fn observability_auth_and_effect_lookup_indexes_remain_present() {
             "Spanner baseline should keep the {index_name} secondary index",
         );
     }
+
+    assert!(
+        SPANNER_BASELINE.contains("CREATE UNIQUE INDEX IF NOT EXISTS")
+            && SPANNER_BASELINE.contains("ON tokens(instance_id, token_hash)"),
+        "Spanner baseline should keep a unique secondary index over tokens(instance_id, token_hash)",
+    );
 }

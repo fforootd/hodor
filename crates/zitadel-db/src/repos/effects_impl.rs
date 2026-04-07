@@ -2,13 +2,13 @@ use anyhow::Context;
 use google_cloud_spanner::{
     client::Error as SpannerError, row::Row as SpannerRow, statement::Statement,
 };
+use serde_json::Value;
 use zitadel_app::{
     effect::{Effect, EffectStatus, EffectType},
     repo::{BoxFuture, EffectRepository},
 };
 
-use super::entities::{json_string, json_value};
-use crate::{Db, current_timestamp_sql, timestamp_plus_expr};
+use crate::{Db, Dialect, current_timestamp_sql, timestamp_plus_expr};
 
 type EffectSqlRow = (
     String,
@@ -241,7 +241,7 @@ impl EffectRepository for DbEffectRepository {
                                              lease_owner = @lease_owner, \
                                              lease_expires_at = {} \
                                          WHERE instance_id = @instance_id AND id = @id",
-                                        timestamp_plus_expr(crate::Dialect::Spanner, lease_ttl_secs),
+                                        timestamp_plus_expr(Dialect::Spanner, lease_ttl_secs),
                                     ));
                                     stmt.add_param("lease_owner", &owner);
                                     stmt.add_param("instance_id", &iid);
@@ -645,4 +645,12 @@ pub async fn insert_effects_in_tx(
     }
 
     Ok(())
+}
+
+fn json_string(value: &Value) -> anyhow::Result<String> {
+    serde_json::to_string(value).context("serialize JSON value")
+}
+
+fn json_value(raw: &str) -> Value {
+    serde_json::from_str(raw).unwrap_or(Value::Null)
 }

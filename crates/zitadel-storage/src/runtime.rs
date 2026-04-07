@@ -8,7 +8,7 @@ use crate::{
     DefaultTransientStorage, MemoryKvStore, NoopAnalyticsSink, SpannerAnalyticsQueryBackend,
     SpannerKvStore, SpannerReadStore, SpannerStatefulStore, SqlAnalyticsQueryBackend, SqlKvStore,
     SqlReadStore, SqlSink, SqlStatefulStore, prepare_postgres_kv_schema,
-    prepare_postgres_sink_schema,
+    prepare_postgres_sink_schema, storage_backend_capabilities,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,36 +258,35 @@ pub async fn prepare_postgres_role_databases(
 }
 
 fn derive_read_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Result<String> {
+    let capabilities = storage_backend_capabilities(backend);
     if config.read.backend.is_empty() {
-        return Ok(match backend {
-            BackendKind::Sqlite => "same_connection",
-            BackendKind::Postgres | BackendKind::Spanner => "same_primary",
-        }
-        .to_string());
+        return Ok(capabilities.default_read_backend.to_string());
     }
 
     match config.read.backend.as_str() {
-        "same_connection" if backend == BackendKind::Sqlite => Ok("same_connection".into()),
-        "same_primary" if backend != BackendKind::Sqlite => Ok("same_primary".into()),
+        "same_connection" if capabilities.default_read_backend == "same_connection" => {
+            Ok("same_connection".into())
+        }
+        "same_primary" if capabilities.default_read_backend == "same_primary" => {
+            Ok("same_primary".into())
+        }
         "postgres_replica" if backend == BackendKind::Postgres => Ok("postgres_replica".into()),
         other => anyhow::bail!("unsupported storage.read.backend for this stateful store: {other}"),
     }
 }
 
 fn derive_kv_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Result<String> {
+    let capabilities = storage_backend_capabilities(backend);
     if config.kv.backend.is_empty() {
-        return Ok(match backend {
-            BackendKind::Sqlite => "memory",
-            BackendKind::Postgres => "postgres_unlogged",
-            BackendKind::Spanner => "shared_sql",
-        }
-        .to_string());
+        return Ok(capabilities.default_kv_backend.to_string());
     }
 
     match config.kv.backend.as_str() {
-        "memory" if backend != BackendKind::Spanner => Ok("memory".into()),
-        "postgres_unlogged" if backend == BackendKind::Postgres => Ok("postgres_unlogged".into()),
-        "shared_sql" if backend != BackendKind::Sqlite => Ok("shared_sql".into()),
+        "memory" if capabilities.supports_memory_kv => Ok("memory".into()),
+        "postgres_unlogged" if capabilities.supports_postgres_unlogged_kv => {
+            Ok("postgres_unlogged".into())
+        }
+        "shared_sql" if capabilities.supports_shared_sql_kv => Ok("shared_sql".into()),
         "redis" => Ok("redis".into()),
         "memory" => anyhow::bail!(
             "storage.kv.backend = \"memory\" is not supported for native Spanner; use \"shared_sql\""
@@ -297,20 +296,16 @@ fn derive_kv_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Re
 }
 
 fn derive_sink_backend(config: &StorageConfig, backend: BackendKind) -> anyhow::Result<String> {
+    let capabilities = storage_backend_capabilities(backend);
     if config.sink.backend.is_empty() {
-        return Ok(match backend {
-            BackendKind::Sqlite => "channel",
-            BackendKind::Postgres => "postgres",
-            BackendKind::Spanner => "noop",
-        }
-        .to_string());
+        return Ok(capabilities.default_sink_backend.to_string());
     }
 
     match config.sink.backend.as_str() {
-        "channel" if backend != BackendKind::Spanner => Ok("channel".into()),
-        "postgres" if backend == BackendKind::Postgres => Ok("postgres".into()),
+        "channel" if capabilities.supports_channel_sink => Ok("channel".into()),
+        "postgres" if capabilities.supports_postgres_sink => Ok("postgres".into()),
         "redis" => Ok("redis".into()),
-        "noop" => Ok("noop".into()),
+        "noop" if capabilities.supports_noop_sink => Ok("noop".into()),
         "channel" => anyhow::bail!(
             "storage.sink.backend = \"channel\" is not supported for native Spanner; use \"noop\""
         ),

@@ -1,3 +1,16 @@
+pub mod adapters;
+pub mod auth_impl;
+pub mod authorization_impl;
+pub mod auxiliary_named_impl;
+pub mod auxiliary_runtime_impl;
+pub mod effects_impl;
+pub mod entities_impl;
+pub mod instances_impl;
+pub mod orgs_groups_impl;
+pub mod schemas_settings_impl;
+pub mod search_impl;
+pub mod users_impl;
+
 pub mod actions {
     pub use crate::{ActionRecord, get_action, list_actions, upsert_catalog_action};
 }

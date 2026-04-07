@@ -1,11 +1,12 @@
 //! Bridge repository implementations for server wiring (ADR-032).
 //!
-//! Builds `Repositories` from production implementations in `zitadel-db/src/repo_impls/`
-//! plus thin wrappers for Session (KvStore) and FGA (FgaService).
+//! Builds `Repositories` from the production adapter boundary in
+//! `zitadel-db/src/repos/adapters.rs` plus thin wrappers for Session (KvStore)
+//! and FGA (FgaService).
 
 use std::sync::Arc;
 use zitadel_app::repo::*;
-use zitadel_db::repo_impls::*;
+use zitadel_db::repos::adapters::*;
 use zitadel_db::{Db, Dialect};
 use zitadel_fga::{
     AuthorizationModelWriteRequest, BatchCheckRequest, ChangeRepository, CheckRequest, Evaluator,

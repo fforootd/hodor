@@ -1,7 +1,7 @@
 use anyhow::Context;
 use google_cloud_spanner::statement::Statement;
 
-use super::entities::{
+use super::entities_impl::{
     GroupSqlRow, OrgSqlRow, SqlGroupRepository, SqlOrgRepository, group_from_spanner_row,
     group_from_sql_row, json_string, limit_from_params, load_group, load_org, next_cursor,
     org_from_spanner_row, org_from_sql_row, spanner_query_all, spanner_query_optional,

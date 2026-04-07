@@ -428,10 +428,23 @@ impl DefaultStatefulStorage {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn resolves_password_and_pat_from_stateful_storage() {
+    async fn fresh_test_db() -> Db {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}')",
+        )
+        .bind(zitadel_db::DEFAULT_INSTANCE_ID)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn resolves_password_and_pat_from_stateful_storage() {
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -514,8 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_non_pat_tokens_when_resolving_pat_identity() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -568,8 +580,7 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_pat_tokens_for_disabled_users() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")

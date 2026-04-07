@@ -1,7 +1,7 @@
 use anyhow::Context;
 use google_cloud_spanner::statement::Statement;
 
-use super::entities::{
+use super::entities_impl::{
     SqlInstanceRepository, domain_from_retained, instance_from_retained, json_string,
     limit_from_params, load_instance, next_cursor, upsert_domain, write_spanner_count,
     write_spanner_many,

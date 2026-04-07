@@ -22,3 +22,19 @@ fn server_routing_stays_behind_repository_boundary() {
         );
     }
 }
+
+#[test]
+fn server_runtime_wiring_does_not_import_repo_impls_directly() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for rel in ["src/repo_bridge.rs", "src/jobs.rs"] {
+        let path = manifest.join(rel);
+        let source = load_runtime_source(&path);
+        for forbidden in ["use zitadel_db::repo_impls", "repo_impls::"] {
+            assert!(
+                !source.contains(forbidden),
+                "{} still contains forbidden repository implementation import `{forbidden}`",
+                path.display()
+            );
+        }
+    }
+}

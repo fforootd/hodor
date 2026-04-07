@@ -2,7 +2,7 @@ use anyhow::Context;
 use google_cloud_spanner::statement::Statement;
 use serde_json::{Map, Value};
 
-use super::entities::{
+use super::entities_impl::{
     SqlProviderRepository, SqlSchemaRepository, SqlSettingsRepository, json_string,
     limit_from_params, load_provider, load_schema, load_settings_exact, next_cursor, parse_scope,
     provider_definition_from_storage, provider_from_storage, provider_org_id,
