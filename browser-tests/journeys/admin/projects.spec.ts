@@ -15,9 +15,8 @@ test.describe('Admin projects journey', () => {
     const suffix = `${Date.now()}`
     const name = `Journey Project ${suffix}`
 
-    await page.goto('/console/projects')
-    await page.getByRole('button', { name: /New Project/i }).click()
-    await page.getByLabel(/Project Name/i).fill(name)
+    await page.goto('/console/projects/new')
+    await page.getByRole('textbox', { name: 'Name' }).fill(name)
     await page.getByRole('button', { name: /Create Project/i }).click()
 
     await expect(page).toHaveURL(/\/console\/projects\/.+/)

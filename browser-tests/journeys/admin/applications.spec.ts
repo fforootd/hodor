@@ -15,14 +15,8 @@ test.describe('Admin applications journey', () => {
     const suffix = `${Date.now()}`
     const name = `Journey Application ${suffix}`
 
-    await page.goto('/console/applications')
-    await page.getByRole('button', { name: /New Application/i }).click()
-    // Wizard step 0: select application type (default: web) → next
-    await page.getByRole('button', { name: /Next/i }).click()
-    // Wizard step 1: fill name
-    await page.getByLabel(/Application Name/i).fill(name)
-    await page.getByRole('button', { name: /Next/i }).click()
-    // Wizard step 2: confirm
+    await page.goto('/console/applications/new')
+    await page.getByRole('textbox', { name: 'Name' }).fill(name)
     await page.getByRole('button', { name: /Create Application/i }).click()
 
     await expect(page).toHaveURL(/\/console\/applications\/.+/)
