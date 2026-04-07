@@ -2538,6 +2538,19 @@ mod tests {
 
     #[tokio::test]
     async fn spanner_ddl_parsing_keeps_credentials_foreign_key_when_configured() {
+        let any_spanner_env_present = [
+            crate::test_support::TEST_SPANNER_EMULATOR_HOST_ENV,
+            crate::test_support::TEST_SPANNER_PROJECT_ENV,
+            crate::test_support::TEST_SPANNER_INSTANCE_ENV,
+            crate::test_support::TEST_SPANNER_DATABASE_PREFIX_ENV,
+            crate::test_support::TEST_SPANNER_DATABASE_ENV,
+        ]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some());
+        if !any_spanner_env_present {
+            return;
+        }
+
         let Some(db) = crate::test_support::spanner_db_from_env("schema-fk-debug")
             .await
             .expect("provision spanner test db")
