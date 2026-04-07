@@ -1,4 +1,4 @@
-name: Nightly / Extended Families
+name: Nightly
 
 on:
   schedule:
@@ -6,27 +6,66 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: nightly-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  nightly-families:
-    name: Extended Families
-    uses: ./.github/workflows/reusable-ci.yml
-    with:
-      execution_tier_label: Nightly
-      run_docs: false
-      run_fast_rust: false
-      run_fast_web: false
-      run_journeys_admin: false
-      run_journeys_login: false
-      run_journeys_oidc: false
-      run_journeys_quarantine: true
-      run_contracts: false
-      run_invariants: false
-      run_subsystems: false
-      run_resilience: true
-      artifact_prefix: nightly
+  quarantine:
+    name: E2E / Quarantine
+    runs-on: ubuntu-latest
+    env:
+      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/zitadel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci --prefer-offline
+      - run: npm run build -w web
+      - run: cargo build -p zitadel
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - run: npx playwright install --with-deps chromium
+      - run: npm test -w browser-tests -- --grep @quarantine --reporter=github,line,html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-quarantine-report
+          path: |
+            browser-tests/playwright-report
+            browser-tests/test-results
+          retention-days: 7
+
+  resilience:
+    name: Resilience
+    runs-on: ubuntu-latest
+    services:
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator
+        ports: ['9010:9010', '9020:9020']
+    env:
+      ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      ZITADEL_TEST_SPANNER_PROJECT: local-project
+      ZITADEL_TEST_SPANNER_INSTANCE: test-instance
+      ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelrs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Create web/dist placeholder
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - name: Wait for Spanner emulator
+        run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
+      - run: cargo test -p zitadel-storage --test resilience_storage_spanner_transient

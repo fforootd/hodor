@@ -1,100 +1,26 @@
-name: Reusable CI
+name: CI
 
 on:
-  workflow_call:
-    inputs:
-      execution_tier_label:
-        required: false
-        type: string
-        default: CI
-      run_docs:
-        required: false
-        type: boolean
-        default: true
-      run_fast_rust:
-        required: false
-        type: boolean
-        default: true
-      run_fast_web:
-        required: false
-        type: boolean
-        default: true
-      run_journeys_admin:
-        required: false
-        type: boolean
-        default: true
-      run_journeys_login:
-        required: false
-        type: boolean
-        default: true
-      run_journeys_oidc:
-        required: false
-        type: boolean
-        default: true
-      run_journeys_quarantine:
-        required: false
-        type: boolean
-        default: false
-      run_contracts:
-        required: false
-        type: boolean
-        default: true
-      run_db:
-        required: false
-        type: boolean
-        default: true
-      run_invariants:
-        required: false
-        type: boolean
-        default: true
-      run_subsystems:
-        required: false
-        type: boolean
-        default: true
-      run_resilience:
-        required: false
-        type: boolean
-        default: false
-      artifact_prefix:
-        required: false
-        type: string
-        default: ci
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  noop:
-    name: No Lanes
-    if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_journeys_admin && !inputs.run_journeys_login && !inputs.run_journeys_oidc && !inputs.run_journeys_quarantine && !inputs.run_contracts && !inputs.run_db && !inputs.run_invariants && !inputs.run_subsystems && !inputs.run_resilience }}
+  # ── Rust ────────────────────────────────────────────────
+
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
-      - name: No lanes selected
-        run: echo "No reusable CI lanes selected."
-
-  # ── Fast lanes (all parallel, no dependencies) ──────────
-
-  rust-static:
-    name: Rust / Static
-    if: inputs.run_fast_rust
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Create web/dist placeholder
-        run: |
-          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
-          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
-      - run: cargo fmt --check
-      - run: cargo clippy --workspace -- -D warnings
-
-  rust-tests:
-    name: Rust / Tests
-    if: inputs.run_fast_rust
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -104,37 +30,21 @@ jobs:
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
-      - name: Run Rust tests
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace -- -D warnings
+      - name: Test
         run: |
           cargo nextest run --workspace --lib --bins
           cargo nextest run -p zitadel-app --test use_case_tests
 
-  docs-check:
-    name: Docs / Check
-    if: inputs.run_docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - run: python3 tools/validate-testing-manifest.py
+  # ── Web ─────────────────────────────────────────────────
 
-  docs-links:
-    name: Docs / Links
-    if: inputs.run_docs
+  web:
+    name: Web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
-      - name: Validate local Markdown links
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --offline --no-progress README.md docs/**/*.md
-
-  web-static:
-    name: Web / Static
-    if: inputs.run_fast_web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -142,51 +52,47 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm run lint -w web
       - run: npm run typecheck -w web
-
-  web-unit:
-    name: Web / Unit
-    if: inputs.run_fast_web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm ci --prefer-offline
       - run: npm test -w web
 
-  # ── Build (single job: web assets + binary) ─────────────
+  # ── Docs ────────────────────────────────────────────────
 
-  build:
-    name: Build / Zitadel Binary
-    if: inputs.run_journeys_admin || inputs.run_journeys_login || inputs.run_journeys_oidc || inputs.run_journeys_quarantine
+  docs:
+    name: Docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/checkout@v4
+      - name: Validate local Markdown links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress README.md docs/**/*.md
+
+  # ── Build (web assets + binary) ─────────────────────────
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build web assets and binary
-        run: |
-          npm ci --prefer-offline
-          npm run build -w web
-          cargo build -p zitadel
-      - uses: actions/upload-artifact@v4.6.2
+      - run: npm ci --prefer-offline
+      - run: npm run build -w web
+      - run: cargo build -p zitadel
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_prefix }}-zitadel-binary
+          name: zitadel-binary
           path: target/debug/zitadel
           retention-days: 1
 
-  # ── E2E journeys (matrix, parallel legs) ────────────────
+  # ── E2E browser journeys (parallel matrix) ──────────────
 
-  journeys:
-    name: Journeys / ${{ matrix.name }}
+  e2e:
+    name: E2E / ${{ matrix.name }}
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -195,65 +101,45 @@ jobs:
         include:
           - name: Admin
             project: journeys-admin
-            enabled: ${{ inputs.run_journeys_admin }}
           - name: Login
             project: journeys-login
-            enabled: ${{ inputs.run_journeys_login }}
           - name: OIDC
             project: journeys-login-oidc
-            enabled: ${{ inputs.run_journeys_oidc }}
-          - name: Quarantine
-            project: journeys-login-oidc
-            enabled: ${{ inputs.run_journeys_quarantine }}
-        exclude:
-          - enabled: false
     env:
       ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/zitadel
     steps:
-      - uses: actions/checkout@v6.0.2
-
-      - uses: actions/download-artifact@v4.3.0
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.artifact_prefix }}-zitadel-binary
-
+          name: zitadel-binary
       - run: chmod +x zitadel
-
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4.2.4
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
+          restore-keys: playwright-${{ runner.os }}-
       - run: npm ci --prefer-offline
       - run: npx playwright install --with-deps chromium
-
-      - name: Run ${{ matrix.name }} journeys
-        run: npm test -w browser-tests -- --project=${{ matrix.project }} --reporter=github,line,html
-
-      - name: Upload Playwright report
+      - run: npm test -w browser-tests -- --project=${{ matrix.project }} --reporter=github,line,html
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4.6.2
         with:
-          name: ${{ inputs.artifact_prefix }}-journeys-${{ matrix.project }}-report
+          name: e2e-${{ matrix.project }}-report
           path: |
             browser-tests/playwright-report
             browser-tests/test-results
           if-no-files-found: warn
           retention-days: 7
 
-  # ── Database and integration lanes ──────────────────────
+  # ── Database integration ────────────────────────────────
 
   db:
     name: DB
-    if: inputs.run_db
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -262,18 +148,11 @@ jobs:
           POSTGRES_DB: postgres
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d postgres" --health-interval 10s --health-timeout 5s --health-retries 5
       spanner:
         image: gcr.io/cloud-spanner-emulator/emulator
-        ports:
-          - 9010:9010
-          - 9020:9020
+        ports: ['9010:9010', '9020:9020']
     env:
       ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
@@ -281,7 +160,7 @@ jobs:
       ZITADEL_TEST_SPANNER_INSTANCE: test-instance
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadeldb
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Create web/dist placeholder
@@ -300,9 +179,10 @@ jobs:
           diff -u crates/zitadel-db/src/schema_manifest.json /tmp/schema_manifest.json
       - run: cargo test -p zitadel-db
 
+  # ── Contracts ───────────────────────────────────────────
+
   contracts:
     name: Contracts
-    if: inputs.run_contracts
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -311,18 +191,11 @@ jobs:
           POSTGRES_DB: postgres
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d postgres" --health-interval 10s --health-timeout 5s --health-retries 5
       spanner:
         image: gcr.io/cloud-spanner-emulator/emulator
-        ports:
-          - 9010:9010
-          - 9020:9020
+        ports: ['9010:9010', '9020:9020']
     env:
       ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
@@ -330,7 +203,7 @@ jobs:
       ZITADEL_TEST_SPANNER_INSTANCE: test-instance
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelct
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Create web/dist placeholder
@@ -341,23 +214,22 @@ jobs:
         run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
       - run: cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance --test contracts_spanner_http_router
 
+  # ── Invariants ──────────────────────────────────────────
+
   invariants:
     name: Invariants
-    if: inputs.run_invariants
     runs-on: ubuntu-latest
     services:
       spanner:
         image: gcr.io/cloud-spanner-emulator/emulator
-        ports:
-          - 9010:9010
-          - 9020:9020
+        ports: ['9010:9010', '9020:9020']
     env:
       ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
       ZITADEL_TEST_SPANNER_PROJECT: local-project
       ZITADEL_TEST_SPANNER_INSTANCE: test-instance
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadeliv
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Create web/dist placeholder
@@ -369,9 +241,10 @@ jobs:
       - run: cargo test -p zitadel-server --test invariants_tenant_instance_isolation
       - run: cargo test -p zitadel-fga --test invariants_authorization_hierarchy
 
+  # ── Subsystems ──────────────────────────────────────────
+
   subsystems:
     name: Subsystems
-    if: inputs.run_subsystems
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -380,18 +253,11 @@ jobs:
           POSTGRES_DB: postgres
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d postgres" --health-interval 10s --health-timeout 5s --health-retries 5
       spanner:
         image: gcr.io/cloud-spanner-emulator/emulator
-        ports:
-          - 9010:9010
-          - 9020:9020
+        ports: ['9010:9010', '9020:9020']
     env:
       ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
@@ -399,7 +265,7 @@ jobs:
       ZITADEL_TEST_SPANNER_INSTANCE: test-instance
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelss
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Create web/dist placeholder
@@ -416,23 +282,22 @@ jobs:
           cargo test -p zitadel-storage --test subsystems_storage_postgres_roles
           cargo test -p zitadel-storage --test subsystems_storage_spanner_emulator
 
+  # ── Resilience ──────────────────────────────────────────
+
   resilience:
     name: Resilience
-    if: inputs.run_resilience
     runs-on: ubuntu-latest
     services:
       spanner:
         image: gcr.io/cloud-spanner-emulator/emulator
-        ports:
-          - 9010:9010
-          - 9020:9020
+        ports: ['9010:9010', '9020:9020']
     env:
       ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
       ZITADEL_TEST_SPANNER_PROJECT: local-project
       ZITADEL_TEST_SPANNER_INSTANCE: test-instance
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelrs
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Create web/dist placeholder

@@ -125,25 +125,38 @@ Current home:
 ## Command Map
 
 ```bash
-just test
-just test-fast
-just rust-static
-just web-static
-just test-web
-just journeys
-just journeys-admin
-just journeys-login
-just journeys-oidc
-just journeys-quarantine
-just contracts
-just invariants
-just subsystems
-just resilience
-just spanner-cert
-just conformance-oidc
-just test-pr
-just test-release
-just test-nightly
+# Fast local feedback
+cargo test --workspace                                          # unit + integration tests
+cargo fmt --check && cargo clippy --workspace -- -D warnings    # Rust static checks
+npm run lint -w web && npm run typecheck -w web                 # web static checks
+npm test -w web                                                 # web unit tests
+
+# Journey (browser) tests
+npm test -w browser-tests                                       # all journeys
+npm test -w browser-tests -- --project=journeys-admin           # admin journeys
+npm test -w browser-tests -- --project=journeys-login           # login journeys
+npm test -w browser-tests -- --project=journeys-login-oidc      # OIDC journeys
+npm test -w browser-tests -- --grep @quarantine                 # quarantined journeys
+
+# Family suites
+cargo test -p zitadel-server --test contracts_http_router \
+  --test contracts_management_root_instance \
+  --test contracts_spanner_http_router                          # contracts
+cargo test -p zitadel-server --test invariants_tenant_instance_isolation \
+  && cargo test -p zitadel-fga --test invariants_authorization_hierarchy  # invariants
+# subsystems: multiple cargo test -p ... commands per crate
+cargo test -p zitadel-storage \
+  --test resilience_storage_spanner_transient                   # resilience
+
+# Spanner emulator certification
+# Run contracts + invariants + subsystems + resilience in sequence
+
+# OIDC conformance
+./conformance/oidc/scripts/run-op.sh
+
+# CI tier reproduction (run all CI jobs locally — no single command)
+# test-pr / test-release: run fast + contracts + invariants + subsystems + resilience + journeys + spanner-cert
+# test-nightly: test-pr + quarantine journeys + conformance
 ```
 
 ## CI Shape

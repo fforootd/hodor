@@ -1,5 +1,5 @@
 # Frontend local seed pack.
-# Default for `just dev` so console and login flows have deterministic data.
+# Default dev seed — provides deterministic credentials (admin/admin123).
 
 users:
   - identifier: admin

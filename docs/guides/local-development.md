@@ -1,9 +1,13 @@
 # Local Development
 
-Zitadel now has one default local workflow:
+Zitadel's default local workflow runs the backend and frontend in parallel:
 
 ```bash
-just dev
+# Terminal 1 — Rust API:
+cargo run -p zitadel -- start --seed fixtures/seeds/frontend.yaml
+
+# Terminal 2 — Vite dev server:
+npm run dev -w web
 ```
 
 That starts:
@@ -18,13 +22,10 @@ That starts:
 
 | Command | Use it for |
 |---|---|
-| `just dev` | The default flow: Rust API + Vite HMR + frontend seed data |
-| `just dev-embed` | Backend work when you do not need Vite |
-| `just dev-web` | Frontend-only work against an already running API |
-| `just dev-embed` | Parity mode with embedded web assets instead of Vite |
-| `just dev-reset` | Wipe `./data` SQLite files and restart local dev |
-| `just dev-seed <name>` | Reapply a named seed pack without wiping the DB |
-| `just dev-status` | Print the current local dev paths, credentials, and seed pack |
+| `cargo run -p zitadel -- start --seed fixtures/seeds/frontend.yaml` + `npm run dev -w web` | The default flow: Rust API + Vite HMR + frontend seed data |
+| `npm run build -w web && cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml` | Parity mode with embedded web assets instead of Vite |
+| `npm run dev -w web` | Frontend-only work against an already running API |
+| Delete `data/zitadel.db*` files, then restart | Wipe `./data` SQLite files and restart local dev |
 
 ## Seed Packs
 
@@ -39,16 +40,15 @@ Seed packs live in [fixtures/seeds](../../fixtures/seeds):
 Examples:
 
 ```bash
-just dev-seed
-just dev-seed minimal
-just dev-seed e2e
+cargo run -p zitadel -- seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/frontend.yaml
+cargo run -p zitadel -- seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/minimal.yaml
+cargo run -p zitadel -- seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/e2e.yaml
 ```
 
-The CLI entrypoint is also available directly:
+Validation:
 
 ```bash
 cargo run -p zitadel -- seed validate --file fixtures/seeds/frontend.yaml
-cargo run -p zitadel -- seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/frontend.yaml
 ```
 
 `seed apply` is safe to use on a fresh local SQLite database because it runs migrations first, ensures built-in schemas exist, and then applies the seed file.
@@ -60,7 +60,7 @@ Local development is standardized around repo-root `./data`:
 - database: `data/zitadel.db`
 - analytics cache: `data/zitadel-cache.db`
 
-`just dev-reset` removes those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and refuses to run when `ZITADEL_STORAGE_STATEFUL_URL` is not SQLite.
+To reset, delete those files plus their SQLite sidecars (`-wal`, `-shm`, `-journal`) and restart. Only do this when `ZITADEL_STORAGE_STATEFUL_URL` is SQLite (the default).
 
 ## Credentials And Mock OIDC
 
@@ -92,11 +92,7 @@ The current bootstrap/recovery status is documented in [Bootstrap and Recovery](
 
 ## Spanner Emulator Certification
 
-The native Spanner PR-wall lane is reproducible locally through:
-
-```bash
-just spanner-cert
-```
+The native Spanner PR-wall lane is reproducible locally by running the contracts, invariants, subsystems, and resilience family suites in sequence.
 
 If you want the emulator-backed suites to run instead of skipping, start the Cloud Spanner emulator and export the stable test env contract:
 
@@ -108,10 +104,17 @@ export ZITADEL_TEST_SPANNER_PROJECT=local-project
 export ZITADEL_TEST_SPANNER_INSTANCE=test-instance
 export ZITADEL_TEST_SPANNER_DATABASE_PREFIX=zitadel
 
-just spanner-cert
+# Then run the family suites (contracts, invariants, subsystems, resilience)
+cargo test -p zitadel-server --test contracts_http_router \
+  --test contracts_management_root_instance \
+  --test contracts_spanner_http_router
+cargo test -p zitadel-server --test invariants_tenant_instance_isolation \
+  && cargo test -p zitadel-fga --test invariants_authorization_hierarchy
+# ... plus subsystems and resilience suites
+cargo test -p zitadel-storage --test resilience_storage_spanner_transient
 ```
 
-`just test-pr` now includes the same emulator-backed certification lane. If those env vars are absent locally, the Spanner suites skip cleanly instead of blocking the zero-config SQLite workflow.
+The PR CI wall includes the same emulator-backed certification lane. If those env vars are absent locally, the Spanner suites skip cleanly instead of blocking the zero-config SQLite workflow.
 
 ## Notifications In Local Dev
 

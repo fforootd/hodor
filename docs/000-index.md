@@ -103,7 +103,7 @@ ADRs are grouped by theme. For the full chronological list, see the [collapsed t
 
 | Document | Summary |
 |---|---|
-| [Local Development](guides/local-development.md) | Canonical `just dev` flow, role-specific commands, seed packs, local SQLite lifecycle |
+| [Local Development](guides/local-development.md) | Canonical local dev flow, role-specific commands, seed packs, local SQLite lifecycle |
 | [Testing Strategy](guides/testing-strategy.md) | Question-oriented test families, execution tiers, and the command surface that selects them |
 | [Testing Matrix](guides/testing-matrix.md) | Current suite inventory mapped to families, owner areas, and execution tiers |
 | [Bootstrap and Recovery](guides/bootstrap-recovery.md) | Current Rust bootstrap flow and recovery limitations |

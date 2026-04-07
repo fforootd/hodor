@@ -57,10 +57,14 @@ What it does **not** do today:
 For local development, the supported path to a known working admin is a seed pack:
 
 ```bash
-just dev
-# or
-just dev-embed
-# or
+# Full-stack with hot reload (backend + frontend):
+cargo run -p zitadel -- start --seed fixtures/seeds/frontend.yaml  # in one terminal
+npm run dev -w web                                                  # in another terminal
+
+# Or embedded assets (production-like, no Vite):
+npm run build -w web && cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml
+
+# Or backend only:
 cargo run -p zitadel -- server start -c fixtures/zitadel.dev.toml
 ```
 

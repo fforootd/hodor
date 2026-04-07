@@ -3,18 +3,15 @@
 The repository uses a dedicated `OIDC Protocol Compliance` lane for official protocol validation. In the current repo, that means the OpenID Provider conformance lane only.
 
 ```bash
-just conformance-oidc
-just oidc-conformance-op
-just conformance-oidc-clean
+./conformance/oidc/scripts/run-op.sh      # run OP conformance
+./conformance/oidc/scripts/clean.sh        # stop and remove the conformance stack
 ```
 
 ## What Each Target Does
 
-- `just conformance-oidc`
-  Runs the canonical OIDC protocol compliance lane. Today this resolves to the OP conformance target.
-- `just oidc-conformance-op`
-  Runs the official OpenID Foundation conformance suite against Zitadel as an OpenID Provider. The current repo target is the Core Basic static-client profile.
-- `just conformance-oidc-clean`
+- `./conformance/oidc/scripts/run-op.sh`
+  Runs the official OpenID Foundation conformance suite against Zitadel as an OpenID Provider. The current repo target is the Core Basic static-client profile. This is also the canonical OIDC protocol compliance lane.
+- `./conformance/oidc/scripts/clean.sh`
   Stops and removes the local Dockerized conformance stack.
 
 Protocol conformance is intentionally outside the required PR and release walls. CI runs it in `oidc-conformance-daily.yml` on a nightly schedule and exposes the same workflow through `workflow_dispatch` for manual reruns or certification-style checks.
@@ -22,9 +19,9 @@ Protocol conformance is intentionally outside the required PR and release walls.
 OIDC browser regression coverage now lives in the Journeys family instead of Conformance:
 
 ```bash
-just journeys-oidc
-just journeys-oidc-op
-just journeys-oidc-rp
+npm test -w browser-tests -- --project=journeys-login-oidc                                          # all OIDC journeys
+npm test -w browser-tests -- --project=journeys-login-oidc journeys/login/oidc-code-pkce.spec.ts    # OP journeys
+npm test -w browser-tests -- --project=journeys-login-oidc journeys/login/oidc-rp.spec.ts           # RP journeys
 ```
 
 In CI, protocol compliance is wired as:
@@ -43,16 +40,10 @@ The OP lane clones the pinned OIDF suite release into `${XDG_CACHE_HOME:-$HOME/.
 
 ## Local Usage
 
-Run only the OP conformance lane:
+Run the OP conformance lane:
 
 ```bash
-just oidc-conformance-op
-```
-
-Run the canonical protocol lane:
-
-```bash
-just conformance-oidc
+./conformance/oidc/scripts/run-op.sh
 ```
 
 ## Artifacts And Debugging

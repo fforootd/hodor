@@ -25,7 +25,7 @@ No YAML files. No Docker Compose. No database setup. One command, working in 60 
 - Bootstrap creates the default org and admin user record
 - Development TLS auto-provisions if needed
 
-For deterministic local credentials such as `admin / admin123`, use a seed file like `fixtures/zitadel.dev.toml` or the `just dev` workflow.
+For deterministic local credentials such as `admin / admin123`, use a seed file like `fixtures/zitadel.dev.toml` or pass `--seed fixtures/seeds/frontend.yaml` when starting the server.
 
 **Root instance uses explicit platform authz:**
 The root instance (`inst_root`) is the operator's own instance, but it is still authorized through the internal platform authorization model. Root staff get explicit platform roles and hierarchy tuples in the deployment-scoped `platform` store, and `operator_admin` remains the only break-glass bypass. This means:
@@ -143,7 +143,7 @@ SQLite is the default test database — no Docker, no setup:
 let db = zitadel_db::Db::open("").await?;
 ```
 
-The default fast path is `just test` or `just test-fast`. That lane runs the workspace `lib` and `bin` suites plus `crates/zitadel-app/tests/use_case_tests.rs`, using `cargo-nextest` when it is installed and falling back to `cargo test` otherwise. Use `just spanner-cert` for the emulator-backed native Spanner lane, and `just test-pr`, `just test-release`, and `just test-nightly` to reproduce the larger CI tiers locally.
+The default fast path is `cargo test --workspace`. That lane runs the workspace `lib` and `bin` suites plus `crates/zitadel-app/tests/use_case_tests.rs`. For the emulator-backed native Spanner lane, run the contracts, invariants, subsystems, and resilience family suites in sequence. To reproduce the larger CI tiers locally, run the individual family suite commands (see [Testing Matrix](../guides/testing-matrix.md)).
 
 For full-router integration coverage, prefer the shared `crates/zitadel-testkit` helpers over ad hoc per-crate harnesses.
 
