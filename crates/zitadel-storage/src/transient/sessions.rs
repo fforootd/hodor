@@ -254,17 +254,15 @@ async fn user_is_active(
     scoped: &zitadel_db::scoped::ScopedDb,
     user_id: &str,
 ) -> anyhow::Result<bool> {
-    let active = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (
-            SELECT 1 FROM users WHERE instance_id = $1 AND id = $2 AND state = 'active'
-        )",
+    let active = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM users WHERE instance_id = $1 AND id = $2 AND state = 'active'",
     )
     .bind(scoped.instance_id())
     .bind(user_id)
     .fetch_one(scoped.pool())
     .await?;
 
-    Ok(active)
+    Ok(active > 0)
 }
 
 async fn fetch_session_by_id(

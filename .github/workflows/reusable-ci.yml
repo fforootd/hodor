@@ -224,6 +224,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-with-webdist
 
       - name: Build zitadel binary
         run: cargo build -p zitadel
