@@ -14,10 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  # ── Rust ────────────────────────────────────────────────
-
-  rust:
-    name: Rust
+  rust-lint-and-test:
+    name: Rust / lint + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,21 +24,21 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - name: Create web/dist placeholder
+      - name: Placeholder web/dist for rust-embed
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
-      - run: cargo fmt --check
-      - run: cargo clippy --workspace -- -D warnings
-      - name: Test
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
+      - name: Unit + integration tests
         run: |
           cargo nextest run --workspace --lib --bins
           cargo nextest run -p zitadel-app --test use_case_tests
 
-  # ── Web ─────────────────────────────────────────────────
-
-  web:
-    name: Web
+  web-lint-and-test:
+    name: Web / lint + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,15 +47,17 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci --prefer-offline
-      - run: npm run lint -w web
-      - run: npm run typecheck -w web
-      - run: npm test -w web
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+      - name: ESLint
+        run: npm run lint -w web
+      - name: Typecheck
+        run: npm run typecheck -w web
+      - name: Vitest
+        run: npm test -w web
 
-  # ── Docs ────────────────────────────────────────────────
-
-  docs:
-    name: Docs
+  docs-links:
+    name: Docs / link check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,10 +66,8 @@ jobs:
         with:
           args: --offline --no-progress README.md docs/**/*.md
 
-  # ── Build (web assets + binary) ─────────────────────────
-
-  build:
-    name: Build
+  build-binary:
+    name: Build / zitadel binary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,20 +78,20 @@ jobs:
           cache-dependency-path: package-lock.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: npm ci --prefer-offline
-      - run: npm run build -w web
-      - run: cargo build -p zitadel
-      - uses: actions/upload-artifact@v4
+      - name: Build web assets
+        run: npm ci --prefer-offline && npm run build -w web
+      - name: Build zitadel binary
+        run: cargo build -p zitadel
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
         with:
           name: zitadel-binary
           path: target/debug/zitadel
           retention-days: 1
 
-  # ── E2E browser journeys (parallel matrix) ──────────────
-
   e2e:
     name: E2E / ${{ matrix.name }}
-    needs: build
+    needs: build-binary
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -109,7 +107,8 @@ jobs:
       ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/zitadel
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - name: Download zitadel binary
+        uses: actions/download-artifact@v4
         with:
           name: zitadel-binary
       - run: chmod +x zitadel
@@ -123,10 +122,14 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: playwright-${{ runner.os }}-
-      - run: npm ci --prefer-offline
-      - run: npx playwright install --with-deps chromium
-      - run: npm test -w browser-tests -- --project=${{ matrix.project }} --reporter=github,line,html
-      - uses: actions/upload-artifact@v4
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run ${{ matrix.name }} journeys
+        run: npm test -w browser-tests -- --project=${{ matrix.project }} --reporter=github,line,html
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: e2e-${{ matrix.project }}-report
@@ -136,10 +139,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # ── Database integration ────────────────────────────────
-
-  db:
-    name: DB
+  db-integration:
+    name: DB / schema + tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -163,26 +164,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Create web/dist placeholder
+      - name: Placeholder web/dist for rust-embed
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
       - name: Wait for Spanner emulator
         run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
-      - name: Verify generated schema artifacts
+      - name: Verify generated schema baselines
         run: |
           for backend in sqlite postgres spanner; do
             cargo run -p zitadel-db --example dump_generated_baseline -- "$backend" > "/tmp/baseline_$backend.sql"
             diff -u "migrations/$backend/00001_baseline.sql" "/tmp/baseline_$backend.sql"
           done
+      - name: Verify schema manifest
+        run: |
           cargo run -p zitadel-db --example dump_schema_manifest > /tmp/schema_manifest.json
           diff -u crates/zitadel-db/src/schema_manifest.json /tmp/schema_manifest.json
-      - run: cargo test -p zitadel-db
-
-  # ── Contracts ───────────────────────────────────────────
+      - name: Run DB tests
+        run: cargo test -p zitadel-db
 
   contracts:
-    name: Contracts
+    name: Contracts / HTTP + management
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -206,18 +208,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Create web/dist placeholder
+      - name: Placeholder web/dist for rust-embed
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
       - name: Wait for Spanner emulator
         run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
-      - run: cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance --test contracts_spanner_http_router
-
-  # ── Invariants ──────────────────────────────────────────
+      - name: Run contract tests
+        run: cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance --test contracts_spanner_http_router
 
   invariants:
-    name: Invariants
+    name: Invariants / tenant isolation + authz hierarchy
     runs-on: ubuntu-latest
     services:
       spanner:
@@ -232,19 +233,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Create web/dist placeholder
+      - name: Placeholder web/dist for rust-embed
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
       - name: Wait for Spanner emulator
         run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
-      - run: cargo test -p zitadel-server --test invariants_tenant_instance_isolation
-      - run: cargo test -p zitadel-fga --test invariants_authorization_hierarchy
-
-  # ── Subsystems ──────────────────────────────────────────
+      - name: Tenant instance isolation
+        run: cargo test -p zitadel-server --test invariants_tenant_instance_isolation
+      - name: Authorization hierarchy
+        run: cargo test -p zitadel-fga --test invariants_authorization_hierarchy
 
   subsystems:
-    name: Subsystems
+    name: Subsystems / backend boundaries + storage
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -268,24 +269,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Create web/dist placeholder
+      - name: Placeholder web/dist for rust-embed
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
       - name: Wait for Spanner emulator
         run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
-      - run: |
+      - name: Backend boundary tests
+        run: |
           cargo test -p zitadel-api --test subsystems_backend_boundary
           cargo test -p zitadel-login --test subsystems_backend_boundary
           cargo test -p zitadel-oidc --test subsystems_backend_boundary
           cargo test -p zitadel-server --test subsystems_backend_boundary
+      - name: Storage tests
+        run: |
           cargo test -p zitadel-storage --test subsystems_storage_postgres_roles
           cargo test -p zitadel-storage --test subsystems_storage_spanner_emulator
 
-  # ── Resilience ──────────────────────────────────────────
-
   resilience:
-    name: Resilience
+    name: Resilience / Spanner transient faults
     runs-on: ubuntu-latest
     services:
       spanner:
@@ -300,10 +302,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Create web/dist placeholder
+      - name: Placeholder web/dist for rust-embed
         run: |
           mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
           for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
       - name: Wait for Spanner emulator
         run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
-      - run: cargo test -p zitadel-storage --test resilience_storage_spanner_transient
+      - name: Spanner transient fault tests
+        run: cargo test -p zitadel-storage --test resilience_storage_spanner_transient

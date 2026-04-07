@@ -941,8 +941,7 @@ async fn login_flows_respect_prompt_login_even_with_an_existing_session() -> any
 }
 
 #[tokio::test]
-async fn oidc_authorization_code_pkce_round_trip_survives_login_completion() -> anyhow::Result<()>
-{
+async fn oidc_authorization_code_pkce_round_trip_survives_login_completion() -> anyhow::Result<()> {
     let app = build_test_app().await?;
     let user = app
         .ctx
