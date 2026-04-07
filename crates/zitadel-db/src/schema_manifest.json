@@ -398,11 +398,11 @@
         },
         {
           "name": "done",
-          "family": "Integer",
+          "family": "Bool",
           "nullable": false,
           "default": {
-            "kind": "Integer",
-            "value": 0
+            "kind": "Bool",
+            "value": false
           }
         },
         {
@@ -849,7 +849,7 @@
         {
           "name": "domain",
           "family": "String",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -963,7 +963,7 @@
           "columns": [
             "instance_id"
           ],
-          "predicate": "org_id IS NULL AND is_primary = 1"
+          "predicate": "org_id IS NULL AND is_primary = TRUE"
         },
         {
           "name": "idx_domains_org_primary",
@@ -972,7 +972,7 @@
             "instance_id",
             "org_id"
           ],
-          "predicate": "org_id IS NOT NULL AND is_primary = 1"
+          "predicate": "org_id IS NOT NULL AND is_primary = TRUE"
         }
       ],
       "unique_keys": [
@@ -980,14 +980,14 @@
           "columns": [
             "instance_id"
           ],
-          "predicate": "org_id IS NULL AND is_primary = 1"
+          "predicate": "org_id IS NULL AND is_primary = TRUE"
         },
         {
           "columns": [
             "instance_id",
             "org_id"
           ],
-          "predicate": "org_id IS NOT NULL AND is_primary = 1"
+          "predicate": "org_id IS NOT NULL AND is_primary = TRUE"
         }
       ],
       "foreign_keys": [
@@ -1588,7 +1588,7 @@
         {
           "name": "scope_id",
           "family": "String",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -1678,7 +1678,7 @@
         {
           "name": "seq",
           "family": "Integer",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -2122,7 +2122,7 @@
         {
           "name": "instance_id",
           "family": "String",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -2814,7 +2814,7 @@
           "columns": [
             "instance_id"
           ],
-          "predicate": "is_default = 1"
+          "predicate": "is_default = TRUE"
         },
         {
           "name": "idx_login_flows_instance_org",
@@ -2841,7 +2841,7 @@
           "columns": [
             "instance_id"
           ],
-          "predicate": "is_default = 1"
+          "predicate": "is_default = TRUE"
         }
       ],
       "foreign_keys": [],
@@ -2989,11 +2989,11 @@
         },
         {
           "name": "done",
-          "family": "Integer",
+          "family": "Bool",
           "nullable": false,
           "default": {
-            "kind": "Integer",
-            "value": 0
+            "kind": "Bool",
+            "value": false
           }
         },
         {
@@ -3822,7 +3822,7 @@
         {
           "name": "assignment_id",
           "family": "String",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -4012,7 +4012,7 @@
         {
           "name": "role_key",
           "family": "String",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -4151,7 +4151,7 @@
         {
           "name": "id",
           "family": "String",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {

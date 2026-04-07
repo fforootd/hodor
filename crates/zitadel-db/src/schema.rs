@@ -1114,7 +1114,34 @@ fn parse_current_timestamp_offset_seconds(raw: &str) -> Option<i64> {
         return Some(seconds);
     }
 
+    if let Some(seconds) = compact
+        .strip_prefix("NOW()+'")
+        .and_then(|rest| rest.strip_suffix('\''))
+        .and_then(parse_hms_interval_seconds)
+    {
+        return Some(seconds);
+    }
+
+    if let Some(seconds) = compact
+        .strip_prefix("CURRENT_TIMESTAMP+'")
+        .and_then(|rest| rest.strip_suffix('\''))
+        .and_then(parse_hms_interval_seconds)
+    {
+        return Some(seconds);
+    }
+
     None
+}
+
+fn parse_hms_interval_seconds(raw: &str) -> Option<i64> {
+    let mut parts = raw.split(':');
+    let hours = parts.next()?.parse::<i64>().ok()?;
+    let minutes = parts.next()?.parse::<i64>().ok()?;
+    let seconds = parts.next()?.parse::<i64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(hours * 3600 + minutes * 60 + seconds)
 }
 
 fn parse_spanner_column_defaults(
@@ -1293,8 +1320,103 @@ fn normalize_predicate(raw: &str) -> String {
     let mut normalized = raw.trim().replace("::text", "");
     normalized = normalized.replace("::character varying", "");
     normalized = normalized.replace("<>", "!=");
+    normalized = normalized.replace(" = ANY (ARRAY[", " IN (");
+    normalized = normalized.replace("])", ")");
     normalized = strip_wrapping_parens(&normalized).trim().to_string();
-    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+    normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for column_name in ["is_primary", "is_default"] {
+        normalized = normalized.replace(
+            &format!("{column_name} = 1"),
+            &format!("{column_name} = TRUE"),
+        );
+        normalized = normalized.replace(
+            &format!("{column_name} = 0"),
+            &format!("{column_name} = FALSE"),
+        );
+        normalized = normalized.replace(
+            &format!("{column_name} = true"),
+            &format!("{column_name} = TRUE"),
+        );
+        normalized = normalized.replace(
+            &format!("{column_name} = false"),
+            &format!("{column_name} = FALSE"),
+        );
+    }
+
+    normalize_boolean_grouping(&normalized)
+}
+
+fn normalize_boolean_grouping(raw: &str) -> String {
+    let disjuncts = split_top_level(raw, " OR ");
+    if disjuncts.len() == 1 {
+        return normalize_boolean_clause(&disjuncts[0]);
+    }
+
+    disjuncts
+        .into_iter()
+        .map(|clause| {
+            let normalized_clause = normalize_boolean_clause(&clause);
+            if split_top_level(&normalized_clause, " AND ").len() > 1 {
+                format!("({normalized_clause})")
+            } else {
+                normalized_clause
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+fn normalize_boolean_clause(raw: &str) -> String {
+    split_top_level(strip_wrapping_parens(raw), " AND ")
+        .into_iter()
+        .map(|term| strip_wrapping_parens(&term).trim().to_string())
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn split_top_level(raw: &str, delimiter: &str) -> Vec<String> {
+    let bytes = raw.as_bytes();
+    let delimiter_bytes = delimiter.as_bytes();
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut idx = 0usize;
+    let mut depth = 0i64;
+    let mut in_string = false;
+
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'\'' => {
+                if in_string && bytes.get(idx + 1) == Some(&b'\'') {
+                    idx += 2;
+                    continue;
+                }
+                in_string = !in_string;
+                idx += 1;
+            }
+            b'(' if !in_string => {
+                depth += 1;
+                idx += 1;
+            }
+            b')' if !in_string => {
+                depth -= 1;
+                idx += 1;
+            }
+            _ if !in_string && depth == 0 && bytes[idx..].starts_with(delimiter_bytes) => {
+                parts.push(raw[start..idx].trim().to_string());
+                idx += delimiter_bytes.len();
+                start = idx;
+            }
+            _ => idx += 1,
+        }
+    }
+
+    if parts.is_empty() {
+        return vec![raw.trim().to_string()];
+    }
+
+    parts.push(raw[start..].trim().to_string());
+    parts
 }
 
 fn extract_check_expressions(sql: &str) -> Vec<String> {
@@ -1436,12 +1558,12 @@ async fn list_columns(
             let rows: Vec<(i64, String, String, i64, Option<String>, i64)> =
                 sqlx::query_as(&pragma_sql).fetch_all(db.pool()).await?;
             rows.into_iter()
-                .map(|(_, name, raw_type, notnull, default, _)| {
+                .map(|(_, name, raw_type, notnull, default, pk)| {
                     let family = logical_type_family(table_name, &name, &raw_type);
                     ColumnManifest {
                         default: normalize_default_value(family, default.as_deref()),
                         family,
-                        nullable: notnull == 0,
+                        nullable: notnull == 0 && pk == 0,
                         name,
                     }
                 })
@@ -2077,6 +2199,72 @@ mod tests {
     }
 
     #[test]
+    fn canonical_transient_done_flags_stay_boolean() {
+        for table_name in ["auth_states", "oidc_auth_requests"] {
+            let table = canonical_table_manifest(table_name).expect("transient table");
+            let done = table
+                .columns
+                .iter()
+                .find(|column| column.name == "done")
+                .expect("done column");
+
+            assert_eq!(done.family, ColumnTypeFamily::Bool, "{table_name}.done");
+            assert_eq!(
+                done.default,
+                Some(DefaultValueManifest::Bool(false)),
+                "{table_name}.done default"
+            );
+        }
+    }
+
+    #[test]
+    fn spanner_transient_done_flags_render_as_bool_columns() {
+        let baseline = render_baseline_migration(BackendKind::Spanner);
+
+        assert!(baseline.contains("CREATE TABLE IF NOT EXISTS auth_states ("));
+        assert!(baseline.contains("CREATE TABLE IF NOT EXISTS oidc_auth_requests ("));
+        assert!(baseline.contains("done BOOL NOT NULL DEFAULT (FALSE)"));
+        assert!(!baseline.contains("done INT64"));
+    }
+
+    #[test]
+    fn canonical_primary_keys_are_not_nullable() {
+        for table in &canonical_manifest().tables {
+            for pk in &table.primary_key {
+                let column = table
+                    .columns
+                    .iter()
+                    .find(|column| &column.name == pk)
+                    .expect("primary-key column must exist");
+                assert!(
+                    !column.nullable,
+                    "{}.{} should stay non-nullable because it participates in the primary key",
+                    table.name, column.name
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_primary_keys_are_reported_non_nullable() {
+        let db = crate::Db::open("").await.expect("sqlite db");
+        sqlx::query("CREATE TABLE sample_pk (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
+            .execute(db.pool())
+            .await
+            .expect("create table");
+
+        let columns = list_columns(&db, "sample_pk", None)
+            .await
+            .expect("inspect columns");
+        let id = columns
+            .iter()
+            .find(|column| column.name == "id")
+            .expect("id column");
+
+        assert!(!id.nullable);
+    }
+
+    #[test]
     fn normalize_default_value_collapses_timestamp_expressions_and_json_literals() {
         assert_eq!(
             normalize_default_value(ColumnTypeFamily::Timestamp, Some("(datetime('now'))")),
@@ -2094,6 +2282,10 @@ mod tests {
                 ColumnTypeFamily::Timestamp,
                 Some("(datetime('now', '+600 seconds'))")
             ),
+            Some(DefaultValueManifest::CurrentTimestampPlusSeconds(600))
+        );
+        assert_eq!(
+            normalize_default_value(ColumnTypeFamily::Timestamp, Some("(now() + '00:10:00')")),
             Some(DefaultValueManifest::CurrentTimestampPlusSeconds(600))
         );
         assert_eq!(
@@ -2135,6 +2327,24 @@ mod tests {
         assert_eq!(
             normalize_predicate("(expires_at IS NOT NULL)"),
             "expires_at IS NOT NULL"
+        );
+        assert_eq!(
+            normalize_predicate("((org_id IS NULL) AND (is_primary = true))"),
+            "org_id IS NULL AND is_primary = TRUE"
+        );
+        assert_eq!(normalize_predicate("(is_default = 1)"), "is_default = TRUE");
+        assert_eq!(
+            normalize_predicate("kind = ANY (ARRAY['root', 'managed', 'federated'])"),
+            "kind IN ('root', 'managed', 'federated')"
+        );
+        assert_eq!(
+            normalize_predicate(
+                "parent_instance_id IS NULL AND owner_org_id IS NULL AND kind = 'root' \
+                 OR parent_instance_id IS NOT NULL AND owner_org_id IS NOT NULL \
+                 AND (kind = ANY (ARRAY['managed', 'federated']))"
+            ),
+            "(parent_instance_id IS NULL AND owner_org_id IS NULL AND kind = 'root') \
+             OR (parent_instance_id IS NOT NULL AND owner_org_id IS NOT NULL AND kind IN ('managed', 'federated'))"
         );
     }
 

@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS auth_states (
     code_challenge_method TEXT DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     data JSONB DEFAULT '{}'::jsonb,
-    done INTEGER NOT NULL DEFAULT 0,
+    done BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '+10 minutes'),
     id TEXT NOT NULL,
     instance_id TEXT NOT NULL,
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS domains (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     dns_authorization_id TEXT NOT NULL DEFAULT '',
     dns_challenge_host TEXT NOT NULL DEFAULT '',
-    domain TEXT,
+    domain TEXT NOT NULL,
     instance_id TEXT NOT NULL,
     is_primary BOOLEAN NOT NULL DEFAULT FALSE,
     org_id TEXT,
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS fga_authorization_models (
 );
 
 CREATE TABLE IF NOT EXISTS fga_stores (
-    scope_id TEXT,
+    scope_id TEXT NOT NULL,
     store_id TEXT NOT NULL,
     PRIMARY KEY (scope_id)
 );
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS instance_trust_links (
 CREATE TABLE IF NOT EXISTS instances (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     feature_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
-    instance_id TEXT,
+    instance_id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'managed',
     last_heartbeat_at TIMESTAMPTZ,
     last_heartbeat_status TEXT NOT NULL DEFAULT '',
@@ -362,7 +362,7 @@ CREATE TABLE IF NOT EXISTS oidc_auth_requests (
     code_challenge TEXT NOT NULL DEFAULT '',
     code_challenge_method TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    done INTEGER NOT NULL DEFAULT 0,
+    done BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '+10 minutes'),
     id TEXT NOT NULL,
     instance_id TEXT NOT NULL,
@@ -455,7 +455,7 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 
 CREATE TABLE IF NOT EXISTS role_assignments (
     approved_by TEXT,
-    assignment_id TEXT,
+    assignment_id TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     enforcement_instance_id TEXT NOT NULL,
     expires_at TIMESTAMPTZ,
@@ -476,7 +476,7 @@ CREATE TABLE IF NOT EXISTS role_definitions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     permissions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     relation_name TEXT NOT NULL,
-    role_key TEXT,
+    role_key TEXT NOT NULL,
     scope_kind TEXT NOT NULL,
     source_version TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -498,7 +498,7 @@ CREATE TABLE IF NOT EXISTS saved_queries (
 CREATE TABLE IF NOT EXISTS schemas (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by TEXT DEFAULT '',
-    id TEXT,
+    id TEXT NOT NULL,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
     message TEXT DEFAULT '',
     schema JSONB NOT NULL,

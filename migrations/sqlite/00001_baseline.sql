@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS auth_states (
     code_challenge_method TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     data TEXT DEFAULT '{}',
-    done INTEGER NOT NULL DEFAULT 0,
+    done BOOLEAN NOT NULL DEFAULT 0,
     expires_at TEXT NOT NULL DEFAULT (datetime('now', '+10 minutes')),
     id TEXT NOT NULL,
     instance_id TEXT NOT NULL,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS domains (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     dns_authorization_id TEXT NOT NULL DEFAULT '',
     dns_challenge_host TEXT NOT NULL DEFAULT '',
-    domain TEXT,
+    domain TEXT NOT NULL,
     instance_id TEXT NOT NULL,
     is_primary BOOLEAN NOT NULL DEFAULT 0,
     org_id TEXT,
@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS fga_authorization_models (
 );
 
 CREATE TABLE IF NOT EXISTS fga_stores (
-    scope_id TEXT,
+    scope_id TEXT NOT NULL,
     store_id TEXT NOT NULL,
     PRIMARY KEY (scope_id)
 );
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS instance_trust_links (
 CREATE TABLE IF NOT EXISTS instances (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     feature_overrides TEXT NOT NULL DEFAULT '{}',
-    instance_id TEXT,
+    instance_id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'managed',
     last_heartbeat_at TEXT,
     last_heartbeat_status TEXT NOT NULL DEFAULT '',
@@ -371,7 +371,7 @@ CREATE TABLE IF NOT EXISTS oidc_auth_requests (
     code_challenge TEXT NOT NULL DEFAULT '',
     code_challenge_method TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    done INTEGER NOT NULL DEFAULT 0,
+    done BOOLEAN NOT NULL DEFAULT 0,
     expires_at TEXT NOT NULL DEFAULT (datetime('now', '+10 minutes')),
     id TEXT NOT NULL,
     instance_id TEXT NOT NULL,
@@ -465,7 +465,7 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 
 CREATE TABLE IF NOT EXISTS role_assignments (
     approved_by TEXT,
-    assignment_id TEXT,
+    assignment_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     enforcement_instance_id TEXT NOT NULL,
     expires_at TEXT,
@@ -489,7 +489,7 @@ CREATE TABLE IF NOT EXISTS role_definitions (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     permissions_json TEXT NOT NULL DEFAULT '[]',
     relation_name TEXT NOT NULL,
-    role_key TEXT,
+    role_key TEXT NOT NULL,
     scope_kind TEXT NOT NULL,
     source_version TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -511,7 +511,7 @@ CREATE TABLE IF NOT EXISTS saved_queries (
 CREATE TABLE IF NOT EXISTS schemas (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     created_by TEXT DEFAULT '',
-    id TEXT,
+    id TEXT NOT NULL,
     is_default BOOLEAN NOT NULL DEFAULT 0,
     message TEXT DEFAULT '',
     schema TEXT NOT NULL,
@@ -642,9 +642,9 @@ CREATE INDEX IF NOT EXISTS idx_domains_instance ON domains(instance_id);
 
 CREATE INDEX IF NOT EXISTS idx_domains_instance_org ON domains(instance_id, org_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_instance_primary ON domains(instance_id) WHERE org_id IS NULL AND is_primary = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_instance_primary ON domains(instance_id) WHERE org_id IS NULL AND is_primary = TRUE;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_org_primary ON domains(instance_id, org_id) WHERE org_id IS NOT NULL AND is_primary = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_org_primary ON domains(instance_id, org_id) WHERE org_id IS NOT NULL AND is_primary = TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_effects_cleanup ON effects(instance_id, status, completed_at);
 
@@ -704,7 +704,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_login_flow_assets_fe47ca5fd93c1632 ON login
 
 CREATE INDEX IF NOT EXISTS idx_login_flow_assets_instance_flow ON login_flow_assets(instance_id, login_flow_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_login_flows_instance_default ON login_flows(instance_id) WHERE is_default = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_login_flows_instance_default ON login_flows(instance_id) WHERE is_default = TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_login_flows_instance_org ON login_flows(instance_id, org_id);
 

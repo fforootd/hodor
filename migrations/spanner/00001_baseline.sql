@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS auth_states (
     code_challenge_method STRING(MAX) DEFAULT (''),
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     data STRING(MAX) DEFAULT ('{}'),
-    done INT64 NOT NULL DEFAULT (0),
+    done BOOL NOT NULL DEFAULT (FALSE),
     expires_at TIMESTAMP NOT NULL DEFAULT (TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 10 MINUTE)),
     id STRING(MAX) NOT NULL,
     instance_id STRING(MAX) NOT NULL,
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS domains (
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     dns_authorization_id STRING(MAX) NOT NULL DEFAULT (''),
     dns_challenge_host STRING(MAX) NOT NULL DEFAULT (''),
-    domain STRING(MAX),
+    domain STRING(MAX) NOT NULL,
     instance_id STRING(MAX) NOT NULL,
     is_primary BOOL NOT NULL DEFAULT (FALSE),
     org_id STRING(MAX),
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS fga_authorization_models (
 );
 
 CREATE TABLE IF NOT EXISTS fga_stores (
-    scope_id STRING(MAX),
+    scope_id STRING(MAX) NOT NULL,
     store_id STRING(MAX) NOT NULL,
     PRIMARY KEY (scope_id)
 );
@@ -267,7 +267,7 @@ CREATE TABLE IF NOT EXISTS instance_trust_links (
 CREATE TABLE IF NOT EXISTS instances (
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     feature_overrides STRING(MAX) NOT NULL DEFAULT ('{}'),
-    instance_id STRING(MAX),
+    instance_id STRING(MAX) NOT NULL,
     kind STRING(MAX) NOT NULL DEFAULT ('managed'),
     last_heartbeat_at TIMESTAMP,
     last_heartbeat_status STRING(MAX) NOT NULL DEFAULT (''),
@@ -375,7 +375,7 @@ CREATE TABLE IF NOT EXISTS oidc_auth_requests (
     code_challenge STRING(MAX) NOT NULL DEFAULT (''),
     code_challenge_method STRING(MAX) NOT NULL DEFAULT (''),
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
-    done INT64 NOT NULL DEFAULT (0),
+    done BOOL NOT NULL DEFAULT (FALSE),
     expires_at TIMESTAMP NOT NULL DEFAULT (TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 10 MINUTE)),
     id STRING(MAX) NOT NULL,
     instance_id STRING(MAX) NOT NULL,
@@ -471,7 +471,7 @@ CREATE TABLE IF NOT EXISTS retention_policies (
 
 CREATE TABLE IF NOT EXISTS role_assignments (
     approved_by STRING(MAX),
-    assignment_id STRING(MAX),
+    assignment_id STRING(MAX) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     enforcement_instance_id STRING(MAX) NOT NULL,
     expires_at TIMESTAMP,
@@ -492,7 +492,7 @@ CREATE TABLE IF NOT EXISTS role_definitions (
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     permissions_json STRING(MAX) NOT NULL DEFAULT ('[]'),
     relation_name STRING(MAX) NOT NULL,
-    role_key STRING(MAX),
+    role_key STRING(MAX) NOT NULL,
     scope_kind STRING(MAX) NOT NULL,
     source_version STRING(MAX) NOT NULL DEFAULT (''),
     updated_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
@@ -514,7 +514,7 @@ CREATE TABLE IF NOT EXISTS saved_queries (
 CREATE TABLE IF NOT EXISTS schemas (
     created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP()),
     created_by STRING(MAX) DEFAULT (''),
-    id STRING(MAX),
+    id STRING(MAX) NOT NULL,
     is_default BOOL NOT NULL DEFAULT (FALSE),
     message STRING(MAX) DEFAULT (''),
     schema STRING(MAX) NOT NULL,
