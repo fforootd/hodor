@@ -906,10 +906,30 @@ async fn apply_transient_records(db: &Db, records: &[TransientRecord]) -> anyhow
                 let sql = format!(
                     "INSERT INTO sessions (id, instance_id, user_id, org_id, token_hash, user_agent, ip_address, fingerprint, metadata, created_at, expires_at) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, {}, {created_at_bind}, {expires_at_bind}) \
-                     ON CONFLICT(instance_id, id) DO UPDATE SET user_id = EXCLUDED.user_id, org_id = EXCLUDED.org_id, token_hash = EXCLUDED.token_hash, user_agent = EXCLUDED.user_agent, ip_address = EXCLUDED.ip_address, fingerprint = EXCLUDED.fingerprint, metadata = EXCLUDED.metadata, expires_at = EXCLUDED.expires_at",
+                     ON CONFLICT DO NOTHING",
                     scoped.json_bind(9),
                 );
                 sqlx::query(&sql)
+                    .bind(&session.id)
+                    .bind(scoped.instance_id())
+                    .bind(&session.user_id)
+                    .bind(&session.org_id)
+                    .bind(&session.token_hash)
+                    .bind(&session.user_agent)
+                    .bind(&session.ip_address)
+                    .bind(&session.fingerprint)
+                    .bind(serde_json::to_string(&session.metadata).unwrap_or_else(|_| "{}".into()))
+                    .bind(&session.created_at)
+                    .bind(&session.expires_at)
+                    .execute(&mut *tx)
+                    .await?;
+
+                let update_sql = format!(
+                    "UPDATE sessions SET user_id = $3, org_id = $4, token_hash = $5, user_agent = $6, ip_address = $7, fingerprint = $8, metadata = {}, created_at = {created_at_bind}, expires_at = {expires_at_bind} \
+                     WHERE instance_id = $2 AND id = $1",
+                    scoped.json_bind(9),
+                );
+                sqlx::query(&update_sql)
                     .bind(&session.id)
                     .bind(scoped.instance_id())
                     .bind(&session.user_id)
@@ -1474,6 +1494,79 @@ mod tests {
             .unwrap()
             .expect("replayed session");
         assert_eq!(replayed.fingerprint, "fp-preserved");
+    }
+
+    #[tokio::test]
+    async fn replaying_same_session_is_idempotent_under_token_unique_constraint() {
+        let db = fresh_test_db().await;
+        let scoped = db.scoped_default();
+
+        sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
+            .bind("org-1")
+            .bind(scoped.instance_id())
+            .bind("Default")
+            .execute(scoped.pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, instance_id, org_id, identifier, user_type) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind("user-1")
+        .bind(scoped.instance_id())
+        .bind("org-1")
+        .bind("alice")
+        .bind("human")
+        .execute(scoped.pool())
+        .await
+        .unwrap();
+
+        let store = SqlKvStore::local_only(db.clone(), 86_400);
+        let created = store
+            .create_session(
+                zitadel_db::DEFAULT_INSTANCE_ID,
+                "user-1",
+                "org-1",
+                "ua",
+                "127.0.0.1",
+                "fp-idempotent",
+            )
+            .await
+            .unwrap();
+        let session = store
+            .get_session(zitadel_db::DEFAULT_INSTANCE_ID, &created.session_id)
+            .await
+            .unwrap()
+            .expect("session created");
+        let record = TransientRecord::SessionCreated {
+            instance_id: zitadel_db::DEFAULT_INSTANCE_ID.into(),
+            session: PersistedSessionRecord {
+                id: session.id.clone(),
+                user_id: session.user_id.clone(),
+                org_id: session.org_id.clone(),
+                token_hash: session.token_hash.clone(),
+                user_agent: session.user_agent.clone(),
+                ip_address: session.ip_address.clone(),
+                fingerprint: session.fingerprint.clone(),
+                metadata: session.metadata.clone(),
+                created_at: session.created_at.clone(),
+                expires_at: session.expires_at.clone(),
+            },
+        };
+
+        apply_transient_records(&db, std::slice::from_ref(&record))
+            .await
+            .unwrap();
+        apply_transient_records(&db, &[record]).await.unwrap();
+
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sessions WHERE instance_id = $1 AND id = $2",
+        )
+        .bind(scoped.instance_id())
+        .bind(&created.session_id)
+        .fetch_one(scoped.pool())
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
