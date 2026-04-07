@@ -2287,11 +2287,11 @@
         },
         {
           "name": "enabled",
-          "family": "Integer",
+          "family": "Bool",
           "nullable": false,
           "default": {
-            "kind": "Integer",
-            "value": 1
+            "kind": "Bool",
+            "value": true
           }
         },
         {

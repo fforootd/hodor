@@ -290,7 +290,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     cron STRING(MAX) NOT NULL,
     description STRING(MAX) DEFAULT (''),
     display_name STRING(MAX) NOT NULL,
-    enabled INT64 NOT NULL DEFAULT (1),
+    enabled BOOL NOT NULL DEFAULT (TRUE),
     instance_id STRING(MAX) NOT NULL,
     last_error STRING(MAX) NOT NULL DEFAULT (''),
     last_rows_removed INT64 NOT NULL DEFAULT (0),

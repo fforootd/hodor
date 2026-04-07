@@ -283,7 +283,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     cron TEXT NOT NULL,
     description TEXT DEFAULT '',
     display_name TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 1,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
     instance_id TEXT NOT NULL,
     last_error TEXT NOT NULL DEFAULT '',
     last_rows_removed INTEGER NOT NULL DEFAULT 0,

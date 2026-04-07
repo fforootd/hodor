@@ -1804,14 +1804,16 @@ mod tests {
         .await
         .unwrap();
 
-        let row: (String, i64) =
-            sqlx::query_as("SELECT step, done FROM auth_states WHERE instance_id = $1 AND id = $2")
-                .bind(scoped.instance_id())
-                .bind("flow-1")
-                .fetch_one(scoped.pool())
-                .await
-                .unwrap();
+        let row: (String, String) = sqlx::query_as(
+            "SELECT step, CASE WHEN done THEN '1' ELSE '0' END AS done FROM auth_states \
+                 WHERE instance_id = $1 AND id = $2",
+        )
+        .bind(scoped.instance_id())
+        .bind("flow-1")
+        .fetch_one(scoped.pool())
+        .await
+        .unwrap();
         assert_eq!(row.0, "complete");
-        assert_eq!(row.1, 1);
+        assert_eq!(row.1, "1");
     }
 }
