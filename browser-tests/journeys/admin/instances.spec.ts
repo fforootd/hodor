@@ -13,8 +13,8 @@ test.describe('Admin instances journey', () => {
     const domain = `${instanceId}.zitadel.cloud`
 
     await page.goto('/console/instances/new')
-    await page.getByLabel(/Instance ID/i).fill(instanceId)
-    await page.getByLabel(/^Domain$/i).fill(domain)
+    await page.getByLabel(/Instance Name/i).fill(instanceId)
+    await page.getByLabel(/Subdomain/i).fill(domain)
     await page.getByRole('button', { name: /Create Instance/i }).click()
 
     await expect(page).toHaveURL(/\/console\/instances\/?$/)
