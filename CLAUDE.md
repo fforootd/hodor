@@ -5,23 +5,20 @@
 The frontend (Vue/Vite) and backend (Rust) are independent and can run separately.
 
 ```bash
-# Full-stack with hot reload (recommended):
-just dev
-# → Rust API on http://localhost:8080
-# → Vite HMR on http://localhost:5173 (proxies API calls to :8080)
-
-# Backend only (Rust API, no frontend):
-cargo build -p zitadel && ./target/debug/zitadel start -c fixtures/zitadel.dev.toml
+# Backend (builds + starts with dev seed data):
+cargo run -p zitadel -- start --seed fixtures/seeds/frontend.yaml
 # → http://localhost:8080
 
-# Frontend only (requires backend already running at :8080):
-just dev-web
+# Frontend (separate terminal, Vite HMR proxies to :8080):
+npm run dev -w web
 # → http://localhost:5173
+
+# Zero-config start (generates random admin password, prints it):
+cargo run -p zitadel -- start
 ```
 
-**Dev credentials:** admin / admin123
+**Dev credentials (with frontend.yaml seed):** admin / admin123
 **Dev PAT:** `zitadel-dev-pat-do-not-use-in-production`
-(Defined in `fixtures/zitadel.dev.toml`)
 
 ## Project Structure
 
@@ -49,27 +46,13 @@ web/
   src/account/                    Vue SPA — account self-service
   vite.config.ts                  Vite config with backend proxy (:5173 → :8080)
 fixtures/
-  zitadel.dev.toml                Dev config (SQLite, mock OIDC, seed data)
+  zitadel.dev.toml                Dev config (SQLite, seed data)
   seeds/frontend.yaml             Default seed pack (admin + 3 test users)
+  seeds/e2e.yaml                  E2E test seed (mock OIDC providers)
 docs/
   000-index.md                    ADR index
   GLOSSARY.md                     Domain vocabulary
 ```
-
-## Key Recipes
-
-| Command | Purpose |
-|---------|---------|
-| `just dev` | Vite HMR + Rust server (recommended for development) |
-| `just dev-embed` | Embedded assets + Rust server (production-like) |
-| `just dev-web` | Frontend-only on :5173 (needs backend at :8080) |
-| `just dev-reset` | Wipe DB and restart fresh |
-| `just test` | Rust tests (`cargo test --workspace`) |
-| `just test-web` | Vitest unit tests |
-| `just test-e2e` | Playwright E2E tests |
-| `just quality` | Full CI gate (fmt, clippy, test, typecheck, vitest) |
-| `just build` | Release build (`cargo build --release`) |
-| `just ensure-webdist` | Create placeholder web/dist for compilation |
 
 ## Building & Testing
 
@@ -77,17 +60,23 @@ docs/
 # Rust tests:
 cargo test --workspace
 
-# Rust with clippy:
+# Rust lint:
+cargo fmt --check
 cargo clippy --workspace -- -D warnings
 
-# Web (Vitest):
+# Web component tests (Vitest):
 npm test -w web
 
-# TypeScript typecheck:
+# Web lint:
+npm run lint -w web
 npm run typecheck -w web
 
-# Full CI-equivalent gate:
-just quality
+# E2E browser journeys (Playwright manages the server lifecycle):
+npm test -w browser-tests                              # all suites
+npm test -w browser-tests -- --project=journeys-admin  # one suite
+
+# Release build:
+cargo build --release
 ```
 
 ## Conventions
@@ -100,6 +89,7 @@ just quality
 - **Config cascade:** CLI flags > env vars > TOML config > defaults. Every field is optional.
 - **Database:** SQLite default, Postgres supported. Migrations in both dialects.
 - **Authorization:** Embedded FGA for relationship evaluation plus a built-in role-permission catalog sourced from ZITADEL `InternalAuthZ`. Platform authz uses the internal `platform` store; `operator_admin` is the only break-glass bypass.
+- **Native tools only:** Use `cargo` for Rust, `npm` for frontend/tests. No task runner.
 
 ## Common Patterns
 

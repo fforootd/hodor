@@ -246,11 +246,6 @@ pub(crate) fn flat_env_overrides() -> Serialized<Value> {
     );
 
     // Dev
-    if let Ok(v) = env::var("ZITADEL_MOCK_OIDC")
-        && let Some(value) = parse_boolish(&v)
-    {
-        merge_path(&mut overrides, &["dev", "mock_oidc"], Value::Bool(value));
-    }
     if let Ok(v) = env::var("ZITADEL_SEED_FILE") {
         merge_path(&mut overrides, &["dev", "seed_file"], Value::String(v));
     }

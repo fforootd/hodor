@@ -406,6 +406,4 @@ max_age_secs = 86400    # 24h
 # DEV — Development and testing features (DO NOT USE IN PRODUCTION)
 # ═══════════════════════════════════════════════════════════════════════════════
 [dev]
-mock_oidc = false
-mock_oidc_port = 9998
 # seed_file    = "./seed.yaml"

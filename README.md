@@ -2,98 +2,84 @@
 
 [![Is It Alive?](https://isitalive.dev/api/badge/github/fforootd/hodor)](https://isitalive.dev/github/fforootd/hodor)
 
-> ⚠️ **Experimental** — This is a research/prototype project exploring a reimagined identity platform architecture. It is not production-ready and APIs may change without notice. See [Zitadel](https://github.com/zitadel/zitadel) for the production IAM system.
+> **Experimental** — This is a research/prototype project exploring a reimagined identity platform architecture. It is not production-ready and APIs may change without notice. See [Zitadel](https://github.com/zitadel/zitadel) for the production IAM system.
 
 **Identity infrastructure for humans and AI.** Open-source identity platform with unified auth, fine-grained authorization, and schema-driven user and application management — single binary by default, edge-ready at scale.
 
 ## Quick Start
 
 ```bash
-# Fresh clone: install web deps, build embedded assets, start Rust + Vite
-just dev
+# Zero-config — generates admin password, prints it
+cargo run -p zitadel -- start
+
+# With dev seed data (admin/admin123):
+cargo run -p zitadel -- start --seed fixtures/seeds/frontend.yaml
+
+# Frontend hot-reload (separate terminal, proxies API to :8080):
+npm run dev -w web
 ```
 
-Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` for the Rust API / OIDC endpoints.
+Open `http://localhost:5173` for the hot-reload UI and `http://localhost:8080` for the API / OIDC endpoints.
 
 ## Local Development
 
-### Fresh clone
+### Backend + Frontend
 
 ```bash
-just dev
+# Terminal 1: Rust API with dev seed
+cargo run -p zitadel -- start --seed fixtures/seeds/frontend.yaml
+
+# Terminal 2: Vite HMR (proxies to :8080)
+npm run dev -w web
 ```
 
-Default local credentials:
+Default dev credentials (from `fixtures/seeds/frontend.yaml`):
 
 - `admin / admin123`
 - PAT: `zitadel-dev-pat-do-not-use-in-production`
 
-### Backend-only dev
+### Backend only (embedded frontend)
 
 ```bash
-just dev-embed
+npm run build -w web
+cargo run -p zitadel -- start -c fixtures/zitadel.dev.toml
 ```
 
-This builds `web/dist` and serves the embedded frontend directly from the Rust binary on `http://localhost:8080`.
-
-### Frontend dev
+### Frontend only (against existing backend)
 
 ```bash
-# Start the backend in another terminal
-just dev-embed
-
-# Then run Vite HMR
-just dev-web
-```
-
-To point Vite at a different API:
-
-```bash
-ZITADEL_API_BASE=http://localhost:8081 just dev-web
+npm run dev -w web
+# Or point at a different API:
+ZITADEL_API_BASE=http://localhost:8081 npm run dev -w web
 ```
 
 ### Reset local DB
 
-```bash
-just dev-reset
-```
+Delete `data/zitadel.db*` files and restart.
 
-This deletes local SQLite files under `./data/`, refuses to run against non-SQLite `ZITADEL_STORAGE_STATEFUL_URL` values, and then boots the default frontend seed pack again.
-
-### Reseed data
+### Seed packs
 
 ```bash
-# Default pack used by just dev
-just dev-seed
+# Apply a named seed pack
+cargo run -p zitadel -- seed apply -c fixtures/zitadel.dev.toml --file fixtures/seeds/frontend.yaml
 
-# Alternate packs
-just dev-seed minimal
-just dev-seed e2e
-```
-
-Named seed packs live in [fixtures/seeds](fixtures/seeds). Validate one without touching the DB:
-
-```bash
+# Validate without touching the DB
 cargo run -p zitadel -- seed validate --file fixtures/seeds/frontend.yaml
 ```
 
+Named seed packs live in [fixtures/seeds](fixtures/seeds):
+- `frontend.yaml` — dev default (admin + test users + login flows)
+- `e2e.yaml` — browser tests (mock OIDC providers + deterministic users)
+- `minimal.yaml` — bare minimum
+- `oidc-conformance.yaml` — OIDC protocol compliance
+
 ### Standalone binary
 
-The zero-config path still works:
-
 ```bash
-cargo run -p zitadel -- server start
+cargo run -p zitadel -- start
 ```
 
-That uses SQLite at `./data/zitadel.db` with no required config file. For deterministic local credentials such as `admin / admin123`, prefer `just dev` or run with `fixtures/zitadel.dev.toml`, which applies the frontend seed pack on startup.
-
-For an explicit migration + bootstrap pass before serving, use:
-
-```bash
-cargo run -p zitadel -- migrate -c fixtures/zitadel.dev.toml --bootstrap
-```
-
-The current Rust CLI does not yet expose the old `bootstrap admin` or `recover admin` subcommands. The current operator flow and its limits are documented in [docs/guides/bootstrap-recovery.md](docs/guides/bootstrap-recovery.md).
+Uses SQLite at `./data/zitadel.db` with no config file. On first run, generates a random admin password and prints it. For deterministic credentials, use `--seed fixtures/seeds/frontend.yaml`.
 
 More contributor detail lives in [docs/guides/local-development.md](docs/guides/local-development.md).
 Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guides/bootstrap-recovery.md).
@@ -114,38 +100,24 @@ Operator-focused examples live in [docs/guides/bootstrap-recovery.md](docs/guide
 ## Testing
 
 ```bash
-# Fast local Rust lane
-just test
-just test-fast
+# Rust unit + integration tests
+cargo test --workspace
 
-# Fast web unit lane
-just test-web
+# Web component tests (Vitest)
+npm test -w web
 
-# Stable browser journeys
-just journeys
-just journeys-admin
-just journeys-login
-just journeys-oidc
-just journeys-quarantine
+# E2E browser journeys (Playwright manages server lifecycle)
+npm test -w browser-tests                              # all suites
+npm test -w browser-tests -- --project=journeys-admin  # admin only
+npm test -w browser-tests -- --project=journeys-login  # login only
+npm test -w browser-tests -- --project=journeys-login-oidc  # OIDC only
 
-# Run family-specific Rust suites
-just contracts
-just invariants
-just subsystems
-just resilience
-just spanner-cert
-
-# Emulate CI locally
-just test-pr
-just test-release
-just test-nightly
-
-# Run official OIDC protocol compliance
-just conformance-oidc
-just oidc-conformance-op
+# Lint
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
+npm run lint -w web
+npm run typecheck -w web
 ```
-
-`just test` is the zero-config local default. It runs the fast Rust lane, not the full PR wall. The stable PR wall is always-on in CI and can be reproduced locally with `just test-pr`. Quarantined browser coverage is intentionally split into `just journeys-quarantine` so known unstable cases do not dilute required PR signal.
 
 ## Configuration
 
@@ -155,11 +127,9 @@ Three-layer precedence: `CLI flags > env vars > TOML config > defaults`
 |---|---|---|---|
 | Stateful storage URL | `ZITADEL_STORAGE_STATEFUL_URL` | — | `sqlite://./data/zitadel.db` |
 | Server port | `ZITADEL_PORT` | — | `8080` |
-| Mock OIDC | `ZITADEL_MOCK_OIDC` | `--mock-oidc` | `false` |
 | Seed file | `ZITADEL_SEED_FILE` | `--seed` | — |
 | External domain | `ZITADEL_EXTERNAL_DOMAIN` | — | `localhost` |
 
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE)
-

@@ -43,7 +43,6 @@ conn_max_lifetime = "1h"
 cache_path = "../data/zitadel-spanner-cache.db"
 
 [dev]
-mock_oidc = true
 seed_file = "./seeds/frontend.yaml"
 
 # Optional: enable cloud-mode routing and GCP domain provisioning on top of Spanner.

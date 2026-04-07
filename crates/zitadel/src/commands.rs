@@ -6,9 +6,6 @@ pub(crate) fn run_start(args: StartArgs) -> anyhow::Result<()> {
     let mut cfg = load_config(args.config.as_deref())?;
     resolve_paths(&mut cfg, args.config.as_deref());
 
-    if args.mock_oidc {
-        cfg.dev.mock_oidc = true;
-    }
     if let Some(seed_path) = args.seed {
         cfg.dev.seed_file = seed_path.to_string_lossy().into_owned();
     }
@@ -58,9 +55,9 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
             if args.bootstrap {
                 let ext_domain =
                     Some(cfg.server.external_domain.as_str()).filter(|d| !d.is_empty());
-                let changed = zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
+                let result = zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
                 tracing::info!(
-                    bootstrapped = changed,
+                    bootstrapped = result.changed,
                     seeded_roles,
                     "migration command completed"
                 );

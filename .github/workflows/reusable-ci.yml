@@ -72,177 +72,184 @@ jobs:
       - name: No lanes selected
         run: echo "No reusable CI lanes selected."
 
-  fast-rust-static:
+  # ── Fast lanes (all parallel, no dependencies) ──────────
+
+  rust-static:
     name: Rust / Static
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
+      - name: Create web/dist placeholder
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace -- -D warnings
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Run fast Rust static lane
-        run: just rust-static
-
-  fast-rust-tests:
+  rust-tests:
     name: Rust / Tests
     if: inputs.run_fast_rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      - name: Create web/dist placeholder
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - name: Run Rust tests
+        run: |
+          cargo nextest run --workspace --lib --bins
+          cargo nextest run -p zitadel-app --test use_case_tests
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Run fast Rust lane
-        run: just test-fast
-
-  fast-docs-check:
+  docs-check:
     name: Docs / Check
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
+      - run: python3 tools/validate-testing-manifest.py
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Run docs checks
-        run: just docs-check
-
-  fast-docs-links:
+  docs-links:
     name: Docs / Links
     if: inputs.run_docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-
       - name: Validate local Markdown links
         uses: lycheeverse/lychee-action@v2
         with:
           args: --offline --no-progress README.md docs/**/*.md
 
-  fast-web-static:
+  web-static:
     name: Web / Static
     if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: actions/setup-node@v6.3.0
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
+      - run: npm ci --prefer-offline
+      - run: npm run lint -w web
+      - run: npm run typecheck -w web
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Run fast web static lane
-        run: just web-static
-
-  fast-web-unit:
+  web-unit:
     name: Web / Unit
     if: inputs.run_fast_web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: actions/setup-node@v6.3.0
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
+      - run: npm ci --prefer-offline
+      - run: npm test -w web
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
+  # ── Build (single job: web assets + binary) ─────────────
 
-      - name: Run fast web unit lane
-        run: just test-web
-
-  prepare-webdist:
-    name: Prepare / Web Assets
+  build:
+    name: Build / Zitadel Binary
     if: inputs.run_journeys_admin || inputs.run_journeys_login || inputs.run_journeys_oidc || inputs.run_journeys_quarantine
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: actions/setup-node@v6.3.0
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Build embedded web assets
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build web assets and binary
         run: |
           npm ci --prefer-offline
-          just web
-          tar -czf webdist.tgz web/dist
-
-      - name: Upload embedded web assets
-        uses: actions/upload-artifact@v4.6.2
+          npm run build -w web
+          cargo build -p zitadel
+      - uses: actions/upload-artifact@v4.6.2
         with:
-          name: ${{ inputs.artifact_prefix }}-webdist
-          path: webdist.tgz
+          name: ${{ inputs.artifact_prefix }}-zitadel-binary
+          path: target/debug/zitadel
           retention-days: 1
 
-  prepare-rust-binary:
-    name: Prepare / Zitadel Binary
-    if: inputs.run_journeys_admin || inputs.run_journeys_login || inputs.run_journeys_oidc || inputs.run_journeys_quarantine
-    needs: prepare-webdist
+  # ── E2E journeys (matrix, parallel legs) ────────────────
+
+  journeys:
+    name: Journeys / ${{ matrix.name }}
+    needs: build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Admin
+            project: journeys-admin
+            enabled: ${{ inputs.run_journeys_admin }}
+          - name: Login
+            project: journeys-login
+            enabled: ${{ inputs.run_journeys_login }}
+          - name: OIDC
+            project: journeys-login-oidc
+            enabled: ${{ inputs.run_journeys_oidc }}
+          - name: Quarantine
+            project: journeys-login-oidc
+            enabled: ${{ inputs.run_journeys_quarantine }}
+        exclude:
+          - enabled: false
+    env:
+      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/zitadel
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Restore embedded web assets
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: ${{ inputs.artifact_prefix }}-webdist
-          path: .
-
-      - name: Extract embedded web assets
-        run: tar -xzf webdist.tgz
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build zitadel binary
-        run: cargo build -p zitadel
-
-      - name: Package zitadel binary
-        run: |
-          mkdir -p artifacts/prepare-rust-binary
-          tar -czf artifacts/prepare-rust-binary/zitadel-debug.tgz -C target/debug zitadel
-
-      - name: Upload zitadel binary artifact
-        uses: actions/upload-artifact@v4.6.2
+      - uses: actions/download-artifact@v4.3.0
         with:
           name: ${{ inputs.artifact_prefix }}-zitadel-binary
-          path: artifacts/prepare-rust-binary/zitadel-debug.tgz
-          retention-days: 1
+
+      - run: chmod +x zitadel
+
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4.2.4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - run: npm ci --prefer-offline
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run ${{ matrix.name }} journeys
+        run: npm test -w browser-tests -- --project=${{ matrix.project }} --reporter=github,line,html
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ inputs.artifact_prefix }}-journeys-${{ matrix.project }}-report
+          path: |
+            browser-tests/playwright-report
+            browser-tests/test-results
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ── Database and integration lanes ──────────────────────
 
   db:
     name: DB
@@ -275,35 +282,23 @@ jobs:
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadeldb
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Wait for Spanner emulator
+      - name: Create web/dist placeholder
         run: |
-          for i in $(seq 1 30); do
-            if nc -z 127.0.0.1 9010; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
-          exit 1
-
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - name: Wait for Spanner emulator
+        run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
       - name: Verify generated schema artifacts
         run: |
-          just schema-baselines
-          git diff --exit-code -- migrations/sqlite/00001_baseline.sql migrations/postgres/00001_baseline.sql migrations/spanner/00001_baseline.sql
-          just schema-manifest
-          git diff --exit-code -- crates/zitadel-db/src/schema_manifest.json
-
-      - name: Run DB test suite
-        run: just db-tests
+          for backend in sqlite postgres spanner; do
+            cargo run -p zitadel-db --example dump_generated_baseline -- "$backend" > "/tmp/baseline_$backend.sql"
+            diff -u "migrations/$backend/00001_baseline.sql" "/tmp/baseline_$backend.sql"
+          done
+          cargo run -p zitadel-db --example dump_schema_manifest > /tmp/schema_manifest.json
+          diff -u crates/zitadel-db/src/schema_manifest.json /tmp/schema_manifest.json
+      - run: cargo test -p zitadel-db
 
   contracts:
     name: Contracts
@@ -336,28 +331,15 @@ jobs:
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelct
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Wait for Spanner emulator
+      - name: Create web/dist placeholder
         run: |
-          for i in $(seq 1 30); do
-            if nc -z 127.0.0.1 9010; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
-          exit 1
-
-      - name: Run contract suites
-        run: just contracts
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - name: Wait for Spanner emulator
+        run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
+      - run: cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance --test contracts_spanner_http_router
 
   invariants:
     name: Invariants
@@ -376,28 +358,16 @@ jobs:
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadeliv
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Wait for Spanner emulator
+      - name: Create web/dist placeholder
         run: |
-          for i in $(seq 1 30); do
-            if nc -z 127.0.0.1 9010; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
-          exit 1
-
-      - name: Run invariant suites
-        run: just invariants
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - name: Wait for Spanner emulator
+        run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
+      - run: cargo test -p zitadel-server --test invariants_tenant_instance_isolation
+      - run: cargo test -p zitadel-fga --test invariants_authorization_hierarchy
 
   subsystems:
     name: Subsystems
@@ -430,28 +400,21 @@ jobs:
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelss
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Wait for Spanner emulator
+      - name: Create web/dist placeholder
         run: |
-          for i in $(seq 1 30); do
-            if nc -z 127.0.0.1 9010; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
-          exit 1
-
-      - name: Run subsystem suites
-        run: just subsystems
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
+      - name: Wait for Spanner emulator
+        run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
+      - run: |
+          cargo test -p zitadel-api --test subsystems_backend_boundary
+          cargo test -p zitadel-login --test subsystems_backend_boundary
+          cargo test -p zitadel-oidc --test subsystems_backend_boundary
+          cargo test -p zitadel-server --test subsystems_backend_boundary
+          cargo test -p zitadel-storage --test subsystems_storage_postgres_roles
+          cargo test -p zitadel-storage --test subsystems_storage_spanner_emulator
 
   resilience:
     name: Resilience
@@ -470,249 +433,12 @@ jobs:
       ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadelrs
     steps:
       - uses: actions/checkout@v6.0.2
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
+      - name: Create web/dist placeholder
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
       - name: Wait for Spanner emulator
-        run: |
-          for i in $(seq 1 30); do
-            if nc -z 127.0.0.1 9010; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
-          exit 1
-
-      - name: Run resilience suites
-        run: just resilience
-
-  journeys-admin:
-    name: Journeys / Admin
-    if: inputs.run_journeys_admin
-    needs: prepare-rust-binary
-    runs-on: ubuntu-latest
-    env:
-      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Restore zitadel binary
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: ${{ inputs.artifact_prefix }}-zitadel-binary
-          path: .
-
-      - name: Extract zitadel binary
-        run: |
-          mkdir -p "$CI_TMP_DIR/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
-
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run admin journey suite
-        run: npm run test:journeys:admin -w browser-tests -- --reporter=github,line,html
-
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: ${{ inputs.artifact_prefix }}-journeys-admin-report
-          path: |
-            browser-tests/playwright-report
-            browser-tests/test-results
-          if-no-files-found: warn
-          retention-days: 7
-
-  journeys-login:
-    name: Journeys / Login
-    if: inputs.run_journeys_login
-    needs: prepare-rust-binary
-    runs-on: ubuntu-latest
-    env:
-      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Restore zitadel binary
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: ${{ inputs.artifact_prefix }}-zitadel-binary
-          path: .
-
-      - name: Extract zitadel binary
-        run: |
-          mkdir -p "$CI_TMP_DIR/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
-
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run login journey suite
-        run: npm run test:journeys:login -w browser-tests -- --reporter=github,line,html
-
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: ${{ inputs.artifact_prefix }}-journeys-login-report
-          path: |
-            browser-tests/playwright-report
-            browser-tests/test-results
-          if-no-files-found: warn
-          retention-days: 7
-
-  journeys-oidc:
-    name: Journeys / OIDC
-    if: inputs.run_journeys_oidc
-    needs: prepare-rust-binary
-    runs-on: ubuntu-latest
-    env:
-      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Restore zitadel binary
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: ${{ inputs.artifact_prefix }}-zitadel-binary
-          path: .
-
-      - name: Extract zitadel binary
-        run: |
-          mkdir -p "$CI_TMP_DIR/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
-
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run OIDC journey suite
-        run: npm run test:journeys:oidc -w browser-tests -- --reporter=github,line,html
-
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: ${{ inputs.artifact_prefix }}-journeys-oidc-report
-          path: |
-            browser-tests/playwright-report
-            browser-tests/test-results
-          if-no-files-found: warn
-          retention-days: 7
-
-  journeys-quarantine:
-    name: Journeys / Quarantine
-    if: inputs.run_journeys_quarantine
-    needs: prepare-rust-binary
-    runs-on: ubuntu-latest
-    env:
-      CI_TMP_DIR: ${{ github.workspace }}/.ci-tmp
-      ZITADEL_BROWSER_TESTS_BINARY: ${{ github.workspace }}/.ci-tmp/zitadel-bin/zitadel
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Restore zitadel binary
-        uses: actions/download-artifact@v4.3.0
-        with:
-          name: ${{ inputs.artifact_prefix }}-zitadel-binary
-          path: .
-
-      - name: Extract zitadel binary
-        run: |
-          mkdir -p "$CI_TMP_DIR/zitadel-bin"
-          tar -xzf zitadel-debug.tgz -C "$CI_TMP_DIR/zitadel-bin"
-
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Run quarantined browser journeys
-        run: npm run test:journeys:quarantine -w browser-tests -- --reporter=github,line,html
-
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: ${{ inputs.artifact_prefix }}-journeys-quarantine-report
-          path: |
-            browser-tests/playwright-report
-            browser-tests/test-results
-          if-no-files-found: warn
-          retention-days: 7
+        run: for i in $(seq 1 30); do nc -z 127.0.0.1 9010 && exit 0; sleep 1; done; echo "Spanner emulator did not start" >&2; exit 1
+      - run: cargo test -p zitadel-storage --test resilience_storage_spanner_transient

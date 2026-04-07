@@ -89,9 +89,7 @@ impl Config {
 
     /// Whether this looks like a dev environment.
     pub fn is_dev(&self) -> bool {
-        self.dev.mock_oidc
-            || !self.dev.seed_file.is_empty()
-            || self.server.external_domain == "localhost"
+        !self.dev.seed_file.is_empty() || self.server.external_domain == "localhost"
     }
 }
 
@@ -196,8 +194,6 @@ pub struct CatalogConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct DevConfig {
-    pub mock_oidc: bool,
-    pub mock_oidc_port: u16,
     pub seed_file: String,
     pub conformance_login_html: bool,
 }
