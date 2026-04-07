@@ -27,4 +27,4 @@ if [ -n "${ZITADEL_E2E_SEED:-}" ]; then
   SEED_ARG="--seed $ZITADEL_E2E_SEED"
 fi
 
-exec "$ZITADEL_BIN" start -c "$ROOT_DIR/fixtures/zitadel.e2e.toml" $SEED_ARG
+exec "$ZITADEL_BIN" server start -c "$ROOT_DIR/fixtures/zitadel.e2e.toml" $SEED_ARG

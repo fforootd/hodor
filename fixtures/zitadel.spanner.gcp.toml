@@ -7,7 +7,7 @@
 #   cargo run -p zitadel -- server start -c fixtures/zitadel.spanner.gcp.toml
 #
 # Notes:
-# - `storage.stateful.database` must be a full Spanner database resource name.
+# - `storage.primary.database` must be a full Spanner database resource name.
 # - Leave `url` empty for native Spanner.
 # - Use either ADC via GOOGLE_APPLICATION_CREDENTIALS or set credentials_file below.
 # - This keeps cloud routing/provisioning disabled by default. If you want to test
@@ -18,7 +18,7 @@ port = 8080
 external_domain = "localhost"
 cookie_secrets = ["zitadel-spanner-dev-cookie-secret-do-not-use-in-production"]
 
-[storage.stateful]
+[storage.primary]
 backend = "spanner"
 url = ""
 database = "projects/YOUR_GCP_PROJECT/instances/YOUR_SPANNER_INSTANCE/databases/YOUR_DATABASE"

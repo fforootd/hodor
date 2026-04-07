@@ -16,7 +16,7 @@ port = 8080
 external_domain = "localhost"
 cookie_secrets = ["zitadel-spanner-local-cookie-secret-do-not-use-in-production"]
 
-[storage.stateful]
+[storage.primary]
 backend = "spanner"
 url = ""
 database = "projects/ffo-test-27661/instances/test/databases/a1"
