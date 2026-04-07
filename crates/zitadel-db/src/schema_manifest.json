@@ -1,0 +1,5070 @@
+{
+  "tables": [
+    {
+      "name": "actions",
+      "columns": [
+        {
+          "name": "action_type",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "expr"
+          }
+        },
+        {
+          "name": "config",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "enabled",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": true
+          }
+        },
+        {
+          "name": "fail_open",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": false
+          }
+        },
+        {
+          "name": "hook",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "on_event"
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "priority",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "timeout_ms",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 5000
+          }
+        },
+        {
+          "name": "trigger_expr",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": "true"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_actions_instance_hook",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "hook",
+            "enabled"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_actions_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "apps",
+      "columns": [
+        {
+          "name": "app_type",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "oidc"
+          }
+        },
+        {
+          "name": "client_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "client_secret",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "grant_types",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": [
+              "authorization_code"
+            ]
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "post_logout_redirect_uris",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "redirect_uris",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "response_types",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": [
+              "code"
+            ]
+          }
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_apps_instance_client",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "client_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_apps_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "client_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "auth_states",
+      "columns": [
+        {
+          "name": "auth_time",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "code",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "code_challenge",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "code_challenge_method",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "data",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "done",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestampPlusSeconds",
+            "value": 600
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "nonce",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "pkce_verifier",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "provider_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "redirect_uri",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "response_type",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": "code"
+          }
+        },
+        {
+          "name": "scopes",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Expression",
+            "value": "''"
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "step",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_auth_states_instance_code",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "code"
+          ],
+          "predicate": "code != ''"
+        },
+        {
+          "name": "idx_auth_states_instance_expires",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "expires_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_auth_states_instance_state",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "state"
+          ],
+          "predicate": "state != ''"
+        },
+        {
+          "name": "idx_auth_states_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "type"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "cache",
+      "columns": [
+        {
+          "name": "data",
+          "family": "Json",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "fetched_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "key",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "namespace",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "default"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "namespace",
+        "key"
+      ],
+      "indexes": [
+        {
+          "name": "idx_cache_instance_expires",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "expires_at"
+          ],
+          "predicate": "expires_at IS NOT NULL"
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "consumer_cursors",
+      "columns": [
+        {
+          "name": "consumer_name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "last_event_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "consumer_name"
+      ],
+      "indexes": [],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "credentials",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "data",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_credentials_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id",
+            "type"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_credentials_instance_user",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "referenced_table": "users",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "domains",
+      "columns": [
+        {
+          "name": "certificate_dns_record_name",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "certificate_dns_record_type",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "certificate_dns_record_value",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "certificate_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "certificate_map_entry",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "certificate_state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "dns_authorization_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "dns_challenge_host",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "domain",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "is_primary",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": false
+          }
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "origin_trust_state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "provisioning_error",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "purpose",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "served"
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "verification_token",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "verified",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": false
+          }
+        }
+      ],
+      "primary_key": [
+        "domain"
+      ],
+      "indexes": [
+        {
+          "name": "idx_domains_instance",
+          "unique": false,
+          "columns": [
+            "instance_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_domains_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_domains_instance_primary",
+          "unique": true,
+          "columns": [
+            "instance_id"
+          ],
+          "predicate": "org_id IS NULL AND is_primary = 1"
+        },
+        {
+          "name": "idx_domains_org_primary",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": "org_id IS NOT NULL AND is_primary = 1"
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id"
+          ],
+          "predicate": "org_id IS NULL AND is_primary = 1"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": "org_id IS NOT NULL AND is_primary = 1"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id"
+          ],
+          "referenced_table": "instances",
+          "referenced_columns": [
+            "instance_id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "effects",
+      "columns": [
+        {
+          "name": "attempt",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "completed_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "config",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "effect_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "event_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "last_error",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "lease_expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "lease_owner",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "max_attempts",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 5
+          }
+        },
+        {
+          "name": "next_retry_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "payload",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "source_key",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "status",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "pending"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_effects_cleanup",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "status",
+            "completed_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_effects_due",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "status",
+            "next_retry_at",
+            "lease_expires_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_effects_event",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "event_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_effects_source_key",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "source_key"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "source_key"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "events",
+      "columns": [
+        {
+          "name": "actor_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "actor_type",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "aggregate_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "aggregate_type",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "category",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "client_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "delegation_type",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "event_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "fingerprint",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "flow_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "0"
+          }
+        },
+        {
+          "name": "payload",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "request_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "resource_type",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "sdk_name",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "sdk_version",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "sequence",
+          "family": "Integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "shipped_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "token_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_events_actor",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "actor_id"
+          ],
+          "predicate": "actor_id IS NOT NULL"
+        },
+        {
+          "name": "idx_events_aggregate",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "aggregate_id",
+            "aggregate_type"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_events_category",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "category",
+            "created_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_events_client",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "client_id"
+          ],
+          "predicate": "client_id != ''"
+        },
+        {
+          "name": "idx_events_delegation",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "delegation_type"
+          ],
+          "predicate": "delegation_type != ''"
+        },
+        {
+          "name": "idx_events_flow",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "flow_id"
+          ],
+          "predicate": "flow_id IS NOT NULL"
+        },
+        {
+          "name": "idx_events_instance_created",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "created_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_events_instance_type_created",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "event_type",
+            "created_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_events_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id",
+            "created_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_events_request",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "request_id"
+          ],
+          "predicate": "request_id IS NOT NULL"
+        },
+        {
+          "name": "idx_events_ship",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "shipped_at"
+          ],
+          "predicate": "shipped_at IS NULL"
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "fga_authorization_models",
+      "columns": [
+        {
+          "name": "compiled_model",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "core_model_version",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "custom_model",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "is_active",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "model_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "module_fragments",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "schema_version",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "store_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "scope_id",
+        "store_id",
+        "model_id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_fga_models_active",
+          "unique": false,
+          "columns": [
+            "scope_id",
+            "store_id",
+            "is_active",
+            "created_at"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "fga_stores",
+      "columns": [
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "store_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "scope_id"
+      ],
+      "indexes": [],
+      "unique_keys": [
+        {
+          "columns": [
+            "store_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "fga_tuple_changes",
+      "columns": [
+        {
+          "name": "authorization_model_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "object_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "object_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "operation",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "raw_object",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "raw_user",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "relation",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "seq",
+          "family": "Integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "store_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_relation",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "user_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "seq"
+      ],
+      "indexes": [
+        {
+          "name": "idx_fga_tuple_changes_lookup",
+          "unique": false,
+          "columns": [
+            "scope_id",
+            "store_id",
+            "seq"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "fga_tuples",
+      "columns": [
+        {
+          "name": "inserted_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "object_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "object_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "raw_object",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "raw_user",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "relation",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "store_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_relation",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "user_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "scope_id",
+        "store_id",
+        "object_type",
+        "object_id",
+        "relation",
+        "user_type",
+        "user_id",
+        "user_relation"
+      ],
+      "indexes": [
+        {
+          "name": "idx_fga_tuples_lookup",
+          "unique": false,
+          "columns": [
+            "scope_id",
+            "store_id",
+            "object_type",
+            "object_id",
+            "relation"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_fga_tuples_user",
+          "unique": false,
+          "columns": [
+            "scope_id",
+            "store_id",
+            "user_type",
+            "user_id",
+            "user_relation"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "fingerprints",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "raw_data",
+          "family": "Json",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_fingerprints_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "type"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "groups",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "description",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_groups_instance_name_no_org",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "name"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "name": "idx_groups_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "name"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "org_id",
+            "name"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "instance_trust_links",
+      "columns": [
+        {
+          "name": "allowed_scopes",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "audience",
+          "family": "Json",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "child_instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "issuer",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "child_instance_id",
+        "issuer",
+        "audience"
+      ],
+      "indexes": [],
+      "unique_keys": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "child_instance_id"
+          ],
+          "referenced_table": "instances",
+          "referenced_columns": [
+            "instance_id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "instances",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "feature_overrides",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "managed"
+          }
+        },
+        {
+          "name": "last_heartbeat_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "last_heartbeat_status",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "owner_org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "parent_instance_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "placement_mode",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "global"
+          }
+        },
+        {
+          "name": "region_key",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "registration_token_hash",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id"
+      ],
+      "indexes": [],
+      "unique_keys": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "parent_instance_id"
+          ],
+          "referenced_table": "instances",
+          "referenced_columns": [
+            "instance_id"
+          ],
+          "on_delete": "Cascade"
+        },
+        {
+          "columns": [
+            "parent_instance_id",
+            "owner_org_id"
+          ],
+          "referenced_table": "orgs",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Restrict"
+        }
+      ],
+      "checks": [
+        {
+          "expression": "(parent_instance_id IS NULL AND owner_org_id IS NULL AND kind = 'root') OR (parent_instance_id IS NOT NULL AND owner_org_id IS NOT NULL AND kind IN ('managed', 'federated'))"
+        },
+        {
+          "expression": "kind IN ('root', 'managed', 'federated')"
+        },
+        {
+          "expression": "placement_mode IN ('global', 'regional')"
+        }
+      ]
+    },
+    {
+      "name": "jobs",
+      "columns": [
+        {
+          "name": "config_json",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "cron",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "description",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "display_name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "enabled",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 1
+          }
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "last_error",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "last_rows_removed",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "last_run_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "last_status",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "idle"
+          }
+        },
+        {
+          "name": "lease_expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "lease_owner",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "next_run_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "run_count",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "name"
+      ],
+      "indexes": [
+        {
+          "name": "idx_jobs_instance_due_lease",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "enabled",
+            "next_run_at",
+            "lease_expires_at"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "linked_identities",
+      "columns": [
+        {
+          "name": "external_email",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "external_sub",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "last_used_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "linked_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "provider_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "raw_claims",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_linked_identities_instance_user",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "provider_id",
+            "external_sub"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "provider_id"
+          ],
+          "referenced_table": "providers",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "referenced_table": "users",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "login_flow_assets",
+      "columns": [
+        {
+          "name": "content_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "data",
+          "family": "Json",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "etag",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "filename",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "login_flow_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "sha256",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "size_bytes",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "slot",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_login_flow_assets_instance_flow",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "login_flow_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "login_flow_id",
+            "slot"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "login_flow_id"
+          ],
+          "referenced_table": "login_flows",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "login_flows",
+      "columns": [
+        {
+          "name": "audience",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "auth_methods",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "config",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "enabled",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": true
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "is_default",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": false
+          }
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "priority",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "draft"
+          }
+        },
+        {
+          "name": "steps",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "strategy",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "identifier_first"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_login_flows_instance_default",
+          "unique": true,
+          "columns": [
+            "instance_id"
+          ],
+          "predicate": "is_default = 1"
+        },
+        {
+          "name": "idx_login_flows_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_login_flows_instance_state",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "state",
+            "enabled"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id"
+          ],
+          "predicate": "is_default = 1"
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "memberships",
+      "columns": [
+        {
+          "name": "added_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "resource_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "resource_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "role",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "member"
+          }
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "resource_type",
+        "resource_id",
+        "user_id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_memberships_instance_resource",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "resource_type",
+            "resource_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_memberships_instance_user",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id",
+            "resource_type"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "referenced_table": "users",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "oidc_auth_requests",
+      "columns": [
+        {
+          "name": "auth_time",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "code",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "code_challenge",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "code_challenge_method",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "done",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestampPlusSeconds",
+            "value": 600
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "login_hint",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "max_age",
+          "family": "Integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "nonce",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "prompt",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "redirect_uri",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "response_type",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "code"
+          }
+        },
+        {
+          "name": "scope",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "session_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_oidc_auth_requests_code",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "code"
+          ],
+          "predicate": "code != ''"
+        },
+        {
+          "name": "idx_oidc_auth_requests_instance_client",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "client_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_oidc_auth_requests_instance_created",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "created_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_oidc_auth_requests_instance_expires",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "expires_at"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "code"
+          ],
+          "predicate": "code != ''"
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "oidc_rp_auth_states",
+      "columns": [
+        {
+          "name": "callback_uri",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "expected_issuer",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestampPlusSeconds",
+            "value": 600
+          }
+        },
+        {
+          "name": "flow_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "nonce",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "pkce_verifier",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "provider_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "redirect_uri",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_oidc_rp_auth_states_instance_expires",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "expires_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_oidc_rp_auth_states_provider",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "provider_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_oidc_rp_auth_states_state",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "state"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "state"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "orgs",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_orgs_instance_state",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "state"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "name"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id"
+          ],
+          "referenced_table": "instances",
+          "referenced_columns": [
+            "instance_id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "projects",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "description",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_projects_instance_name_no_org",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "name"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "name": "idx_projects_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "name"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "org_id",
+            "name"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "providers",
+      "columns": [
+        {
+          "name": "catalog_ref",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "connection",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "display_name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "display_order",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        },
+        {
+          "name": "enabled",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": true
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "custom"
+          }
+        },
+        {
+          "name": "linking",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "mapping",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "protocol",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "oidc"
+          }
+        },
+        {
+          "name": "session",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "target",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "ui",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_providers_instance_name_no_org",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "display_name"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "name": "idx_providers_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_providers_instance_protocol",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "protocol",
+            "enabled"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_providers_instance_sort",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "display_order",
+            "display_name"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "display_name"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "org_id",
+            "display_name"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "retention_policies",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "event_pattern",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "lake_ttl",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "oltp_ttl",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "priority",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 0
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_retention_policies_instance_priority",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "priority"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "role_assignments",
+      "columns": [
+        {
+          "name": "approved_by",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "assignment_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "enforcement_instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "origin_instance_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "principal_ref",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "reason",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "revoked_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "role_key",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope_kind",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "source_kind",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "manual"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "assignment_id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_role_assignments_instance_scope",
+          "unique": false,
+          "columns": [
+            "enforcement_instance_id",
+            "scope_kind",
+            "scope_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_role_assignments_principal",
+          "unique": false,
+          "columns": [
+            "principal_ref",
+            "revoked_at",
+            "expires_at"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_role_assignments_role_source",
+          "unique": false,
+          "columns": [
+            "role_key",
+            "source_kind"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "enforcement_instance_id"
+          ],
+          "referenced_table": "instances",
+          "referenced_columns": [
+            "instance_id"
+          ],
+          "on_delete": "Cascade"
+        },
+        {
+          "columns": [
+            "origin_instance_id"
+          ],
+          "referenced_table": "instances",
+          "referenced_columns": [
+            "instance_id"
+          ],
+          "on_delete": "SetNull"
+        },
+        {
+          "columns": [
+            "role_key"
+          ],
+          "referenced_table": "role_definitions",
+          "referenced_columns": [
+            "role_key"
+          ],
+          "on_delete": "NoAction"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "role_definitions",
+      "columns": [
+        {
+          "name": "builtin",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 1
+          }
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "permissions_json",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "relation_name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "role_key",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "scope_kind",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "source_version",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "role_key"
+      ],
+      "indexes": [],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "saved_queries",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "created_by",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "description",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "sql_text",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_saved_queries_instance_name",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "name"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "schemas",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "created_by",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "is_default",
+          "family": "Bool",
+          "nullable": false,
+          "default": {
+            "kind": "Bool",
+            "value": false
+          }
+        },
+        {
+          "name": "message",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "schema",
+          "family": "Json",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "version",
+          "family": "Integer",
+          "nullable": false,
+          "default": {
+            "kind": "Integer",
+            "value": 1
+          }
+        },
+        {
+          "name": "visibility",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "private"
+          }
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_schema_default",
+          "unique": false,
+          "columns": [
+            "type",
+            "is_default"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_schema_type",
+          "unique": false,
+          "columns": [
+            "type"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_schema_version",
+          "unique": false,
+          "columns": [
+            "type",
+            "version"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "secrets",
+      "columns": [
+        {
+          "name": "algorithm",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "RS256"
+          }
+        },
+        {
+          "name": "ciphertext",
+          "family": "Bytes",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "encryption_key_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "nonce",
+          "family": "Bytes",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "public_key",
+          "family": "Bytes",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "secret_type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_secrets_instance_enc_key",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "encryption_key_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_secrets_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "secret_type"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "sessions",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "fingerprint",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "ip_address",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "last_active_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "revoked_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "token_hash",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "user_agent",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_sessions_instance_expires",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "expires_at"
+          ],
+          "predicate": "expires_at IS NOT NULL"
+        },
+        {
+          "name": "idx_sessions_instance_revoked",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "revoked_at"
+          ],
+          "predicate": "revoked_at IS NOT NULL"
+        },
+        {
+          "name": "idx_sessions_instance_token_unique",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "token_hash"
+          ],
+          "predicate": "token_hash != ''"
+        },
+        {
+          "name": "idx_sessions_instance_user",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "token_hash"
+          ],
+          "predicate": "token_hash != ''"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "referenced_table": "users",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "settings",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "data",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "instance"
+          }
+        },
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_settings_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "type",
+            "scope"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "type",
+            "scope",
+            "scope_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    },
+    {
+      "name": "tokens",
+      "columns": [
+        {
+          "name": "application_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "audience",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Expression",
+            "value": "''"
+          }
+        },
+        {
+          "name": "auth_method",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "auth_time",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "expires_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "last_used",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "name",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "refresh_token_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "revoked_at",
+          "family": "Timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "scopes",
+          "family": "Json",
+          "nullable": false,
+          "default": {
+            "kind": "Json",
+            "value": []
+          }
+        },
+        {
+          "name": "session_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "token_hash",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "type",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_tokens_instance_app",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "application_id"
+          ],
+          "predicate": "application_id != ''"
+        },
+        {
+          "name": "idx_tokens_instance_expires",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "expires_at"
+          ],
+          "predicate": "expires_at IS NOT NULL"
+        },
+        {
+          "name": "idx_tokens_instance_revoked",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "revoked_at"
+          ],
+          "predicate": "revoked_at IS NOT NULL"
+        },
+        {
+          "name": "idx_tokens_instance_session",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "session_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_tokens_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "type",
+            "user_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_tokens_instance_user",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "token_hash"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "session_id"
+          ],
+          "referenced_table": "sessions",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "SetNull"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "referenced_table": "users",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "unique_fields",
+      "columns": [
+        {
+          "name": "field_name",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "normalized_value",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "resource_type",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "scope_id",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "user_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "scope_id",
+        "field_name",
+        "normalized_value"
+      ],
+      "indexes": [
+        {
+          "name": "idx_unique_fields_instance_lookup",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "normalized_value",
+            "field_name"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_unique_fields_instance_resource",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "user_id"
+          ],
+          "referenced_table": "users",
+          "referenced_columns": [
+            "instance_id",
+            "id"
+          ],
+          "on_delete": "Cascade"
+        }
+      ],
+      "checks": []
+    },
+    {
+      "name": "users",
+      "columns": [
+        {
+          "name": "created_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "display_name",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "identifier",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "instance_id",
+          "family": "String",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "family": "Json",
+          "nullable": true,
+          "default": {
+            "kind": "Json",
+            "value": {}
+          }
+        },
+        {
+          "name": "org_id",
+          "family": "String",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "schema_id",
+          "family": "String",
+          "nullable": true,
+          "default": {
+            "kind": "String",
+            "value": ""
+          }
+        },
+        {
+          "name": "state",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "active"
+          }
+        },
+        {
+          "name": "updated_at",
+          "family": "Timestamp",
+          "nullable": false,
+          "default": {
+            "kind": "CurrentTimestamp"
+          }
+        },
+        {
+          "name": "user_type",
+          "family": "String",
+          "nullable": false,
+          "default": {
+            "kind": "String",
+            "value": "human"
+          }
+        }
+      ],
+      "primary_key": [
+        "instance_id",
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_users_instance_identifier_no_org",
+          "unique": true,
+          "columns": [
+            "instance_id",
+            "identifier"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "name": "idx_users_instance_org",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "org_id"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_users_instance_state",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "state"
+          ],
+          "predicate": null
+        },
+        {
+          "name": "idx_users_instance_type",
+          "unique": false,
+          "columns": [
+            "instance_id",
+            "user_type"
+          ],
+          "predicate": null
+        }
+      ],
+      "unique_keys": [
+        {
+          "columns": [
+            "instance_id",
+            "identifier"
+          ],
+          "predicate": "org_id IS NULL"
+        },
+        {
+          "columns": [
+            "instance_id",
+            "org_id",
+            "identifier"
+          ],
+          "predicate": null
+        }
+      ],
+      "foreign_keys": [],
+      "checks": []
+    }
+  ]
+}

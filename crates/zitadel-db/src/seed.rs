@@ -268,6 +268,22 @@ pub async fn apply(db: &Db, path: &Path) -> anyhow::Result<()> {
     }
     let pool = db.pool();
     let scoped = db.scoped_default();
+    let ensure_instance_sql = match db.dialect() {
+        crate::Dialect::Postgres => {
+            "INSERT INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}') \
+             ON CONFLICT (instance_id) DO NOTHING"
+        }
+        crate::Dialect::Sqlite => {
+            "INSERT OR IGNORE INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}')"
+        }
+        crate::Dialect::Spanner => unreachable!(),
+    };
+    sqlx::query(ensure_instance_sql)
+        .bind(DEFAULT_INSTANCE_ID)
+        .execute(pool)
+        .await?;
 
     // Get default org (first org, or create one).
     let org_id: String = match sqlx::query_as::<_, (String,)>(

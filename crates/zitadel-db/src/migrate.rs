@@ -1,21 +1,5 @@
-use crate::{BackendKind, Db};
+use crate::{BackendKind, Db, schema};
 use sqlx::{Connection, Executor};
-
-/// Embedded migration SQL files.
-const SQLITE_MIGRATIONS: &[(&str, &str)] = &[(
-    "00001_baseline",
-    include_str!("../../../migrations/sqlite/00001_baseline.sql"),
-)];
-
-const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[(
-    "00001_baseline",
-    include_str!("../../../migrations/postgres/00001_baseline.sql"),
-)];
-
-const SPANNER_MIGRATIONS: &[(&str, &str)] = &[(
-    "00001_baseline",
-    include_str!("../../../migrations/spanner/00001_baseline.sql"),
-)];
 
 const POSTGRES_MIGRATION_LOCK_ID: i64 = 6_900_181_427_071;
 
@@ -24,14 +8,10 @@ pub async fn migrate(db: &Db) -> anyhow::Result<()> {
     let backend = db.backend();
     let dialect = db.dialect();
 
-    let migrations = match backend {
-        BackendKind::Sqlite => SQLITE_MIGRATIONS,
-        BackendKind::Postgres => POSTGRES_MIGRATIONS,
-        BackendKind::Spanner => SPANNER_MIGRATIONS,
-    };
+    let migrations = schema::embedded_migrations(backend);
 
     if backend == BackendKind::Spanner {
-        let statements = SPANNER_MIGRATIONS
+        let statements = schema::embedded_migrations(BackendKind::Spanner)
             .iter()
             .flat_map(|(_, sql)| split_statements(&extract_goose_up(sql)))
             .collect::<Vec<_>>();
@@ -164,8 +144,8 @@ pub async fn check_version(db: &Db) -> anyhow::Result<()> {
 
     let pool = db.pool();
     let target = match db.backend() {
-        BackendKind::Sqlite => SQLITE_MIGRATIONS.len() as i64,
-        BackendKind::Postgres => POSTGRES_MIGRATIONS.len() as i64,
+        BackendKind::Sqlite => schema::embedded_migrations(BackendKind::Sqlite).len() as i64,
+        BackendKind::Postgres => schema::embedded_migrations(BackendKind::Postgres).len() as i64,
         BackendKind::Spanner => unreachable!("spanner is handled above"),
     };
 
@@ -350,7 +330,7 @@ mod tests {
 
     #[test]
     fn spanner_baseline_is_native_googlesql_only() {
-        let (_, sql) = SPANNER_MIGRATIONS
+        let (_, sql) = schema::embedded_migrations(BackendKind::Spanner)
             .first()
             .expect("spanner baseline migration must exist");
         let up = extract_goose_up(sql);
@@ -381,7 +361,10 @@ mod tests {
             "spanner baseline should quote reserved table names like `groups`"
         );
         assert!(
-            up.contains("FOREIGN KEY (parent_instance_id) REFERENCES instances(instance_id) ON DELETE NO ACTION"),
+            up.contains("parent_instance_id")
+                && !up.contains(
+                    "FOREIGN KEY (parent_instance_id) REFERENCES instances(instance_id) ON DELETE CASCADE"
+                ),
             "spanner baseline should avoid self-referential cascade deletes on instances"
         );
         assert!(
@@ -425,6 +408,42 @@ mod tests {
             .await;
         println!("schemas index: {:?}", r);
         assert!(r.is_ok(), "Failed: {:?}", r.err());
+    }
+
+    #[tokio::test]
+    async fn generated_sqlite_auth_states_statement_executes() {
+        let db = Db::open("").await.unwrap();
+        let (_, sql) = schema::embedded_migrations(BackendKind::Sqlite)
+            .first()
+            .expect("sqlite baseline migration must exist");
+        let up = extract_goose_up(sql);
+        let statements = split_statements(&up);
+        let statement = statements
+            .get(2)
+            .expect("sqlite baseline should include auth_states");
+        let result = sqlx::query(statement).execute(&*db.pool()).await;
+        assert!(
+            result.is_ok(),
+            "auth_states statement failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_accepts_datetime_modifier_defaults() {
+        let db = Db::open("").await.unwrap();
+        let result = sqlx::query(
+            "CREATE TABLE IF NOT EXISTS auth_state_probe (
+                expires_at TEXT NOT NULL DEFAULT (datetime('now', '+10 minutes'))
+            )",
+        )
+        .execute(&*db.pool())
+        .await;
+        assert!(
+            result.is_ok(),
+            "datetime modifier default failed: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]

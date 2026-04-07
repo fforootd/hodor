@@ -3023,8 +3023,12 @@ impl UnitOfWork for SqlUnitOfWork {
                         .await?;
                     }
                     if !self.effects.is_empty() {
-                        super::effects::insert_effects_in_tx(&mut *tx, &scoped, &self.effects)
-                            .await?;
+                        crate::repos::effects_impl::insert_effects_in_tx(
+                            &mut *tx,
+                            &scoped,
+                            &self.effects,
+                        )
+                        .await?;
                     }
                     tx.commit().await?;
                 }

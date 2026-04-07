@@ -1,8 +1,19 @@
-use google_cloud_spanner::statement::Statement;
+use google_cloud_spanner::{row::Row as SpannerRow, statement::Statement};
+use std::collections::HashSet;
 
-use super::entities::{SqlSearchRepository, normalized_resource_types, spanner_query_all};
-use crate::{Db, list_schema_registry, provider, spanner_ident};
+use crate::{Db, SpannerDb, list_schema_registry, provider, spanner_ident};
 use zitadel_app::repo::{BoxFuture, SearchRepository, SearchResult};
+
+#[derive(Clone)]
+pub struct SqlSearchRepository {
+    db: Db,
+}
+
+impl SqlSearchRepository {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+}
 
 impl SearchRepository for SqlSearchRepository {
     fn search(
@@ -190,4 +201,25 @@ impl SearchRepository for SqlSearchRepository {
             Ok(results)
         })
     }
+}
+
+fn normalized_resource_types(resource_types: Option<&[&str]>) -> HashSet<String> {
+    resource_types
+        .into_iter()
+        .flatten()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+async fn spanner_query_all(
+    spanner: &SpannerDb,
+    stmt: Statement,
+) -> anyhow::Result<Vec<SpannerRow>> {
+    let mut tx = spanner.client().single().await?;
+    let mut rows = tx.query(stmt).await?;
+    let mut result = Vec::new();
+    while let Some(row) = rows.next().await? {
+        result.push(row);
+    }
+    Ok(result)
 }

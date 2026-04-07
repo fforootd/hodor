@@ -221,11 +221,15 @@ journeys-oidc-rp: _ensure-node-modules _ensure-browser-tests-runtime
 journeys-quarantine: _ensure-node-modules _ensure-browser-tests-runtime
     npm run test:journeys:quarantine -w browser-tests
 
+# Run all `zitadel-db` tests
+[group('test')]
+db-tests:
+    cargo test -p zitadel-db
+
 # Run contract tests
 [group('test')]
 contracts: ensure-webdist
     cargo test -p zitadel-server --test contracts_http_router --test contracts_management_root_instance --test contracts_spanner_http_router
-    cargo test -p zitadel-db --test contracts_spanner_schema_layout
 
 # Run invariant tests
 [group('test')]
@@ -247,11 +251,11 @@ subsystems: ensure-webdist
 [group('test')]
 resilience: ensure-webdist
     cargo test -p zitadel-storage --test resilience_storage_spanner_transient
-    cargo test -p zitadel-db --test resilience_spanner_effects_jobs
 
 # Run the emulator-backed native Spanner certification lane
 [group('test')]
 spanner-cert: ensure-webdist
+    just db-tests
     just contracts
     just invariants
     just subsystems
@@ -419,6 +423,31 @@ config-schema:
     echo "═══ config-schema ═══"
     SCHEMA_OUT=config.schema.json cargo test -p zitadel-config json_schema_generates --quiet
     echo "Written config.schema.json ($(wc -l < config.schema.json) lines)"
+
+# Regenerate checked-in dialect baselines from the canonical schema manifest
+[group('codegen')]
+schema-baselines:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "═══ schema-baselines ═══"
+    for backend in sqlite postgres spanner; do
+      tmp_file="$(mktemp)"
+      cargo run -p zitadel-db --example dump_generated_baseline -- "$backend" > "$tmp_file"
+      mv "$tmp_file" "migrations/$backend/00001_baseline.sql"
+      echo "Written migrations/$backend/00001_baseline.sql ($(wc -l < "migrations/$backend/00001_baseline.sql") lines)"
+    done
+
+# Regenerate the canonical logical DB schema manifest by roundtripping the generated SQLite baseline
+[group('codegen')]
+schema-manifest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "═══ schema-manifest ═══"
+    tmp_file="$(mktemp)"
+    trap 'rm -f "$tmp_file"' EXIT
+    cargo run -p zitadel-db --example dump_schema_manifest > "$tmp_file"
+    mv "$tmp_file" crates/zitadel-db/src/schema_manifest.json
+    echo "Written crates/zitadel-db/src/schema_manifest.json ($(wc -l < crates/zitadel-db/src/schema_manifest.json) lines)"
 
 # Export OpenAPI 3.1 spec
 [group('codegen')]

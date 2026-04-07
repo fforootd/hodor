@@ -2,6 +2,7 @@
 #![allow(clippy::large_enum_variant)]
 
 pub mod analytics;
+pub mod backend_capabilities;
 pub mod runtime;
 pub mod stateful;
 pub mod transient;
@@ -11,6 +12,7 @@ pub use analytics::{
     DefaultAnalyticsStorage, NoopAnalyticsSink, SpannerAnalyticsQueryBackend,
     SqlAnalyticsQueryBackend,
 };
+pub use backend_capabilities::{StorageBackendCapabilities, storage_backend_capabilities};
 pub use runtime::{StorageRoleSummary, StorageRuntime, prepare_postgres_role_databases};
 pub use stateful::{
     DefaultStatefulStorage, ReadStore, ResolvedPatIdentity, SpannerReadStore, SpannerStatefulStore,

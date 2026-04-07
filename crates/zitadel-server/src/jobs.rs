@@ -11,7 +11,7 @@ use zitadel_app::hook::{HookContext, HookPhase, HookPipeline};
 use zitadel_app::repo::EffectRepository;
 use zitadel_app::usecase::{plan_durable_effects, run_effects};
 use zitadel_config::{Config, RetentionConfig, WorkersConfig};
-use zitadel_db::repo_impls::DbEffectRepository;
+use zitadel_db::repos::adapters::DbEffectRepository;
 use zitadel_db::{
     BackendKind, DEFAULT_INSTANCE_ID, Db, Dialect, JobBudget, JobReconcileSpec, bool_true_sql,
     complete_job_run, current_timestamp_sql, delete_sink_inbox_records,

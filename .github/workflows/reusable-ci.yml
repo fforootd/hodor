@@ -39,6 +39,10 @@ on:
         required: false
         type: boolean
         default: true
+      run_db:
+        required: false
+        type: boolean
+        default: true
       run_invariants:
         required: false
         type: boolean
@@ -62,7 +66,7 @@ permissions:
 jobs:
   noop:
     name: No Lanes
-    if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_journeys_admin && !inputs.run_journeys_login && !inputs.run_journeys_oidc && !inputs.run_journeys_quarantine && !inputs.run_contracts && !inputs.run_invariants && !inputs.run_subsystems && !inputs.run_resilience }}
+    if: ${{ !inputs.run_docs && !inputs.run_fast_rust && !inputs.run_fast_web && !inputs.run_journeys_admin && !inputs.run_journeys_login && !inputs.run_journeys_oidc && !inputs.run_journeys_quarantine && !inputs.run_contracts && !inputs.run_db && !inputs.run_invariants && !inputs.run_subsystems && !inputs.run_resilience }}
     runs-on: ubuntu-latest
     steps:
       - name: No lanes selected
@@ -240,17 +244,92 @@ jobs:
           path: artifacts/prepare-rust-binary/zitadel-debug.tgz
           retention-days: 1
 
-  contracts:
-    name: Contracts
-    if: inputs.run_contracts
+  db:
+    name: DB
+    if: inputs.run_db
     runs-on: ubuntu-latest
     services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
       spanner:
         image: gcr.io/cloud-spanner-emulator/emulator
         ports:
           - 9010:9010
           - 9020:9020
     env:
+      ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
+      ZITADEL_TEST_SPANNER_PROJECT: local-project
+      ZITADEL_TEST_SPANNER_INSTANCE: test-instance
+      ZITADEL_TEST_SPANNER_DATABASE_PREFIX: zitadeldb
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Wait for Spanner emulator
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 9010; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Spanner emulator did not start on 127.0.0.1:9010" >&2
+          exit 1
+
+      - name: Verify generated schema artifacts
+        run: |
+          just schema-baselines
+          git diff --exit-code -- migrations/sqlite/00001_baseline.sql migrations/postgres/00001_baseline.sql migrations/spanner/00001_baseline.sql
+          just schema-manifest
+          git diff --exit-code -- crates/zitadel-db/src/schema_manifest.json
+
+      - name: Run DB test suite
+        run: just db-tests
+
+  contracts:
+    name: Contracts
+    if: inputs.run_contracts
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      spanner:
+        image: gcr.io/cloud-spanner-emulator/emulator
+        ports:
+          - 9010:9010
+          - 9020:9020
+    env:
+      ZITADEL_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       ZITADEL_TEST_SPANNER_EMULATOR_HOST: 127.0.0.1:9010
       ZITADEL_TEST_SPANNER_PROJECT: local-project
       ZITADEL_TEST_SPANNER_INSTANCE: test-instance

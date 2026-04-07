@@ -28,7 +28,7 @@ async fn effect_repository_handles_claim_retry_complete_and_cleanup_on_spanner_w
     };
     migrate::migrate(&db).await?;
 
-    let repo = zitadel_db::repo_impls::DbEffectRepository::new(db.clone());
+    let repo = zitadel_db::repos::adapters::DbEffectRepository::new(db.clone());
     repo.enqueue_batch(
         DEFAULT_INSTANCE_ID,
         &[sample_effect("spanner-a"), sample_effect("spanner-b")],

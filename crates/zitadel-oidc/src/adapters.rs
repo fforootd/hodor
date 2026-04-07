@@ -236,7 +236,7 @@ mod tests {
     use super::*;
     use crate::op::{AuthRequestStore, ClientStore};
     use zitadel_db::Db;
-    use zitadel_db::repo_impls::DbOidcRepository;
+    use zitadel_db::repos::adapters::DbOidcRepository;
 
     fn make_store(db: Db) -> ZitadelOpStore {
         ZitadelOpStore::new(Arc::new(DbOidcRepository::new(db)))

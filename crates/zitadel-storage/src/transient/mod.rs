@@ -1103,10 +1103,23 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn transient_storage_emits_session_records() {
+    async fn fresh_test_db() -> Db {
         let db = Db::open("").await.unwrap();
         zitadel_db::migrate::migrate(&db).await.unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO instances (instance_id, kind, state, placement_mode, feature_overrides) \
+             VALUES ($1, 'root', 'active', 'global', '{}')",
+        )
+        .bind(zitadel_db::DEFAULT_INSTANCE_ID)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn transient_storage_emits_session_records() {
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1158,8 +1171,7 @@ mod tests {
 
     #[tokio::test]
     async fn sink_failure_does_not_fail_memory_session_creation() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1201,8 +1213,7 @@ mod tests {
 
     #[tokio::test]
     async fn sql_session_lookup_rejects_disabled_users() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1253,8 +1264,7 @@ mod tests {
 
     #[tokio::test]
     async fn memory_session_lookup_rejects_disabled_users() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1305,8 +1315,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_auth_state_is_consumed_once() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let storage = TransientStorage::new(MemoryKvStore::new(db, 86_400), NoopSink);
 
         let state = ProviderAuthState {
@@ -1340,8 +1349,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_auth_state_survives_sqlite_replay_and_stays_consume_once() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
 
         let sink = ChannelSink::new(db.clone(), 16, 4, parse_duration("10ms"));
         let storage = TransientStorage::new(MemoryKvStore::new(db.clone(), 86_400), sink);
@@ -1379,8 +1387,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_sink_batches_memory_sessions_into_sqlite() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1425,8 +1432,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_sink_replay_preserves_session_fingerprint() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1472,8 +1478,7 @@ mod tests {
 
     #[tokio::test]
     async fn memory_revoked_session_does_not_fall_back_to_stale_sqlite_copy() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
@@ -1536,8 +1541,7 @@ mod tests {
 
     #[tokio::test]
     async fn memory_expired_session_does_not_fall_back_to_stale_sqlite_copy() {
-        let db = Db::open("").await.unwrap();
-        zitadel_db::migrate::migrate(&db).await.unwrap();
+        let db = fresh_test_db().await;
         let scoped = db.scoped_default();
 
         sqlx::query("INSERT INTO orgs (id, instance_id, name) VALUES ($1, $2, $3)")
