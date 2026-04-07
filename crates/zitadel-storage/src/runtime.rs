@@ -82,6 +82,7 @@ pub async fn prepare_auxiliary_databases(
         match transient_db.backend() {
             BackendKind::Sqlite | BackendKind::Postgres => {
                 zitadel_db::migrate::migrate(&transient_db).await?;
+                zitadel_db::migrate::prepare_transient_authority_db(&transient_db).await?;
             }
             BackendKind::Spanner => {
                 anyhow::bail!(

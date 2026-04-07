@@ -140,6 +140,117 @@ pub async fn migrate(db: &Db) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Relax foreign keys that assume retained user/org rows exist locally.
+///
+/// Separate transient databases are authoritative for auth-runtime state, but
+/// retained entities still live in the primary database. Sessions therefore
+/// must not require local `users` or `orgs` rows when `storage.transient`
+/// points at its own SQL database.
+pub async fn prepare_transient_authority_db(db: &Db) -> anyhow::Result<()> {
+    match db.backend() {
+        BackendKind::Postgres => {
+            sqlx::query(
+                "ALTER TABLE sessions DROP CONSTRAINT IF EXISTS fk_sessions_ca7ce9e77ef4176a",
+            )
+            .execute(db.pool())
+            .await?;
+            sqlx::query(
+                "ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_instance_id_user_id_fkey",
+            )
+            .execute(db.pool())
+            .await?;
+            sqlx::query(
+                "ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_instance_id_org_id_fkey",
+            )
+            .execute(db.pool())
+            .await?;
+        }
+        BackendKind::Sqlite => {
+            let mut conn = db.pool().acquire().await?;
+            conn.execute("PRAGMA foreign_keys = OFF").await?;
+            conn.execute("DROP TABLE IF EXISTS sessions_new").await?;
+            conn.execute(
+                "CREATE TABLE sessions_new (
+                    instance_id      TEXT NOT NULL,
+                    id               TEXT NOT NULL,
+                    user_id          TEXT NOT NULL,
+                    org_id           TEXT DEFAULT NULL,
+                    token_hash       TEXT NOT NULL DEFAULT '',
+                    user_agent       TEXT DEFAULT '',
+                    ip_address       TEXT DEFAULT '',
+                    metadata         TEXT DEFAULT '{}',
+                    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_active_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                    expires_at       TEXT,
+                    revoked_at       TEXT,
+                    fingerprint      TEXT DEFAULT '',
+                    PRIMARY KEY (instance_id, id)
+                )",
+            )
+            .await?;
+            conn.execute(
+                "INSERT INTO sessions_new (
+                    instance_id,
+                    id,
+                    user_id,
+                    org_id,
+                    token_hash,
+                    user_agent,
+                    ip_address,
+                    metadata,
+                    created_at,
+                    last_active_at,
+                    expires_at,
+                    revoked_at,
+                    fingerprint
+                )
+                SELECT
+                    instance_id,
+                    id,
+                    user_id,
+                    org_id,
+                    token_hash,
+                    user_agent,
+                    ip_address,
+                    metadata,
+                    created_at,
+                    last_active_at,
+                    expires_at,
+                    revoked_at,
+                    fingerprint
+                FROM sessions",
+            )
+            .await?;
+            conn.execute("DROP TABLE sessions").await?;
+            conn.execute("ALTER TABLE sessions_new RENAME TO sessions")
+                .await?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_instance_user ON sessions(instance_id, user_id)",
+            )
+            .await?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_instance_expires
+                 ON sessions(instance_id, expires_at) WHERE expires_at IS NOT NULL",
+            )
+            .await?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_instance_revoked
+                 ON sessions(instance_id, revoked_at) WHERE revoked_at IS NOT NULL",
+            )
+            .await?;
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_instance_token_unique
+                 ON sessions(instance_id, token_hash) WHERE token_hash != ''",
+            )
+            .await?;
+            conn.execute("PRAGMA foreign_keys = ON").await?;
+        }
+        BackendKind::Spanner => {}
+    }
+
+    Ok(())
+}
+
 /// Check the current schema version without running DDL.
 pub async fn check_version(db: &Db) -> anyhow::Result<()> {
     if db.backend() == BackendKind::Spanner {
@@ -489,6 +600,39 @@ mod tests {
             column_names
                 .iter()
                 .any(|column| column == "lease_expires_at")
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_transient_authority_sqlite_relaxes_session_foreign_keys() {
+        let db = Db::open("").await.unwrap();
+        migrate(&db).await.unwrap();
+        prepare_transient_authority_db(&db).await.unwrap();
+
+        let inserted = sqlx::query(
+            "INSERT INTO sessions (
+                id,
+                instance_id,
+                user_id,
+                org_id,
+                token_hash,
+                user_agent,
+                ip_address,
+                fingerprint
+            ) VALUES ($1, $2, $3, $4, $5, '', '', '')",
+        )
+        .bind("session-1")
+        .bind("instance-1")
+        .bind("user-only-in-primary")
+        .bind("org-only-in-primary")
+        .bind("hash")
+        .execute(db.pool())
+        .await;
+
+        assert!(
+            inserted.is_ok(),
+            "transient session insert should not require local users/orgs: {:?}",
+            inserted.err()
         );
     }
 }
