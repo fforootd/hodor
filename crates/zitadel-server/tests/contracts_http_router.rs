@@ -7,11 +7,12 @@ use std::{
 
 use axum::{
     Router,
-    http::{HeaderMap, header},
+    http::{HeaderMap, StatusCode, header},
 };
 use serde_json::json;
 use zitadel_db::DEFAULT_INSTANCE_ID;
 use zitadel_fga::core_authorization_model;
+use zitadel_oidc::oidc::s256_challenge;
 use zitadel_server::{AppState, build_router, routing::InstanceResolver};
 use zitadel_testkit::{AuthActor, TestApp, TestContext};
 
@@ -151,6 +152,18 @@ async fn assert_named_resource_crud(
     );
 
     Ok(())
+}
+
+fn query_param(input: &str, key: &str) -> Option<String> {
+    let query = input.split_once('?')?.1;
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        if name == key {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 #[tokio::test]
@@ -923,6 +936,138 @@ async fn login_flows_respect_prompt_login_even_with_an_existing_session() -> any
         redirect_uri.starts_with("https://rp.example/callback?"),
         "prompt=login completion should still finish the OIDC redirect",
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn oidc_authorization_code_pkce_round_trip_survives_login_completion() -> anyhow::Result<()>
+{
+    let app = build_test_app().await?;
+    let user = app
+        .ctx
+        .create_user("oidc-code@example.com", "password123")
+        .await?;
+    let client = app.ctx.create_oidc_client(&["authorization_code"]).await?;
+    let state = "state-1";
+    let nonce = "nonce-1";
+    let code_verifier = "verifier-1";
+    let authorize = app
+        .get(
+            &format!(
+                "/authorize?client_id={}&redirect_uri={}&response_type=code&scope=openid%20profile%20email&state={state}&nonce={nonce}&code_challenge={}&code_challenge_method=S256",
+                client.client_id,
+                client.redirect_uri,
+                s256_challenge(code_verifier),
+            ),
+            AuthActor::Anonymous,
+        )
+        .await?;
+    assert_eq!(authorize.status, StatusCode::SEE_OTHER);
+
+    let auth_request_id = query_param(
+        authorize
+            .headers
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default(),
+        "auth_request_id",
+    )
+    .expect("authorize redirect should include auth_request_id");
+
+    let created_flow = app
+        .post_json(
+            "/v1/login/flows",
+            AuthActor::Anonymous,
+            &json!({
+                "auth_request_id": auth_request_id,
+            }),
+        )
+        .await?;
+    assert_eq!(created_flow.status, StatusCode::CREATED);
+
+    let flow_id = created_flow.json_value()["flow_id"]
+        .as_str()
+        .expect("flow id should be present")
+        .to_string();
+
+    let advanced = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            AuthActor::Anonymous,
+            &json!({
+                "action": "identifier",
+                "identifier": user.identifier,
+            }),
+        )
+        .await?;
+    assert_eq!(advanced.status, StatusCode::OK);
+    assert_eq!(advanced.json_value()["step"], "password");
+
+    let completed = app
+        .post_json(
+            &format!("/v1/login/flows/{flow_id}/submit"),
+            AuthActor::Anonymous,
+            &json!({
+                "action": "password",
+                "password": "password123",
+            }),
+        )
+        .await?;
+    assert_eq!(completed.status, StatusCode::OK, "{}", completed.text());
+    assert_eq!(completed.json_value()["step"], "complete");
+
+    let callback = completed.json_value()["redirect_uri"]
+        .as_str()
+        .expect("callback redirect should be present")
+        .to_string();
+    assert!(
+        callback.starts_with(&format!("{}?", client.redirect_uri)),
+        "completion should redirect back to the client callback",
+    );
+    assert_eq!(query_param(&callback, "state").as_deref(), Some(state));
+
+    let code = query_param(&callback, "code").expect("callback redirect should include code");
+
+    let token = app
+        .post_form(
+            "/oauth/token",
+            AuthActor::Anonymous,
+            &format!(
+                "grant_type=authorization_code&code={code}&redirect_uri={}&client_id={}&client_secret={}&code_verifier={code_verifier}",
+                client.redirect_uri, client.client_id, client.client_secret,
+            ),
+        )
+        .await?;
+    assert_eq!(token.status, StatusCode::OK, "{}", token.text());
+    let token_json = token.json_value();
+    let access_token = token_json["access_token"]
+        .as_str()
+        .expect("access token should be present")
+        .to_string();
+    assert!(token_json["id_token"].as_str().is_some());
+    assert_eq!(token_json["token_type"], "Bearer");
+
+    let userinfo = app
+        .get("/userinfo", AuthActor::bearer(access_token))
+        .await?;
+    assert_eq!(userinfo.status, StatusCode::OK, "{}", userinfo.text());
+    let userinfo_json = userinfo.json_value();
+    assert_eq!(userinfo_json["email"], user.identifier);
+    assert_eq!(userinfo_json["email_verified"], true);
+
+    let reused = app
+        .post_form(
+            "/oauth/token",
+            AuthActor::Anonymous,
+            &format!(
+                "grant_type=authorization_code&code={code}&redirect_uri={}&client_id={}&client_secret={}&code_verifier={code_verifier}",
+                client.redirect_uri, client.client_id, client.client_secret,
+            ),
+        )
+        .await?;
+    assert_eq!(reused.status, StatusCode::BAD_REQUEST, "{}", reused.text());
+    assert_eq!(reused.json_value()["error"], "invalid_grant");
 
     Ok(())
 }

@@ -23,7 +23,17 @@ export async function withIsolatedPage(run: (page: Page) => Promise<void>) {
   })
   page.on('response', (response) => {
     if (response.status() >= 400) {
-      diagnostics.push(`response:${response.status()} ${response.request().method()} ${response.url()}`)
+      void response
+        .text()
+        .then((body) => {
+          const preview = body.replace(/\s+/g, ' ').trim().slice(0, 240)
+          diagnostics.push(
+            `response:${response.status()} ${response.request().method()} ${response.url()}${preview ? ` body:${preview}` : ''}`,
+          )
+        })
+        .catch(() => {
+          diagnostics.push(`response:${response.status()} ${response.request().method()} ${response.url()}`)
+        })
     }
   })
 
@@ -104,8 +114,9 @@ export async function completePasswordLogin(
   }
 
   const bodyText = await page.locator('body').innerText().catch(() => '')
+  const diagnostics = pageDiagnostics.get(page) || []
   throw new Error(
-    `Password login did not advance. Current URL: ${page.url()}. Body: ${bodyText.slice(0, 300)}`,
+    `Password login did not advance. Current URL: ${page.url()}. Body: ${bodyText.slice(0, 300)}. Diagnostics: ${diagnostics.slice(-10).join(' | ')}`,
   )
 }
 

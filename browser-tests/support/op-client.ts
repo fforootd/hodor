@@ -30,6 +30,24 @@ type AuthorizationRequest = {
 
 let configPromise: Promise<Configuration> | null = null
 
+function describeClientError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return String(error)
+  }
+
+  const details = [error.message]
+  const withCode = error as Error & { code?: string; cause?: unknown }
+  if (withCode.code) {
+    details.push(`code=${withCode.code}`)
+  }
+  if (withCode.cause instanceof Error && withCode.cause.message) {
+    details.push(`cause=${withCode.cause.message}`)
+  } else if (withCode.cause) {
+    details.push(`cause=${String(withCode.cause)}`)
+  }
+  return details.join(' ')
+}
+
 async function getConfig() {
   if (!configPromise) {
     configPromise = discovery(
@@ -83,11 +101,18 @@ export async function exchangeAuthorizationCode(
   codeVerifier: string,
 ) {
   const config = await getConfig()
-  return authorizationCodeGrant(config, callbackUrl, {
-    expectedState: state,
-    expectedNonce: nonce,
-    pkceCodeVerifier: codeVerifier,
-  })
+  try {
+    return await authorizationCodeGrant(config, callbackUrl, {
+      expectedState: state,
+      expectedNonce: nonce,
+      pkceCodeVerifier: codeVerifier,
+    })
+  } catch (error) {
+    throw new Error(
+      `authorization code exchange failed for ${callbackUrl.toString()}: ${describeClientError(error)}`,
+      { cause: error instanceof Error ? error : undefined },
+    )
+  }
 }
 
 export async function fetchOpenIdUserInfo(accessToken: string) {
