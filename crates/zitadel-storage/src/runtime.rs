@@ -76,17 +76,17 @@ pub async fn prepare_auxiliary_databases(
 ) -> anyhow::Result<()> {
     let mut opened = HashMap::new();
 
-    if let Some(transient_db) = resolve_transient_db(config, primary_db, &mut opened).await? {
-        if !same_db(&transient_db, primary_db) {
-            match transient_db.backend() {
-                BackendKind::Sqlite | BackendKind::Postgres => {
-                    zitadel_db::migrate::migrate(&transient_db).await?;
-                }
-                BackendKind::Spanner => {
-                    anyhow::bail!(
-                        "separate native Spanner transient databases are not supported in this POC"
-                    );
-                }
+    if let Some(transient_db) = resolve_transient_db(config, primary_db, &mut opened).await?
+        && !same_db(&transient_db, primary_db)
+    {
+        match transient_db.backend() {
+            BackendKind::Sqlite | BackendKind::Postgres => {
+                zitadel_db::migrate::migrate(&transient_db).await?;
+            }
+            BackendKind::Spanner => {
+                anyhow::bail!(
+                    "separate native Spanner transient databases are not supported in this POC"
+                );
             }
         }
     }
