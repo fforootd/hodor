@@ -44,12 +44,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
       - name: Ensure embedded web placeholder exists
-        run: just ensure-webdist
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
 
       - name: Run DB perf harness
         env:
@@ -90,12 +88,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
       - name: Ensure embedded web placeholder exists
-        run: just ensure-webdist
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
 
       - name: Download current DB perf artifacts
         uses: actions/download-artifact@v4.3.0

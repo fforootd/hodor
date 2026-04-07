@@ -18,8 +18,13 @@ if [ -n "${ZITADEL_BROWSER_TESTS_BINARY:-${ZITADEL_E2E_BINARY:-}}" ]; then
   fi
 else
   # Direct browser-test runs need fresh embedded web assets and a fresh binary.
-  just web >/dev/null
+  npm run build -w web >/dev/null
   cargo build -p zitadel 2>&1
 fi
 
-exec "$ZITADEL_BIN" start -c "$ROOT_DIR/fixtures/zitadel.e2e.toml"
+SEED_ARG=""
+if [ -n "${ZITADEL_E2E_SEED:-}" ]; then
+  SEED_ARG="--seed $ZITADEL_E2E_SEED"
+fi
+
+exec "$ZITADEL_BIN" start -c "$ROOT_DIR/fixtures/zitadel.e2e.toml" $SEED_ARG

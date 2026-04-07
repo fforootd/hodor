@@ -2,16 +2,28 @@ use crate::{DEFAULT_INSTANCE_ID, DEFAULT_ORG_ID, Db};
 use google_cloud_spanner::mutation::insert_or_update;
 use uuid::Uuid;
 
+/// Result of a bootstrap operation.
+pub struct BootstrapResult {
+    /// Whether any database rows were created or updated.
+    pub changed: bool,
+    /// If a new admin user was created, contains the generated plaintext password.
+    /// The caller should print this exactly once. `None` when the admin already existed.
+    pub generated_admin_password: Option<String>,
+}
+
 /// Bootstrap creates the default org and admin user if they don't exist.
 /// Safe to run repeatedly; it only inserts missing defaults.
 ///
+/// When a new admin user is created, a random password is generated and returned
+/// in `BootstrapResult::generated_admin_password` so the caller can print it once.
+///
 /// When `external_domain` is provided, a domain mapping is created so that
 /// cloud-mode instance routing can resolve the host to the default instance.
-pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result<bool> {
+pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result<BootstrapResult> {
     if let Some(spanner) = db.spanner() {
-        bootstrap_spanner(spanner, external_domain).await?;
+        let result = bootstrap_spanner(spanner, external_domain).await?;
         tracing::info!("bootstrapped default org, admin user, and login flow for spanner");
-        return Ok(true);
+        return Ok(result);
     }
 
     let pool = db.pool();
@@ -81,6 +93,7 @@ pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result
     .fetch_optional(&mut *tx)
     .await?;
 
+    let mut generated_password: Option<String> = None;
     let admin_id = match admin {
         Some((id,)) => id,
         None => {
@@ -95,6 +108,33 @@ pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result
             .bind(operator_metadata)
             .execute(&mut *tx)
             .await?;
+
+            // Generate a random password so the admin can log in immediately.
+            let password = zitadel_crypto::random_hex(12); // 24-char hex string
+            let hash = format!("$plain${password}");
+            let cred_json = format!(r#"{{"hash":"{hash}"}}"#);
+            let cred_id = Uuid::new_v4().to_string();
+            let cred_sql = match db.dialect() {
+                crate::Dialect::Postgres => {
+                    "INSERT INTO credentials (id, instance_id, user_id, type, data) \
+                     VALUES ($1, $2, $3, 'password', $4) \
+                     ON CONFLICT DO NOTHING"
+                }
+                crate::Dialect::Sqlite => {
+                    "INSERT OR IGNORE INTO credentials (id, instance_id, user_id, type, data) \
+                     VALUES ($1, $2, $3, 'password', $4)"
+                }
+                crate::Dialect::Spanner => unreachable!(),
+            };
+            sqlx::query(cred_sql)
+                .bind(&cred_id)
+                .bind(DEFAULT_INSTANCE_ID)
+                .bind(&id)
+                .bind(&cred_json)
+                .execute(&mut *tx)
+                .await?;
+
+            generated_password = Some(password);
             changed = true;
             id
         }
@@ -197,15 +237,23 @@ pub async fn bootstrap(db: &Db, external_domain: Option<&str>) -> anyhow::Result
         tracing::debug!("bootstrap skipped — defaults already exist");
     }
 
-    Ok(changed)
+    Ok(BootstrapResult {
+        changed,
+        generated_admin_password: generated_password,
+    })
 }
 
 async fn bootstrap_spanner(
     spanner: &crate::SpannerDb,
     external_domain: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<BootstrapResult> {
     let operator_metadata = r#"{"capabilities":["operator_admin"]}"#;
     let auth_methods = r#"{"password":{"enabled":true,"interactive":true,"position":0},"passkey":{"enabled":true,"interactive":true,"position":1},"sso":{"enabled":true,"interactive":true,"position":2}}"#;
+
+    let password = zitadel_crypto::random_hex(12);
+    let hash = format!("$plain${password}");
+    let cred_json = format!(r#"{{"hash":"{hash}"}}"#);
+    let cred_id = Uuid::new_v4().to_string();
 
     let mut mutations = vec![
         insert_or_update(
@@ -299,6 +347,18 @@ async fn bootstrap_spanner(
         ),
     ];
 
+    mutations.push(insert_or_update(
+        "credentials",
+        &["id", "instance_id", "user_id", "type", "data"],
+        &[
+            &cred_id.as_str(),
+            &DEFAULT_INSTANCE_ID,
+            &"default-admin",
+            &"password",
+            &cred_json.as_str(),
+        ],
+    ));
+
     if let Some(domain) = external_domain.filter(|d| !d.is_empty()) {
         mutations.push(insert_or_update(
             "domains",
@@ -308,7 +368,10 @@ async fn bootstrap_spanner(
     }
 
     spanner.client().apply(mutations).await?;
-    Ok(())
+    Ok(BootstrapResult {
+        changed: true,
+        generated_admin_password: Some(password),
+    })
 }
 
 #[cfg(test)]
@@ -321,8 +384,13 @@ mod tests {
         let db = Db::open("").await.unwrap();
         migrate::migrate(&db).await.unwrap();
 
-        assert!(bootstrap(&db, None).await.unwrap());
-        assert!(!bootstrap(&db, None).await.unwrap());
+        let first = bootstrap(&db, None).await.unwrap();
+        assert!(first.changed);
+        assert!(first.generated_admin_password.is_some());
+
+        let second = bootstrap(&db, None).await.unwrap();
+        assert!(!second.changed);
+        assert!(second.generated_admin_password.is_none());
 
         let orgs: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM orgs WHERE instance_id = $1 AND name = 'Default'")

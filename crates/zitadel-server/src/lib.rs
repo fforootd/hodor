@@ -81,9 +81,14 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     }
 
     // Bootstrap (create default org + admin if empty).
+    let mut bootstrap_password: Option<String> = None;
     if config.storage.stateful.resolve_bootstrap_mode() == "auto" {
         let ext_domain = Some(config.server.external_domain.as_str()).filter(|d| !d.is_empty());
-        zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
+        let result = zitadel_db::bootstrap::bootstrap(&db, ext_domain).await?;
+        // Only surface the generated password if no seed file will override it.
+        if config.dev.seed_file.is_empty() {
+            bootstrap_password = result.generated_admin_password;
+        }
     }
 
     // Apply seed file if configured.
@@ -263,7 +268,21 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     // Mark ready after binding.
     state.ready.store(true, Ordering::SeqCst);
 
-    tracing::info!("Zitadel server listening on http://{}", addr);
+    if let Some(password) = bootstrap_password {
+        eprintln!();
+        eprintln!("════════════════════════════════════════════════");
+        eprintln!("  Zitadel is ready: http://localhost:{port}");
+        eprintln!();
+        eprintln!("  Admin credentials (first run, no seed file):");
+        eprintln!("    Username: admin");
+        eprintln!("    Password: {password}");
+        eprintln!();
+        eprintln!("  Change this password after first login.");
+        eprintln!("════════════════════════════════════════════════");
+        eprintln!();
+    } else {
+        tracing::info!("Zitadel server listening on http://{}", addr);
+    }
 
     axum::serve(
         listener,

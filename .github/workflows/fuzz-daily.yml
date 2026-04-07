@@ -39,12 +39,10 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
       - name: Create web/dist placeholder
-        run: just ensure-webdist
+        run: |
+          mkdir -p web/dist/src/login web/dist/src/console web/dist/src/account web/dist/assets
+          for d in login console account; do echo '<!DOCTYPE html><html><body>placeholder</body></html>' > "web/dist/src/$d/index.html"; done
 
       - name: Restore fuzz corpus
         uses: actions/cache/restore@v4

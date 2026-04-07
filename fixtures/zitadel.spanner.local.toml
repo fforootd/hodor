@@ -37,7 +37,6 @@ conn_max_lifetime = "1h"
 cache_path = "../data/zitadel-spanner-local-cache.db"
 
 [dev]
-mock_oidc = true
 seed_file = "./seeds/frontend.yaml"
 
 # Leave cloud-mode off unless you also want to exercise GCP custom-domain

@@ -184,10 +184,6 @@ pub(crate) struct StartArgs {
     #[arg(short, long)]
     pub config: Option<PathBuf>,
 
-    /// Enable embedded mock OIDC provider.
-    #[arg(long)]
-    pub mock_oidc: bool,
-
     /// Path to YAML seed file loaded on startup.
     #[arg(long)]
     pub seed: Option<PathBuf>,

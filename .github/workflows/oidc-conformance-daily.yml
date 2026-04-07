@@ -67,10 +67,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
       - name: Check prepared compliance artifacts
         id: preflight
         continue-on-error: true
@@ -92,7 +88,7 @@ jobs:
         id: run_conformance
         if: steps.preflight.outcome == 'success'
         continue-on-error: true
-        run: just conformance-oidc
+        run: ./conformance/oidc/scripts/run-op.sh
 
       - name: Resolve compliance run status
         if: always()
