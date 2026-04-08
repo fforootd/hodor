@@ -205,7 +205,7 @@ impl TestContext {
             .context("rebuild platform fga tuples")?;
 
         // Build application services (ADR-032).
-        let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
+        let repos = Arc::new(zitadel_server::wiring::build_repositories(
             db.db.clone(),
             storage.primary.as_ref().replica_db().cloned(),
             storage.transient.clone(),

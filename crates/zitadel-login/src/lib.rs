@@ -139,7 +139,7 @@ mod tests {
         .await
         .unwrap();
         let fga = Arc::new(FgaService::new(db.clone()));
-        let repos = Arc::new(zitadel_server::repo_bridge::build_repositories(
+        let repos = Arc::new(zitadel_server::wiring::build_repositories(
             db.clone(),
             storage.primary.as_ref().replica_db().cloned(),
             storage.transient.clone(),

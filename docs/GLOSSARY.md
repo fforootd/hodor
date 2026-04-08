@@ -70,6 +70,19 @@ The following terms define the structure and scope of the identity intelligence 
 | `signal` | `signal.*` | `signal.ui.rendered` *(future)* | OTLP ingestion |
 | `threat` | `threat.*` | `threat.detected` *(future)* | Intelligence engine |
 
+### Backend Architecture (ADR-032)
+
+| Term | Meaning | Legacy / Standard Equivalent |
+|---|---|---|
+| **Repository port** | Trait in `zitadel-app` defining a persistence contract. Use cases depend on ports, not storage implementations. | Interface / Port (hexagonal) |
+| **Repository adapter** | Concrete implementation of a repository port, typically in `zitadel-db`. Backed by SQL, KvStore, or external services. | Adapter / Driver |
+| **Transport adapter** | HTTP handler, login route, OIDC endpoint, or CLI command that parses input, calls use cases, and maps responses. | Controller / Handler |
+| **Use case** | Single business operation with a typed command and result. Owns validation, authorization, and domain event emission. | Service method / Command handler |
+| **Wiring** | Server startup assembly that connects repository adapters to ports. Lives in `zitadel-server/src/wiring.rs`. | Composition root / DI container |
+| **Primary storage** | Authoritative durable database for product state (`storage.primary`). | Main DB |
+| **Transient storage** | Authoritative database for auth-runtime state such as sessions and login flows (`storage.transient`). | Session store |
+| **Analytics storage** | Database for observability and analytical queries (`storage.analytics`). | Analytics DB / OLAP store |
+
 ### Three-Tier Data Architecture
 
 | Tier | What | Failure behavior | Example |

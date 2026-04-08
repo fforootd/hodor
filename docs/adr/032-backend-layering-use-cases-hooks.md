@@ -283,3 +283,31 @@ Workers use cursor-based event consumption from the `events` table.
 - The events table schema is unchanged
 - The FGA model is unchanged
 - Wire-format compatibility is not a goal for this POC
+
+## Canonical Vocabulary
+
+| Term | Meaning | Where in code |
+|---|---|---|
+| **Repository port** | Trait defining a persistence contract | `zitadel-app/src/repo.rs` |
+| **Repository adapter** | Concrete trait impl backed by storage | `zitadel-db/src/repos/*_impl.rs` |
+| **Transport adapter** | HTTP/login/OIDC handler + routing | `zitadel-api`, `zitadel-login`, `zitadel-oidc` |
+| **Use case** | Single business operation with typed command/result | `zitadel-app/src/{domain}/` |
+| **Wiring** | Server startup code that assembles adapters into ports | `zitadel-server/src/wiring.rs` |
+
+## Storage Placement Rules
+
+| Data kind | Storage role | Examples |
+|---|---|---|
+| Durable product facts | `storage.primary` | Users, orgs, providers, settings, passwords |
+| Auth-runtime state | `storage.transient` | Sessions, login flows, auth requests, callback state |
+| Observability | `storage.analytics` | Wide events, request logs, metrics buffer |
+
+See `docs/design/storage-architecture.md` for the full operator model and defaults.
+
+## Current Exceptions
+
+Known mismatches between the model and current code, tracked for follow-on work:
+
+- Some session metadata still written to `primary` alongside the KvStore token in `transient` (should converge)
+- Login flow state straddles `primary` and `transient` depending on the storage backend
+- The `wiring` module contains thin bridge structs (e.g., `FgaBridge`, `KvSessionRepo`) that adapt non-DB services to repository port traits — these are infrastructure adapters, not use cases
