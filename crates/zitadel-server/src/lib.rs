@@ -2,7 +2,7 @@ pub mod assets;
 pub mod health;
 mod jobs;
 pub mod openapi;
-pub mod repo_bridge;
+pub mod wiring;
 pub mod routing;
 
 use axum::Router;
@@ -165,7 +165,7 @@ pub async fn run_with_db(config: Config, db: zitadel_db::Db) -> anyhow::Result<(
     fga.rebuild_platform_store().await?;
 
     // ── ADR-032: Build application layer ──
-    let repos = Arc::new(repo_bridge::build_repositories(
+    let repos = Arc::new(wiring::build_repositories(
         db.clone(),
         storage.primary.as_ref().replica_db().cloned(),
         storage.transient.clone(),
