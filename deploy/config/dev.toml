@@ -1,0 +1,49 @@
+# Zitadel Cloud — Dev Environment
+# Non-secret config. Secrets injected via env vars from 1Password at deploy time.
+
+[server]
+port = 8080
+external_domain = "dev.zitadel.example.com"
+
+[server.security_headers]
+hsts_enabled = true
+hsts_max_age = 63072000
+hsts_subdomains = true
+csp_enabled = true
+
+[storage.stateful]
+backend = "spanner"
+url = ""
+database = "projects/REPLACE_GCP_PROJECT/instances/zitadel-dev/databases/zitadel"
+migrate = "check"
+bootstrap = "skip"
+max_open_conns = 25
+max_idle_conns = 5
+conn_max_lifetime = "1h"
+
+[observability]
+log_level = "debug"
+log_format = "json"
+cache_path = "/tmp/zitadel-cache.db"
+gcp_cloud_logging = true
+
+[observability.streams.runtime]
+sinks = ["stdout", "analytics"]
+mode = "buffered"
+
+[observability.streams.request]
+sinks = ["stdout", "analytics"]
+mode = "sampled"
+sample_rate = 0.1
+
+[workers]
+scheduler_enabled = true
+
+[cloud]
+enabled = true
+
+[cloud.gcp]
+project_id = "REPLACE_GCP_PROJECT"
+certificate_map = "zitadel-cert-map-dev"
+url_map = "zitadel-lb-dev"
+backend_service = "zitadel-backend-dev"
