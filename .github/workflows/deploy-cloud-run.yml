@@ -11,11 +11,11 @@ on:
       environment:
         description: "Target environment"
         required: true
-        default: test
+        default: dev
         type: choice
         options:
-          - test
-          - production
+          - dev
+          - prod
       run_migrations:
         description: "Run schema migrations before deploying"
         required: true
@@ -24,15 +24,15 @@ on:
 
 concurrency:
   group: deploy-${{ inputs.environment }}
-  cancel-in-progress: false # Never cancel an in-flight deploy
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  id-token: write # Workload Identity Federation
+  id-token: write
 
 env:
   GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  AR_REGION: ${{ vars.AR_REGION || 'us-west1' }}
+  AR_REGION: ${{ vars.AR_REGION || 'us-central1' }}
   AR_REPOSITORY: ${{ vars.AR_REPOSITORY || 'zitadel' }}
   IMAGE_NAME: zitadel
 
@@ -50,7 +50,6 @@ jobs:
           registry="${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPOSITORY}"
           full="${registry}/${IMAGE_NAME}:${{ inputs.image_tag }}"
           echo "ref=${full}" >> "$GITHUB_OUTPUT"
-          echo "Deploying: ${full}"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -61,25 +60,54 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v2
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          ZITADEL_COOKIE_SECRETS: "op://Zitadel/cookie-secrets-${{ inputs.environment }}/secret"
+          ZITADEL_ENCRYPTION__ACTIVE_KEY_ID: "op://Zitadel/encryption-key-${{ inputs.environment }}/key-id"
+          ZITADEL_ENCRYPTION__KEYS__0__ID: "op://Zitadel/encryption-key-${{ inputs.environment }}/key-id"
+          ZITADEL_ENCRYPTION__KEYS__0__SECRET: "op://Zitadel/encryption-key-${{ inputs.environment }}/secret"
+          ZITADEL_CLOUD__LICENSE_KEY: "op://Zitadel/cloud-license-${{ inputs.environment }}/key"
+          ZITADEL_SERVER__MANAGEMENT_SECRET: "op://Zitadel/management-secret-${{ inputs.environment }}/secret"
+
       - name: Verify image exists
         run: |
           gcloud artifacts docker images describe "${{ steps.image.outputs.ref }}" \
             --project="${GCP_PROJECT_ID}" \
             || { echo "::error::Image not found: ${{ steps.image.outputs.ref }}"; exit 1; }
 
+      - name: Build secret env vars string
+        id: secrets
+        run: |
+          secrets=""
+          for var in ZITADEL_COOKIE_SECRETS \
+                     ZITADEL_ENCRYPTION__ACTIVE_KEY_ID \
+                     ZITADEL_ENCRYPTION__KEYS__0__ID \
+                     ZITADEL_ENCRYPTION__KEYS__0__SECRET \
+                     ZITADEL_CLOUD__LICENSE_KEY \
+                     ZITADEL_SERVER__MANAGEMENT_SECRET; do
+            val="${!var}"
+            echo "::add-mask::${val}"
+            if [ -n "$secrets" ]; then secrets="${secrets},"; fi
+            secrets="${secrets}${var}=${val}"
+          done
+          echo "env_vars=${secrets}" >> "$GITHUB_OUTPUT"
+
       - name: Run migrations
         if: inputs.run_migrations
         env:
-          MIGRATE_JOB: ${{ vars.CLOUD_RUN_MIGRATE_JOB || 'zitadel-migrate' }}
+          MIGRATE_JOB: ${{ vars.CLOUD_RUN_MIGRATE_JOB || format('zitadel-migrate-{0}', inputs.environment) }}
           REGION: ${{ vars.CLOUD_RUN_REGION || env.AR_REGION }}
         run: |
-          echo "Updating migration job image..."
           gcloud run jobs update "${MIGRATE_JOB}" \
             --image="${{ steps.image.outputs.ref }}" \
+            --update-env-vars="${{ steps.secrets.outputs.env_vars }}" \
             --region="${REGION}" \
             --project="${GCP_PROJECT_ID}"
 
-          echo "Executing migration job..."
           gcloud run jobs execute "${MIGRATE_JOB}" \
             --region="${REGION}" \
             --project="${GCP_PROJECT_ID}" \
@@ -88,11 +116,12 @@ jobs:
       - name: Deploy service
         id: deploy
         env:
-          SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'zitadel-test' }}
+          SERVICE: ${{ vars.CLOUD_RUN_SERVICE || format('zitadel-{0}', inputs.environment) }}
           REGION: ${{ vars.CLOUD_RUN_REGION || env.AR_REGION }}
         run: |
           gcloud run services update "${SERVICE}" \
             --image="${{ steps.image.outputs.ref }}" \
+            --update-env-vars="${{ steps.secrets.outputs.env_vars }}" \
             --region="${REGION}" \
             --project="${GCP_PROJECT_ID}"
 
@@ -102,35 +131,19 @@ jobs:
             --format='value(status.url)')"
           echo "url=${url}" >> "$GITHUB_OUTPUT"
 
-          # Update origin env vars to match the deployed URL.
-          host="${url#https://}"
-          gcloud run services update "${SERVICE}" \
-            --region="${REGION}" \
-            --project="${GCP_PROJECT_ID}" \
-            --update-env-vars "ZITADEL_SERVER__PUBLIC_ORIGIN=${url},ZITADEL_SERVER__EXTERNAL_DOMAIN=${host}"
-
       - name: Health check
         env:
           SERVICE_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          echo "Checking ${SERVICE_URL}/healthz ..."
           for i in 1 2 3 4 5; do
             status="$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/healthz" || true)"
             if [[ "$status" == "200" ]]; then
               echo "Health check passed"
               break
             fi
-            echo "Attempt ${i}: got HTTP ${status}, retrying in 10s..."
+            echo "Attempt ${i}: HTTP ${status}, retrying in 10s..."
             sleep 10
           done
-
-          echo "Checking ${SERVICE_URL}/readyz ..."
-          status="$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/readyz" || true)"
-          if [[ "$status" != "200" ]]; then
-            echo "::warning::Readiness probe returned HTTP ${status}"
-          else
-            echo "Readiness check passed"
-          fi
 
       - name: Summary
         run: |

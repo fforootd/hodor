@@ -27,6 +27,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/zitadel /usr/local/bin/zitadel
 COPY fixtures/prod-seed.yaml /etc/zitadel/seed.yaml
+COPY deploy/config/ /etc/zitadel/config/
 EXPOSE 8080
 ENTRYPOINT ["zitadel"]
 CMD ["start"]
